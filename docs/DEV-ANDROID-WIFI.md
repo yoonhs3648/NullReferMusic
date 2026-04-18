@@ -77,7 +77,11 @@ http://<위_IP>:8787
 
 ## 4) 백엔드 + Expo를 LAN 모드로 한 번에 루트
 
-원클릭:
+원클릭 (웹 브라우저 자동 오픈 + 바탕화면 바로가기까지 포함):
+
+- **`Start-Dev-Full.bat`** (저장소 루트) — 동일 Wi‑Fi용 Metro `--lan`, 약 25초 후 `http://127.0.0.1:8081/` 열기, 바탕화면에 **`NullReferMusic-Dev.lnk`** 생성
+
+폰 위주만 빠르게 켤 때:
 
 - **`Start-Android-Wifi-Lab.bat`**
 
