@@ -19,6 +19,7 @@ if errorlevel 1 (
 
 echo.
 echo Done. On Desktop open:  NullReferMusic-Dev
+echo Do not copy Start-Dev-Full.bat to Desktop ^(use this shortcut only^).
 echo That runs Start-Dev-Full.bat ^(backend + Expo + browser^).
 echo.
 timeout /t 5 /nobreak >nul

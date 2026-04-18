@@ -2,13 +2,24 @@
 setlocal EnableExtensions
 title NRM-Android-WiFi-Lab
 
-cd /d "%~dp0"
+if defined NRM_REPO_ROOT (
+  cd /d "%NRM_REPO_ROOT%"
+) else (
+  cd /d "%~dp0"
+)
 set "NRM_ROOT=%CD%"
+if not exist "%NRM_ROOT%\backend\pom.xml" (
+  if exist "C:\NullReferMusic\backend\pom.xml" (
+    cd /d "C:\NullReferMusic"
+    set "NRM_ROOT=%CD%"
+  )
+)
 set "NRM_LOCK=%TEMP%\NRM-DevStack-Lock"
 
 if not exist "%NRM_ROOT%\backend\pom.xml" (
   echo ERROR: missing backend\pom.xml
-  timeout /t 6 /nobreak >nul
+  echo Run from repo root or set NRM_REPO_ROOT. This file: %~f0
+  timeout /t 10 /nobreak >nul
   exit /b 1
 )
 if not exist "%NRM_ROOT%\app\package.json" (

@@ -2,13 +2,33 @@
 setlocal EnableExtensions
 title NRM-Dev-Full
 
-cd /d "%~dp0"
+REM Repo root: optional NRM_REPO_ROOT, else folder of this .bat, else C:\NullReferMusic
+if defined NRM_REPO_ROOT (
+  cd /d "%NRM_REPO_ROOT%"
+) else (
+  cd /d "%~dp0"
+)
 set "NRM_ROOT=%CD%"
+if not exist "%NRM_ROOT%\backend\pom.xml" (
+  if exist "C:\NullReferMusic\backend\pom.xml" (
+    cd /d "C:\NullReferMusic"
+    set "NRM_ROOT=%CD%"
+  )
+)
 set "NRM_LOCK=%TEMP%\NRM-DevStack-Lock"
 
 if not exist "%NRM_ROOT%\backend\pom.xml" (
   echo ERROR: missing backend\pom.xml
-  timeout /t 6 /nobreak >nul
+  echo.
+  echo This file must run inside the repo ^(folder that contains backend\ and app\^).
+  echo Do NOT copy Start-Dev-Full.bat to Desktop. Use Install-Desktop-DevShortcut.bat
+  echo and click the "NullReferMusic-Dev" icon only.
+  echo Or:  set NRM_REPO_ROOT=C:\your\path\NullReferMusic
+  echo Then run this .bat again.
+  echo.
+  echo This file: %~f0
+  echo Tried folder: %NRM_ROOT%
+  timeout /t 12 /nobreak >nul
   exit /b 1
 )
 if not exist "%NRM_ROOT%\app\package.json" (
