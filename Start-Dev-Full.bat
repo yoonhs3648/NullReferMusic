@@ -4,7 +4,6 @@ title NRM-Dev-Full
 
 cd /d "%~dp0"
 set "NRM_ROOT=%CD%"
-set "NRM_DEV_BAT=%~f0"
 set "NRM_LOCK=%TEMP%\NRM-DevStack-Lock"
 
 if not exist "%NRM_ROOT%\backend\pom.xml" (
@@ -26,9 +25,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM One hidden PowerShell: shortcut + LAN hint file (no extra CMD popups)
+REM LAN hint file only (desktop shortcut: run Install-Desktop-DevShortcut.bat once)
 powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass ^
-  -File "%NRM_ROOT%\scripts\Prepare-DevLauncher.ps1" -RepoRoot "%NRM_ROOT%" -LauncherBat "%NRM_DEV_BAT%"
+  -File "%NRM_ROOT%\scripts\Prepare-DevLauncher.ps1"
 if errorlevel 1 (
   rmdir "%NRM_LOCK%" 2>nul
   echo Prepare-DevLauncher.ps1 failed.

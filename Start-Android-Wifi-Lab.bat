@@ -26,7 +26,7 @@ if errorlevel 1 (
 )
 
 powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass ^
-  -File "%NRM_ROOT%\scripts\Prepare-DevLauncher.ps1" -RepoRoot "%NRM_ROOT%" -SkipDesktopShortcut
+  -File "%NRM_ROOT%\scripts\Prepare-DevLauncher.ps1"
 if errorlevel 1 (
   rmdir "%NRM_LOCK%" 2>nul
   echo Prepare-DevLauncher.ps1 failed.

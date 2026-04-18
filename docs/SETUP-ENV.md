@@ -51,7 +51,8 @@ npm -v
 | 파일 | 설명 |
 |------|------|
 | `Setup-Dependencies.bat` | 최초 1회 또는 의존성 변경 후 — `backend`(Maven 패키지)·`app`(`npm install`) |
-| **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081), 바탕화면 **`NullReferMusic-Dev.lnk`** 자동 생성. PowerShell은 숨김 창 1회만 사용, 런처 CMD는 끝나면 자동 종료. 중복 실행 방지: `%TEMP%\NRM-DevStack-Lock` |
+| **`Install-Desktop-DevShortcut.bat`** | **바탕화면에 `NullReferMusic-Dev` 바로가기만** 만듦 → 대상은 **`Start-Dev-Full.bat`** (최초 1회 또는 경로 바뀔 때 실행) |
+| **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081) + 브라우저. **평소에는 바탕화면 `NullReferMusic-Dev`만 클릭**하면 이 파일이 실행됨. PowerShell 숨김 1회(LAN 힌트), 런처 CMD 자동 종료. 중복 방지: `%TEMP%\NRM-DevStack-Lock` |
 | **`Stop-Backend.bat`** | **8787 포트 점유 종료** — 이전 Spring Boot 창을 닫지 않고 다시 켤 때 `Address already in use` 나면 실행 |
 | `Start-Server.bat` | 로컬 다운로드 API만 (8787) |
 | `Start-Expo-Dev.bat` | Expo Metro (사진 1과 같음 — `w` 웹, `a` Android) |
@@ -162,5 +163,6 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-18 | 실기 Android·동일 Wi‑Fi 랩: `Start-Android-Wifi-Lab.bat`, `docs/DEV-ANDROID-WIFI.md` |
 | 2026-04-18 | GitHub에 저장소가 안 보일 때: `docs/GITHUB-FIRST-PUSH.md`, `Push-After-Web-Create.bat` |
 | 2026-04-18 | 8787 포트 충돌 시: `Stop-Backend.bat`, `scripts/Stop-Backend-8787.ps1` |
+| 2026-04-18 | 바탕화면 전용: `Install-Desktop-DevShortcut.bat` → `NullReferMusic-Dev` → `Start-Dev-Full.bat` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
