@@ -56,6 +56,7 @@ npm -v
 | `Start-Web.bat` | 웹만 바로 (`expo start --web`) |
 | `Start-Android-Dev.bat` | Android 연결/에뮬로 Expo (`expo start --android`) |
 | `Start-Server-and-Expo.bat` | 서버 + Metro **두 창** 한 번에 |
+| `Start-Android-Wifi-Lab.bat` | **실기 Android + 동일 Wi‑Fi**: 백엔드(8787) + `expo start --lan`(8081) **두 창** (절차: `docs/DEV-ANDROID-WIFI.md`) |
 | `Start-Server-and-Web.bat` | 서버 + 웹 **두 창** 한 번에 |
 
 각 창을 **닫으면** 해당 프로세스는 종료됩니다. 앱은 평소 `app`에서 `npm start` 등으로 실행하고, 다운로드 API는 `backend`에서 `mvnw.cmd spring-boot:run`(또는 `Start-Server.bat`)만 돌리면 됩니다.
@@ -154,5 +155,6 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | Expo 앱·로컬 서버·APK 안내 추가 |
 | 2026-04-18 | 로컬 다운로드 API를 `server/`(Node)에서 `backend/`(Spring Boot)로 통일 |
 | 2026-04-18 | 로컬 Git 초기화(`main`) 및 GitHub(`yoonhs3648/NullReferMusic`) 연결 안내 추가 |
+| 2026-04-18 | 실기 Android·동일 Wi‑Fi 랩: `Start-Android-Wifi-Lab.bat`, `docs/DEV-ANDROID-WIFI.md` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
