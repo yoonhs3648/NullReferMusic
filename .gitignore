@@ -1,6 +1,9 @@
 # 다운로드 산출물 (로컬 전용)
 /downloads/
 
+# 로컬 샘플 미디어 (형상관리 제외)
+sample/
+
 # 의존성
 app/node_modules/
 server/node_modules/
