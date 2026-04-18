@@ -111,6 +111,37 @@ npm -v
 - **앱 동작**: Android에서 기본은「이 기기에서」모드. Expo Go에는 커스텀 네이티브가 없으므로 **`npx expo run:android`** 또는 릴리스 APK로 설치해야 한다.
 - **저장 경로**: 대략 `Android/data/com.nullrefer.music/files/Music/NullReferMusic/` (기기·OS에 따라 표시 방식이 다름).
 
+## Git 및 GitHub (`yoonhs3648`)
+
+로컬 저장소는 `C:\NullReferMusic` 에서 **`main`** 브랜치로 초기화되어 있다. GitHub에 비어 있는 저장소 **`NullReferMusic`** 을 만들고 한 번에 올리려면:
+
+1. **GitHub CLI 로그인** (PC당 최초 1회):
+
+   ```powershell
+   gh auth login
+   ```
+
+2. **저장소 생성 + 원격 연결 + 푸시** (저장소가 아직 없을 때):
+
+   ```powershell
+   cd C:\NullReferMusic
+   gh repo create NullReferMusic --public --source=. --remote=origin --push
+   ```
+
+   원격 주소는 `https://github.com/yoonhs3648/NullReferMusic` 이 된다.
+
+이미 웹에서 빈 저장소만 만들었다면:
+
+```powershell
+cd C:\NullReferMusic
+git remote add origin https://github.com/yoonhs3648/NullReferMusic.git
+git push -u origin main
+```
+
+원클릭으로 시도할 때는 저장소 루트의 `Push-Github.bat` 을 실행한다 (위 1번 로그인 후).
+
+---
+
 ## Node 버전 참고
 
 winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React Native 빌드 오류가 나면 [Node 20 LTS](https://nodejs.org/)를 수동 설치하거나 [nvm-windows](https://github.com/coreybutler/nvm-windows)로 20.x를 병행하는 것을 검토한다.
@@ -122,5 +153,6 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | 최초 작성 (JDK 21, Node, Android Studio, yt-dlp 갱신 반영) |
 | 2026-04-12 | Expo 앱·로컬 서버·APK 안내 추가 |
 | 2026-04-18 | 로컬 다운로드 API를 `server/`(Node)에서 `backend/`(Spring Boot)로 통일 |
+| 2026-04-18 | 로컬 Git 초기화(`main`) 및 GitHub(`yoonhs3648/NullReferMusic`) 연결 안내 추가 |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
