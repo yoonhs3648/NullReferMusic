@@ -1,0 +1,8 @@
+{
+  "name": "nullrefer-music-server-legacy-bridge",
+  "private": true,
+  "description": "Old .bat files expected server/; API is Spring Boot in ../backend. npm start forwards there.",
+  "scripts": {
+    "start": "cd ..\\backend && mvnw.cmd spring-boot:run"
+  }
+}
