@@ -1,0 +1,20 @@
+# 다운로드 산출물 (로컬 전용)
+/downloads/
+
+# 의존성
+app/node_modules/
+server/node_modules/
+
+# Spring Boot
+backend/target/
+
+# Expo / 네이티브 생성물
+app/.expo/
+# app/android/ — 온디바이스 yt-dlp(Chaquopy)·커스텀 모듈 포함으로 버전 관리함
+app/ios/
+app/dist/
+
+# 로그·OS
+*.log
+.DS_Store
+Thumbs.db
