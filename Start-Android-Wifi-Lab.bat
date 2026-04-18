@@ -2,36 +2,54 @@
 setlocal EnableExtensions
 title NRM-Android-WiFi-Lab
 
-cd /d C:\NullReferMusic
+cd /d "%~dp0"
+set "NRM_ROOT=%CD%"
+set "NRM_LOCK=%TEMP%\NRM-DevStack-Lock"
 
-if not exist "C:\NullReferMusic\backend\pom.xml" (
+if not exist "%NRM_ROOT%\backend\pom.xml" (
   echo ERROR: missing backend\pom.xml
-  pause
+  timeout /t 6 /nobreak >nul
   exit /b 1
 )
-if not exist "C:\NullReferMusic\app\package.json" (
+if not exist "%NRM_ROOT%\app\package.json" (
   echo ERROR: missing app\package.json
-  pause
+  timeout /t 6 /nobreak >nul
   exit /b 1
 )
 
-echo === LAN IP hint (PowerShell) ===
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Show-LanIp.ps1"
+mkdir "%NRM_LOCK%" 2>nul
+if errorlevel 1 (
+  echo Another dev launcher may be running. Wait, or close duplicate Backend/Expo windows.
+  echo If nothing is running, delete folder: %NRM_LOCK%
+  timeout /t 6 /nobreak >nul
+  exit /b 1
+)
+
+powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass ^
+  -File "%NRM_ROOT%\scripts\Prepare-DevLauncher.ps1" -RepoRoot "%NRM_ROOT%" -SkipDesktopShortcut
+if errorlevel 1 (
+  rmdir "%NRM_LOCK%" 2>nul
+  echo Prepare-DevLauncher.ps1 failed.
+  timeout /t 6 /nobreak >nul
+  exit /b 1
+)
+
+if exist "%TEMP%\NRM-LAN-HINT.txt" type "%TEMP%\NRM-LAN-HINT.txt"
 
 echo Starting Spring Boot API :8787 ...
-start "NRM-Backend-WiFi" cmd.exe /k "cd /d C:\NullReferMusic\backend && mvnw.cmd spring-boot:run"
+start "NRM-Backend-WiFi" cmd.exe /k "cd /d %NRM_ROOT%\backend && mvnw.cmd spring-boot:run"
 
 timeout /t 8 /nobreak >nul
 
-echo Starting Expo Metro :8081 with --lan (same Wi-Fi QR for Expo Go) ...
-start "NRM-Expo-LAN" cmd.exe /k "cd /d C:\NullReferMusic\app && npm run start:lan"
+echo Starting Expo Metro :8081 --lan ...
+start "NRM-Expo-LAN" cmd.exe /k "cd /d %NRM_ROOT%\app && npm run start:lan"
+
+rmdir "%NRM_LOCK%" 2>nul
 
 echo.
-echo OPEN: two windows (Backend + Expo). Keep them running.
-echo PHONE: same Wi-Fi as this PC. Expo Go app - scan QR from Expo window.
-echo APP: set download server to http://YOUR_PC_IP:8787 then Save + connection test.
-echo If blocked: run scripts\Open-DevFirewall.ps1 as Administrator once.
-echo Manual: docs\DEV-ANDROID-WIFI.md
-echo.
-pause
+echo Keep: Backend + Expo windows. Phone: same Wi-Fi, Expo Go QR.
+echo App: download server http://YOUR_PC_IP:8787
+echo Docs: docs\DEV-ANDROID-WIFI.md
+timeout /t 3 /nobreak >nul
 endlocal
+exit /b 0

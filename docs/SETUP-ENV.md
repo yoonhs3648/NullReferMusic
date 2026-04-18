@@ -51,7 +51,7 @@ npm -v
 | 파일 | 설명 |
 |------|------|
 | `Setup-Dependencies.bat` | 최초 1회 또는 의존성 변경 후 — `backend`(Maven 패키지)·`app`(`npm install`) |
-| **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081), 바탕화면 **`NullReferMusic-Dev.lnk`** 자동 생성 |
+| **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081), 바탕화면 **`NullReferMusic-Dev.lnk`** 자동 생성. PowerShell은 숨김 창 1회만 사용, 런처 CMD는 끝나면 자동 종료. 중복 실행 방지: `%TEMP%\NRM-DevStack-Lock` |
 | **`Stop-Backend.bat`** | **8787 포트 점유 종료** — 이전 Spring Boot 창을 닫지 않고 다시 켤 때 `Address already in use` 나면 실행 |
 | `Start-Server.bat` | 로컬 다운로드 API만 (8787) |
 | `Start-Expo-Dev.bat` | Expo Metro (사진 1과 같음 — `w` 웹, `a` Android) |
