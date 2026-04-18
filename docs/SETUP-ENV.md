@@ -52,6 +52,7 @@ npm -v
 |------|------|
 | `Setup-Dependencies.bat` | 최초 1회 또는 의존성 변경 후 — `backend`(Maven 패키지)·`app`(`npm install`) |
 | **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081), 바탕화면 **`NullReferMusic-Dev.lnk`** 자동 생성 |
+| **`Stop-Backend.bat`** | **8787 포트 점유 종료** — 이전 Spring Boot 창을 닫지 않고 다시 켤 때 `Address already in use` 나면 실행 |
 | `Start-Server.bat` | 로컬 다운로드 API만 (8787) |
 | `Start-Expo-Dev.bat` | Expo Metro (사진 1과 같음 — `w` 웹, `a` Android) |
 | `Start-Web.bat` | 웹만 바로 (`expo start --web`) |
@@ -160,5 +161,6 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-18 | 로컬 Git 초기화(`main`) 및 GitHub(`yoonhs3648/NullReferMusic`) 연결 안내 추가 |
 | 2026-04-18 | 실기 Android·동일 Wi‑Fi 랩: `Start-Android-Wifi-Lab.bat`, `docs/DEV-ANDROID-WIFI.md` |
 | 2026-04-18 | GitHub에 저장소가 안 보일 때: `docs/GITHUB-FIRST-PUSH.md`, `Push-After-Web-Create.bat` |
+| 2026-04-18 | 8787 포트 충돌 시: `Stop-Backend.bat`, `scripts/Stop-Backend-8787.ps1` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
