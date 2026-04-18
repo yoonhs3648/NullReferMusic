@@ -10,6 +10,7 @@ export default function Root({ children }: { children: React.ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
+        <meta name="theme-color" content="#C8102E" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -31,11 +32,11 @@ html, body, #root {
 body {
   margin: 0;
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: #0c0c12;
+  background-color: #0c080a;
 }
 @media (prefers-color-scheme: light) {
   body {
-    background-color: #f8f7ff;
+    background-color: #fff6f5;
   }
 }
 `;

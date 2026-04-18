@@ -1,18 +1,25 @@
 /**
- * NullReferMusic 디자인 토큰 — 웹·앱 공통 (확장 시 여기만 조정)
+ * NullReferMusic 디자인 토큰 — 웹·앱 공통
+ * 메인: 리버풀 FC 구 엠블럼(~2010 전후) 실드 톤의 빨강 / 보조: 동 시기 크레스트 트림 초록
  */
 export const nrmTokens = {
   color: {
-    bg: '#0c0c12',
-    bgElevated: '#12121c',
-    surface: '#1a1a28',
-    surfaceHover: '#222232',
-    border: '#2e2e40',
-    text: '#f4f4f8',
-    textMuted: '#9ca3b8',
-    accent: '#8b7cff',
-    accentDim: '#6b5bdb',
-    accent2: '#22d3ee',
+    /** 어두운 베이스(살짝 레드 블랙) */
+    bg: '#0c080a',
+    bgElevated: '#140f12',
+    surface: '#1a1418',
+    surfaceHover: '#242022',
+    border: '#33262b',
+    text: '#f8f6f6',
+    textMuted: '#b0a0a4',
+    /** LFC heritage red (Pantone 186C 계열, 구 실드 빨강) */
+    accent: '#C8102E',
+    accentDim: '#9e0d24',
+    /** 구 엠블럼 트림·클럽 그린 계열 */
+    accent2: '#1B8C5E',
+    accent2Dim: '#136647',
+    accentSoft: 'rgba(200, 16, 46, 0.18)',
+    accent2Soft: 'rgba(27, 140, 94, 0.22)',
     danger: '#f87171',
     success: '#4ade80',
   },

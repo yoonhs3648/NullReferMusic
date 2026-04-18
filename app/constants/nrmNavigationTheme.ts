@@ -7,10 +7,10 @@ const nrmLight: Theme = {
   colors: {
     ...DefaultTheme.colors,
     primary: nrmTokens.color.accent,
-    background: '#f8f7ff',
+    background: '#fff6f5',
     card: '#ffffff',
-    text: '#111118',
-    border: '#e2e2ee',
+    text: '#1a0a0e',
+    border: '#edd5d8',
     notification: nrmTokens.color.accent2,
   },
 };

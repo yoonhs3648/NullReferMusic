@@ -389,13 +389,13 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.lg,
     paddingBottom: nrmTokens.space.md,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(128,128,160,0.25)',
+    borderBottomColor: 'rgba(200, 16, 46, 0.2)',
   },
   serverSection: {
     marginBottom: nrmTokens.space.lg,
     paddingBottom: nrmTokens.space.lg,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(128,128,160,0.25)',
+    borderBottomColor: 'rgba(27, 140, 94, 0.22)',
   },
   sectionTitle: {
     fontSize: nrmTokens.font.body,
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: nrmTokens.space.md,
     borderRadius: nrmTokens.radius.sm,
-    backgroundColor: 'rgba(139,124,255,0.2)',
+    backgroundColor: nrmTokens.color.accentSoft,
     minHeight: 40,
     justifyContent: 'center',
   },
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   secondaryBtnLabel: {
-    color: nrmTokens.color.accent,
+    color: nrmTokens.color.accentDim,
     fontWeight: '700',
     fontSize: nrmTokens.font.small,
   },

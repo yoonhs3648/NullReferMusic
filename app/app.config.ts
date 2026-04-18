@@ -12,7 +12,7 @@ const config: ExpoConfig = {
   splash: {
     image: './assets/images/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#0c0c12',
+    backgroundColor: '#0c080a',
   },
   ios: {
     supportsTablet: true,
@@ -21,7 +21,7 @@ const config: ExpoConfig = {
   android: {
     adaptiveIcon: {
       foregroundImage: './assets/images/adaptive-icon.png',
-      backgroundColor: '#0c0c12',
+      backgroundColor: '#C8102E',
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,

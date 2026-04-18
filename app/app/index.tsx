@@ -18,8 +18,8 @@ export default function HomeScreen() {
     <LinearGradient
       colors={
         isDark
-          ? [nrmTokens.color.bg, '#14142a', nrmTokens.color.bg]
-          : ['#f5f3ff', '#eef8ff', '#faf8ff']
+          ? [nrmTokens.color.bg, '#160e12', nrmTokens.color.bg]
+          : ['#fff5f4', '#f0faf5', '#fff8f6']
       }
       style={styles.gradient}
       start={{ x: 0, y: 0 }}
@@ -34,7 +34,7 @@ export default function HomeScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag">
           <View style={[styles.centerColumn, { maxWidth: maxW }]}>
-            <NrmLogo />
+            <NrmLogo isDark={isDark} />
             <Text
               style={[
                 styles.lead,
