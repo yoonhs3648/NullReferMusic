@@ -114,6 +114,8 @@ npm -v
 
 ## Git 및 GitHub (`yoonhs3648`)
 
+**저장소가 GitHub에 안 보일 때:** 이 PC에 GitHub 로그인·푸시가 한 번도 안 된 상태일 수 있다. 단계별 안내는 **`docs/GITHUB-FIRST-PUSH.md`** 를 본다. 웹에서 빈 저장소만 만든 뒤 **`Push-After-Web-Create.bat`** 로 푸시할 수 있다.
+
 로컬 저장소는 `C:\NullReferMusic` 에서 **`main`** 브랜치로 초기화되어 있다. GitHub에 비어 있는 저장소 **`NullReferMusic`** 을 만들고 한 번에 올리려면:
 
 1. **GitHub CLI 로그인** (PC당 최초 1회):
@@ -156,5 +158,6 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-18 | 로컬 다운로드 API를 `server/`(Node)에서 `backend/`(Spring Boot)로 통일 |
 | 2026-04-18 | 로컬 Git 초기화(`main`) 및 GitHub(`yoonhs3648/NullReferMusic`) 연결 안내 추가 |
 | 2026-04-18 | 실기 Android·동일 Wi‑Fi 랩: `Start-Android-Wifi-Lab.bat`, `docs/DEV-ANDROID-WIFI.md` |
+| 2026-04-18 | GitHub에 저장소가 안 보일 때: `docs/GITHUB-FIRST-PUSH.md`, `Push-After-Web-Create.bat` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
