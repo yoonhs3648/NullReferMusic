@@ -1,7 +1,6 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
-apply plugin: "com.chaquo.python"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -138,25 +137,10 @@ android {
 }
 
 // ── yt-dlp 버전 관리 안내 ─────────────────────────────────────────────────────
-// YouTube가 패치(403·서명 변경 등)를 배포할 때마다 아래 버전 상수만 최신으로 올리세요.
-// 최신 버전 확인: https://github.com/yt-dlp/yt-dlp/releases
-//
-// 업데이트 절차:
-//   1. YT_DLP_VERSION 값을 최신 버전으로 수정 (예: "2026.05.01")
-//   2. cd app && ./gradlew clean assembleRelease (또는 assembleDebug)
-//   3. Chaquopy 가 pip 으로 새 버전을 자동 설치합니다.
+// yt-dlp는 Chaquopy(Python) 없이 독립 실행 바이너리를 런타임에 GitHub Releases에서
+// 자동 다운로드합니다. YtDlpBootstrap.kt 참조.
+// "releases/latest/download/yt-dlp_linux_aarch64" → 항상 최신 버전 사용
 // ─────────────────────────────────────────────────────────────────────────────
-def YT_DLP_VERSION = "2026.03.17"
-
-chaquopy {
-    defaultConfig {
-        version "3.10"
-        extractPackages "yt_dlp"
-        pip {
-            install "yt-dlp==${YT_DLP_VERSION}"
-        }
-    }
-}
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
 // Accepts values in comma delimited lists, example:
