@@ -1,0 +1,43 @@
+{
+  "description": "NullReferMusic development stack versions. Match or exceed 'minimum' on a new PC; see docs/SETUP-ENV.md.",
+  "recordedAt": "2026-05-20",
+  "recordedOn": "reference Windows dev PC",
+  "minimum": {
+    "jdk": "21",
+    "node": "20.0.0",
+    "npm": "10.0.0",
+    "javaForAndroidBuild": "17"
+  },
+  "verifiedOnReferencePc": {
+    "jdk": "21.0.10 (Eclipse Temurin)",
+    "node": "24.14.1",
+    "npm": "11.11.0",
+    "maven": "3.9.9 (optional; project uses backend/mvnw.cmd)",
+    "expoCli": "54.0.23",
+    "adb": "not in PATH on reference PC (install Android SDK platform-tools for device debug)"
+  },
+  "projectPinned": {
+    "springBoot": "3.4.4",
+    "javaTarget": "21",
+    "expoSdk": "~54.0.33",
+    "react": "19.1.0",
+    "reactNative": "0.81.5",
+    "appPackageVersion": "1.2.1"
+  },
+  "bundledInRepo": {
+    "ytDlp": "2026.03.17",
+    "ffmpeg": "7.1.1-essentials_build",
+    "paths": {
+      "ytDlp": "library/yt-dlp.exe",
+      "ffmpeg": "library/ffmpeg-7.1.1-essentials_build/bin/ffmpeg.exe"
+    }
+  },
+  "installHints": {
+    "jdk": "winget install EclipseAdoptium.Temurin.21.JDK",
+    "node": "winget install OpenJS.NodeJS.LTS (prefer 20.x LTS if RN build issues; see SETUP-ENV.md)",
+    "androidStudio": "winget install Google.AndroidStudio"
+  },
+  "devEntrypoint": "StartServer.bat",
+  "firstTimeSetup": "Setup-Dependencies.bat",
+  "desktopShortcut": "Install-Desktop-DevShortcut.bat"
+}

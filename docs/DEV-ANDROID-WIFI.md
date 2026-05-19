@@ -79,18 +79,14 @@ http://<위_IP>:8787
 
 원클릭 (웹 브라우저 자동 오픈):
 
-- **바탕화면 `NullReferMusic-Dev`** — 최초에 없으면 저장소에서 **`Install-Desktop-DevShortcut.bat`** 한 번 실행 후 이 바로가기만 사용.
-- 실제로 도는 파일은 **`Start-Dev-Full.bat`** (백엔드 + Metro `--lan`, 약 25초 후 `http://127.0.0.1:8081/` 열기).
-
-폰 위주만 빠르게 켤 때:
-
-- **`Start-Android-Wifi-Lab.bat`**
+- **바탕화면 `NullReferMusic-Dev`** — 최초에 없으면 **`Install-Desktop-DevShortcut.bat`** 한 번 실행.
+- 실제로 도는 파일은 **`StartServer.bat`** (백엔드 + `expo start --lan --web`, 약 12초 후 `http://127.0.0.1:8081/`).
 
 동작:
 
-1. LAN IP 힌트 출력 (`scripts\Show-LanIp.ps1`)
-2. 새 창: **`backend`** → `mvnw spring-boot:run` (**8787**)
-3. 잠시 대기 후 새 창: **`app`** → **`npm run start:lan`** → Metro **8081**, QR은 **같은 Wi‑Fi**용 URL
+1. LAN IP로 `EXPO_PUBLIC_API_BASE_URL` 설정 (`scripts\resolve-lan-ip.ps1`)
+2. 새 창: **`backend`** → `mvnw.cmd spring-boot:run` (**8787**)
+3. 새 창: **`app`** → **`npx expo start --lan --web`** → Metro **8081**, QR은 **같은 Wi‑Fi**용
 
 창 **두 개를 닫지 말고** 유지합니다.
 

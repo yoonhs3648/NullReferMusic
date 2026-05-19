@@ -3,8 +3,8 @@ setlocal EnableExtensions
 title NRM-install-desktop-shortcut
 
 cd /d "%~dp0"
-if not exist "%CD%\Start-Dev-Full.bat" (
-  echo ERROR: run this from repo root ^(Start-Dev-Full.bat missing^)
+if not exist "%CD%\StartServer.bat" (
+  echo ERROR: run this from repo root ^(StartServer.bat missing^)
   timeout /t 6 /nobreak >nul
   exit /b 1
 )
@@ -19,8 +19,7 @@ if errorlevel 1 (
 
 echo.
 echo Done. On Desktop open:  NullReferMusic-Dev
-echo Do not copy Start-Dev-Full.bat to Desktop ^(use this shortcut only^).
-echo That runs Start-Dev-Full.bat ^(backend + Expo + browser^).
+echo That runs StartServer.bat ^(backend + Expo web + Expo Go LAN^).
 echo.
 timeout /t 5 /nobreak >nul
 endlocal

@@ -1,4 +1,4 @@
-# Creates Desktop\NullReferMusic-Dev.lnk -> runs Start-Dev-Full.bat from repo (cd first so cwd is correct).
+# Creates Desktop\NullReferMusic-Dev.lnk -> runs StartServer.bat from repo root.
 
 param(
   [Parameter(Mandatory = $true)]
@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
-$bat = Join-Path $RepoRoot 'Start-Dev-Full.bat'
+$bat = Join-Path $RepoRoot 'StartServer.bat'
 if (-not (Test-Path -LiteralPath $bat)) {
   throw "Not found: $bat"
 }
@@ -24,7 +24,7 @@ $s = $w.CreateShortcut($lnk)
 $s.TargetPath = $cmd
 $s.Arguments = "/c cd /d `"$RepoRoot`" && call `"$bat`""
 $s.WorkingDirectory = $RepoRoot
-$s.Description = 'NullReferMusic: one click = backend + Expo LAN + browser'
+$s.Description = 'NullReferMusic: backend + Expo web + Expo Go (LAN)'
 $s.Save()
 
 Write-Output "OK: $lnk"

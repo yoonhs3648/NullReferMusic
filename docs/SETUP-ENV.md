@@ -6,14 +6,17 @@
 
 1. **클론**: `git clone https://github.com/yoonhs3648/NullReferMusic.git` (경로는 자유. `NRM_REPO_ROOT` 또는 배치 파일이 저장소 루트를 자동 탐지함)
 2. **시스템 도구** (아래 표): JDK 21, Node LTS, Android Studio(SDK·platform-tools)
-3. **의존성 1회**: 저장소 루트에서 `Setup-Dependencies.bat` 실행 (`backend` Maven + `app` npm)
-4. **개발 실행** (택 1):
-   - `Start-Dev-Full.bat` — 백엔드 + Expo LAN + 웹 (바탕화면 바로가기: `Install-Desktop-DevShortcut.bat`)
-   - `scripts\Start-NullreferenceMusic-All.bat` — 백엔드 + `expo start --lan --web`, LAN API URL 자동
-5. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi, Expo QR 스캔. API는 콘솔의 `http://(LAN IP):8787`
-6. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
+3. **도구 버전 확인**: 루트 `dev-stack-versions.json` (JDK 21, Node 20+, 등)
+4. **의존성 1회**: `Setup-Dependencies.bat` (`backend` Maven + `app` npm)
+5. **개발 실행**: `StartServer.bat` (백엔드 + Expo 웹 + Expo Go LAN 한 번에). 바탕화면: `Install-Desktop-DevShortcut.bat` → `NullReferMusic-Dev`
+6. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi, Expo QR 스캔. API는 `http://(LAN IP):8787` (자동 설정)
+7. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
+
+## 개발 스택 버전 (`dev-stack-versions.json`)
+
+저장소 루트 **`dev-stack-versions.json`** 에 JDK·Node·Expo SDK·Spring Boot·번들 yt-dlp/ffmpeg 버전과 **minimum** / **verifiedOnReferencePc** 가 기록되어 있다. 다른 PC에서 클론 후 도구 버전을 맞출 때 이 파일을 먼저 본다.
 
 ## 시스템에 설치됨 (winget 등)
 
@@ -59,27 +62,19 @@ npm -v
 3. 환경 변수 `ANDROID_HOME`(또는 `ANDROID_SDK_ROOT`)이 자동 설정되지 않았다면 SDK 경로를 지정하고, `platform-tools`를 PATH에 추가.
 4. React Native 프로젝트가 생기면: `npm install` 후 `npx react-native run-android`.
 
-## Windows 원클릭 실행 (`C:\NullReferMusic\*.bat`)
+## Windows 배치 파일 (저장소 루트)
 
 | 파일 | 설명 |
 |------|------|
-| `Setup-Dependencies.bat` | 최초 1회 또는 의존성 변경 후 — `backend`(Maven 패키지)·`app`(`npm install`) |
-| **`Install-Desktop-DevShortcut.bat`** | **바탕화면에 `NullReferMusic-Dev` 바로가기만** 만듦 → 대상은 **`Start-Dev-Full.bat`** (최초 1회 또는 경로 바뀔 때 실행) |
-| **`Start-Dev-Full.bat`** | **웹+모바일 한 번에**: 백엔드(8787) + `expo start --lan`(8081) + 브라우저. **평소에는 바탕화면 `NullReferMusic-Dev`만 클릭**하면 이 파일이 실행됨. PowerShell 숨김 1회(LAN 힌트), 런처 CMD 자동 종료. 중복 방지: `%TEMP%\NRM-DevStack-Lock` |
-| **`Stop-Backend.bat`** | **8787 포트 점유 종료** — 이전 Spring Boot 창을 닫지 않고 다시 켤 때 `Address already in use` 나면 실행 |
-| `Start-Server.bat` | 로컬 다운로드 API만 (8787) |
-| `Start-Expo-Dev.bat` | Expo Metro (사진 1과 같음 — `w` 웹, `a` Android) |
-| `Start-Web.bat` | 웹만 바로 (`expo start --web`) |
-| `Start-Android-Dev.bat` | Android 연결/에뮬로 Expo (`expo start --android`) |
-| `Start-Server-and-Expo.bat` | 서버 + Metro **두 창** 한 번에 |
-| `Start-Android-Wifi-Lab.bat` | **실기 Android + 동일 Wi‑Fi**: 백엔드(8787) + `expo start --lan`(8081) **두 창** (절차: `docs/DEV-ANDROID-WIFI.md`) |
-| `Start-Server-and-Web.bat` | 서버 + 웹 **두 창** 한 번에 |
-| `scripts/Start-NullreferenceMusic-All.bat` | 백엔드(8787) + `expo start --lan --web` — LAN IP로 `EXPO_PUBLIC_API_BASE_URL` 자동 설정 (`NRM_REPO_ROOT` 지원) |
-| `scripts/Start-Mobile-Apk-Usb-Logcat.bat` | USB 연결 실기 **logcat** (`ReactNativeJS` / `NRM:dev` 필터) |
-| `scripts/Start-Mobile-Apk-Wireless-Debug.bat` | Wi‑Fi **무선 adb** 연결 후 Expo/개발 빌드용 |
-| `scripts/resolve-lan-ip.ps1` | PC LAN IP 조회 (배치·Expo API URL용) |
+| **`StartServer.bat`** | **유일한 개발 서버 실행**: Spring Boot(8787) + `expo start --lan --web`(8081, PC 웹 + Expo Go QR) + 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
+| `Setup-Dependencies.bat` | 최초 1회 — `backend` Maven + `app` npm install |
+| `Install-Desktop-DevShortcut.bat` | 바탕화면 `NullReferMusic-Dev` → `StartServer.bat` (최초 1회) |
+| `Stop-Backend.bat` | 8787 포트 점유 프로세스 종료 |
+| `scripts/Start-Mobile-Apk-Usb-Logcat.bat` | USB 실기 logcat |
+| `scripts/Start-Mobile-Apk-Wireless-Debug.bat` | Wi‑Fi 무선 adb |
+| `scripts/resolve-lan-ip.ps1` | PC LAN IP (StartServer.bat 내부 사용) |
 
-각 창을 **닫으면** 해당 프로세스는 종료됩니다. 앱은 평소 `app`에서 `npm start` 등으로 실행하고, 다운로드 API는 `backend`에서 `mvnw.cmd spring-boot:run`(또는 `Start-Server.bat`)만 돌리면 됩니다.
+평소 개발: **`StartServer.bat`** 또는 바탕화면 **`NullReferMusic-Dev`** 만 실행. 백엔드·Expo 창을 닫으면 해당 프로세스가 종료된다.
 
 배치 파일 안 문구는 **영문(ASCII)만** 사용합니다. 한글·UTF-8만 넣은 `.bat`은 기본 CMD 코드페이지에서 깨져 **명령으로 오인**될 수 있습니다.
 
@@ -189,3 +184,4 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
 | 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
+| 2026-05-20 | 개발 실행 통합: `StartServer.bat` 단일화, `dev-stack-versions.json` |
