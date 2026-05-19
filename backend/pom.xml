@@ -14,8 +14,8 @@
   <groupId>com.nullrefer.music</groupId>
   <artifactId>nullrefer-music-backend</artifactId>
   <version>1.0.0-SNAPSHOT</version>
-  <name>NullReferMusic Backend</name>
-  <description>Local download API (yt-dlp + ffmpeg) for NullReferMusic web and Expo app</description>
+  <name>nullreference music backend</name>
+  <description>Local download API (yt-dlp + ffmpeg) for nullreference music web and Expo app</description>
 
   <properties>
     <java.version>21</java.version>
@@ -29,6 +29,12 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-configuration-processor</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-devtools</artifactId>
+      <scope>runtime</scope>
       <optional>true</optional>
     </dependency>
     <dependency>

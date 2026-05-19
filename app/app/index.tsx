@@ -1,76 +1,145 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { ScrollView, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  BackHandler,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { NrmAppMenu } from '@/components/nrm/NrmAppMenu';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
-import { NrmUrlDownloader } from '@/components/nrm/NrmUrlDownloader';
+import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 import { nrmTokens } from '@/constants/nrmTokens';
+
+const LOGO_TOP_FRAC = 0.1;
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const isDark = scheme !== 'light';
-  const { width } = useWindowDimensions();
+  const { width, height: winH } = useWindowDimensions();
+  const [layoutPhase, setLayoutPhase] = useState<'welcome' | 'browsing'>(
+    'welcome',
+  );
+  const [homeEpoch, setHomeEpoch] = useState(0);
+
   const pad = width >= 900 ? nrmTokens.space.xxl : nrmTokens.space.lg;
-  const maxW = Math.min(width - pad * 2, nrmTokens.layout.maxContentWidth + pad * 2);
+  const logoPadTop = Math.max(0, winH * LOGO_TOP_FRAC);
+  const isWelcome = layoutPhase === 'welcome';
+  const resetToWelcome = useCallback(() => {
+    setLayoutPhase('welcome');
+    setHomeEpoch((v) => v + 1);
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (layoutPhase !== 'welcome') {
+        resetToWelcome();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [layoutPhase, resetToWelcome]);
 
   return (
-    <LinearGradient
-      colors={
-        isDark
-          ? [nrmTokens.color.bg, '#160e12', nrmTokens.color.bg]
-          : ['#fff5f4', '#f0faf5', '#fff8f6']
-      }
-      style={styles.gradient}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}>
+    <View
+      style={[
+        styles.rootBg,
+        {
+          backgroundColor: isDark
+            ? nrmTokens.color.surfaceTile1
+            : nrmTokens.color.canvasParchment,
+        },
+      ]}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollInner,
-            { paddingHorizontal: pad, paddingVertical: nrmTokens.space.xl },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag">
-          <View style={[styles.centerColumn, { maxWidth: maxW }]}>
-            <NrmLogo isDark={isDark} />
-            <Text
-              style={[
-                styles.lead,
-                { color: isDark ? nrmTokens.color.textMuted : '#4b5568' },
-              ]}>
-              Android에서는 기본으로 이 기기 안에서 yt-dlp·FFmpeg로 MP3를 저장할
-              수 있습니다. 웹은 로컬 PC 서버, 필요 시 앱에서「PC 서버」모드로 전환할
-              수 있습니다.
-            </Text>
-            <NrmUrlDownloader isDark={isDark} />
-          </View>
-        </ScrollView>
+        <NrmAppMenu isDark={isDark} paddingHorizontal={pad} />
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollInner,
+              {
+                flexGrow: 1,
+                justifyContent: isWelcome ? 'center' : 'flex-start',
+                paddingHorizontal: pad,
+                paddingBottom: nrmTokens.space.xl,
+                ...(Platform.OS === 'web' && isWelcome
+                  ? { minHeight: winH }
+                  : {}),
+              },
+            ]}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode={
+              Platform.OS === 'ios' ? 'on-drag' : 'none'
+            }
+            {...(Platform.OS === 'ios'
+              ? { contentInsetAdjustmentBehavior: 'never' as const }
+              : {})}>
+            <View style={styles.centerColumn}>
+              <View
+                style={[
+                  styles.logoWrap,
+                  isWelcome
+                    ? styles.logoWrapWelcome
+                    : [styles.logoWrapBrowsing, { paddingTop: logoPadTop }],
+                ]}>
+                <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={resetToWelcome} />
+              </View>
+              <NrmYoutubeHome
+                key={homeEpoch}
+                isDark={isDark}
+                phase={layoutPhase}
+                onSearchCommitted={() => setLayoutPhase('browsing')}
+              />
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
+  rootBg: {
     flex: 1,
   },
   safe: {
     flex: 1,
+    position: 'relative',
+  },
+  keyboardAvoid: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
   },
   scrollInner: {
-    flexGrow: 1,
     alignItems: 'center',
+    width: '100%',
   },
   centerColumn: {
     width: '100%',
-    alignSelf: 'center',
+    maxWidth: nrmTokens.layout.maxContentWidth,
   },
-  lead: {
-    fontSize: nrmTokens.font.subtitle,
-    lineHeight: 26,
+  logoWrap: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  logoWrapWelcome: {
     marginBottom: nrmTokens.space.xl,
-    fontWeight: '500',
+  },
+  logoWrapBrowsing: {
+    paddingBottom: nrmTokens.space.md,
   },
 });

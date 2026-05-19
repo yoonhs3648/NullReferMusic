@@ -38,4 +38,5 @@ yarn-error.*
 
 # generated native folders
 /ios
-/android
+# /android 은 Chaquopy(yt-dlp) 커스텀 네이티브 모듈이 포함되어 있어 git 추적 필요
+# (EAS Build 업로드에 포함되어야 함)

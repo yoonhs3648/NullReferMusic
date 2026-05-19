@@ -1,0 +1,16 @@
+---
+description: NullRefer Music UI must follow the Apple-gallery design spec implemented in code.
+globs: app/**/*.tsx,app/**/*.ts
+alwaysApply: false
+---
+
+# NRM UI (nullferenceMusicDesign)
+
+- **Source of truth in repo:** `app/constants/nrmTokens.ts` — colors, spacing, radii, type scale, layout. Extend these tokens; do not introduce ad-hoc hex accents.
+- **Single interactive color:** Action Blue `#0066cc` (`primary`); on dark tiles use `primaryOnDark` for links. No second brand accent.
+- **Chrome:** No decorative CSS gradients. No box-shadow on cards, buttons, or nav — only `nrmShadow.productImage` for photographic/product weight. Surfaces and 1px hairlines create hierarchy.
+- **Shape:** Pills (`radius.pill`) for primary actions and search fields; `radius.lg` (18) for utility cards; full-bleed sections use `radius.none`.
+- **Type:** Body is 17px / 400; display headlines 600; no weight 500 in the ladder. Prefer system/Inter stack (web: `+html.tsx` global CSS).
+- **Motion:** Button press `transform: scale(0.95)` (or equivalent) per spec.
+
+If the user’s desktop `nullferenceMusicDesign.md` conflicts with the repo, prefer updating `nrmTokens` and components to match the document, then keep code and spec aligned.

@@ -1,50 +1,64 @@
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 
 type Props = {
-  isDark: boolean;
+  compact?: boolean;
+  tone?: 'light' | 'dark';
+  onPress?: () => void;
 };
 
-export function NrmLogo({ isDark }: Props) {
-  return (
+export function NrmLogo({ compact = false, tone = 'light', onPress }: Props) {
+  const fontSize = compact ? 20 : nrmTokens.font.logo;
+  const nullColor = tone === 'dark' ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
+  const musicColor =
+    tone === 'dark' ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+  const markSize = compact ? 26 : 34;
+
+  const content = (
     <View style={styles.wrap} accessibilityRole="header">
-      <Text style={styles.wordmark}>
-        <Text style={styles.wordNull}>NullRefer</Text>
-        <Text style={styles.wordMusic}>Music</Text>
-      </Text>
-      <Text
-        style={[
-          styles.tagline,
-          { color: isDark ? nrmTokens.color.textMuted : '#6b4a52' },
-        ]}>
-        로컬에서 · YouTube → 오디오
+      <Image
+        source={require('@/assets/images/icon.png')}
+        style={[styles.markImage, { width: markSize, height: markSize }]}
+        resizeMode="contain"
+      />
+      <Text style={[styles.wordmark, { fontSize }]}>
+        <Text style={[styles.wordNull, { color: nullColor }]}>Nullreference </Text>
+        <Text style={[styles.wordMusic, { color: musicColor }]}>Music</Text>
       </Text>
     </View>
+  );
+
+  if (!onPress) return content;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="메인 홈으로 이동"
+      style={({ pressed }) => [pressed && styles.pressed]}>
+      {content}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: nrmTokens.space.xl,
+    gap: nrmTokens.space.sm,
+  },
+  markImage: {
+    borderRadius: nrmTokens.radius.sm,
   },
   wordmark: {
-    fontSize: nrmTokens.font.logo,
-    fontWeight: '800',
-    letterSpacing: Platform.OS === 'ios' ? -0.5 : 0,
+    fontWeight: '600',
+    letterSpacing: Platform.OS === 'ios' ? -0.37 : -0.2,
   },
-  /** 메인 테마: LFC 구 실드 빨강 — 라이트/다크 모두 대비 확보 */
-  wordNull: {
-    color: nrmTokens.color.accent,
+  pressed: {
+    opacity: 0.92,
+    transform: [{ scale: 0.99 }],
   },
-  /** 보조 테마: 클럽 그린 */
-  wordMusic: {
-    color: nrmTokens.color.accent2,
-  },
-  tagline: {
-    marginTop: nrmTokens.space.sm,
-    fontSize: nrmTokens.font.small,
-    fontWeight: '500',
-  },
+  wordNull: {},
+  wordMusic: {},
 });

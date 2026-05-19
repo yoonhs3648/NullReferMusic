@@ -6,12 +6,12 @@ const nrmLight: Theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: nrmTokens.color.accent,
-    background: '#fff6f5',
-    card: '#ffffff',
-    text: '#1a0a0e',
-    border: '#edd5d8',
-    notification: nrmTokens.color.accent2,
+    primary: nrmTokens.color.primary,
+    background: nrmTokens.color.canvasParchment,
+    card: nrmTokens.color.canvas,
+    text: nrmTokens.color.ink,
+    border: nrmTokens.color.hairline,
+    notification: nrmTokens.color.primaryFocus,
   },
 };
 
@@ -19,12 +19,12 @@ const nrmDark: Theme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    primary: nrmTokens.color.accent,
-    background: nrmTokens.color.bg,
-    card: nrmTokens.color.bgElevated,
-    text: nrmTokens.color.text,
-    border: nrmTokens.color.border,
-    notification: nrmTokens.color.accent2,
+    primary: nrmTokens.color.primary,
+    background: nrmTokens.color.surfaceTile1,
+    card: nrmTokens.color.surfaceTile3,
+    text: nrmTokens.color.bodyOnDark,
+    border: nrmTokens.color.borderOnDark,
+    notification: nrmTokens.color.primaryOnDark,
   },
 };
 

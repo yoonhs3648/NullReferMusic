@@ -1,22 +1,21 @@
 import { nrmTokens } from '@/constants/nrmTokens';
 
-/** 레거시 Themed 컴포넌트용 — nrmTokens와 동일 계열 */
-const tintColorLight = nrmTokens.color.accent;
-const tintColorDark = nrmTokens.color.accent2;
+const tintColorLight = nrmTokens.color.primary;
+const tintColorDark = nrmTokens.color.primaryOnDark;
 
 export default {
   light: {
-    text: '#1a0a0e',
-    background: '#fff6f5',
+    text: nrmTokens.color.ink,
+    background: nrmTokens.color.canvasParchment,
     tint: tintColorLight,
-    tabIconDefault: '#ccc',
+    tabIconDefault: nrmTokens.color.inkMuted48,
     tabIconSelected: tintColorLight,
   },
   dark: {
-    text: nrmTokens.color.text,
-    background: nrmTokens.color.bg,
+    text: nrmTokens.color.bodyOnDark,
+    background: nrmTokens.color.surfaceTile1,
     tint: tintColorDark,
-    tabIconDefault: '#ccc',
-    tabIconSelected: tintColorDark,
+    tabIconDefault: nrmTokens.color.bodyMuted,
+    tabIconSelected: tintColorLight,
   },
 };

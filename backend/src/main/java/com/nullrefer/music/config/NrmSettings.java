@@ -12,6 +12,8 @@ public class NrmSettings {
   private String ffmpegDir = "";
   private String outputDir = "";
 
+  private String youtubeApiKey = "";
+
   public String getRepoRoot() {
     return repoRoot;
   }
@@ -42,5 +44,13 @@ public class NrmSettings {
 
   public void setOutputDir(String outputDir) {
     this.outputDir = outputDir;
+  }
+
+  public String getYoutubeApiKey() {
+    return youtubeApiKey;
+  }
+
+  public void setYoutubeApiKey(String youtubeApiKey) {
+    this.youtubeApiKey = youtubeApiKey;
   }
 }

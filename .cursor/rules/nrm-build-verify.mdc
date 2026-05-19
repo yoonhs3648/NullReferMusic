@@ -1,0 +1,11 @@
+---
+description: After code changes, compile/build until clean; fix errors without asking the user.
+globs: "**/*.{ts,tsx,js,jsx,java,xml,properties}"
+alwaysApply: true
+---
+
+# 빌드 검증 (저장소 규칙)
+
+`docs/BUILD-VERIFY-RULE.md`와 동일한 의무를 따른다.
+
+**요약:** `app`을 건드렸으면 `cd app && npx tsc --noEmit`. `backend`를 건드렸으면 `cd backend && mvn -DskipTests compile`. 실패 시 사용자에게 묻지 말고 수정 후 같은 명령을 에러가 없을 때까지 반복한다.

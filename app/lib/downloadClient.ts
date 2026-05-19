@@ -30,7 +30,7 @@ export async function requestDownload(
       data.error ||
       data.detail ||
       (typeof data.message === 'string' ? data.message : null) ||
-      `요청 실패 (${res.status})`;
+      `HTTP ${res.status}`;
     throw new Error(msg);
   }
   return data;

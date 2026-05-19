@@ -2,6 +2,19 @@
 
 이 문서는 이 PC에 설치된 도구와, 프로젝트에 이미 포함된 바이너리 위치를 정리한다. (`docs/SOURCE-MANAGEMENT.md`의 IntelliJ·RN 안내와 함께 본다.)
 
+## 다른 PC에서 빠른 시작
+
+1. **클론**: `git clone https://github.com/yoonhs3648/NullReferMusic.git` (경로는 자유. `NRM_REPO_ROOT` 또는 배치 파일이 저장소 루트를 자동 탐지함)
+2. **시스템 도구** (아래 표): JDK 21, Node LTS, Android Studio(SDK·platform-tools)
+3. **의존성 1회**: 저장소 루트에서 `Setup-Dependencies.bat` 실행 (`backend` Maven + `app` npm)
+4. **개발 실행** (택 1):
+   - `Start-Dev-Full.bat` — 백엔드 + Expo LAN + 웹 (바탕화면 바로가기: `Install-Desktop-DevShortcut.bat`)
+   - `scripts\Start-NullreferenceMusic-All.bat` — 백엔드 + `expo start --lan --web`, LAN API URL 자동
+5. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi, Expo QR 스캔. API는 콘솔의 `http://(LAN IP):8787`
+6. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
+
+Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
+
 ## 시스템에 설치됨 (winget 등)
 
 | 도구 | 용도 | 비고 |
@@ -61,6 +74,10 @@ npm -v
 | `Start-Server-and-Expo.bat` | 서버 + Metro **두 창** 한 번에 |
 | `Start-Android-Wifi-Lab.bat` | **실기 Android + 동일 Wi‑Fi**: 백엔드(8787) + `expo start --lan`(8081) **두 창** (절차: `docs/DEV-ANDROID-WIFI.md`) |
 | `Start-Server-and-Web.bat` | 서버 + 웹 **두 창** 한 번에 |
+| `scripts/Start-NullreferenceMusic-All.bat` | 백엔드(8787) + `expo start --lan --web` — LAN IP로 `EXPO_PUBLIC_API_BASE_URL` 자동 설정 (`NRM_REPO_ROOT` 지원) |
+| `scripts/Start-Mobile-Apk-Usb-Logcat.bat` | USB 연결 실기 **logcat** (`ReactNativeJS` / `NRM:dev` 필터) |
+| `scripts/Start-Mobile-Apk-Wireless-Debug.bat` | Wi‑Fi **무선 adb** 연결 후 Expo/개발 빌드용 |
+| `scripts/resolve-lan-ip.ps1` | PC LAN IP 조회 (배치·Expo API URL용) |
 
 각 창을 **닫으면** 해당 프로세스는 종료됩니다. 앱은 평소 `app`에서 `npm start` 등으로 실행하고, 다운로드 API는 `backend`에서 `mvnw.cmd spring-boot:run`(또는 `Start-Server.bat`)만 돌리면 됩니다.
 
@@ -83,7 +100,7 @@ npm -v
 
    기본 포트 `8787`, **모든 LAN 인터페이스에 바인딩**(`0.0.0.0`)하므로 같은 Wi‑Fi의 폰에서도 접속 가능하다. 시작 시 로그에 `http://192.168.x.x:8787` 형태로 가능한 주소가 출력된다. (로컬만 열고 싶으면 `NRM_BIND_HOST=127.0.0.1`)
 
-   환경 변수: `NRM_SERVER_PORT`, `NRM_OUTPUT_DIR`, `NRM_YT_DLP`, `NRM_FFMPEG_DIR`, `NRM_BIND_HOST`, `NRM_REPO_ROOT`(저장소 루트를 수동 지정할 때).
+   환경 변수: `NRM_SERVER_PORT`, `NRM_OUTPUT_DIR`, `NRM_YT_DLP`, `NRM_FFMPEG_DIR`, `NRM_BIND_HOST`, `NRM_REPO_ROOT`(저장소 루트를 수동 지정할 때), **`NRM_YOUTUBE_API_KEY`**(YouTube Data API v3 키 — 메인 화면 **음악 검색**용. 없으면 `/api/youtube/search` 는 503).
 
    **Windows 방화벽**: 폰이 붙지 않으면 인바운드 규칙으로 TCP `8787`을 허용한다. (관리자 PowerShell 예: `New-NetFirewallRule -DisplayName "NullReferMusic LAN" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow`)
 
@@ -96,6 +113,11 @@ npm -v
    ```
 
    또는 에뮬레이터/실기: `npm run android` (USB 시 개발 빌드 필요 시 `npx expo run-android`).
+
+   **앱 검색 오류 — 화면 vs 개발자 로그:** 사용자에게는 짧은 안내 문구만 보이고, 원인 코드·HTTP 상태·응답 일부는 앱이 **`[NRM:dev]`** 로그로만 남긴다.
+   - **Metro를 켠 디버그 빌드**: 터미널(Expo) 콘솔에서 `NRM:dev` 또는 `youtubeSearch`를 찾는다.
+   - **USB로 실기 연결**: `adb logcat`에서 `ReactNativeJS` 또는 문자열 `NRM:dev`로 필터한다. (예: `adb logcat -s ReactNativeJS:V` 후 검색 실행)
+   - **백엔드**: 같은 시각의 Spring Boot 콘솔 로그(특히 YouTube API 관련 `WARN`)와 대조한다. `errorCode`가 `youtube_api_key_missing`이면 `NRM_YOUTUBE_API_KEY` 미설정이다.
 
 3. **실제 안드로이드 폰 + PC 서버 (같은 망, AWS 없음)**  
    - **권장**: PC와 폰을 **같은 Wi‑Fi**에 두고, 서버 콘솔에 나온 **`http://(PC의 LAN IP):8787`** 을 앱 상단의「다운로드 서버」에 입력 후 **저장 → 연결 테스트**.  
@@ -166,3 +188,4 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-18 | 바탕화면 전용: `Install-Desktop-DevShortcut.bat` → `NullReferMusic-Dev` → `Start-Dev-Full.bat` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
+| 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |

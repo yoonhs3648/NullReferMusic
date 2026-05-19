@@ -10,11 +10,12 @@ export default function Root({ children }: { children: React.ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
-        <meta name="theme-color" content="#C8102E" />
+        <meta name="theme-color" content="#0066cc" />
+        <meta name="referrer" content="strict-origin-when-cross-origin" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap"
           rel="stylesheet"
         />
         <ScrollViewStyleReset />
@@ -31,12 +32,12 @@ html, body, #root {
 }
 body {
   margin: 0;
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: #0c080a;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #272729;
 }
 @media (prefers-color-scheme: light) {
   body {
-    background-color: #fff6f5;
+    background-color: #f5f5f7;
   }
 }
 `;

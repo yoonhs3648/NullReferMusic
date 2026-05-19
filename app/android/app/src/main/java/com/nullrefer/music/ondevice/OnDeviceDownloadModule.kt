@@ -3,6 +3,8 @@ package com.nullrefer.music.ondevice
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -16,6 +18,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
 
   override fun getName(): String = "NrmOnDeviceDownload"
+
+  private fun ensurePython() {
+    val ctx = reactApplicationContext.applicationContext
+    if (!Python.isStarted()) {
+      Python.start(AndroidPlatform(ctx))
+    }
+  }
 
   // ── 쿠키 추출 ──────────────────────────────────────────────────────────────
   private fun saveCookiesToTempFile(): String {
@@ -65,48 +74,33 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     return result
   }
 
-  // ── yt-dlp 실행 프로파일 (403 우회용) ─────────────────────────────────────
-  private data class YtDlpProfile(
-    val name: String,
-    val playerClient: String,
-    val userAgent: String,
-    val clientName: String,
-    val clientVersion: String,
-  )
-
-  private val RETRY_PROFILES = listOf(
-    YtDlpProfile(
-      name = "android_primary",
-      playerClient = "android,web",
-      userAgent = "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
-      clientName = "3",
-      clientVersion = "17.36.4",
-    ),
-    YtDlpProfile(
-      name = "ios_primary",
-      playerClient = "ios,web",
-      userAgent = "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)",
-      clientName = "5",
-      clientVersion = "19.29.1",
-    ),
-    YtDlpProfile(
-      name = "tv_embedded",
-      playerClient = "tv_embedded,web",
-      userAgent = "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/6.0 TV Safari/538.1",
-      clientName = "85",
-      clientVersion = "2.0",
-    ),
-    YtDlpProfile(
-      name = "web_fallback",
-      playerClient = "web",
-      userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      clientName = "1",
-      clientVersion = "2.20240417.01.00",
-    ),
-  )
+  // ── 스트림 URL 추출 ──────────────────────────────────────────────────────────
+  @ReactMethod
+  fun getAudioStreamUrl(videoId: String, promise: Promise) {
+    Thread {
+      var cookieFilePath = ""
+      try {
+        ensurePython()
+        cookieFilePath = getCookieFilePathSync()
+        val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
+        val streamUrl = py.callAttr("get_audio_stream_url", videoId, cookieFilePath).toString()
+        if (streamUrl.isBlank()) {
+          throw Exception("스트림 URL이 비어 있습니다.")
+        }
+        promise.resolve(streamUrl)
+      } catch (e: Exception) {
+        promise.reject("E_STREAM_URL", e.message ?: e.toString(), e)
+      } finally {
+        if (cookieFilePath.isNotBlank()) {
+          try { File(cookieFilePath).delete() } catch (_: Exception) {}
+        }
+      }
+    }.start()
+  }
 
   // ── 다운로드 ────────────────────────────────────────────────────────────────
   @ReactMethod
+  @Suppress("UNUSED_PARAMETER")
   fun downloadAudio(url: String, noPlaylist: Boolean, promise: Promise) {
     Thread {
       var cookieFilePath = ""
@@ -117,39 +111,19 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         }
 
         val ctx = reactApplicationContext.applicationContext
-
+        ensurePython()
         cookieFilePath = getCookieFilePathSync()
-
-        val ytDlpPath = YtDlpBootstrap.ensure(ctx)
-        val ffmpegDir = FfmpegBootstrap.ensure(ctx)
-
         val outDir = File(ctx.cacheDir, "nrm-ytdlp-tmp").apply { mkdirs() }
-
-        var lastError: Exception? = null
-        for (profile in RETRY_PROFILES) {
-          try {
-            val outFile = runYtDlp(
-              ytDlpPath = ytDlpPath,
-              ffmpegDir = ffmpegDir,
-              outDir = outDir,
-              url = url,
-              cookieFilePath = cookieFilePath,
-              profile = profile,
-            )
-            val map = Arguments.createMap()
-            map.putString("path", outFile.absolutePath)
-            map.putString("message", "기기에 저장되었습니다.")
-            promise.resolve(map)
-            return@Thread
-          } catch (e: Exception) {
-            lastError = e
-            // 403·재시도 가능한 오류면 다음 프로파일 시도
-            if (!isRetryable(e.message)) {
-              break
-            }
-          }
+        val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
+        val outPath = py.callAttr("download_audio", url, outDir.absolutePath, cookieFilePath).toString()
+        val outFile = File(outPath)
+        if (!outFile.exists()) {
+          throw Exception("다운로드 결과 파일을 찾지 못했습니다.")
         }
-        throw lastError ?: Exception("yt-dlp 다운로드 실패 (알 수 없는 오류)")
+        val map = Arguments.createMap()
+        map.putString("path", outFile.absolutePath)
+        map.putString("message", "기기에 저장되었습니다.")
+        promise.resolve(map)
       } catch (e: Exception) {
         promise.reject("E_ONDEVICE", e.message ?: e.toString(), e)
       } finally {
@@ -158,81 +132,5 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         }
       }
     }.start()
-  }
-
-  private fun runYtDlp(
-    ytDlpPath: String,
-    ffmpegDir: String,
-    outDir: File,
-    url: String,
-    cookieFilePath: String,
-    profile: YtDlpProfile,
-  ): File {
-    // 이전 실패 파티알 파일 정리
-    outDir.listFiles()?.forEach { f ->
-      if (f.name.endsWith(".part") || f.name.endsWith(".ytdl")) f.delete()
-    }
-
-    val outTemplate = File(outDir, "%(title).100s.%(ext)s").absolutePath
-
-    val cmd = mutableListOf(
-      ytDlpPath,
-      "-x",
-      "--audio-format", "opus",
-      "--audio-quality", "0",
-      "--ffmpeg-location", ffmpegDir,
-      "--no-playlist",
-      "--retries", "3",
-      "--socket-timeout", "30",
-      "--extractor-args", "youtube:player_client=${profile.playerClient}",
-      "--add-header", "User-Agent:${profile.userAgent}",
-      "--add-header", "X-YouTube-Client-Name:${profile.clientName}",
-      "--add-header", "X-YouTube-Client-Version:${profile.clientVersion}",
-      "--add-header", "Origin:https://www.youtube.com",
-      "--add-header", "Referer:https://www.youtube.com/",
-      "-o", outTemplate,
-    )
-
-    if (cookieFilePath.isNotBlank()) {
-      cmd.addAll(listOf("--cookies", cookieFilePath))
-    }
-
-    cmd.add(url)
-
-    val proc = ProcessBuilder(cmd)
-      .directory(outDir)
-      .redirectErrorStream(true)
-      .also { pb ->
-        pb.environment()["HOME"] = outDir.absolutePath
-        pb.environment()["TMPDIR"] = outDir.absolutePath
-        val existingPath = pb.environment()["PATH"] ?: ""
-        pb.environment()["PATH"] = "$ffmpegDir:$existingPath"
-      }
-      .start()
-
-    val output = proc.inputStream.bufferedReader().readText()
-    val exitCode = proc.waitFor()
-
-    if (exitCode != 0) {
-      throw Exception("yt-dlp[${profile.name}] 실패 (exit=$exitCode): $output")
-    }
-
-    val files = outDir.listFiles()
-      ?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }
-      ?: emptyList()
-
-    return files.maxByOrNull { it.lastModified() }
-      ?: throw Exception("다운로드된 파일을 찾지 못했습니다.")
-  }
-
-  private fun isRetryable(message: String?): Boolean {
-    if (message == null) return false
-    val lower = message.lowercase()
-    return lower.contains("http error 403") ||
-      lower.contains("403 forbidden") ||
-      lower.contains("sign in") ||
-      lower.contains("bot") ||
-      lower.contains("unavailable") ||
-      lower.contains("nsig")
   }
 }

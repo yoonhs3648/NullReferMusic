@@ -30,7 +30,7 @@ public class NrmStartupBanner implements ApplicationRunner {
   public void run(ApplicationArguments args) throws Exception {
     String port = env.getProperty("server.port", "8787");
     String bind = env.getProperty("server.address", "0.0.0.0");
-    log.info("[NullReferMusic] listening {}:{} -> out: {}", bind, port, paths.getOutputDir());
+    log.info("[nullreference music] listening {}:{} -> out: {}", bind, port, paths.getOutputDir());
     log.info("  -> this PC  http://127.0.0.1:{}", port);
 
     if ("0.0.0.0".equals(bind)) {

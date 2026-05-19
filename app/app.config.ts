@@ -1,9 +1,9 @@
 import type { ExpoConfig } from 'expo/config';
 
 const config: ExpoConfig = {
-  name: 'Nullreference Music',
+  name: 'NullReferenceMusic',
   slug: 'nullrefer-music',
-  version: '1.1.1',
+  version: '1.2.4',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',
@@ -17,10 +17,10 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.nullrefer.music',
-    // Documents 저장분을 «파일» 앱(내 iPhone)에서 열 수 있게 함
     infoPlist: {
       UIFileSharingEnabled: true,
       LSSupportsOpeningDocumentsInPlace: true,
+      UIBackgroundModes: ['audio'],
     },
   },
   android: {

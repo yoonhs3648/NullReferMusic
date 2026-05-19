@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.chaquo.python"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -92,13 +93,20 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 5
+        versionName "1.2.4"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
         ndk {
             abiFilters 'arm64-v8a', 'x86_64'
+        }
+        python {
+            version "3.11"
+            buildPython "C:/Users/yunhs/AppData/Local/Programs/Python/Python311/python.exe"
+            pip {
+                install "yt-dlp"
+            }
         }
     }
     signingConfigs {
@@ -134,12 +142,17 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    // APK 파일명을 "nullReferenceMusic-v{versionName}.apk" 형식으로 지정
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "nullReferenceMusic-v${variant.versionName}.apk"
+        }
+    }
 }
 
-// ── yt-dlp 버전 관리 안내 ─────────────────────────────────────────────────────
-// yt-dlp는 Chaquopy(Python) 없이 독립 실행 바이너리를 런타임에 GitHub Releases에서
-// 자동 다운로드합니다. YtDlpBootstrap.kt 참조.
-// "releases/latest/download/yt-dlp_linux_aarch64" → 항상 최신 버전 사용
+// ── yt-dlp 실행 방식 안내 ──────────────────────────────────────────────────────
+// Android에서는 Chaquopy Python 런타임에서 yt-dlp 모듈을 직접 실행합니다.
+// (ProcessBuilder로 외부 바이너리 실행하지 않음)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
