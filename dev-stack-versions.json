@@ -38,6 +38,9 @@
     "androidStudio": "winget install Google.AndroidStudio"
   },
   "devEntrypoint": "StartServer.bat",
-  "firstTimeSetup": "Setup-Dependencies.bat",
-  "desktopShortcut": "Install-Desktop-DevShortcut.bat"
+  "mobileDebugBat": "scripts/Start-Mobile-Apk-Usb-Logcat.bat",
+  "firstTimeSetup": {
+    "backend": "cd backend && mvnw.cmd -q -DskipTests package",
+    "app": "cd app && npm install"
+  }
 }

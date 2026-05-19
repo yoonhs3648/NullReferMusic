@@ -26,7 +26,7 @@ PC 방화벽이 막으면 폰에서 둘 다 실패합니다. 아래 **방화벽*
 
 저장소 루트에서:
 
-- **`Setup-Dependencies.bat`** 실행  
+- **의존성**: `cd backend` → `mvnw.cmd -q -DskipTests package`, `cd app` → `npm install`  
   또는 수동으로 `backend` Maven 패키지 + `app` 에서 `npm install`.
 
 필요 시:
@@ -79,8 +79,7 @@ http://<위_IP>:8787
 
 원클릭 (웹 브라우저 자동 오픈):
 
-- **바탕화면 `NullReferMusic-Dev`** — 최초에 없으면 **`Install-Desktop-DevShortcut.bat`** 한 번 실행.
-- 실제로 도는 파일은 **`StartServer.bat`** (백엔드 + `expo start --lan --web`, 약 12초 후 `http://127.0.0.1:8081/`).
+- 저장소 루트에서 **`StartServer.bat`** (백엔드 + `expo start --lan --web`, 약 12초 후 `http://127.0.0.1:8081/`).
 
 동작:
 

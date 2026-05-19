@@ -2,7 +2,12 @@
 setlocal EnableExtensions
 title NRM APK USB Logcat
 
-set "ROOT=C:\NullReferMusic"
+if defined NRM_REPO_ROOT (
+  set "ROOT=%NRM_REPO_ROOT%"
+) else (
+  cd /d "%~dp0.."
+  set "ROOT=%CD%"
+)
 set "DL=%ROOT%\downloads"
 set "TOOLS_DIR=%DL%\platform-tools"
 set "ADB=%TOOLS_DIR%\adb.exe"

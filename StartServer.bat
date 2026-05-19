@@ -21,7 +21,7 @@ if not exist "%ROOT%\app\package.json" (
   exit /b 1
 )
 if not exist "%ROOT%\app\node_modules" (
-  echo ERROR: app\node_modules missing. Run Setup-Dependencies.bat once first.
+  echo ERROR: app\node_modules missing. Run: cd app ^&^& npm install
   timeout /t 8 /nobreak >nul
   exit /b 1
 )

@@ -7,10 +7,15 @@
 1. **클론**: `git clone https://github.com/yoonhs3648/NullReferMusic.git` (경로는 자유. `NRM_REPO_ROOT` 또는 배치 파일이 저장소 루트를 자동 탐지함)
 2. **시스템 도구** (아래 표): JDK 21, Node LTS, Android Studio(SDK·platform-tools)
 3. **도구 버전 확인**: 루트 `dev-stack-versions.json` (JDK 21, Node 20+, 등)
-4. **의존성 1회**: `Setup-Dependencies.bat` (`backend` Maven + `app` npm)
-5. **개발 실행**: `StartServer.bat` (백엔드 + Expo 웹 + Expo Go LAN 한 번에). 바탕화면: `Install-Desktop-DevShortcut.bat` → `NullReferMusic-Dev`
+4. **의존성 1회** (PowerShell):
+   ```powershell
+   cd backend; .\mvnw.cmd -q -DskipTests package
+   cd ..\app; npm install
+   ```
+5. **개발 실행**: `StartServer.bat` (백엔드 + Expo 웹 + Expo Go LAN)
 6. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi, Expo QR 스캔. API는 `http://(LAN IP):8787` (자동 설정)
-7. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
+7. **USB 실기 크래시 로그**: `scripts\Start-Mobile-Apk-Usb-Logcat.bat`
+8. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
 
@@ -62,19 +67,16 @@ npm -v
 3. 환경 변수 `ANDROID_HOME`(또는 `ANDROID_SDK_ROOT`)이 자동 설정되지 않았다면 SDK 경로를 지정하고, `platform-tools`를 PATH에 추가.
 4. React Native 프로젝트가 생기면: `npm install` 후 `npx react-native run-android`.
 
-## Windows 배치 파일 (저장소 루트)
+## Windows 배치 파일 (프로젝트 런처는 2개만)
 
 | 파일 | 설명 |
 |------|------|
-| **`StartServer.bat`** | **유일한 개발 서버 실행**: Spring Boot(8787) + `expo start --lan --web`(8081, PC 웹 + Expo Go QR) + 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
-| `Setup-Dependencies.bat` | 최초 1회 — `backend` Maven + `app` npm install |
-| `Install-Desktop-DevShortcut.bat` | 바탕화면 `NullReferMusic-Dev` → `StartServer.bat` (최초 1회) |
-| `Stop-Backend.bat` | 8787 포트 점유 프로세스 종료 |
-| `scripts/Start-Mobile-Apk-Usb-Logcat.bat` | USB 실기 logcat |
-| `scripts/Start-Mobile-Apk-Wireless-Debug.bat` | Wi‑Fi 무선 adb |
-| `scripts/resolve-lan-ip.ps1` | PC LAN IP (StartServer.bat 내부 사용) |
+| **`StartServer.bat`** | Spring Boot(8787) + `expo start --lan --web`(8081, PC 웹 + Expo Go QR) + 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
+| **`scripts/Start-Mobile-Apk-Usb-Logcat.bat`** | USB 연결 실기 크래시·에러 logcat 수집 (`downloads\usb-crash-log-*.txt`) |
 
-평소 개발: **`StartServer.bat`** 또는 바탕화면 **`NullReferMusic-Dev`** 만 실행. 백엔드·Expo 창을 닫으면 해당 프로세스가 종료된다.
+내부용: `scripts/resolve-lan-ip.ps1` (StartServer.bat 전용). Android 빌드용 `app/android/gradlew.bat` 은 Gradle Wrapper로 별도 유지.
+
+8787 포트가 이미 쓰이면 이전 **NRM Backend** CMD 창을 닫거나, 작업 관리자에서 해당 Java 프로세스를 종료한다.
 
 배치 파일 안 문구는 **영문(ASCII)만** 사용합니다. 한글·UTF-8만 넣은 `.bat`은 기본 CMD 코드페이지에서 깨져 **명령으로 오인**될 수 있습니다.
 
@@ -134,7 +136,7 @@ npm -v
 
 ## Git 및 GitHub (`yoonhs3648`)
 
-**저장소가 GitHub에 안 보일 때:** 이 PC에 GitHub 로그인·푸시가 한 번도 안 된 상태일 수 있다. 단계별 안내는 **`docs/GITHUB-FIRST-PUSH.md`** 를 본다. 웹에서 빈 저장소만 만든 뒤 **`Push-After-Web-Create.bat`** 로 푸시할 수 있다.
+**저장소가 GitHub에 안 보일 때:** **`docs/GITHUB-FIRST-PUSH.md`** 를 본다.
 
 로컬 저장소는 `C:\NullReferMusic` 에서 **`main`** 브랜치로 초기화되어 있다. GitHub에 비어 있는 저장소 **`NullReferMusic`** 을 만들고 한 번에 올리려면:
 
@@ -161,8 +163,6 @@ git remote add origin https://github.com/yoonhs3648/NullReferMusic.git
 git push -u origin main
 ```
 
-원클릭으로 시도할 때는 저장소 루트의 `Push-Github.bat` 을 실행한다 (위 1번 로그인 후).
-
 ---
 
 ## Node 버전 참고
@@ -185,3 +185,4 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
 | 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
 | 2026-05-20 | 개발 실행 통합: `StartServer.bat` 단일화, `dev-stack-versions.json` |
+| 2026-05-20 | 런처 bat 2개만 유지: `StartServer.bat`, `scripts/Start-Mobile-Apk-Usb-Logcat.bat` |

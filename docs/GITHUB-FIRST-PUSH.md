@@ -45,8 +45,6 @@ git push -u origin main
 
 처음이면 **Git Credential Manager** 창이 뜨고, 브라우저로 GitHub 로그인하면 됩니다.
 
-또는 저장소 루트의 **`Push-After-Web-Create.bat`** 을 더블클릭 (위와 동일한 명령).
-
 ### 3) 확인
 
 브라우저에서 열기: **https://github.com/yoonhs3648/NullReferMusic**
@@ -60,7 +58,7 @@ PowerShell:
 ```powershell
 gh auth login
 cd C:\NullReferMusic
-.\scripts\Push-GitHub.ps1
+gh repo create NullReferMusic --public --source=. --remote=origin --push
 ```
 
 `gh auth login` 에서 HTTPS, 브라우저 인증을 선택하면 됩니다.
@@ -77,7 +75,7 @@ cd C:\NullReferMusic
 $env:GH_TOKEN = 'ghp_여기에_토큰'
 cd C:\NullReferMusic
 $env:GH_TOKEN | gh auth login --with-token
-.\scripts\Push-GitHub.ps1
+git push -u origin main
 ```
 
 ---

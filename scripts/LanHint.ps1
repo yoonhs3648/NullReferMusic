@@ -1,4 +1,4 @@
-# Shared LAN hint lines for phone + API URL (used by Show-LanIp and Prepare-DevLauncher).
+# Shared LAN hint lines for phone + API URL (used by Show-LanIp.ps1).
 
 function Get-LanHintLines {
   $lines = [System.Collections.Generic.List[string]]::new()
