@@ -12,9 +12,9 @@
    cd backend; .\mvnw.cmd -q -DskipTests package
    cd ..\app; npm install
    ```
-5. **개발 실행**: `StartServer.bat` (백엔드 + Expo 웹 + Expo Go LAN)
-6. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi, Expo QR 스캔. API는 `http://(LAN IP):8787` (자동 설정)
-7. **USB 실기 크래시 로그**: `scripts\Start-Mobile-Apk-Usb-Logcat.bat`
+5. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
+6. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi(또는 폰 핫스팟), Expo QR 스캔. API는 `http://(LAN IP):8787` (자동 설정)
+7. **릴리스 APK**: `scripts\Build-Release-Apk.bat`
 8. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
@@ -71,10 +71,10 @@ npm -v
 
 | 파일 | 설명 |
 |------|------|
-| **`StartServer.bat`** | Spring Boot(8787) + `expo start --lan --web`(8081, PC 웹 + Expo Go QR) + 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
-| **`scripts/Start-Mobile-Apk-Usb-Logcat.bat`** | USB 연결 실기 크래시·에러 logcat 수집 (`downloads\usb-crash-log-*.txt`) |
+| **`StartServer.bat`** | Spring Boot(8787) + Expo Metro(8081, LAN QR) + PC 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
+| **`scripts/Build-Release-Apk.bat`** | 릴리스 APK 빌드 (`app\android\gradlew.bat assembleRelease`) |
 
-내부용: `scripts/resolve-lan-ip.ps1` (StartServer.bat 전용). Android 빌드용 `app/android/gradlew.bat` 은 Gradle Wrapper로 별도 유지.
+내부용: `scripts/resolve-lan-ip.ps1`, `scripts/Open-DevFirewall.ps1` 등. Android Gradle용 `app/android/gradlew.bat` 은 Wrapper로 별도 유지.
 
 8787 포트가 이미 쓰이면 이전 **NRM Backend** CMD 창을 닫거나, 작업 관리자에서 해당 Java 프로세스를 종료한다.
 
@@ -113,12 +113,11 @@ npm -v
 
    **앱 검색 오류 — 화면 vs 개발자 로그:** 사용자에게는 짧은 안내 문구만 보이고, 원인 코드·HTTP 상태·응답 일부는 앱이 **`[NRM:dev]`** 로그로만 남긴다.
    - **Metro를 켠 디버그 빌드**: 터미널(Expo) 콘솔에서 `NRM:dev` 또는 `youtubeSearch`를 찾는다.
-   - **USB로 실기 연결**: `adb logcat`에서 `ReactNativeJS` 또는 문자열 `NRM:dev`로 필터한다. (예: `adb logcat -s ReactNativeJS:V` 후 검색 실행)
+   - **Android Studio Logcat** 또는 `adb logcat`에서 `ReactNativeJS` / `NRM:dev` 필터
    - **백엔드**: 같은 시각의 Spring Boot 콘솔 로그(특히 YouTube API 관련 `WARN`)와 대조한다. `errorCode`가 `youtube_api_key_missing`이면 `NRM_YOUTUBE_API_KEY` 미설정이다.
 
 3. **실제 안드로이드 폰 + PC 서버 (같은 망, AWS 없음)**  
    - **권장**: PC와 폰을 **같은 Wi‑Fi**에 두고, 서버 콘솔에 나온 **`http://(PC의 LAN IP):8787`** 을 앱 상단의「다운로드 서버」에 입력 후 **저장 → 연결 테스트**.  
-   - **USB만 쓸 때**: PC에서 `adb reverse tcp:8787 tcp:8787` 후 앱에서 `http://127.0.0.1:8787` (또는 기본값) 사용.  
    - 여전히 **PC에서 `backend`가 실행 중**이어야 한다. 파일은 PC의 `downloads` 폴더에 저장된다.
 
    (폰 **단독**으로 yt-dlp/ffmpeg를 돌리는 기능은 네이티브 바이너리·권한 설계가 따로 필요하다.)
@@ -185,4 +184,4 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
 | 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
 | 2026-05-20 | 개발 실행 통합: `StartServer.bat` 단일화, `dev-stack-versions.json` |
-| 2026-05-20 | 런처 bat 2개만 유지: `StartServer.bat`, `scripts/Start-Mobile-Apk-Usb-Logcat.bat` |
+| 2026-05-20 | 런처 bat 2개: `StartServer.bat`, `scripts/Build-Release-Apk.bat` (USB 전용 스크립트 제거) |

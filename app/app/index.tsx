@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NrmAppMenu } from '@/components/nrm/NrmAppMenu';
+import { NrmFireworksOverlay } from '@/components/nrm/NrmFireworksOverlay';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -27,6 +28,8 @@ export default function HomeScreen() {
     'welcome',
   );
   const [homeEpoch, setHomeEpoch] = useState(0);
+  /** TEMP: increment on logo tap for fireworks test */
+  const [fireworksBurst, setFireworksBurst] = useState(0);
 
   const pad = width >= 900 ? nrmTokens.space.xxl : nrmTokens.space.lg;
   const logoPadTop = Math.max(0, winH * LOGO_TOP_FRAC);
@@ -35,6 +38,11 @@ export default function HomeScreen() {
     setLayoutPhase('welcome');
     setHomeEpoch((v) => v + 1);
   }, []);
+
+  const onMainLogoPress = useCallback(() => {
+    setFireworksBurst((v) => v + 1);
+    resetToWelcome();
+  }, [resetToWelcome]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -94,7 +102,7 @@ export default function HomeScreen() {
                     ? styles.logoWrapWelcome
                     : [styles.logoWrapBrowsing, { paddingTop: logoPadTop }],
                 ]}>
-                <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={resetToWelcome} />
+                <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onMainLogoPress} />
               </View>
               <NrmYoutubeHome
                 key={homeEpoch}
@@ -105,6 +113,7 @@ export default function HomeScreen() {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+        <NrmFireworksOverlay burstId={fireworksBurst} />
       </SafeAreaView>
     </View>
   );

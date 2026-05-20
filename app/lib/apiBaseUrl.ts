@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+
 const STORAGE_KEY = 'nrm.apiBaseUrl';
 
 export function normalizeApiBaseUrl(raw: string): string {
@@ -91,11 +93,8 @@ export function getDefaultApiBaseUrl(): string {
     }
   }
 
-  /**
-   * iOS/Android(Expo Go·스탠드얼론): 디버그 호스트로 PC 백엔드(:8787)를 추론하지 않습니다.
-   * 네이티브 검색·저장은 기기 내 로직만 사용합니다.
-   */
-  if (Platform.OS === 'web') {
+  /** Expo Go·웹 개발: Metro 호스트 IP로 PC 백엔드(:8787) 추론 */
+  if (usesPcBackendInDev()) {
     const fromExpoHost = inferDevApiBaseFromExpoHost();
     if (fromExpoHost) {
       return mapLocalhostApiToAndroidEmulator(fromExpoHost);
@@ -117,10 +116,10 @@ export function getDefaultApiBaseUrl(): string {
 
 export async function getResolvedApiBaseUrl(): Promise<string> {
   /**
-   * iOS/Android: URL 다운로더·검색이 PC 서버를 쓰지 않으므로 AsyncStorage API 주소를 쓰지 않습니다.
-   * (웹 전용 주소를 네이티브에서 잘못 쓰는 것을 막고, Expo Go·APK·IPA 동작을 맞춥니다.)
+   * 릴리스 APK/IPA: PC API 주소 저장·조회 없음 (기기 단독).
+   * Expo Go·웹 개발: 저장된 LAN 주소 허용.
    */
-  if (Platform.OS !== 'web') {
+  if (Platform.OS !== 'web' && !usesPcBackendInDev()) {
     return getDefaultApiBaseUrl();
   }
 

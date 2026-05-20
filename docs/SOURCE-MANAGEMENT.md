@@ -110,11 +110,11 @@ Community에서 Spring 전용 뷰가 부족하면 **실행은 Gradle/Maven CLI +
 
 3. 빌드가 끝나면 에뮬레이터에 앱이 설치·실행된다.
 
-### 6.3 실제 폰(USB)으로 테스트
+### 6.3 실제 폰(Expo Go / Wi‑Fi)으로 테스트
 
-1. 폰에서 **개발자 옵션** → **USB 디버깅** 켬.
-2. USB 연결 후 터미널에서 `adb devices`로 기기가 `device`로 보이는지 확인.
-3. 동일하게 `npx react-native run-android` 실행.
+1. PC에서 `StartServer.bat` 실행.
+2. 폰에 **Expo Go** 설치, PC와 같은 Wi‑Fi(또는 폰 핫스팟)에서 QR(`exp://`) 스캔.
+3. 네이티브 개발 빌드가 필요하면 `npx expo run:android` (Android Studio·SDK 필요).
 
 ### 6.4 무엇을 “테스트”하면 좋은지(초보용 체크리스트)
 

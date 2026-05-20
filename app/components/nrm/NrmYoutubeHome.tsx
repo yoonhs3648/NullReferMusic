@@ -15,6 +15,7 @@ import {
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   nrmYoutubeSearchBackendConnectionMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
@@ -166,6 +167,23 @@ export function NrmYoutubeHome({
       }
 
       try {
+        if (Platform.OS !== 'web' && usesPcBackendInDev()) {
+          const res = await requestDownload(youtubeWatchUrl(videoId), {
+            noPlaylist: true,
+          });
+          const jobId = res.jobId;
+          if (!jobId || typeof jobId !== 'string') {
+            throw new Error(
+              '서버 응답에 jobId가 없어 파일을 받을 수 없습니다.',
+            );
+          }
+          const apiBase = await getResolvedApiBaseUrl();
+          await persistAudioAfterServerJob(apiBase, jobId, { fileName });
+          notifyUser('다운로드가 완료되었습니다.');
+          nrmNotifyDownloadFinished(videoId, displayLabel, true);
+          return;
+        }
+
         if (Platform.OS !== 'web') {
           const { downloadYoutubeAudioOnDevice } = await import(
             '@/lib/nrmInnertubeYoutube'

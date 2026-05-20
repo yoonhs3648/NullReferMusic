@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   clearApiBaseUrlOverride,
   getDefaultApiBaseUrl,
@@ -144,7 +145,7 @@ export async function searchYoutube(q: string): Promise<YoutubeSearchOutcome> {
   const suffixMode = await getYoutubeSearchSuffixMode();
   const queryForApi = buildYoutubeSearchQuery(q, suffixMode);
 
-  if (Platform.OS !== 'web') {
+  if (Platform.OS !== 'web' && !usesPcBackendInDev()) {
     const { searchYoutubeOnDevice } = await import('@/lib/nrmInnertubeYoutube');
     return searchYoutubeOnDevice(queryForApi);
   }

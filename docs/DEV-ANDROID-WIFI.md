@@ -148,7 +148,7 @@ JS/TS만 수정할 때는 저장 후 Metro가 리로드되므로 **앱에서 바
 | 게스트 Wi‑Fi | AP isolation 때문에 기기 간 통신 차단되는 경우 많음 → 일반 SSID 사용 |
 | `adb` 를 쓰고 싶음 | Android Studio SDK의 `platform-tools` 또는 winget `Google.PlatformTools` (설치 오류 시 Studio SDK 경로의 `adb.exe` 사용) |
 
-USB로만 디버깅할 때는 별도로 `adb reverse tcp:8081 tcp:8081` 등이 필요할 수 있습니다. 이 문서는 **동일 Wi‑Fi** 기준입니다.
+이 문서는 **동일 Wi‑Fi**(또는 폰 핫스팟) 기준입니다. 회사망 AP 격리 시 `docs/DEV-THREE-TARGETS.md`의 핫스팟·터널 절을 참고하세요.
 
 ---
 
