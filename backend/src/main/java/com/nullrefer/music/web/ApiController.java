@@ -1,5 +1,9 @@
 package com.nullrefer.music.web;
 
+import com.nullrefer.music.chart.SpotifyChartResult;
+import com.nullrefer.music.chart.SpotifyChartService;
+import com.nullrefer.music.chart.SpotifyTokenProvider;
+import com.nullrefer.music.chart.SpotifyTokenResponse;
 import com.nullrefer.music.config.NrmPaths;
 import com.nullrefer.music.download.YtDlpDownloadService;
 import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
@@ -29,16 +33,22 @@ public class ApiController {
 
   private final YtDlpDownloadService downloadService;
   private final YoutubeSearchService youtubeSearchService;
+  private final SpotifyChartService spotifyChartService;
+  private final SpotifyTokenProvider spotifyTokenProvider;
   private final NrmSettings settings;
   private final NrmPaths paths;
 
   public ApiController(
       YtDlpDownloadService downloadService,
       YoutubeSearchService youtubeSearchService,
+      SpotifyChartService spotifyChartService,
+      SpotifyTokenProvider spotifyTokenProvider,
       NrmSettings settings,
       NrmPaths paths) {
     this.downloadService = downloadService;
     this.youtubeSearchService = youtubeSearchService;
+    this.spotifyChartService = spotifyChartService;
+    this.spotifyTokenProvider = spotifyTokenProvider;
     this.settings = settings;
     this.paths = paths;
   }
@@ -53,13 +63,89 @@ public class ApiController {
     return Map.of(
         "name", "nullreference-music-backend",
         "youtubeSearchEnabled", settings.getYoutubeApiKey() != null && !settings.getYoutubeApiKey().isBlank(),
+        "spotifyChartsEnabled", spotifyTokenProvider.isConfigured(),
         "endpoints",
             List.of(
                 "/api/health",
                 "/api/youtube/search?q=...",
                 "/youtube/search?q=... (legacy alias)",
+                "/api/charts/spotify/top100?market=KR",
+                "POST /api/charts/spotify/token",
                 "/api/download",
                 "/api/download/file?jobId=..."));
+  }
+
+  @GetMapping("/api/charts/spotify/top100")
+  public ResponseEntity<?> spotifyTopChart(
+      @RequestParam(value = "market", required = false) String market,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    try {
+      String bearer = extractBearerToken(authorization);
+      SpotifyChartResult result =
+          spotifyChartService.fetchTopChart(market, clientIdHeader, clientSecretHeader, bearer);
+      return ResponseEntity.ok(result);
+    } catch (IllegalStateException e) {
+      return spotifyErrorResponse(e);
+    }
+  }
+
+  private static String extractBearerToken(String authorization) {
+    if (authorization == null || authorization.isBlank()) {
+      return null;
+    }
+    String t = authorization.trim();
+    if (t.length() > 7 && t.regionMatches(true, 0, "Bearer ", 0, 7)) {
+      return t.substring(7).trim();
+    }
+    return null;
+  }
+
+  @PostMapping("/api/charts/spotify/token")
+  public ResponseEntity<?> spotifyToken(@RequestBody SpotifyTokenRequest req) {
+    try {
+      SpotifyTokenResponse token =
+          spotifyTokenProvider.issueToken(
+              req != null ? req.clientId : null, req != null ? req.clientSecret : null);
+      return ResponseEntity.ok(
+          Map.of(
+              "accessToken", token.accessToken(),
+              "expiresIn", token.expiresIn(),
+              "tokenType", token.tokenType()));
+    } catch (IllegalStateException e) {
+      return spotifyErrorResponse(e);
+    }
+  }
+
+  private static ResponseEntity<Map<String, String>> spotifyErrorResponse(
+      IllegalStateException e) {
+    String code = e.getMessage() != null ? e.getMessage() : "spotify_error";
+    if ("spotify_not_configured".equals(code)
+        || "spotify_playlist_not_configured".equals(code)) {
+      return ResponseEntity.status(503).body(Map.of("error", code));
+    }
+    if ("spotify_playlist_not_accessible".equals(code)) {
+      return ResponseEntity.status(404).body(Map.of("error", code));
+    }
+    if ("spotify_auth_failed".equals(code)) {
+      return ResponseEntity.status(502).body(Map.of("error", code));
+    }
+    return ResponseEntity.status(502).body(Map.of("error", code));
+  }
+
+  public static class SpotifyTokenRequest {
+    public String clientId;
+    public String clientSecret;
   }
 
   @GetMapping({"/api/youtube/search", "/youtube/search"})

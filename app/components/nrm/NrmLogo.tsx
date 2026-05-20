@@ -14,15 +14,26 @@ export function NrmLogo({ compact = false, tone = 'light', onPress }: Props) {
   const musicColor =
     tone === 'dark' ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
   const markSize = compact ? 26 : 34;
+  const lineHeight = Math.round(fontSize * 1.15);
+  const androidTextPad =
+    Platform.OS === 'android' ? ({ includeFontPadding: false } as const) : {};
 
   const content = (
     <View style={styles.wrap} accessibilityRole="header">
-      <Image
-        source={require('@/assets/images/icon.png')}
-        style={[styles.markImage, { width: markSize, height: markSize }]}
-        resizeMode="contain"
-      />
-      <Text style={[styles.wordmark, { fontSize }]}>
+      <View
+        style={[styles.markSlot, { width: markSize, height: markSize }]}>
+        <Image
+          source={require('@/assets/images/icon.png')}
+          style={[styles.markImage, { width: markSize, height: markSize }]}
+          resizeMode="contain"
+        />
+      </View>
+      <Text
+        style={[
+          styles.wordmark,
+          { fontSize, lineHeight },
+          androidTextPad,
+        ]}>
         <Text style={[styles.wordNull, { color: nullColor }]}>Nullreference </Text>
         <Text style={[styles.wordMusic, { color: musicColor }]}>Music</Text>
       </Text>
@@ -46,7 +57,12 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: nrmTokens.space.sm,
+    justifyContent: 'center',
+    gap: nrmTokens.space.xxs,
+  },
+  markSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   markImage: {
     borderRadius: nrmTokens.radius.sm,

@@ -6,30 +6,26 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  useColorScheme,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NrmAppMenu } from '@/components/nrm/NrmAppMenu';
-import { NrmFireworksOverlay } from '@/components/nrm/NrmFireworksOverlay';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 
 const LOGO_TOP_FRAC = 0.1;
 
 export default function HomeScreen() {
-  const scheme = useColorScheme();
-  const isDark = scheme !== 'light';
+  const { isDark } = useNrmUiAppearance();
   const { width, height: winH } = useWindowDimensions();
   const [layoutPhase, setLayoutPhase] = useState<'welcome' | 'browsing'>(
     'welcome',
   );
   const [homeEpoch, setHomeEpoch] = useState(0);
-  /** TEMP: increment on logo tap for fireworks test */
-  const [fireworksBurst, setFireworksBurst] = useState(0);
 
   const pad = width >= 900 ? nrmTokens.space.xxl : nrmTokens.space.lg;
   const logoPadTop = Math.max(0, winH * LOGO_TOP_FRAC);
@@ -40,7 +36,6 @@ export default function HomeScreen() {
   }, []);
 
   const onMainLogoPress = useCallback(() => {
-    setFireworksBurst((v) => v + 1);
     resetToWelcome();
   }, [resetToWelcome]);
 
@@ -113,7 +108,6 @@ export default function HomeScreen() {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
-        <NrmFireworksOverlay burstId={fireworksBurst} />
       </SafeAreaView>
     </View>
   );
@@ -143,6 +137,8 @@ const styles = StyleSheet.create({
   },
   logoWrap: {
     width: '100%',
+    maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
+    alignSelf: 'center',
     alignItems: 'center',
   },
   logoWrapWelcome: {

@@ -1,9 +1,10 @@
 import type { HealthResponse, DownloadResponse } from '@/lib/downloadTypes';
 import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
+import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 
 export async function fetchHealth(): Promise<HealthResponse> {
   const base = await getResolvedApiBaseUrl();
-  const res = await fetch(`${base}/api/health`);
+  const res = await nrmBackendFetch(`${base}/api/health`);
   const data = (await res.json().catch(() => ({}))) as HealthResponse;
   if (!res.ok) {
     return { ok: false, error: `HTTP ${res.status}` };
@@ -16,7 +17,7 @@ export async function requestDownload(
   options?: { noPlaylist?: boolean },
 ): Promise<DownloadResponse> {
   const base = await getResolvedApiBaseUrl();
-  const res = await fetch(`${base}/api/download`, {
+  const res = await nrmBackendFetch(`${base}/api/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

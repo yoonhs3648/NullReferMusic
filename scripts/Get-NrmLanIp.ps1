@@ -25,9 +25,11 @@ function Get-NrmLanIp {
 
     $score = 0
     if ($alias -match 'Wi-?Fi|Wireless|WLAN|무선') { $score += 200 }
-    elseif ($alias -match 'Ethernet|이더넷|LAN') { $score += 80 }
+    elseif ($alias -match 'Ethernet|이더넷|LAN|로컬') { $score += 80 }
 
-    if ($ip -match '^192\.168\.') { $score += 40 }
+    # Phone hotspot client IPs (prefer over corp 10.x when both NICs are up)
+    if ($ip -match '^192\.168\.(43|137|88|89)\.') { $score += 400 }
+    elseif ($ip -match '^192\.168\.') { $score += 40 }
     elseif ($ip -match '^10\.' -and $ip -notmatch '^10\.0\.2\.') { $score += 30 }
     elseif ($ip -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { $score -= 80 }
 

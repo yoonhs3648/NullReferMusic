@@ -40,4 +40,36 @@ body {
     background-color: #f5f5f7;
   }
 }
+
+/* 메뉴 드로어 등 — 웹만 얇은 스크롤바 (모바일은 NrmMenuDrawerScroll에서 인디케이터 off) */
+.nrm-scroll-web {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+.nrm-scroll-web::-webkit-scrollbar {
+  width: 6px;
+}
+.nrm-scroll-web::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nrm-scroll-web::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.nrm-scroll-web::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.34);
+}
+@media (prefers-color-scheme: light) {
+  .nrm-scroll-web {
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  }
+  .nrm-scroll-web::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.16);
+  }
+  .nrm-scroll-web::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.26);
+  }
+}
 `;

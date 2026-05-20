@@ -12,5 +12,6 @@ alwaysApply: false
 - **Shape:** Pills (`radius.pill`) for primary actions and search fields; `radius.lg` (18) for utility cards; full-bleed sections use `radius.none`.
 - **Type:** Body is 17px / 400; display headlines 600; no weight 500 in the ladder. Prefer system/Inter stack (web: `+html.tsx` global CSS).
 - **Motion:** Button press `transform: scale(0.95)` (or equivalent) per spec.
+- **Scrollbars:** Web only — thin overlay scrollbar via `NrmMenuDrawerScroll` + `.nrm-scroll-web` in `app/+html.tsx`. Native (iOS/Android) must not show scroll indicators. See `docs/NRM-SCROLLBAR.md`.
 
 If the user’s desktop `nullferenceMusicDesign.md` conflicts with the repo, prefer updating `nrmTokens` and components to match the document, then keep code and spec aligned.

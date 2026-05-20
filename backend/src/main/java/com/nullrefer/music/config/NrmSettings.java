@@ -14,6 +14,11 @@ public class NrmSettings {
 
   private String youtubeApiKey = "";
 
+  private String spotifyClientId = "";
+  private String spotifyClientSecret = "";
+  /** 공개 플레이리스트 ID (차트 곡 목록 소스). Spotify 소유 에디토리얼은 신규 앱에서 404일 수 있음. */
+  private String spotifyChartPlaylistId = "";
+
   public String getRepoRoot() {
     return repoRoot;
   }
@@ -52,5 +57,29 @@ public class NrmSettings {
 
   public void setYoutubeApiKey(String youtubeApiKey) {
     this.youtubeApiKey = youtubeApiKey;
+  }
+
+  public String getSpotifyClientId() {
+    return spotifyClientId;
+  }
+
+  public void setSpotifyClientId(String spotifyClientId) {
+    this.spotifyClientId = spotifyClientId;
+  }
+
+  public String getSpotifyClientSecret() {
+    return spotifyClientSecret;
+  }
+
+  public void setSpotifyClientSecret(String spotifyClientSecret) {
+    this.spotifyClientSecret = spotifyClientSecret;
+  }
+
+  public String getSpotifyChartPlaylistId() {
+    return spotifyChartPlaylistId;
+  }
+
+  public void setSpotifyChartPlaylistId(String spotifyChartPlaylistId) {
+    this.spotifyChartPlaylistId = spotifyChartPlaylistId;
   }
 }

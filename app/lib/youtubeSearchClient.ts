@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 
+import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   clearApiBaseUrlOverride,
@@ -71,7 +72,7 @@ async function youtubeSearchWithBase(
   base: string,
 ): Promise<YoutubeSearchOutcome> {
   try {
-    const res = await fetch(
+    const res = await nrmBackendFetch(
       `${base}/api/youtube/search?q=${encodeURIComponent(q)}`,
     );
     const rawText = await res.text();

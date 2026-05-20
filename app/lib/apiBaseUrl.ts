@@ -72,7 +72,20 @@ function isLocalhostUrl(url: string): boolean {
 function shouldIgnoreStoredBaseOnDevice(stored: string): boolean {
   if (Platform.OS === 'web') return false;
   if (!Constants.isDevice) return false;
-  return isLocalhostUrl(stored);
+  if (isLocalhostUrl(stored)) return true;
+  const envUrl =
+    typeof process !== 'undefined'
+      ? process.env?.EXPO_PUBLIC_API_BASE_URL
+      : undefined;
+  if (
+    envUrl &&
+    /\.loca\.lt/i.test(stored) &&
+    !/\.loca\.lt/i.test(envUrl) &&
+    usesPcBackendInDev()
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function getDefaultApiBaseUrl(): string {

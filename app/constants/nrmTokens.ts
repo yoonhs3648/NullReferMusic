@@ -92,6 +92,8 @@ export const nrmTokens = {
   },
   layout: {
     maxContentWidth: 980,
+    /** 메인 로고 블록과 검색 행(입력+버튼) 동일 폭 정렬용 */
+    homeSearchClusterMaxWidth: 440,
     touchMin: 44,
   },
 } as const;

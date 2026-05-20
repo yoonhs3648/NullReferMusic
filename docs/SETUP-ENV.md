@@ -13,7 +13,7 @@
    cd ..\app; npm install
    ```
 5. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
-6. **Expo Go(폰)**: PC·폰 같은 Wi‑Fi(또는 폰 핫스팟), Expo QR 스캔. API는 `http://(LAN IP):8787` (자동 설정)
+6. **Expo Go(폰)**: covian Wi‑Fi → `Start-CovianWifi-Dev.bat` (`docs/DEV-COVIAN-WIFI.md`). LAN 되는 망 → `StartServer.bat`
 7. **릴리스 APK**: `scripts\Build-Release-Apk.bat`
 8. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
@@ -97,7 +97,7 @@ npm -v
 
    기본 포트 `8787`, **모든 LAN 인터페이스에 바인딩**(`0.0.0.0`)하므로 같은 Wi‑Fi의 폰에서도 접속 가능하다. 시작 시 로그에 `http://192.168.x.x:8787` 형태로 가능한 주소가 출력된다. (로컬만 열고 싶으면 `NRM_BIND_HOST=127.0.0.1`)
 
-   환경 변수: `NRM_SERVER_PORT`, `NRM_OUTPUT_DIR`, `NRM_YT_DLP`, `NRM_FFMPEG_DIR`, `NRM_BIND_HOST`, `NRM_REPO_ROOT`(저장소 루트를 수동 지정할 때), **`NRM_YOUTUBE_API_KEY`**(YouTube Data API v3 키 — 메인 화면 **음악 검색**용. 없으면 `/api/youtube/search` 는 503).
+   환경 변수: `NRM_SERVER_PORT`, `NRM_OUTPUT_DIR`, `NRM_YT_DLP`, `NRM_FFMPEG_DIR`, `NRM_BIND_HOST`, `NRM_REPO_ROOT`(저장소 루트를 수동 지정할 때), **`NRM_YOUTUBE_API_KEY`**(YouTube Data API v3 키 — 메인 화면 **음악 검색**용. 없으면 `/api/youtube/search` 는 503), **`NRM_SPOTIFY_CLIENT_ID`** / **`NRM_SPOTIFY_CLIENT_SECRET`**(메뉴 **실시간 차트 → Spotify** — 서버만 보관, Client Credentials로 토큰 자동 갱신), **`NRM_SPOTIFY_CHART_PLAYLIST_ID`**(선택, 기본 Top 50 Global. Spotify 소유 에디토리얼은 신규 앱에서 404일 수 있어 **접근 가능한 공개 플레이리스트** ID로 바꿀 수 있음).
 
    **Windows 방화벽**: 폰이 붙지 않으면 인바운드 규칙으로 TCP `8787`을 허용한다. (관리자 PowerShell 예: `New-NetFirewallRule -DisplayName "NullReferMusic LAN" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow`)
 

@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -14,8 +13,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { NrmMenuChartPanels } from '@/components/nrm/charts/NrmMenuChartPanels';
+import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
+import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
+import {
+  isChartMenuPanel,
+  type ChartMenuPanel,
+} from '@/lib/nrmChartsPlatforms';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 import {
   getNrmAppCopyrightNotice,
   getNrmAppVersionLabel,
@@ -45,9 +52,13 @@ type Panel =
   | 'releaseDetail'
   | 'settings'
   | 'appSettings'
-  | 'searchSettings';
+  | 'searchSettings'
+  | 'screenSettings'
+  | 'spotifyApiManage'
+  | ChartMenuPanel;
 
 export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
+  const { setAppearanceMode } = useNrmUiAppearance();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const drawerW = Math.min(380, windowWidth * 0.88);
@@ -92,6 +103,43 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
     });
   }, [drawerW, translateX]);
 
+  /** Android 하드웨어 뒤로: 하위 패널이면 한 단계 위로, 루트면 드로어 닫기 */
+  const goBackInMenu = useCallback(() => {
+    switch (panel) {
+      case 'releaseDetail':
+        setDetailEntry(null);
+        setPanel('releases');
+        break;
+      case 'spotifyApiManage':
+        setPanel('appSettings');
+        break;
+      case 'appSettings':
+      case 'searchSettings':
+      case 'screenSettings':
+        setPanel('settings');
+        break;
+      case 'chartSpotify':
+      case 'chartBillboard':
+      case 'chartYoutubeMusic':
+      case 'chartMelon':
+      case 'chartGenie':
+        setPanel('charts');
+        break;
+      case 'charts':
+        setPanel('root');
+        break;
+      case 'version':
+      case 'releases':
+      case 'settings':
+        setPanel('root');
+        break;
+      case 'root':
+      default:
+        dismissDrawer();
+        break;
+    }
+  }, [panel, dismissDrawer]);
+
   useEffect(() => {
     if (!open) return;
     translateX.setValue(-drawerW);
@@ -112,13 +160,17 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
 
   /** 네이티브: 본문과 동일하던 좌측 패딩의 절반 + safe area. 상단도 동일 여백 */
   const nativeHalfPad = paddingHorizontal / 2;
+  /** 웹: 뷰포트 모서리에서 햄버거 버튼이 너무 붙지 않게 고정 여백 */
+  const webMenuInset = Math.round(
+    (nrmTokens.space.lg + nrmTokens.space.xs) / 2,
+  );
   const menuLeft =
     Platform.OS === 'web'
-      ? nrmTokens.space.sm
+      ? webMenuInset
       : insets.left + nativeHalfPad;
   const menuTop =
     Platform.OS === 'web'
-      ? insets.top + nrmTokens.space.xs
+      ? Math.max(insets.top, nrmTokens.space.sm) + webMenuInset
       : insets.top + nativeHalfPad;
 
   return (
@@ -152,7 +204,7 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
         visible={open}
         transparent
         animationType="none"
-        onRequestClose={dismissDrawer}
+        onRequestClose={goBackInMenu}
         statusBarTranslucent>
         <View style={styles.modalWrap}>
           <Pressable
@@ -167,7 +219,7 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                 width: drawerW,
                 backgroundColor: cardBg,
                 borderColor: cardBorder,
-                paddingTop: insets.top + nrmTokens.space.sm,
+                paddingTop: insets.top + nrmTokens.space.lg,
                 paddingBottom: insets.bottom + 10,
                 transform: [{ translateX }],
               },
@@ -179,10 +231,24 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                   <NrmLogo compact tone={isDark ? 'dark' : 'light'} />
                 </View>
                 <Pressable
+                  onPress={() => setPanel('charts')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    실시간 차트
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => setPanel('settings')}
                   style={({ pressed }) => [
                     styles.row,
-                    styles.menuSettingRowInset,
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
@@ -378,6 +444,21 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('screenSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    화면 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -398,9 +479,46 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
                   앱 설정
                 </Text>
-                <Text style={[styles.sectionHint, { color: bodyColor }]}>
-                  일반 앱 설정은 추후 업데이트에서 제공됩니다.
-                </Text>
+                <Pressable
+                  onPress={() => setPanel('spotifyApiManage')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    Spotify API 토큰 관리
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'spotifyApiManage' ? (
+              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+                <NrmSpotifyApiManagePanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={() => setPanel('appSettings')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {isChartMenuPanel(panel) ? (
+              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+                <NrmMenuChartPanels
+                  panel={panel}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBackToRoot={() => setPanel('root')}
+                  onBackToCharts={() => setPanel('charts')}
+                  onOpenPlatform={(p) => setPanel(p)}
+                />
               </DrawerShell>
             ) : null}
 
@@ -420,10 +538,6 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                 </Pressable>
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
                   검색 설정
-                </Text>
-                <Text style={[styles.sectionHint, { color: bodyColor }]}>
-                  YouTube 검색 시 검색어 뒤에 붙일 보조어입니다. 기본은 입력한
-                  그대로 검색합니다.
                 </Text>
                 {listYoutubeSearchSuffixModes().map((mode) => {
                   const selected = suffixMode === mode;
@@ -454,6 +568,70 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                     </Pressable>
                   );
                 })}
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'screenSettings' ? (
+              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+                <Pressable
+                  onPress={() => setPanel('settings')}
+                  style={styles.backRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={nrmTokens.color.primary}
+                  />
+                  <Text style={styles.backText}>뒤로</Text>
+                </Pressable>
+                <Text style={[styles.panelTitle, { color: titleColor }]}>
+                  화면 설정
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    void setAppearanceMode('light');
+                  }}
+                  style={({ pressed }) => [
+                    styles.optionRow,
+                    !isDark && styles.optionRowSelected,
+                    pressed && { backgroundColor: rowHover },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="라이트 모드">
+                  <Text style={[styles.optionLabel, { color: titleColor }]}>
+                    라이트 모드
+                  </Text>
+                  <Ionicons
+                    name={!isDark ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={22}
+                    color={
+                      !isDark ? nrmTokens.color.primary : bodyColor
+                    }
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    void setAppearanceMode('dark');
+                  }}
+                  style={({ pressed }) => [
+                    styles.optionRow,
+                    isDark && styles.optionRowSelected,
+                    pressed && { backgroundColor: rowHover },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="다크 모드">
+                  <Text style={[styles.optionLabel, { color: titleColor }]}>
+                    다크 모드
+                  </Text>
+                  <Ionicons
+                    name={isDark ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={22}
+                    color={
+                      isDark ? nrmTokens.color.primary : bodyColor
+                    }
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
           </Animated.View>
@@ -508,18 +686,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  sectionHint: {
-    marginTop: nrmTokens.space.sm,
-    marginBottom: nrmTokens.space.md,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '400',
-  },
   menuLogoGap: {
+    marginTop: nrmTokens.space.xs,
     marginBottom: nrmTokens.space.xl,
-  },
-  /** 루트 메뉴의 「설정」 행만 살짝 오른쪽으로 */
-  menuSettingRowInset: {
-    marginLeft: nrmTokens.space.xs,
   },
   row: {
     flexDirection: 'row',
@@ -538,11 +707,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: nrmTokens.space.xxs,
+    marginTop: nrmTokens.space.md,
     marginBottom: nrmTokens.space.md,
     alignSelf: 'flex-start',
-    ...(Platform.OS === 'ios' || Platform.OS === 'android'
-      ? { marginTop: nrmTokens.space.sm }
-      : {}),
   },
   backText: {
     fontSize: nrmTokens.font.body,
@@ -582,6 +749,12 @@ const styles = StyleSheet.create({
   drawerScrollContent: {
     flexGrow: 1,
     paddingBottom: nrmTokens.space.sm,
+    ...Platform.select({
+      web: {},
+      default: {
+        paddingRight: nrmTokens.space.xxs,
+      },
+    }),
   },
   footerClose: {
     alignSelf: 'stretch',
@@ -592,6 +765,12 @@ const styles = StyleSheet.create({
     borderRadius: nrmTokens.radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(128,128,128,0.35)',
+    ...Platform.select({
+      web: {},
+      default: {
+        marginRight: nrmTokens.space.xxs,
+      },
+    }),
   },
   footerClosePressed: {
     opacity: 0.92,
@@ -652,13 +831,11 @@ function DrawerShell({
 }) {
   return (
     <View style={styles.drawerColumn}>
-      <ScrollView
+      <NrmMenuDrawerScroll
         style={styles.drawerScroll}
-        contentContainerStyle={styles.drawerScrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator>
+        contentContainerStyle={styles.drawerScrollContent}>
         {children}
-      </ScrollView>
+      </NrmMenuDrawerScroll>
       <Pressable
         onPress={onDismiss}
         style={({ pressed }) => [

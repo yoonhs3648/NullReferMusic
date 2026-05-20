@@ -14,7 +14,7 @@
 2. PC: `http://localhost:8081` (자동 오픈)
 3. 폰: **Expo Go** 앱 실행 → 앱 안 **Scan QR code** (휴대폰 기본 카메라·Chrome X)
 4. QR 주소는 **`exp://10.x.x.x:8081`** 형태여야 함. **`http://...:8081/_expo/loading`** 은 웹 전용이라 브라우저만 열림.
-5. PC·폰 **같은 Wi‑Fi**, 방화벽 `8787`·`8081` 허용 (`scripts\Open-DevFirewall.ps1`)
+5. PC·폰 **같은 Wi‑Fi**, 방화벽 `8787`·`8081` 허용 (`scripts\Open-DevFirewall.ps1`). 회사 PC는 `Set-Wifi-Private` 생략 가능 — `docs/DEV-CORPORATE-WIFI-EXPOGO.md`
 
 ### 폰에서 `http://...:8081/_expo/loading` (브라우저)만 열릴 때
 
@@ -49,8 +49,8 @@ PC 브라우저·PowerShell에서는 health가 되는데 **폰만** 실패하면
 
 **우회 (권장 순서):**
 
-1. **폰 핫스팟** — PC를 폰 핫스팟에 연결 후 `StartServer.bat` 재실행
-2. **터널** — `set NRM_EXPO_TUNNEL=1` 후 `StartServer.bat` (느림, 인터넷 경유)
+1. **covian Wi-Fi** — 바탕화면 `StartCovianWifi-Dev.bat` (Backend+터널 한 번에). `docs/DEV-COVIAN-WIFI.md`
+2. **폰 핫스팟** — PC를 폰 핫스팟에 연결 후 `StartServer.bat`
 
 Wi‑Fi를 **프라이빗**으로 (관리자 PowerShell):
 

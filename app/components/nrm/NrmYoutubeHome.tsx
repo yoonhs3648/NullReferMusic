@@ -282,7 +282,8 @@ export function NrmYoutubeHome({
           void runDownloadWithFileName(videoId, fileName);
         }}
       />
-      <View style={styles.searchRow}>
+      <View style={styles.searchRowWrap}>
+        <View style={styles.searchRow}>
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -309,6 +310,7 @@ export function NrmYoutubeHome({
             <Text style={styles.searchBtnLabel}>검색</Text>
           )}
         </Pressable>
+        </View>
       </View>
 
       <View style={styles.list}>
@@ -470,6 +472,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: nrmTokens.space.sm,
+    flex: 1,
+    maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
+    minWidth: 0,
+  },
+  searchRowWrap: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: nrmTokens.space.md,
   },
   input: {
     flex: 1,

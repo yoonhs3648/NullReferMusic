@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 import {
   registerNotifyListener,
   type NotifyPayload,
 } from '@/lib/nrmUserNotify';
 
 export function NrmNotifyHost() {
-  const scheme = useColorScheme();
-  const isDark = scheme !== 'light';
+  const { isDark } = useNrmUiAppearance();
   const [open, setOpen] = useState(false);
   const [payload, setPayload] = useState<NotifyPayload | null>(null);
 
@@ -88,6 +88,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: nrmTokens.space.lg,
+    ...Platform.select({
+      /** 웹: 메뉴 Modal보다 알림 레이어가 위로 오도록 */
+      web: { zIndex: 2147483646 },
+      default: {},
+    }),
   },
   dim: {
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
