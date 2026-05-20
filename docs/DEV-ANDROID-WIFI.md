@@ -38,14 +38,7 @@ PC 방화벽이 막으면 폰에서 둘 다 실패합니다. 아래 **방화벽*
 
 ## 2) 방화벽 (폰이 붙지 않을 때 필수)
 
-관리자 PowerShell에서 **한 번**:
-
-```powershell
-cd C:\NullReferMusic
-powershell -ExecutionPolicy Bypass -File .\scripts\Open-DevFirewall.ps1
-```
-
-수동으로 하려면 (관리자 PowerShell 예):
+관리자 PowerShell에서 **한 번** (인바운드 TCP 8787·8081):
 
 ```powershell
 New-NetFirewallRule -DisplayName "NullReferMusic API 8787" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow -Profile Private,Domain
@@ -58,34 +51,32 @@ Windows에서 해당 Wi‑Fi가 **공용 네트워크**로 잡혀 있으면 규�
 
 ## 3) PC의 LAN IP 확인
 
-PowerShell:
+PowerShell (저장소 루트):
 
 ```powershell
 cd C:\NullReferMusic
-.\scripts\Show-LanIp.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Get-LanIp.ps1
 ```
 
-또는 `ipconfig` 로 무선 LAN 어댑터의 **IPv4 주소**를 확인합니다. 이후 앱에 넣을 주소는:
+표준 출력 한 줄이 권장 LAN IPv4입니다 (`StartServer.bat`과 동일 로직). 또는 `ipconfig` 로 무선 LAN 어댑터 **IPv4**를 확인합니다. 앱에 넣을 주소는:
 
 ```text
 http://<위_IP>:8787
 ```
 
-예: PC가 `192.168.0.42` 이면 **`http://192.168.0.42:8787`** .
-
 ---
 
-## 4) 백엔드 + Expo를 LAN 모드로 한 번에 루트
+## 4) 백엔드 + Expo를 LAN 모드로 한 번에 (권장)
 
-원클릭 (웹 브라우저 자동 오픈):
+원클릭 (PC 브라우저 자동 오픈):
 
-- 저장소 루트에서 **`StartServer.bat`** (백엔드 + `expo start --lan --web`, 약 12초 후 `http://127.0.0.1:8081/`).
+- 저장소 루트 **`StartServer.bat`**
 
-동작:
+동작 요약:
 
-1. LAN IP로 `EXPO_PUBLIC_API_BASE_URL` 설정 (`scripts\resolve-lan-ip.ps1`)
+1. `scripts\Get-LanIp.ps1` 로 LAN IP 후 `EXPO_PUBLIC_API_BASE_URL` 설정
 2. 새 창: **`backend`** → `mvnw.cmd spring-boot:run` (**8787**)
-3. 새 창: **`app`** → **`npx expo start --lan --web`** → Metro **8081**, QR은 **같은 Wi‑Fi**용
+3. 새 창: **`app`** → **`npx expo start --lan --port 8081`** (Metro **8081**, QR은 같은 Wi‑Fi용)
 
 창 **두 개를 닫지 말고** 유지합니다.
 

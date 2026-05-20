@@ -13,8 +13,8 @@
    cd ..\app; npm install
    ```
 5. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
-6. **Expo Go(폰)**: covian Wi‑Fi → `Start-CovianWifi-Dev.bat` (`docs/DEV-COVIAN-WIFI.md`). LAN 되는 망 → `StartServer.bat`
-7. **릴리스 APK**: `scripts\Build-Release-Apk.bat`
+6. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)
+7. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트)
 8. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
@@ -71,10 +71,10 @@ npm -v
 
 | 파일 | 설명 |
 |------|------|
-| **`StartServer.bat`** | Spring Boot(8787) + Expo Metro(8081, LAN QR) + PC 브라우저. `EXPO_PUBLIC_API_BASE_URL` LAN 자동. `NRM_REPO_ROOT` 지원 |
-| **`scripts/Build-Release-Apk.bat`** | 릴리스 APK 빌드 (`app\android\gradlew.bat assembleRelease`) |
+| **`StartServer.bat`** | Spring Boot(8787) + Expo Metro(8081, LAN QR) + PC 브라우저. LAN IP는 `scripts/Get-LanIp.ps1` 로 자동 설정. `NRM_REPO_ROOT` 지원 |
+| **`NullReferMusic-Build-Release-Apk.bat`** | 릴리스 APK 빌드 (`app\android\gradlew.bat assembleRelease`) |
 
-내부용: `scripts/resolve-lan-ip.ps1`, `scripts/Open-DevFirewall.ps1` 등. Android Gradle용 `app/android/gradlew.bat` 은 Wrapper로 별도 유지.
+내부용: `scripts/Get-LanIp.ps1` 만 유지(StartServer 호출). Android Gradle용 `app/android/gradlew.bat` 은 Wrapper로 별도 유지.
 
 8787 포트가 이미 쓰이면 이전 **NRM Backend** CMD 창을 닫거나, 작업 관리자에서 해당 Java 프로세스를 종료한다.
 
@@ -184,4 +184,5 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
 | 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
 | 2026-05-20 | 개발 실행 통합: `StartServer.bat` 단일화, `dev-stack-versions.json` |
-| 2026-05-20 | 런처 bat 2개: `StartServer.bat`, `scripts/Build-Release-Apk.bat` (USB 전용 스크립트 제거) |
+| 2026-05-20 | 런처 bat 2개: `StartServer.bat`, `NullReferMusic-Build-Release-Apk.bat` (USB 전용 스크립트 제거) |
+| 2026-05-21 | 보조 스크립트 정리: 루트 bat 2개 + `scripts/Get-LanIp.ps1` 만 유지 |

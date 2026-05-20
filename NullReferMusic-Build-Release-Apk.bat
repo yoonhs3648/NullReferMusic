@@ -5,7 +5,7 @@ title NRM Build Release APK
 if defined NRM_REPO_ROOT (
   cd /d "%NRM_REPO_ROOT%"
 ) else (
-  cd /d "%~dp0.."
+  cd /d "%~dp0"
 )
 set "ROOT=%CD%"
 set "APP=%ROOT%\app"
