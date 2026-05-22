@@ -9,4 +9,6 @@ public record ChartTrackItem(
     String album,
     String imageUrl,
     String externalUrl,
-    long durationMs) {}
+    long durationMs,
+    int popularity,
+    String releaseDate) {}

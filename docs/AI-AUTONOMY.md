@@ -14,7 +14,7 @@
 - 문서·설정을 요청과 일관되게 **같이 갱신**한다 (사용자가 “문서까지”라고 말하지 않아도, 동작이 바뀌면 필요한 만큼 반영한다).
 - 제품 UI에는 사용법·안내 문단·장식 설명을 넣지 않는다. 레이블은 짧은 역할만. (`docs/ARCHITECTURE-AND-AI-RULES.md` §5와 동일.)
 - 웹·앱 동일 화면은 테두리·색·간격 등 시각 스펙을 통일한다. (`docs/ARCHITECTURE-AND-AI-RULES.md` §6과 동일.)
-- 메인 로고(`NrmLogo`)는 `CI 마크 + nullreference music`으로 고정하고, 라이트/다크에서 텍스트 대비가 충분히 보이는지 확인한다. (`docs/ARCHITECTURE-AND-AI-RULES.md` §6과 동일.)
+- 메인 로고(`NrmLogo`)는 `CI 마크 + NullReference Music`으로 고정하고, 라이트/다크에서 텍스트 대비가 충분히 보이는지 확인한다. (`docs/ARCHITECTURE-AND-AI-RULES.md` §6과 동일.)
 - 오류·알림은 카드 안에 붙이지 않고 `notifyUser` → `NrmNotifyHost` 모달로 처리한다. (`docs/ARCHITECTURE-AND-AI-RULES.md` §7과 동일.)
 - 네이티브·릴리스 APK·IPA에 영향 있는 변경은 **`docs/RELEASE-APK-IPA-RULE.md`** 를 함께 따른다. (Expo Go만으로 “완료”로 보지 않는다.)
 

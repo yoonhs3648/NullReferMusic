@@ -1,4 +1,6 @@
-# GitHub에 `NullReferMusic` 저장소 보이게 하기
+# GitHub에 NullReferenceMusic 원격 저장소 보이게 하기
+
+제품·프로그램 이름은 **NullReference** / **NullReferenceMusic** 이다. 아래 `git clone`·원격 URL의 **`NullReferMusic`** 은 GitHub 저장소 폴더명(기존 식별자)이며, 같은 프로젝트를 가리킨다.
 
 지금 PC에는 **`gh` 로그인이 없고**, 과거에 **`git push`도 하지 않은 상태**라서  
 `https://github.com/yoonhs3648/NullReferMusic` 주소는 **아직 GitHub에 존재하지 않습니다.**  

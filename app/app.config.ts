@@ -31,6 +31,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: 'com.nullrefer.music',
+    permissions: ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_MEDIA_PLAYBACK', 'RECEIVE_BOOT_COMPLETED', 'POST_NOTIFICATIONS'],
   },
   web: {
     bundler: 'metro',
@@ -40,6 +41,15 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-web-browser',
+    [
+      'expo-notifications',
+      {
+        icon: './assets/images/adaptive-icon.png',
+        color: '#0066cc',
+        sounds: [],
+        enableBackgroundRemoteNotifications: false,
+      },
+    ],
     [
       'expo-media-library',
       {

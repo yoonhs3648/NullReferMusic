@@ -1,42 +1,102 @@
 package com.nullrefer.music.chart;
 
+
+
 import com.fasterxml.jackson.databind.JsonNode;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.nullrefer.music.config.NrmSettings;
+
 import java.time.Instant;
+
+import java.time.LocalDate;
+
+import java.time.ZoneOffset;
+
 import java.util.ArrayList;
+
 import java.util.List;
+
 import org.slf4j.Logger;
+
 import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Service;
+
 import org.springframework.web.client.RestClient;
+
 import org.springframework.web.client.RestClientResponseException;
+
 import org.springframework.web.util.UriComponentsBuilder;
 
+
+
 /**
- * Spotify 공개 플레이리스트 트랙을 차트로 노출합니다.
+
+ * charts.spotify.com 내부 API(charts-spotify-com-service.spotify.com)로 실시간 차트를 조회합니다.
+
  *
- * <p>2024년 이후 Spotify 소유 에디토리얼 플레이리스트는 신규 앱에서 404가 날 수 있습니다. 이 경우
- * {@code NRM_SPOTIFY_CHART_PLAYLIST_ID}에 접근 가능한 <strong>일반 공개 플레이리스트</strong> ID를
- * 지정하세요.
+
+ * <p>일간 Top/Viral 50은 인증 엔드포인트({@code /auth/v0/charts/{slug}/{date}})가 필요합니다. Bearer는
+
+ * charts.spotify.com 로그인 세션 토큰 또는 앱 토큰 관리에 저장된 값을 사용합니다.
+
  */
+
 @Service
+
 public class SpotifyChartService {
 
+
+
   private static final Logger log = LoggerFactory.getLogger(SpotifyChartService.class);
-  private static final int MAX_TRACKS = 100;
+
+  private static final String CHARTS_API_BASE =
+
+      "https://charts-spotify-com-service.spotify.com";
+
+  private static final int LEGACY_MAX_TRACKS = 100;
+
+  private static final int DATE_LOOKBACK_DAYS = 10;
+
+
 
   private final NrmSettings settings;
+
   private final SpotifyTokenProvider tokenProvider;
+
+  private final SpotifyWebApiChartService webApiChartService;
+
+  private final SpotifyChartsSessionAuthService chartsSessionAuthService;
+
   private final ObjectMapper objectMapper;
+
   private final RestClient restClient = RestClient.create();
 
+
+
   public SpotifyChartService(
-      NrmSettings settings, SpotifyTokenProvider tokenProvider, ObjectMapper objectMapper) {
+
+      NrmSettings settings,
+      SpotifyTokenProvider tokenProvider,
+      SpotifyWebApiChartService webApiChartService,
+      SpotifyChartsSessionAuthService chartsSessionAuthService,
+      ObjectMapper objectMapper) {
+
     this.settings = settings;
+
     this.tokenProvider = tokenProvider;
+
+    this.webApiChartService = webApiChartService;
+
+    this.chartsSessionAuthService = chartsSessionAuthService;
+
     this.objectMapper = objectMapper;
+
   }
+
+
 
   public SpotifyChartResult fetchTopChart(String market) {
     return fetchTopChart(market, null, null, null);
@@ -47,162 +107,467 @@ public class SpotifyChartService {
       String clientIdOverride,
       String clientSecretOverride,
       String bearerTokenOverride) {
-    String playlistId = settings.getSpotifyChartPlaylistId();
-    if (playlistId == null || playlistId.isBlank()) {
-      throw new IllegalStateException("spotify_playlist_not_configured");
+    String key = "KR".equals(normalizeMarket(market)) ? "top50-kr" : "top50-global";
+    return fetchChartByKey(key, clientIdOverride, clientSecretOverride, bearerTokenOverride);
+  }
+
+
+
+  public SpotifyChartResult fetchChartByKey(
+
+      String chartKey,
+
+      String clientIdOverride,
+
+      String clientSecretOverride,
+
+      String bearerTokenOverride) {
+
+    return fetchChartByKey(chartKey, "charts", clientIdOverride, clientSecretOverride, bearerTokenOverride);
+
+  }
+
+
+
+  public SpotifyChartResult fetchChartByKey(
+
+      String chartKey,
+
+      String source,
+
+      String clientIdOverride,
+
+      String clientSecretOverride,
+
+      String bearerTokenOverride) {
+
+    return fetchChartByKey(
+
+        chartKey,
+        source,
+        clientIdOverride,
+        clientSecretOverride,
+        bearerTokenOverride,
+        null,
+        null,
+        null,
+        null);
+
+  }
+
+
+
+  public SpotifyChartResult fetchChartByKey(
+
+      String chartKey,
+
+      String source,
+
+      String clientIdOverride,
+
+      String clientSecretOverride,
+
+      String bearerTokenOverride,
+
+      String chartsUsername,
+
+      String chartsPassword,
+
+      String chartsSpDc,
+
+      String chartsSpKey) {
+
+    if (isOfficialSource(source)) {
+
+      return webApiChartService.fetchChartByKey(
+
+          chartKey, clientIdOverride, clientSecretOverride, bearerTokenOverride);
+
     }
 
-    String m = normalizeMarket(market);
-    String token = resolveAccessToken(clientIdOverride, clientSecretOverride, bearerTokenOverride);
+    SpotifyChartKind kind = SpotifyChartKind.fromKey(chartKey);
 
-    String playlistUri =
-        UriComponentsBuilder.fromUriString(
-                "https://api.spotify.com/v1/playlists/" + playlistId)
-            .queryParam("market", m)
-            .queryParam("fields", "name")
-            .build(true)
-            .toUriString();
-    JsonNode playlistMeta = spotifyGet(playlistUri, token);
-    String playlistName = playlistMeta.path("name").asText("Spotify Chart");
+    if (bearerTokenOverride == null || bearerTokenOverride.isBlank()) {
+      throw new IllegalStateException("spotify_charts_not_configured");
+    }
+    return fetchChartsComChart(kind, bearerTokenOverride.trim());
 
-    List<ChartTrackItem> items = new ArrayList<>();
-    int offset = 0;
-    while (items.size() < MAX_TRACKS) {
-      int limit = Math.min(50, MAX_TRACKS - items.size());
-      String tracksUri =
+  }
+
+
+
+  private static boolean isOfficialSource(String source) {
+
+    if (source == null || source.isBlank()) {
+
+      return false;
+
+    }
+
+    String s = source.trim().toLowerCase();
+
+    return "official".equals(s) || "webapi".equals(s);
+
+  }
+
+
+
+  private SpotifyChartResult fetchChartsComChart(SpotifyChartKind kind, String token) {
+
+    IllegalStateException lastFailure = null;
+
+    for (String date : chartDateCandidates()) {
+
+      String uri =
+
           UriComponentsBuilder.fromUriString(
-                  "https://api.spotify.com/v1/playlists/" + playlistId + "/tracks")
-              .queryParam("market", m)
-              .queryParam("limit", limit)
-              .queryParam("offset", offset)
-              .queryParam(
-                  "fields",
-                  "items(track(id,name,duration_ms,external_urls.spotify,artists(name),album(name,images))),next")
+
+                  CHARTS_API_BASE + "/auth/v0/charts/" + kind.chartSlug() + "/" + date)
+
               .build(true)
+
               .toUriString();
 
-      JsonNode page = spotifyGet(tracksUri, token);
-      JsonNode trackItems = page.path("items");
-      if (!trackItems.isArray() || trackItems.isEmpty()) {
-        break;
-      }
-      for (JsonNode row : trackItems) {
-        JsonNode track = row.path("track");
-        if (track.isMissingNode() || track.isNull()) {
-          continue;
+      try {
+
+        JsonNode root = chartsGet(uri, token);
+
+        List<ChartTrackItem> items = parseChartEntries(root, kind.maxTracks());
+
+        if (!items.isEmpty()) {
+
+          String playlistName =
+
+              root.path("displayChart")
+
+                  .path("chartMetadata")
+
+                  .path("readableTitle")
+
+                  .asText(kind.displayName());
+
+          return new SpotifyChartResult(
+
+              "spotify",
+
+              kind.chartSlug(),
+
+              playlistName,
+
+              kind.market(),
+
+              Instant.now(),
+
+              List.copyOf(items));
+
         }
-        String trackId = track.path("id").asText("");
-        if (trackId.isEmpty()) {
-          continue;
+
+      } catch (IllegalStateException e) {
+
+        lastFailure = e;
+
+        if ("spotify_charts_auth_failed".equals(e.getMessage())
+
+            || "spotify_not_configured".equals(e.getMessage())) {
+
+          throw e;
+
         }
-        items.add(mapTrack(track, items.size() + 1));
-        if (items.size() >= MAX_TRACKS) {
-          break;
-        }
+
+        log.debug("Spotify charts {} @ {} failed: {}", kind.chartSlug(), date, e.getMessage());
+
       }
-      if (items.size() >= MAX_TRACKS || page.path("next").isNull() || page.path("next").asText("").isBlank()) {
-        break;
-      }
-      offset += limit;
+
     }
 
-    return new SpotifyChartResult(
-        "spotify", playlistId, playlistName, m, Instant.now(), List.copyOf(items));
+    if (lastFailure != null) {
+
+      throw lastFailure;
+
+    }
+
+    throw new IllegalStateException("spotify_charts_empty");
+
   }
 
-  /**
-   * 클라이언트가 전달한 Bearer 액세스 토큰이 있으면 그대로 사용하고, 없으면 Client ID·Secret으로
-   * Client Credentials 토큰을 발급합니다.
-   */
-  private String resolveAccessToken(
-      String clientIdOverride, String clientSecretOverride, String bearerTokenOverride) {
-    if (bearerTokenOverride != null && !bearerTokenOverride.isBlank()) {
-      return bearerTokenOverride.trim();
+
+
+  private List<String> chartDateCandidates() {
+
+    List<String> dates = new ArrayList<>();
+
+    dates.add("latest");
+
+    LocalDate today = LocalDate.now(ZoneOffset.UTC);
+
+    for (int i = 0; i < DATE_LOOKBACK_DAYS; i++) {
+
+      dates.add(today.minusDays(i).toString());
+
     }
-    String clientId = firstNonBlank(clientIdOverride, settings.getSpotifyClientId());
-    String clientSecret = firstNonBlank(clientSecretOverride, settings.getSpotifyClientSecret());
-    if (!tokenProvider.isConfigured(clientId, clientSecret)) {
-      throw new IllegalStateException("spotify_not_configured");
-    }
-    return tokenProvider.bearerOrThrow(clientId, clientSecret);
+
+    return dates;
+
   }
 
-  private ChartTrackItem mapTrack(JsonNode track, int rank) {
-    String title = track.path("name").asText("");
+
+
+  private List<ChartTrackItem> parseChartEntries(JsonNode root, int maxTracks) {
+
+    JsonNode entries = root.path("entries");
+
+    if (!entries.isArray() || entries.isEmpty()) {
+
+      JsonNode responses = root.path("chartEntryViewResponses");
+
+      if (responses.isArray() && !responses.isEmpty()) {
+
+        entries = responses.get(0).path("entries");
+
+      }
+
+    }
+
+    List<ChartTrackItem> items = new ArrayList<>();
+
+    if (!entries.isArray()) {
+
+      return items;
+
+    }
+
+    for (JsonNode row : entries) {
+
+      JsonNode meta = row.path("trackMetadata");
+
+      if (meta.isMissingNode() || meta.isNull()) {
+
+        continue;
+
+      }
+
+      int rank = row.path("chartEntryData").path("currentRank").asInt(items.size() + 1);
+
+      items.add(mapChartsComTrack(meta, rank));
+
+      if (items.size() >= maxTracks) {
+
+        break;
+
+      }
+
+    }
+
+    return items;
+
+  }
+
+
+
+  private ChartTrackItem mapChartsComTrack(JsonNode meta, int rank) {
+
+    String title = meta.path("trackName").asText("");
+
     List<String> artistNames = new ArrayList<>();
-    for (JsonNode a : track.path("artists")) {
+
+    for (JsonNode a : meta.path("artists")) {
+
       String n = a.path("name").asText("");
+
       if (!n.isBlank()) {
+
         artistNames.add(n);
+
       }
+
     }
+
     String artists = String.join(", ", artistNames);
-    String album = track.path("album").path("name").asText("");
-    String imageUrl = "";
-    JsonNode images = track.path("album").path("images");
-    if (images.isArray() && !images.isEmpty()) {
-      imageUrl = images.get(images.size() - 1).path("url").asText("");
-    }
-    String externalUrl = track.path("external_urls").path("spotify").asText("");
-    long durationMs = track.path("duration_ms").asLong(0);
+
+    String trackUri = meta.path("trackUri").asText("");
+
+    String trackId = spotifyIdFromUri(trackUri);
+
+    String imageUrl = meta.path("displayImageUri").asText("");
+
+    String releaseDate = meta.path("releaseDate").asText("");
+
+    String externalUrl =
+
+        trackId.isBlank() ? "" : "https://open.spotify.com/track/" + trackId;
+
     return new ChartTrackItem(
+
         rank,
-        track.path("id").asText(""),
+
+        trackId,
+
         title,
+
         artists,
-        album,
+
+        "",
+
         imageUrl,
+
         externalUrl,
-        durationMs);
+
+        0L,
+
+        0,
+
+        releaseDate);
+
   }
 
-  private JsonNode spotifyGet(String uri, String token) {
+
+
+  private static String spotifyIdFromUri(String uri) {
+
+    if (uri == null || uri.isBlank()) {
+
+      return "";
+
+    }
+
+    String t = uri.trim();
+
+    int idx = t.lastIndexOf(':');
+
+    if (idx >= 0 && idx < t.length() - 1) {
+
+      return t.substring(idx + 1);
+
+    }
+
+    return t;
+
+  }
+
+
+
+  private String resolveAccessToken(
+
+      String clientIdOverride, String clientSecretOverride, String bearerTokenOverride) {
+
+    if (bearerTokenOverride != null && !bearerTokenOverride.isBlank()) {
+
+      return bearerTokenOverride.trim();
+
+    }
+
+    String clientId = firstNonBlank(clientIdOverride, settings.getSpotifyClientId());
+
+    String clientSecret = firstNonBlank(clientSecretOverride, settings.getSpotifyClientSecret());
+
+    if (!tokenProvider.isConfigured(clientId, clientSecret)) {
+
+      throw new IllegalStateException("spotify_not_configured");
+
+    }
+
+    return tokenProvider.bearerOrThrow(clientId, clientSecret);
+
+  }
+
+
+
+  private JsonNode chartsGet(String uri, String token) {
+
     try {
+
       String body =
+
           restClient
+
               .get()
+
               .uri(uri)
+
               .header("Authorization", "Bearer " + token)
+
+              .header("Accept", "application/json")
+
+              .header("Origin", "https://charts.spotify.com")
+
+              .header("Referer", "https://charts.spotify.com/")
+
               .retrieve()
+
               .body(String.class);
+
       if (body == null || body.isBlank()) {
-        throw new IllegalStateException("spotify_api_error");
+
+        throw new IllegalStateException("spotify_charts_api_error");
+
       }
-      JsonNode root = objectMapper.readTree(body);
-      if (root.hasNonNull("error")) {
-        log.warn("Spotify API error: {}", root.get("error"));
-        throw new IllegalStateException("spotify_api_error");
-      }
-      return root;
+
+      return objectMapper.readTree(body);
+
     } catch (RestClientResponseException e) {
+
       int status = e.getStatusCode().value();
-      log.warn("Spotify HTTP {} for {}", status, uri);
-      if (status == 404) {
-        throw new IllegalStateException("spotify_playlist_not_accessible");
+
+      String resp = e.getResponseBodyAsString();
+
+      log.warn("Spotify charts HTTP {} for {} body={}", status, uri, resp);
+
+      if (status == 403) {
+        throw new IllegalStateException("spotify_charts_auth_failed");
       }
-      if (status == 401 || status == 403) {
+      if (status == 401) {
         throw new IllegalStateException("spotify_auth_failed");
       }
-      throw new IllegalStateException("spotify_api_error");
+
+      if (status == 404) {
+
+        throw new IllegalStateException("spotify_charts_not_found");
+
+      }
+
+      throw new IllegalStateException("spotify_charts_api_error");
+
     } catch (IllegalStateException e) {
+
       throw e;
+
     } catch (Exception e) {
-      log.warn("Spotify request failed", e);
-      throw new IllegalStateException("spotify_api_error");
+
+      log.warn("Spotify charts request failed", e);
+
+      throw new IllegalStateException("spotify_charts_api_error");
+
     }
+
   }
+
+
 
   private static String normalizeMarket(String market) {
+
     if (market == null || market.isBlank()) {
+
       return "KR";
+
     }
+
     return market.trim().toUpperCase();
+
   }
 
+
+
   private static String firstNonBlank(String override, String fallback) {
+
     if (override != null && !override.isBlank()) {
+
       return override.trim();
+
     }
+
     return fallback != null ? fallback.trim() : "";
+
   }
+
 }
+

@@ -33,4 +33,4 @@
 
 ---
 
-이 문서는 NullRefer Music 저장소의 AI·인간 공통 작업 규칙으로 둔다.
+이 문서는 NullReference Music 저장소의 AI·인간 공통 작업 규칙으로 둔다.

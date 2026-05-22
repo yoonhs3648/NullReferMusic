@@ -1,9 +1,18 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Animated,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,15 +23,34 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmMenuChartPanels } from '@/components/nrm/charts/NrmMenuChartPanels';
+import { NrmMenuSearchPanels } from '@/components/nrm/search/NrmMenuSearchPanels';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
+import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
+import { registerOpenDownloadSettingsListener } from '@/lib/nrmDownloadNavEvents';
+import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
+import {
+  ensureLastfmChartAccess,
+  ensureSearchApiAccess,
+  ensureSpotifyChartsSessionAccess,
+  ensureSpotifyOfficialChartAccess,
+} from '@/lib/nrmChartTokenGate';
 import {
   isChartMenuPanel,
   type ChartMenuPanel,
 } from '@/lib/nrmChartsPlatforms';
+import {
+  isSearchMenuPanel,
+  type SearchLastfmKind,
+  type SearchMenuPanel,
+} from '@/lib/nrmSearchMenu';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
+import {
+  getNrmModalScrimColor,
+  getNrmRootBackgroundColor,
+} from '@/lib/nrmUiAppearanceColors';
 import {
   getNrmAppCopyrightNotice,
   getNrmAppVersionLabel,
@@ -43,7 +71,27 @@ import {
 type Props = {
   isDark: boolean;
   paddingHorizontal: number;
+  onNavigateAppleMusicCharts?: () => void;
+  onNavigateSpotifyChartsOfficial?: () => void;
+  onNavigateSpotifyChartsCharts?: () => void;
+  onNavigateLastfmCharts?: () => void;
+  onNavigateLastfmArtistSearch?: () => void;
+  onNavigateLastfmAlbumSearch?: () => void;
+  onNavigateLastfmTrackSearch?: () => void;
+  /** Android — Bearer 없을 때 charts.spotify.com WebView 로그인 모달 호출 */
+  onRequestChartsBearerWebView?: () => Promise<boolean>;
 };
+
+export type NrmAppMenuHandle = {
+  openChartsSession: () => void;
+};
+
+const EDGE_HIT_WIDTH = 32;
+/** 터치가 이 X(px) 안에서 시작하면 메뉴 스와이프로 인식 */
+const MOBILE_SWIPE_START_MAX_X = 80;
+const EDGE_SWIPE_OPEN_PX = 44;
+
+const IS_NATIVE_MOBILE = Platform.OS === 'ios' || Platform.OS === 'android';
 
 type Panel =
   | 'root'
@@ -55,14 +103,36 @@ type Panel =
   | 'searchSettings'
   | 'screenSettings'
   | 'spotifyApiManage'
-  | ChartMenuPanel;
+  | 'lastfmApiManage'
+  | 'downloadSettings'
+  | ChartMenuPanel
+  | SearchMenuPanel;
 
-export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
+export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMenu(
+  {
+    isDark,
+    paddingHorizontal,
+    onNavigateAppleMusicCharts,
+    onNavigateSpotifyChartsOfficial,
+    onNavigateSpotifyChartsCharts,
+    onNavigateLastfmCharts,
+    onNavigateLastfmArtistSearch,
+    onNavigateLastfmAlbumSearch,
+    onNavigateLastfmTrackSearch,
+    onRequestChartsBearerWebView,
+  },
+  ref,
+) {
   const { setAppearanceMode } = useNrmUiAppearance();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const drawerW = Math.min(380, windowWidth * 0.88);
   const translateX = useRef(new Animated.Value(0)).current;
+  const spotifyBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const spotifyDrawerDismissRef = useRef<(() => void) | null>(null);
+  const [spotifyFocusChartsSession, setSpotifyFocusChartsSession] = useState(false);
+  const lastfmBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const lastfmDrawerDismissRef = useRef<(() => void) | null>(null);
 
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>('root');
@@ -103,6 +173,121 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
     });
   }, [drawerW, translateX]);
 
+  const closeMenuAndNavigateAppleMusicCharts = useCallback(() => {
+    onNavigateAppleMusicCharts?.();
+    setOpen(false);
+    setPanel('root');
+    setDetailEntry(null);
+    translateX.setValue(-drawerW);
+  }, [drawerW, onNavigateAppleMusicCharts, translateX]);
+
+  const openSpotifyTokenSettings = useCallback(() => {
+    setSpotifyFocusChartsSession(false);
+    setOpen(true);
+    setPanel('spotifyApiManage');
+    translateX.setValue(0);
+  }, [translateX]);
+
+  const openSpotifyChartsSessionSettings = useCallback(() => {
+    setSpotifyFocusChartsSession(true);
+    setOpen(true);
+    setPanel('spotifyApiManage');
+    translateX.setValue(0);
+  }, [translateX]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openChartsSession: openSpotifyChartsSessionSettings,
+    }),
+    [openSpotifyChartsSessionSettings],
+  );
+
+  const openLastfmTokenSettings = useCallback(() => {
+    setOpen(true);
+    setPanel('lastfmApiManage');
+    translateX.setValue(0);
+  }, [translateX]);
+
+  const openDownloadSettingsFromGlobal = useCallback(() => {
+    setOpen(true);
+    setPanel('downloadSettings');
+    translateX.setValue(0);
+  }, [translateX]);
+
+  useEffect(() => {
+    registerOpenDownloadSettingsListener(openDownloadSettingsFromGlobal);
+    return () => {
+      registerOpenDownloadSettingsListener(null);
+    };
+  }, [openDownloadSettingsFromGlobal]);
+
+  const closeMenuAndNavigateSpotifyChartsOfficial = useCallback(async () => {
+    const ok = await ensureSpotifyOfficialChartAccess(openSpotifyTokenSettings);
+    if (!ok) return;
+    onNavigateSpotifyChartsOfficial?.();
+    setOpen(false);
+    setPanel('root');
+    setDetailEntry(null);
+    translateX.setValue(-drawerW);
+  }, [
+    drawerW,
+    onNavigateSpotifyChartsOfficial,
+    openSpotifyTokenSettings,
+    translateX,
+  ]);
+
+  const closeMenuAndNavigateSpotifyChartsCharts = useCallback(async () => {
+    const ok = await ensureSpotifyChartsSessionAccess(
+      openSpotifyChartsSessionSettings,
+      onRequestChartsBearerWebView,
+    );
+    if (!ok) return;
+    onNavigateSpotifyChartsCharts?.();
+    setOpen(false);
+    setPanel('root');
+    setDetailEntry(null);
+    translateX.setValue(-drawerW);
+  }, [
+    drawerW,
+    onNavigateSpotifyChartsCharts,
+    onRequestChartsBearerWebView,
+    openSpotifyChartsSessionSettings,
+    translateX,
+  ]);
+
+  const closeMenuAndNavigateLastfmCharts = useCallback(async () => {
+    const ok = await ensureLastfmChartAccess(openLastfmTokenSettings);
+    if (!ok) return;
+    onNavigateLastfmCharts?.();
+    setOpen(false);
+    setPanel('root');
+    setDetailEntry(null);
+    translateX.setValue(-drawerW);
+  }, [drawerW, onNavigateLastfmCharts, openLastfmTokenSettings, translateX]);
+
+  const closeMenuAndNavigateLastfmSearch = useCallback(
+    async (kind: SearchLastfmKind) => {
+      const ok = await ensureSearchApiAccess(openLastfmTokenSettings);
+      if (!ok) return;
+      if (kind === 'artist') onNavigateLastfmArtistSearch?.();
+      else if (kind === 'album') onNavigateLastfmAlbumSearch?.();
+      else onNavigateLastfmTrackSearch?.();
+      setOpen(false);
+      setPanel('root');
+      setDetailEntry(null);
+      translateX.setValue(-drawerW);
+    },
+    [
+      drawerW,
+      onNavigateLastfmAlbumSearch,
+      onNavigateLastfmArtistSearch,
+      onNavigateLastfmTrackSearch,
+      openLastfmTokenSettings,
+      translateX,
+    ],
+  );
+
   /** Android 하드웨어 뒤로: 하위 패널이면 한 단계 위로, 루트면 드로어 닫기 */
   const goBackInMenu = useCallback(() => {
     switch (panel) {
@@ -111,6 +296,14 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
         setPanel('releases');
         break;
       case 'spotifyApiManage':
+        if (spotifyBackHandlerRef.current?.()) return;
+        setPanel('appSettings');
+        break;
+      case 'lastfmApiManage':
+        if (lastfmBackHandlerRef.current?.()) return;
+        setPanel('appSettings');
+        break;
+      case 'downloadSettings':
         setPanel('appSettings');
         break;
       case 'appSettings':
@@ -118,7 +311,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
       case 'screenSettings':
         setPanel('settings');
         break;
-      case 'chartSpotify':
+      case 'chartAppleMusic':
+      case 'chartSpotifyOfficial':
+      case 'chartSpotifyCharts':
+      case 'chartLastfm':
       case 'chartBillboard':
       case 'chartYoutubeMusic':
       case 'chartMelon':
@@ -126,6 +322,9 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
         setPanel('charts');
         break;
       case 'charts':
+        setPanel('root');
+        break;
+      case 'search':
         setPanel('root');
         break;
       case 'version':
@@ -141,6 +340,29 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
   }, [panel, dismissDrawer]);
 
   useEffect(() => {
+    if (panel !== 'spotifyApiManage') {
+      spotifyBackHandlerRef.current = null;
+      spotifyDrawerDismissRef.current = null;
+    }
+    if (panel !== 'lastfmApiManage') {
+      lastfmBackHandlerRef.current = null;
+      lastfmDrawerDismissRef.current = null;
+    }
+  }, [panel]);
+
+  const requestDrawerDismiss = useCallback(() => {
+    if (panel === 'spotifyApiManage' && spotifyDrawerDismissRef.current) {
+      spotifyDrawerDismissRef.current();
+      return;
+    }
+    if (panel === 'lastfmApiManage' && lastfmDrawerDismissRef.current) {
+      lastfmDrawerDismissRef.current();
+      return;
+    }
+    dismissDrawer();
+  }, [dismissDrawer, panel]);
+
+  useEffect(() => {
     if (!open) return;
     translateX.setValue(-drawerW);
     Animated.timing(translateX, {
@@ -150,6 +372,8 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
     }).start();
   }, [open, drawerW, translateX]);
 
+  const rootBg = getNrmRootBackgroundColor(isDark);
+  const modalScrim = getNrmModalScrimColor(isDark);
   const cardBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -158,47 +382,141 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
 
   const entries = getReleaseNoteEntries();
 
-  /** 네이티브: 본문과 동일하던 좌측 패딩의 절반 + safe area. 상단도 동일 여백 */
+  const openMenuRef = useRef(openMenu);
+  openMenuRef.current = openMenu;
+
+  const edgePanHandlers = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        gesture.dx > 6 && Math.abs(gesture.dy) < Math.abs(gesture.dx) * 1.8,
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dx >= EDGE_SWIPE_OPEN_PX) {
+          openMenuRef.current();
+        }
+      },
+    }),
+  ).current;
+
+  const mobileSwipeStartMaxX =
+    MOBILE_SWIPE_START_MAX_X + insets.left;
+
+  const mobileEdgePanHandlers = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          gesture.dx > 4 &&
+          Math.abs(gesture.dy) < Math.abs(gesture.dx) * 2,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx >= EDGE_SWIPE_OPEN_PX) {
+            openMenuRef.current();
+          }
+        },
+      }),
+    [],
+  );
+
+  const handleAccent = isDark
+    ? nrmTokens.color.primaryOnDark
+    : nrmTokens.color.primary;
+  const edgeRailColor = isDark
+    ? 'rgba(255, 255, 255, 0.14)'
+    : 'rgba(0, 0, 0, 0.08)';
+
   const nativeHalfPad = paddingHorizontal / 2;
-  /** 웹: 뷰포트 모서리에서 햄버거 버튼이 너무 붙지 않게 고정 여백 */
   const webMenuInset = Math.round(
     (nrmTokens.space.lg + nrmTokens.space.xs) / 2,
   );
-  const menuLeft =
+  const menuFabLeft =
     Platform.OS === 'web'
       ? webMenuInset
       : insets.left + nativeHalfPad;
-  const menuTop =
+  const menuFabTop =
     Platform.OS === 'web'
       ? Math.max(insets.top, nrmTokens.space.sm) + webMenuInset
       : insets.top + nativeHalfPad;
 
   return (
     <>
-      <Pressable
-        onPress={openMenu}
-        style={({ pressed }) => [
-          styles.menuFab,
-          {
-            left: menuLeft,
-            top: menuTop,
-            backgroundColor: pressed
-              ? isDark
-                ? 'rgba(255,255,255,0.12)'
-                : 'rgba(0,0,0,0.06)'
-              : isDark
-                ? 'rgba(255,255,255,0.08)'
-                : 'rgba(0,0,0,0.04)',
-          },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="메뉴">
-        <Ionicons
-          name="menu"
-          size={26}
-          color={isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink}
-        />
-      </Pressable>
+      {IS_NATIVE_MOBILE && !open ? (
+        <Pressable
+          onPress={openMenu}
+          style={({ pressed }) => [
+            styles.menuFab,
+            {
+              left: menuFabLeft,
+              top: menuFabTop,
+              backgroundColor: pressed
+                ? isDark
+                  ? 'rgba(255,255,255,0.12)'
+                  : 'rgba(0,0,0,0.06)'
+                : isDark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(0,0,0,0.04)',
+            },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="메뉴">
+          <Ionicons
+            name="menu"
+            size={26}
+            color={isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink}
+          />
+        </Pressable>
+      ) : null}
+
+      {Platform.OS === 'web' && !open ? (
+        <View
+          style={[
+            styles.edgeZone,
+            {
+              width: EDGE_HIT_WIDTH + insets.left,
+              paddingLeft: insets.left,
+            },
+          ]}
+          pointerEvents="box-none"
+          {...edgePanHandlers.panHandlers}>
+          {Platform.OS === 'web' ? (
+            <Pressable
+              onPress={openMenu}
+              accessibilityRole="button"
+              accessibilityLabel="메뉴 열기"
+              style={({ pressed }) => [
+                styles.edgePress,
+                pressed && styles.edgePressPressed,
+                styles.edgePressWeb,
+              ]}>
+              <View
+                style={[
+                  styles.edgeRail,
+                  { backgroundColor: edgeRailColor },
+                ]}
+              />
+              <View
+                style={[
+                  styles.edgeHandle,
+                  {
+                    borderColor: isDark
+                      ? nrmTokens.color.borderOnDark
+                      : nrmTokens.color.hairline,
+                    backgroundColor: isDark
+                      ? 'rgba(255, 255, 255, 0.06)'
+                      : 'rgba(255, 255, 255, 0.72)',
+                  },
+                ]}>
+                <View
+                  style={[styles.edgeGrip, { backgroundColor: handleAccent }]}
+                />
+                <View
+                  style={[styles.edgeGrip, { backgroundColor: handleAccent }]}
+                />
+              </View>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <Modal
         visible={open}
@@ -206,10 +524,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
         animationType="none"
         onRequestClose={goBackInMenu}
         statusBarTranslucent>
-        <View style={styles.modalWrap}>
+        <View style={[styles.modalWrap, { backgroundColor: rootBg }]}>
           <Pressable
-            style={[StyleSheet.absoluteFill, styles.dim]}
-            onPress={dismissDrawer}
+            style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
+            onPress={requestDrawerDismiss}
             accessibilityLabel="닫기"
           />
           <Animated.View
@@ -220,13 +538,20 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                 backgroundColor: cardBg,
                 borderColor: cardBorder,
                 paddingTop: insets.top + nrmTokens.space.lg,
-                paddingBottom: insets.bottom + 10,
+                // NOTE: 닫기 버튼 하단공백은 여기서만 결정됩니다 — 변경 금지
+                paddingBottom:
+                  Platform.OS === 'web'
+                    ? insets.bottom + 10
+                    : insets.bottom + nrmTokens.space.sm,
                 transform: [{ translateX }],
               },
             ]}
             accessibilityViewIsModal>
             {panel === 'root' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <View style={styles.menuLogoGap}>
                   <NrmLogo compact tone={isDark ? 'dark' : 'light'} />
                 </View>
@@ -238,6 +563,21 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     실시간 차트
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('search')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    검색
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -294,7 +634,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'version' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('root')}
                   style={styles.backRow}
@@ -327,7 +670,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'releases' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('root')}
                   style={styles.backRow}
@@ -368,7 +714,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'releaseDetail' && detailEntry ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => {
                     setDetailEntry(null);
@@ -398,7 +747,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'settings' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('root')}
                   style={styles.backRow}
@@ -463,7 +815,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'appSettings' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('settings')}
                   style={styles.backRow}
@@ -494,22 +849,105 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('lastfmApiManage')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    Last.fm API 토큰 관리
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                {IS_NATIVE_MOBILE ? (
+                  <Pressable
+                    onPress={() => setPanel('downloadSettings')}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed && { backgroundColor: rowHover },
+                    ]}>
+                    <Text style={[styles.rowLabel, { color: titleColor }]}>
+                      다운로드 설정
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={bodyColor}
+                    />
+                  </Pressable>
+                ) : null}
               </DrawerShell>
             ) : null}
 
             {panel === 'spotifyApiManage' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={requestDrawerDismiss}
+                compactFooter={Platform.OS !== 'web'}>
                 <NrmSpotifyApiManagePanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   rowHover={rowHover}
+                  focusChartsSession={spotifyFocusChartsSession}
+                  onChartsSessionFocusConsumed={() =>
+                    setSpotifyFocusChartsSession(false)
+                  }
+                  onBack={() => setPanel('appSettings')}
+                  onCloseDrawer={dismissDrawer}
+                  registerBackHandler={(handler) => {
+                    spotifyBackHandlerRef.current = handler;
+                  }}
+                  registerDrawerDismiss={(handler) => {
+                    spotifyDrawerDismissRef.current = handler;
+                  }}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'lastfmApiManage' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={requestDrawerDismiss}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmLastfmApiManagePanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={() => setPanel('appSettings')}
+                  onCloseDrawer={dismissDrawer}
+                  registerBackHandler={(handler) => {
+                    lastfmBackHandlerRef.current = handler;
+                  }}
+                  registerDrawerDismiss={(handler) => {
+                    lastfmDrawerDismissRef.current = handler;
+                  }}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
                   onBack={() => setPanel('appSettings')}
                 />
               </DrawerShell>
             ) : null}
 
             {isChartMenuPanel(panel) ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <NrmMenuChartPanels
                   panel={panel}
                   titleColor={titleColor}
@@ -517,13 +955,37 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
                   rowHover={rowHover}
                   onBackToRoot={() => setPanel('root')}
                   onBackToCharts={() => setPanel('charts')}
-                  onOpenPlatform={(p) => setPanel(p)}
+                  onOpenAppleMusicCharts={closeMenuAndNavigateAppleMusicCharts}
+                  onOpenSpotifyChartsOfficial={closeMenuAndNavigateSpotifyChartsOfficial}
+                  onOpenSpotifyChartsCharts={closeMenuAndNavigateSpotifyChartsCharts}
+                  onOpenLastfmCharts={closeMenuAndNavigateLastfmCharts}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {isSearchMenuPanel(panel) ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmMenuSearchPanels
+                  panel={panel}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBackToRoot={() => setPanel('root')}
+                  onOpenLastfmSearch={(kind) =>
+                    void closeMenuAndNavigateLastfmSearch(kind)
+                  }
                 />
               </DrawerShell>
             ) : null}
 
             {panel === 'searchSettings' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('settings')}
                   style={styles.backRow}
@@ -572,7 +1034,10 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
             ) : null}
 
             {panel === 'screenSettings' ? (
-              <DrawerShell titleColor={titleColor} onDismiss={dismissDrawer}>
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
                 <Pressable
                   onPress={() => setPanel('settings')}
                   style={styles.backRow}
@@ -637,25 +1102,110 @@ export function NrmAppMenu({ isDark, paddingHorizontal }: Props) {
           </Animated.View>
         </View>
       </Modal>
+
+      {IS_NATIVE_MOBILE && !open ? (
+        <View
+          style={styles.mobileSwipeLayer}
+          pointerEvents="box-none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants">
+          <View
+            style={[
+              styles.mobileSwipeEdge,
+              { width: mobileSwipeStartMaxX },
+            ]}
+            collapsable={false}
+            {...mobileEdgePanHandlers.panHandlers}
+          />
+        </View>
+      ) : null}
     </>
   );
-}
+});
 
 const styles = StyleSheet.create({
   menuFab: {
     position: 'absolute',
-    zIndex: 50,
+    zIndex: 52,
     width: 44,
     height: 44,
     borderRadius: nrmTokens.radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  mobileSwipeLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 51,
+    ...Platform.select({
+      android: { elevation: 51 },
+    }),
+  },
+  mobileSwipeEdge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+  },
+  edgeZone: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 50,
+    justifyContent: 'center',
+  },
+  edgePress: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingLeft: nrmTokens.space.xxs,
+  },
+  edgePressPressed: {
+    opacity: 0.88,
+  },
+  edgePressWeb: {
+    cursor: 'pointer',
+  },
+  edgeRail: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+  },
+  edgeHandle: {
+    width: 14,
+    height: 52,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    zIndex: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+      web: {
+        boxShadow: '0 1px 8px rgba(0,0,0,0.08)',
+      },
+    }),
+  },
+  edgeGrip: {
+    width: 2,
+    height: 18,
+    borderRadius: nrmTokens.radius.pill,
+    opacity: 0.85,
+  },
   modalWrap: {
     flex: 1,
-  },
-  dim: {
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   drawer: {
     position: 'absolute',
@@ -772,6 +1322,10 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  footerCloseCompact: {
+    marginTop: nrmTokens.space.xs,
+    // NOTE: marginBottom은 drawer paddingBottom(insets.bottom + sm)이 담당 — 이 값을 변경하지 마세요
+  },
   footerClosePressed: {
     opacity: 0.92,
   },
@@ -823,10 +1377,12 @@ const styles = StyleSheet.create({
 function DrawerShell({
   titleColor,
   onDismiss,
+  compactFooter = false,
   children,
 }: {
   titleColor: string;
   onDismiss: () => void;
+  compactFooter?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -840,6 +1396,7 @@ function DrawerShell({
         onPress={onDismiss}
         style={({ pressed }) => [
           styles.footerClose,
+          compactFooter && styles.footerCloseCompact,
           pressed && styles.footerClosePressed,
         ]}
         accessibilityRole="button"

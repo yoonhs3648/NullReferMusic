@@ -7,9 +7,11 @@ import {
   useMemo,
   useState,
 } from 'react';
+import * as SystemUI from 'expo-system-ui';
 import { useColorScheme } from 'react-native';
 
 import type { NrmUiAppearanceMode } from '@/lib/nrmUiAppearanceSettings';
+import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import {
   getNrmUiAppearanceMode,
   setNrmUiAppearanceMode,
@@ -50,6 +52,11 @@ export function NrmUiAppearanceProvider({ children }: { children: ReactNode }) {
     if (preference === 'dark') return true;
     return systemScheme !== 'light';
   }, [preference, systemScheme]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void SystemUI.setBackgroundColorAsync(getNrmRootBackgroundColor(isDark));
+  }, [hydrated, isDark]);
 
   const setAppearanceMode = useCallback(async (mode: NrmUiAppearanceMode) => {
     setPreference(mode);

@@ -41,8 +41,8 @@ PC 방화벽이 막으면 폰에서 둘 다 실패합니다. 아래 **방화벽*
 관리자 PowerShell에서 **한 번** (인바운드 TCP 8787·8081):
 
 ```powershell
-New-NetFirewallRule -DisplayName "NullReferMusic API 8787" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow -Profile Private,Domain
-New-NetFirewallRule -DisplayName "NullReferMusic Metro 8081" -Direction Inbound -LocalPort 8081 -Protocol TCP -Action Allow -Profile Private,Domain
+New-NetFirewallRule -DisplayName "NullReferenceMusic API 8787" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow -Profile Private,Domain
+New-NetFirewallRule -DisplayName "NullReferenceMusic Metro 8081" -Direction Inbound -LocalPort 8081 -Protocol TCP -Action Allow -Profile Private,Domain
 ```
 
 Windows에서 해당 Wi‑Fi가 **공용 네트워크**로 잡혀 있으면 규칙이 안 먹을 수 있습니다. **설정 → 네트워크**에서 해당 Wi‑Fi를 **프라이빗**으로 바꾸거나, 방화벽 규칙에 **Public** 프로필을 포함해 추가하세요.

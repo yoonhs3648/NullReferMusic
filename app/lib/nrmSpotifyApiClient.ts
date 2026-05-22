@@ -106,7 +106,7 @@ export async function buildSpotifyChartHeaders(): Promise<HeadersInit> {
   }
 
   const creds = await getSpotifyCredentials();
-  if (creds) {
+  if (creds?.clientId && creds?.clientSecret) {
     return {
       'X-NRM-Spotify-Client-Id': creds.clientId,
       'X-NRM-Spotify-Client-Secret': creds.clientSecret,

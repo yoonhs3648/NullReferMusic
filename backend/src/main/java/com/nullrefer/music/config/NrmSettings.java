@@ -16,8 +16,11 @@ public class NrmSettings {
 
   private String spotifyClientId = "";
   private String spotifyClientSecret = "";
-  /** 공개 플레이리스트 ID (차트 곡 목록 소스). Spotify 소유 에디토리얼은 신규 앱에서 404일 수 있음. */
+  /** 공개 플레이리스트 ID (레거시 top100). */
   private String spotifyChartPlaylistId = "";
+
+  private String lastfmApiKey = "";
+  private String lastfmSharedSecret = "";
 
   public String getRepoRoot() {
     return repoRoot;
@@ -81,5 +84,21 @@ public class NrmSettings {
 
   public void setSpotifyChartPlaylistId(String spotifyChartPlaylistId) {
     this.spotifyChartPlaylistId = spotifyChartPlaylistId;
+  }
+
+  public String getLastfmApiKey() {
+    return lastfmApiKey;
+  }
+
+  public void setLastfmApiKey(String lastfmApiKey) {
+    this.lastfmApiKey = lastfmApiKey;
+  }
+
+  public String getLastfmSharedSecret() {
+    return lastfmSharedSecret;
+  }
+
+  public void setLastfmSharedSecret(String lastfmSharedSecret) {
+    this.lastfmSharedSecret = lastfmSharedSecret;
   }
 }

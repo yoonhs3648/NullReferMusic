@@ -10,6 +10,7 @@ export const nrmTrackPlayer: NrmTrackPlayerApi = {
   stop: noop,
   getState: async (): Promise<NrmPlaybackState> => 'idle',
   isSetup: () => false,
+  isModuleAvailable: () => false,
 };
 
 export const Event = {} as Record<string, string>;

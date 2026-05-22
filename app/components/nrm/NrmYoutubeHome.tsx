@@ -29,10 +29,13 @@ import {
 } from '@/lib/nrmMobileDownloadNotifications';
 import { persistAudioAfterServerJob } from '@/lib/nrmPersistServerDownload';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
-import { notifyUser } from '@/lib/nrmUserNotify';
+import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
+import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
+import { nrmTrackPlayer } from '@/lib/nrmTrackPlayer';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
 import { NrmDownloadModal } from '@/components/nrm/NrmDownloadModal';
+import { NrmNativeAudioPlayer } from '@/components/nrm/NrmNativeAudioPlayer';
 import { YoutubeEmbed } from '@/components/nrm/YoutubeEmbed';
 
 function youtubeWatchUrl(videoId: string): string {
@@ -94,6 +97,14 @@ type Props = {
   onSearchCommitted?: () => void;
 };
 
+/**
+ * TrackPlayer 네이티브 모듈 사용 가능 여부.
+ * 표준 Expo Go에는 react-native-track-player가 번들되지 않아 false가 됩니다.
+ * APK 빌드에서는 true입니다.
+ */
+const CAN_USE_TRACK_PLAYER =
+  Platform.OS !== 'web' && nrmTrackPlayer.isModuleAvailable();
+
 export function NrmYoutubeHome({
   isDark,
   phase,
@@ -103,6 +114,7 @@ export function NrmYoutubeHome({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<YoutubeSearchItem[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [trackLoadingId, setTrackLoadingId] = useState<string | null>(null);
   const [dlBusy, setDlBusy] = useState<Record<string, boolean>>({});
   const dlInFlight = useRef<Set<string>>(new Set());
   const [downloadModalItem, setDownloadModalItem] =
@@ -122,6 +134,8 @@ export function NrmYoutubeHome({
     onSearchCommitted?.();
     setLoading(true);
     setPlayingId(null);
+    setTrackLoadingId(null);
+    if (Platform.OS !== 'web') void nrmTrackPlayer.stop();
     try {
       const out = await searchYoutube(q);
       if (token !== latestSearchTokenRef.current) return;
@@ -152,6 +166,29 @@ export function NrmYoutubeHome({
       if (dlInFlight.current.has(videoId)) return;
       const consent = await ensureDownloadConsent();
       if (!consent) return;
+
+      // Android: 다운로드 경로 사전 체크
+      if (Platform.OS === 'android') {
+        const { checkSafDownloadPath } = await import('@/lib/nrmDownloadSafGrant');
+        const pathStatus = await checkSafDownloadPath();
+        if (pathStatus === 'no_path') {
+          const ok = await confirmUser(
+            '다운로드 경로가 설정되지 않았습니다.\n설정에서 경로를 먼저 지정하시겠습니까?',
+            { confirmLabel: '설정하기', cancelLabel: '취소' },
+          );
+          if (ok) openDownloadSettingsPanel();
+          return;
+        }
+        if (pathStatus === 'path_invalid') {
+          const ok = await confirmUser(
+            '설정된 다운로드 경로가 존재하지 않습니다.\n경로를 다시 설정하시겠습니까?',
+            { confirmLabel: '설정하기', cancelLabel: '취소' },
+          );
+          if (ok) openDownloadSettingsPanel();
+          return;
+        }
+      }
+
       dlInFlight.current.add(videoId);
       setDlBusy((m) => ({ ...m, [videoId]: true }));
       const displayLabel = displayLabelFromAudioFileName(fileName);
@@ -320,6 +357,7 @@ export function NrmYoutubeHome({
             ? nrmTokens.color.borderOnDark
             : nrmTokens.color.hairline;
           const busy = !!dlBusy[item.videoId];
+          const trackFetching = trackLoadingId === item.videoId;
           return (
             <Fragment key={item.videoId}>
               <View
@@ -330,7 +368,43 @@ export function NrmYoutubeHome({
                 ]}>
                 <Pressable
                   onPress={() => {
+                    if (!CAN_USE_TRACK_PLAYER) {
+                      // 웹 또는 표준 Expo Go: YoutubeEmbed(WebView) 로 재생
+                      setPlayingId(
+                        playingId === item.videoId ? null : item.videoId,
+                      );
+                      return;
+                    }
+                    // APK 네이티브 빌드: TrackPlayer로 재생
+                    if (playingId === item.videoId) {
+                      setPlayingId(null);
+                      setTrackLoadingId(null);
+                      void nrmTrackPlayer.stop();
+                      return;
+                    }
                     setPlayingId(item.videoId);
+                    setTrackLoadingId(item.videoId);
+                    const currentVideoId = item.videoId;
+                    void (async () => {
+                      try {
+                        const { getAudioStreamUrlWithInnertube } = await import(
+                          '@/lib/nrmInnertubeYoutube'
+                        );
+                        const url = await getAudioStreamUrlWithInnertube(currentVideoId);
+                        await nrmTrackPlayer.play({
+                          id: currentVideoId,
+                          url,
+                          title: item.title,
+                          artist: item.channelTitle ?? 'NullReferenceMusic',
+                          artwork: item.thumbnailUrl ?? undefined,
+                        });
+                      } catch {
+                        setPlayingId(null);
+                        notifyUser('재생할 수 없습니다. 잠시 후 다시 시도하세요.');
+                      } finally {
+                        setTrackLoadingId(null);
+                      }
+                    })();
                   }}
                   style={({ pressed }) => [
                     styles.rowMain,
@@ -338,14 +412,19 @@ export function NrmYoutubeHome({
                   ]}
                   accessibilityRole="button"
                   accessibilityLabel="재생 영역 열기">
-                  {item.thumbnailUrl ? (
-                    <Image
-                      source={{ uri: item.thumbnailUrl }}
-                      style={styles.thumb}
-                    />
-                  ) : (
-                    <View style={styles.thumb} />
-                  )}
+                  <View style={styles.thumb}>
+                    {item.thumbnailUrl ? (
+                      <Image
+                        source={{ uri: item.thumbnailUrl }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    ) : null}
+                    {trackFetching ? (
+                      <View style={[StyleSheet.absoluteFill, styles.thumbLoadingOverlay]}>
+                        <ActivityIndicator size="small" color="#fff" />
+                      </View>
+                    ) : null}
+                  </View>
                   <View style={styles.rowText}>
                     <Text
                       style={[
@@ -410,10 +489,26 @@ export function NrmYoutubeHome({
                   )}
                 </Pressable>
               </View>
-              {/* 영상 상세 플레이어 */}
+              {/* 플레이어 영역
+                  APK: NrmNativeAudioPlayer (TrackPlayer) → 시스템 미디어 알림 지원
+                  웹 / 표준 Expo Go: YoutubeEmbed (WebView) */}
               {active ? (
                 <View style={styles.embedBelow}>
-                  <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
+                  {CAN_USE_TRACK_PLAYER ? (
+                    <NrmNativeAudioPlayer
+                      videoId={item.videoId}
+                      title={item.title}
+                      channelTitle={item.channelTitle ?? ''}
+                      thumbnailUrl={item.thumbnailUrl}
+                      isDark={isDark}
+                      onStop={() => {
+                        setPlayingId(null);
+                        void nrmTrackPlayer.stop();
+                      }}
+                    />
+                  ) : (
+                    <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
+                  )}
                   <Pressable
                     onPress={() => setDownloadModalItem(item)}
                     disabled={busy}
@@ -596,6 +691,12 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     borderRadius: nrmTokens.radius.sm,
     backgroundColor: '#222',
+    overflow: 'hidden',
+  },
+  thumbLoadingOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowText: {
     flex: 1,

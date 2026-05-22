@@ -5,36 +5,67 @@ import { nrmTokens } from '@/constants/nrmTokens';
 type Props = {
   compact?: boolean;
   tone?: 'light' | 'dark';
+  /** 차트 API 실패 등 — 흐리게·비활성 느낌 */
+  disabled?: boolean;
+  /** 워드마크 없이 CI 마크만 표시 (차트 에러 히어로 등) */
+  markOnly?: boolean;
+  /** markOnly일 때 마크 한 변 길이(px) */
+  markSize?: number;
   onPress?: () => void;
 };
 
-export function NrmLogo({ compact = false, tone = 'light', onPress }: Props) {
+export function NrmLogo({
+  compact = false,
+  tone = 'light',
+  disabled = false,
+  markOnly = false,
+  markSize: markSizeProp,
+  onPress,
+}: Props) {
   const fontSize = compact ? 20 : nrmTokens.font.logo;
-  const nullColor = tone === 'dark' ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
-  const musicColor =
-    tone === 'dark' ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
-  const markSize = compact ? 26 : 34;
+  const nullColor = disabled
+    ? 'rgba(128,128,128,0.45)'
+    : tone === 'dark'
+      ? nrmTokens.color.bodyOnDark
+      : nrmTokens.color.ink;
+  const musicColor = disabled
+    ? 'rgba(128,128,128,0.35)'
+    : tone === 'dark'
+      ? nrmTokens.color.primaryOnDark
+      : nrmTokens.color.primary;
+  const markSize = markSizeProp ?? (markOnly ? 72 : compact ? 26 : 34);
   const lineHeight = Math.round(fontSize * 1.15);
   const androidTextPad =
     Platform.OS === 'android' ? ({ includeFontPadding: false } as const) : {};
 
-  const content = (
+  const mark = (
+    <View style={[styles.markSlot, { width: markSize, height: markSize }]}>
+      <Image
+        source={require('@/assets/images/icon.png')}
+        style={[
+          styles.markImage,
+          { width: markSize, height: markSize },
+          disabled && styles.markDisabled,
+        ]}
+        resizeMode="contain"
+      />
+    </View>
+  );
+
+  const content = markOnly ? (
+    <View style={styles.markOnlyWrap} accessibilityRole="image">
+      {mark}
+    </View>
+  ) : (
     <View style={styles.wrap} accessibilityRole="header">
-      <View
-        style={[styles.markSlot, { width: markSize, height: markSize }]}>
-        <Image
-          source={require('@/assets/images/icon.png')}
-          style={[styles.markImage, { width: markSize, height: markSize }]}
-          resizeMode="contain"
-        />
-      </View>
+      {mark}
       <Text
         style={[
           styles.wordmark,
           { fontSize, lineHeight },
           androidTextPad,
         ]}>
-        <Text style={[styles.wordNull, { color: nullColor }]}>Nullreference </Text>
+        <Text style={[styles.wordNull, { color: nullColor }]}>NullReference </Text>
         <Text style={[styles.wordMusic, { color: musicColor }]}>Music</Text>
       </Text>
     </View>
@@ -54,6 +85,10 @@ export function NrmLogo({ compact = false, tone = 'light', onPress }: Props) {
 }
 
 const styles = StyleSheet.create({
+  markOnlyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   wrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -66,6 +101,9 @@ const styles = StyleSheet.create({
   },
   markImage: {
     borderRadius: nrmTokens.radius.sm,
+  },
+  markDisabled: {
+    opacity: 0.35,
   },
   wordmark: {
     fontWeight: '600',

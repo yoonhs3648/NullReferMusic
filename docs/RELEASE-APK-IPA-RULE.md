@@ -72,7 +72,7 @@
 
 ---
 
-이 문서는 NullRefer Music 저장소의 **AI·인간 공통 필수 규칙**으로 둔다. 아키텍처 상위 규칙은 `docs/ARCHITECTURE-AND-AI-RULES.md`를 따른다.
+이 문서는 NullReference Music 저장소의 **AI·인간 공통 필수 규칙**으로 둔다. 아키텍처 상위 규칙은 `docs/ARCHITECTURE-AND-AI-RULES.md`를 따른다.
 
 ---
 
@@ -110,17 +110,17 @@ cd C:\NullReferMusic\app\android
 
 ### 6-4. 산출물 위치 및 파일명 규칙
 
-APK 파일명은 **`nullReferenceMusic-v{버전}.apk`** 형식을 사용한다.
+APK 파일명은 **`NullReferenceMusic-v{버전}.apk`** 형식을 사용한다.
 
 ```
-app\android\app\build\outputs\apk\release\nullReferenceMusic-v1.2.1.apk
+app\android\app\build\outputs\apk\release\NullReferenceMusic-v1.2.1.apk
 ```
 
 파일명은 `android/app/build.gradle`의 `applicationVariants` 블록에서 자동으로 설정된다:
 ```groovy
 applicationVariants.all { variant ->
     variant.outputs.all { output ->
-        outputFileName = "nullReferenceMusic-v${variant.versionName}.apk"
+        outputFileName = "NullReferenceMusic-v${variant.versionName}.apk"
     }
 }
 ```

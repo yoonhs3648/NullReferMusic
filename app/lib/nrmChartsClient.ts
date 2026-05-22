@@ -5,45 +5,51 @@ import {
   getResolvedApiBaseUrl,
 } from '@/lib/apiBaseUrl';
 import {
-  nrmChartsSpotifyBackendConnectionMessage,
-  nrmChartsSpotifyGenericErrorMessage,
-  nrmChartsSpotifyNotConfiguredMessage,
-  nrmChartsSpotifyPlaylistBlockedMessage,
-} from '@/lib/nrmChartsStrings';
+  spotifyErrorFromApi,
+  type ChartErrorCode,
+} from '@/lib/nrmChartErrors';
+import { nrmChartsSpotifyNotConfiguredMessage } from '@/lib/nrmChartsStrings';
 import type {
-  SpotifyChartOutcome,
+  SpotifyChartSource,
+  SpotifyChartTabId,
+} from '@/lib/nrmSpotifyChartCatalog';
+import type {
+  ChartFetchOutcome,
   SpotifyChartPayload,
 } from '@/lib/nrmChartsTypes';
+import {
+  buildSpotifyChartAuthHeaders,
+  refreshSpotifyChartToken,
+} from '@/lib/nrmSpotifyTokenSync';
 
-function messageForError(code: string | undefined, httpStatus: number): string {
-  if (code === 'spotify_not_configured' || code === 'spotify_playlist_not_configured') {
-    return nrmChartsSpotifyNotConfiguredMessage;
-  }
-  if (code === 'spotify_playlist_not_accessible') {
-    return nrmChartsSpotifyPlaylistBlockedMessage;
-  }
-  if (httpStatus === 503) {
-    return nrmChartsSpotifyNotConfiguredMessage;
-  }
-  if (httpStatus === 404 && code === 'spotify_playlist_not_accessible') {
-    return nrmChartsSpotifyPlaylistBlockedMessage;
-  }
-  if (httpStatus >= 500 || code === 'spotify_api_error' || code === 'spotify_auth_failed') {
-    return nrmChartsSpotifyGenericErrorMessage;
-  }
-  return nrmChartsSpotifyGenericErrorMessage;
+type SpotifyFetchFail = {
+  ok: false;
+  errorCode: ChartErrorCode;
+  authFailed: boolean;
+  premiumBlocked: boolean;
+};
+
+type SpotifyFetchSuccess = { ok: true; data: SpotifyChartPayload };
+
+type SpotifyFetchResult = SpotifyFetchSuccess | SpotifyFetchFail;
+
+function isAuthError(code: string | undefined, httpStatus: number): boolean {
+  return (
+    code === 'spotify_auth_failed' ||
+    code === 'spotify_charts_auth_failed' ||
+    httpStatus === 401
+  );
 }
 
-async function fetchSpotifyWithBase(
+async function fetchSpotifyPlaylistWithBase(
   base: string,
-  market: string | undefined,
+  chart: SpotifyChartTabId,
+  source: SpotifyChartSource,
   credHeaders: HeadersInit,
-): Promise<SpotifyChartOutcome> {
+): Promise<SpotifyFetchResult> {
   try {
-    const q = market?.trim()
-      ? `?market=${encodeURIComponent(market.trim())}`
-      : '';
-    const res = await nrmBackendFetch(`${base}/api/charts/spotify/top100${q}`, {
+    const q = `?chart=${encodeURIComponent(chart)}&source=${encodeURIComponent(source)}`;
+    const res = await nrmBackendFetch(`${base}/api/charts/spotify/playlist${q}`, {
       headers: credHeaders,
     });
     const rawText = await res.text();
@@ -55,31 +61,53 @@ async function fetchSpotifyWithBase(
       } catch {
         code = undefined;
       }
-      return { ok: false, message: messageForError(code, res.status) };
+      const errorCode = spotifyErrorFromApi(code, res.status);
+      return {
+        ok: false,
+        errorCode,
+        authFailed: isAuthError(code, res.status),
+        premiumBlocked:
+          errorCode === 'premium_required' || code === 'spotify_premium_required',
+      };
     }
     const data = JSON.parse(rawText) as SpotifyChartPayload;
     if (!data?.items || !Array.isArray(data.items)) {
-      return { ok: false, message: nrmChartsSpotifyGenericErrorMessage };
+      return {
+        ok: false,
+        errorCode: 'unknown',
+        authFailed: false,
+        premiumBlocked: false,
+      };
     }
     return { ok: true, data };
   } catch {
-    return { ok: false, message: nrmChartsSpotifyBackendConnectionMessage };
+    return {
+      ok: false,
+      errorCode: 'network',
+      authFailed: false,
+      premiumBlocked: false,
+    };
   }
 }
 
-export async function fetchSpotifyTopChart(
-  market?: string,
-): Promise<SpotifyChartOutcome> {
-  const { buildSpotifyChartHeaders } = await import(
-    '@/lib/nrmSpotifyApiClient'
-  );
-  const credHeaders = await buildSpotifyChartHeaders();
+async function fetchPlaylistWithDevFallback(
+  chart: SpotifyChartTabId,
+  source: SpotifyChartSource,
+  headers: HeadersInit,
+): Promise<SpotifyFetchResult> {
   const resolved = await getResolvedApiBaseUrl();
-  const primary = resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
+  const primary =
+    resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
   if (!primary) {
-    return { ok: false, message: nrmChartsSpotifyBackendConnectionMessage };
+    return {
+      ok: false,
+      errorCode: 'network',
+      authFailed: false,
+      premiumBlocked: false,
+    };
   }
-  const first = await fetchSpotifyWithBase(primary, market, credHeaders);
+
+  const first = await fetchSpotifyPlaylistWithBase(primary, chart, source, headers);
   if (first.ok || !usesPcBackendInDev()) {
     return first;
   }
@@ -87,5 +115,51 @@ export async function fetchSpotifyTopChart(
   if (fallback === primary) {
     return first;
   }
-  return fetchSpotifyWithBase(fallback, market, credHeaders);
+  return fetchSpotifyPlaylistWithBase(fallback, chart, source, headers);
 }
+
+async function fetchSpotifyChartWithAuthRetry(
+  source: SpotifyChartSource,
+  fetchFn: (headers: HeadersInit) => Promise<SpotifyFetchResult>,
+): Promise<ChartFetchOutcome> {
+  const auth = await buildSpotifyChartAuthHeaders(source);
+  if ('error' in auth) {
+    return {
+      ok: false,
+      errorCode:
+        source === 'charts' ? 'charts_session' : 'not_configured',
+    };
+  }
+
+  let result = await fetchFn(auth.headers);
+
+  if (
+    source === 'official' &&
+    !result.ok &&
+    (result.authFailed || result.premiumBlocked)
+  ) {
+    const refreshed = await refreshSpotifyChartToken();
+    if (refreshed.ok) {
+      result = await fetchFn(refreshed.headers);
+    }
+  }
+
+  if (result.ok) {
+    return { ok: true, data: result.data };
+  }
+  return { ok: false, errorCode: result.errorCode };
+}
+
+export async function fetchSpotifyPlaylistChart(
+  chart: SpotifyChartTabId,
+  source: SpotifyChartSource = 'charts',
+): Promise<ChartFetchOutcome> {
+  return fetchSpotifyChartWithAuthRetry(source, (headers) =>
+    fetchPlaylistWithDevFallback(chart, source, headers),
+  );
+}
+
+export type { SpotifyChartSource };
+
+/** 설정 화면 등 — 기술 문구 유지 */
+export { nrmChartsSpotifyNotConfiguredMessage };

@@ -7,6 +7,8 @@ export type ChartTrackItem = {
   imageUrl: string;
   externalUrl: string;
   durationMs: number;
+  popularity: number;
+  releaseDate: string;
 };
 
 export type SpotifyChartPayload = {
@@ -18,6 +20,11 @@ export type SpotifyChartPayload = {
   items: ChartTrackItem[];
 };
 
-export type SpotifyChartOutcome =
+import type { ChartErrorCode } from '@/lib/nrmChartErrors';
+
+export type ChartFetchOutcome =
   | { ok: true; data: SpotifyChartPayload }
-  | { ok: false; message: string };
+  | { ok: false; errorCode: ChartErrorCode };
+
+/** @deprecated ChartFetchOutcome 사용 */
+export type SpotifyChartOutcome = ChartFetchOutcome;

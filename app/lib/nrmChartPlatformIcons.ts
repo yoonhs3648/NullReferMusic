@@ -9,7 +9,9 @@ export const NRM_CHART_OFFICIAL_ICON_URI: Record<
   ChartPlatformIconKey,
   string | null
 > = {
+  appleMusic: null,
   spotify: null,
+  lastfm: null,
   billboard: null,
   youtubeMusic: null,
   melon:

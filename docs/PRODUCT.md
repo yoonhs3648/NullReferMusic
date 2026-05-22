@@ -1,4 +1,4 @@
-# 🎧 nullReferMusic - 완전 로컬 실행 아키텍처 (v5.0)
+# 🎧 NullReference Music — 완전 로컬 실행 아키텍처 (v5.0)
 
 ## 1. 개요
 
@@ -195,7 +195,7 @@ ffmpeg.exe
 ## 11. 형상 관리
 
 - git 이용
-- https://github.com/yoonhs3648 계정에 새로운 레파지토리로 nullReferMusic 프로젝트 생성
+- https://github.com/yoonhs3648 계정에 새로운 레파지토리로 NullReferenceMusic 프로젝트 생성
 - 해당 레포지토리에서 전체 코드 관리
 
 ---

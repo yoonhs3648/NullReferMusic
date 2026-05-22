@@ -1,62 +1,38 @@
 /**
- * iOS/Android: Metro가 `expo-file-system/legacy` 패키지 서브패스를 못 풀면 소스 경로로 연결.
- * - iOS: 공용 다운로드 경로가 없으므로 앱 Documents 아래 `nullreference/` 폴더에 저장합니다.
- *   «파일» 앱에서 보려면 `app.config`의 UIFileSharingEnabled가 필요합니다.
- * - Android: 미디어 라이브러리 앨범 `nullreference`(및 공용 Downloads 하위 동일 이름 폴더 사용 시)와 맞춥니다.
+ * iOS/Android 오디오 파일 저장.
+ *
+ * Android: MediaLibrary 사용 안 함. SAF(Storage Access Framework)로 저장.
+ *   1. 최초 1회 SAF 폴더 선택 → 이후 무음 저장
+ *   2. SAF 불가(Android 9↓) → /storage/emulated/0/NullReferenceMusic/ 직접 쓰기
+ *   3. fallback → 앱 Documents 폴더 (Expo Go 개발 환경)
+ *
+ * iOS: 앱 Documents > NullReferenceMusic/ 폴더.
+ *
+ * ⚠ SAF로 생성된 content:// URI에는 copyAsync가 0바이트 문제를 일으킬 수 있어
+ *   readAsStringAsync(base64) + writeAsStringAsync(base64) 로 씁니다.
  */
-import { NRM_MEDIA_LIBRARY_ALBUM_SLUG } from '@/constants/nrmNativeDownload';
-import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
-import { getAndroidMediaGranularPermissions } from '@/lib/nrmRequiredPermissions';
-import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
-import * as MediaLibrary from 'expo-media-library';
+import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
-export const NRM_DOWNLOAD_PUBLIC_FOLDER_NAME = NRM_MEDIA_LIBRARY_ALBUM_SLUG;
+import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
+import {
+  acquireSafDirUri,
+} from '@/lib/nrmDownloadSafGrant';
 
-/** @deprecated 웹 `NRM_DOWNLOAD_DIR_NAME` 와 별개 — 네이티브는 `NRM_MEDIA_LIBRARY_ALBUM_SLUG` 사용 */
-export const NRM_DOWNLOAD_DIR_NAME = NRM_MEDIA_LIBRARY_ALBUM_SLUG;
+const NRM_FOLDER = 'NullReferenceMusic';
+
+export const NRM_DOWNLOAD_PUBLIC_FOLDER_NAME = NRM_FOLDER;
+/** @deprecated NRM_DOWNLOAD_PUBLIC_FOLDER_NAME 사용 */
+export const NRM_DOWNLOAD_DIR_NAME = NRM_FOLDER;
 
 function normalizedApiBase(base: string): string {
   return base.trim().replace(/\/+$/, '');
 }
 
-/** yt-dlp 등이 만든 긴 경로·`.mp4`(오디오)는 MediaLibrary가 MIME 판별에 실패하는 경우가 있어 복사·정규화합니다. */
-function extensionFromBasename(pathOrUri: string): string {
-  const path = pathOrUri.replace(/^file:\/\//, '');
-  const base = path.split('/').pop() ?? '';
-  const dot = base.lastIndexOf('.');
-  return dot >= 0 ? base.slice(dot).toLowerCase() : '';
-}
-
-function mediaLibraryImportExtension(
-  sourceExt: string,
-  safeName: string,
-): string {
-  const fromYt: Record<string, string> = {
-    '.mp4': '.m4a',
-    '.m4a': '.m4a',
-    '.mp3': '.mp3',
-    '.webm': '.webm',
-    '.opus': '.opus',
-    '.ogg': '.ogg',
-    '.aac': '.aac',
-    '.flac': '.flac',
-    '.wav': '.wav',
-  };
-  if (sourceExt && fromYt[sourceExt]) return fromYt[sourceExt];
-  const snDot = safeName.lastIndexOf('.');
-  const snExt =
-    snDot >= 0 ? safeName.slice(snDot).toLowerCase() : '';
-  if (snExt && fromYt[snExt]) return fromYt[snExt];
-  return '.m4a';
-}
-
-/**
- * MediaScanner / ExpoMediaLibrary 가 경로의 공백·일부 문자에서 MIME 판별에 실패하는 경우가 있어
- * import 전용 이름은 공백 없이 짧게 만듭니다.
- */
-function androidMediaImportStem(stem: string): string {
+function safeStem(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
   const s = sanitizeFileBase(stem)
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
@@ -65,135 +41,177 @@ function androidMediaImportStem(stem: string): string {
   return s || `t${Date.now()}`;
 }
 
-async function copyForAndroidMediaLibrary(
-  tempUri: string,
-  safeName: string,
-): Promise<string> {
-  const cacheRoot = FileSystem.cacheDirectory;
-  if (!cacheRoot) {
-    throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
-  }
-  const prefix = cacheRoot.endsWith('/') ? cacheRoot : `${cacheRoot}/`;
-  const sourceExt = extensionFromBasename(tempUri);
-  const importExt = mediaLibraryImportExtension(sourceExt, safeName);
-  const dot = safeName.lastIndexOf('.');
-  const stemRaw = dot > 0 ? safeName.slice(0, dot) : safeName;
-  const stem = androidMediaImportStem(stemRaw);
-  const destUri = `${prefix}nrm-ml-import-${Date.now()}-${stem}${importExt}`;
-  await FileSystem.copyAsync({ from: tempUri, to: destUri });
-  return destUri;
+function mimeFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    '.m4a': 'audio/mp4',
+    '.mp3': 'audio/mpeg',
+    '.mp4': 'audio/mp4',
+    '.webm': 'audio/webm',
+    '.opus': 'audio/ogg',
+    '.ogg': 'audio/ogg',
+    '.aac': 'audio/aac',
+    '.flac': 'audio/flac',
+    '.wav': 'audio/wav',
+  };
+  return map[ext.toLowerCase()] ?? 'audio/mp4';
 }
 
-/** MediaLibrary 실패 시 앱 전용 폴더에 복사 (사용자는 «내 파일» 앱에서 확인). */
-async function androidFallbackSaveToAppDocuments(
+// ── Android SAF ───────────────────────────────────────────────────────────────
+
+/**
+ * SAF content:// URI에 파일을 씁니다.
+ * copyAsync 는 SAF 목적지에서 0바이트 문제가 발생하므로
+ * base64 read → write 방식을 사용합니다.
+ */
+async function writeToBinarySafUri(sourceUri: string, destUri: string): Promise<void> {
+  const b64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: 'base64' });
+  await FileSystem.writeAsStringAsync(destUri, b64, { encoding: 'base64' });
+}
+
+/**
+ * SAF로 저장된 파일을 Android MediaStore에 등록합니다.
+ * 등록 후 Samsung My Files 등 파일 탐색기 '내장 저장공간' 트리에서 즉시 보입니다.
+ * 실패해도 파일 자체는 정상 저장되어 있으므로 무시합니다.
+ */
+async function triggerMediaStoreScan(safDocUri: string): Promise<void> {
+  try {
+    // SAF document URI에서 물리 경로 추출
+    // content://...document/primary:NullReferenceMusic%2Ffilename.mp3 → /NullReferenceMusic/filename.mp3
+    const decoded = decodeURIComponent(safDocUri);
+    const m = decoded.match(/\/document\/primary:(.+)$/i);
+    if (!m?.[1]) return;
+    const relPath = m[1]; // e.g. NullReferenceMusic/filename.mp3
+    const physUri = `file:///storage/emulated/0/${relPath}`;
+
+    // expo-media-library를 lazy require — READ_MEDIA_AUDIO 권한이 없는 환경에서는 무시
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ML = require('expo-media-library') as typeof import('expo-media-library');
+    await ML.createAssetAsync(physUri);
+  } catch {
+    /* MediaStore 스캔 실패는 무시 — 파일은 정상 저장됨 */
+  }
+}
+
+/**
+ * SAF로 NullReferenceMusic 폴더(또는 사용자 선택 폴더)에 파일을 저장합니다.
+ * Android 10+ (API 29+) 환경에서 사용합니다.
+ */
+async function saveViaSaf(
+  sourceUri: string,
+  safeName: string,
+): Promise<{ savedLabel: string }> {
+  const dirUri = await acquireSafDirUri(NRM_FOLDER);
+  if (!dirUri) {
+    throw new Error('다운로드 폴더 접근이 취소되었습니다. 설정 > 앱설정 > 다운로드 설정에서 경로를 먼저 지정하세요.');
+  }
+
+  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
+  const fileName = `${safeStem(safeName)}${ext}`;
+  const mimeType = mimeFromExt(ext);
+
+  const destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
+  await writeToBinarySafUri(sourceUri, destUri);
+
+  // MediaStore 등록 → Samsung My Files 내장 저장공간 트리에 즉시 노출
+  await triggerMediaStoreScan(destUri);
+
+  return {
+    savedLabel: `저장했습니다. 내 파일 > 내장 저장공간에서 확인하세요.`,
+  };
+}
+
+/**
+ * Android 9 이하 (/storage/emulated/0/NullReferenceMusic/ 직접 쓰기).
+ * WRITE_EXTERNAL_STORAGE 가 Manifest에 선언되어 있으면 런타임 요청 없이 동작.
+ */
+async function saveToExternalDirect(
+  sourceUri: string,
+  safeName: string,
+): Promise<{ savedLabel: string }> {
+  const dirUri = `file:///storage/emulated/0/${NRM_FOLDER}`;
+  await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true });
+
+  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
+  const fileName = `${safeStem(safeName)}${ext}`;
+  const destUri = `${dirUri}/${fileName}`;
+  await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+  await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+
+  return { savedLabel: `저장했습니다. 내 파일 > ${NRM_FOLDER} 폴더에서 확인하세요.` };
+}
+
+/** fallback: 앱 전용 Documents 폴더 저장 (Expo Go 등) */
+async function saveToAppDocumentsFallback(
   sourceUri: string,
   safeName: string,
 ): Promise<{ savedLabel: string }> {
   const docRoot = FileSystem.documentDirectory;
-  if (!docRoot) {
-    throw new Error('이 기기에서 저장 공간을 사용할 수 없습니다.');
-  }
-  const folderName = NRM_MEDIA_LIBRARY_ALBUM_SLUG;
-  const folderUri = `${docRoot}${folderName}/`;
+  if (!docRoot) throw new Error('이 기기에서 저장 공간을 사용할 수 없습니다.');
+
+  const folderUri = `${docRoot}${NRM_FOLDER}/`;
   await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
-  const snDot = safeName.lastIndexOf('.');
-  const stem = snDot > 0 ? safeName.slice(0, snDot) : safeName;
-  const ext = snDot > 0 ? safeName.slice(snDot) : '.m4a';
-  const fileBase = `${androidMediaImportStem(stem)}${ext.toLowerCase()}`;
-  const destUri = `${folderUri}${fileBase}`;
+
+  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
+  const fileName = `${safeStem(safeName)}${ext}`;
+  const destUri = `${folderUri}${fileName}`;
   await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
   await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-  const savedLabel = `저장했습니다. «내 파일» 또는 «파일» 앱에서 이 앱을 연 뒤 «${folderName}» 폴더를 여세요.`;
-  return { savedLabel };
+
+  return {
+    savedLabel: `저장했습니다. (앱 내부 폴더 — Expo Go 개발 환경)\n앱 폴더 > ${NRM_FOLDER}에서 확인하세요.`,
+  };
 }
 
-async function addAndroidAssetToLibrary(importUri: string): Promise<void> {
-  const album = await MediaLibrary.getAlbumAsync(NRM_MEDIA_LIBRARY_ALBUM_SLUG);
-  if (album) {
-    try {
-      await MediaLibrary.createAssetAsync(importUri, album);
-      return;
-    } catch {
-      await MediaLibrary.createAssetAsync(importUri);
-      return;
-    }
-  }
-  try {
-    await MediaLibrary.createAlbumAsync(
-      NRM_MEDIA_LIBRARY_ALBUM_SLUG,
-      undefined,
-      true,
-      importUri,
-    );
-  } catch {
-    await MediaLibrary.createAssetAsync(importUri);
-  }
-}
-
-/** 임시 파일을 사용자 저장 위치로 옮기고 임시 파일을 삭제합니다. */
-async function moveTempAudioToUserLibrary(
+async function androidSaveToNrmFolder(
   tempUri: string,
   safeName: string,
 ): Promise<{ savedLabel: string }> {
-  if (Platform.OS === 'ios') {
-    const docRoot = FileSystem.documentDirectory;
-    if (!docRoot) {
-      await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-      throw new Error('이 기기에서 문서 저장 공간을 사용할 수 없습니다.');
-    }
-    const folderName = NRM_MEDIA_LIBRARY_ALBUM_SLUG;
-    const folderUri = `${docRoot}${folderName}/`;
-    await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
-    const destUri = `${folderUri}${safeName}`;
-    await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+  // Android 9(API 28) 이하: 직접 쓰기 시도
+  if ((Platform.Version as number) < 29) {
     try {
-      await FileSystem.copyAsync({ from: tempUri, to: destUri });
-    } finally {
-      await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    }
-
-    const savedLabel = `저장했습니다. iOS «파일» 앱 → 내 iPhone → 이 앱 → «${folderName}» 폴더에서 오디오를 확인할 수 있습니다.`;
-    return { savedLabel };
-  }
-
-  const granular = getAndroidMediaGranularPermissions();
-  /** `true`(writeOnly)이면 Android에서 읽기 권한이 없어 getAlbumAsync 가 실패할 수 있음 */
-  const perm = await MediaLibrary.requestPermissionsAsync(false, granular);
-  if (!perm.granted) {
-    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    const expoGoHint =
-      Constants.appOwnership === 'expo'
-        ? ' Expo Go로 실행 중이면 설정 → 앱 → Expo Go → 권한에서 음악 및 오디오(일부 기기·버전에서는 사진 및 동영상·미디어)를 찾아 허용해 주세요.'
-        : '';
-    throw new Error(
-      `저장하려면 미디어·오디오 접근 권한이 필요합니다.${expoGoHint}`,
-    );
-  }
-
-  const importUri = await copyForAndroidMediaLibrary(tempUri, safeName);
-  try {
-    try {
-      await addAndroidAssetToLibrary(importUri);
+      return await saveToExternalDirect(tempUri, safeName);
     } catch {
-      return await androidFallbackSaveToAppDocuments(importUri, safeName);
+      /* fall through to SAF */
     }
-  } finally {
-    await FileSystem.deleteAsync(importUri, { idempotent: true }).catch(() => {});
-    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
   }
 
-  const folder = NRM_MEDIA_LIBRARY_ALBUM_SLUG;
-  const savedLabel = `저장했습니다. 음악·파일 앱에서 오디오를 열고 앨범/폴더 이름 «${folder}»에서 찾을 수 있습니다. (일부 기기에서는 다운로드 폴더가 아니라 음악·오디오 라이브러리에 표시됩니다.)`;
-
-  return { savedLabel };
+  // Android 10+(API 29+): SAF
+  try {
+    return await saveViaSaf(tempUri, safeName);
+  } catch (safErr) {
+    const msg = safErr instanceof Error ? safErr.message : String(safErr);
+    if (msg.includes('취소')) throw safErr;
+    return await saveToAppDocumentsFallback(tempUri, safeName);
+  }
 }
 
-/** 기기에서 생성한 임시 오디오 파일을 미디어 라이브러리·문서 폴더로 옮깁니다. */
+// ── 공개 API ──────────────────────────────────────────────────────────────────
+
+/** 기기에서 생성한 임시 오디오 파일을 저장 위치로 이동합니다. */
 export async function persistLocalAudioFile(
   tempUri: string,
   safeName: string,
 ): Promise<{ savedLabel: string }> {
-  return moveTempAudioToUserLibrary(tempUri, safeName);
+  try {
+    if (Platform.OS === 'ios') {
+      const docRoot = FileSystem.documentDirectory;
+      if (!docRoot) throw new Error('이 기기에서 문서 저장 공간을 사용할 수 없습니다.');
+
+      const folderUri = `${docRoot}${NRM_FOLDER}/`;
+      await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
+      const destUri = `${folderUri}${safeName}`;
+      await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+      await FileSystem.copyAsync({ from: tempUri, to: destUri });
+
+      return {
+        savedLabel: `저장했습니다. iOS «파일» 앱 → 내 iPhone → 이 앱 → «${NRM_FOLDER}» 폴더에서 확인하세요.`,
+      };
+    }
+
+    return await androidSaveToNrmFolder(tempUri, safeName);
+  } finally {
+    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+  }
 }
 
 export async function persistAudioAfterServerJob(
@@ -208,14 +226,11 @@ export async function persistAudioAfterServerJob(
     : `${options.fileName}.mp3`;
 
   const cacheRoot = FileSystem.cacheDirectory;
-  if (!cacheRoot) {
-    throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
-  }
+  if (!cacheRoot) throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
 
-  const tempBase =
-    cacheRoot.endsWith('/') || cacheRoot.endsWith('\\')
-      ? `${cacheRoot}nrm-dl-${jobId}-`
-      : `${cacheRoot}/nrm-dl-${jobId}-`;
+  const tempBase = cacheRoot.endsWith('/') || cacheRoot.endsWith('\\')
+    ? `${cacheRoot}nrm-dl-${jobId}-`
+    : `${cacheRoot}/nrm-dl-${jobId}-`;
   const tempUri = `${tempBase}${safeName}`;
 
   const dl = await FileSystem.downloadAsync(url, tempUri);
@@ -223,5 +238,5 @@ export async function persistAudioAfterServerJob(
     throw new Error(`파일을 받지 못했습니다 (HTTP ${dl.status})`);
   }
 
-  return moveTempAudioToUserLibrary(tempUri, safeName);
+  return persistLocalAudioFile(tempUri, safeName);
 }

@@ -99,7 +99,7 @@ npm -v
 
    환경 변수: `NRM_SERVER_PORT`, `NRM_OUTPUT_DIR`, `NRM_YT_DLP`, `NRM_FFMPEG_DIR`, `NRM_BIND_HOST`, `NRM_REPO_ROOT`(저장소 루트를 수동 지정할 때), **`NRM_YOUTUBE_API_KEY`**(YouTube Data API v3 키 — 메인 화면 **음악 검색**용. 없으면 `/api/youtube/search` 는 503), **`NRM_SPOTIFY_CLIENT_ID`** / **`NRM_SPOTIFY_CLIENT_SECRET`**(메뉴 **실시간 차트 → Spotify** — 서버만 보관, Client Credentials로 토큰 자동 갱신), **`NRM_SPOTIFY_CHART_PLAYLIST_ID`**(선택, 기본 Top 50 Global. Spotify 소유 에디토리얼은 신규 앱에서 404일 수 있어 **접근 가능한 공개 플레이리스트** ID로 바꿀 수 있음).
 
-   **Windows 방화벽**: 폰이 붙지 않으면 인바운드 규칙으로 TCP `8787`을 허용한다. (관리자 PowerShell 예: `New-NetFirewallRule -DisplayName "NullReferMusic LAN" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow`)
+   **Windows 방화벽**: 폰이 붙지 않으면 인바운드 규칙으로 TCP `8787`을 허용한다. (관리자 PowerShell 예: `New-NetFirewallRule -DisplayName "NullReferenceMusic LAN" -Direction Inbound -LocalPort 8787 -Protocol TCP -Action Allow`)
 
 2. **앱** (또 다른 터미널):
 
@@ -131,7 +131,7 @@ npm -v
 - **빌드 PC 요구**: **JDK 17 이상**(Gradle/Android 플러그인), Chaquopy pip 단계용 **Python 3.10** 이 PATH(또는 `py -3.10`)에 있어야 한다. 없으면 `app/android/app/build.gradle` 의 `chaquopy { defaultConfig { buildPython(...) } }` 로 경로를 지정한다.
 - **라이선스**: Chaquopy는 오픈소스 앱에 무료, 상업 배포 시 Chaquopy 라이선스 정책을 확인한다.
 - **앱 동작**: Android에서 기본은「이 기기에서」모드. Expo Go에는 커스텀 네이티브가 없으므로 **`npx expo run:android`** 또는 릴리스 APK로 설치해야 한다.
-- **저장 경로**: 대략 `Android/data/com.nullrefer.music/files/Music/NullReferMusic/` (기기·OS에 따라 표시 방식이 다름).
+- **저장 경로**: 대략 `Android/data/com.nullrefer.music/files/Music/NullReferenceMusic/` (기기·OS에 따라 표시 방식이 다름).
 
 ## Git 및 GitHub (`yoonhs3648`)
 
@@ -182,7 +182,7 @@ winget의 “LTS”가 **Node 24** 등으로 올라가 있을 수 있다. React 
 | 2026-04-18 | 바탕화면 전용: `Install-Desktop-DevShortcut.bat` → `NullReferMusic-Dev` → `Start-Dev-Full.bat` |
 | 2026-04-12 | LAN 바인딩·앱 서버 주소 저장·방화벽 안내 |
 | 2026-04-12 | Windows 원클릭 `*.bat` 안내 추가 |
-| 2026-05-20 | `scripts/Start-NullreferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
+| 2026-05-20 | `scripts/Start-NullReferenceMusic-All.bat`, 모바일 logcat/무선 adb 스크립트 안내 |
 | 2026-05-20 | 개발 실행 통합: `StartServer.bat` 단일화, `dev-stack-versions.json` |
 | 2026-05-20 | 런처 bat 2개: `StartServer.bat`, `NullReferMusic-Build-Release-Apk.bat` (USB 전용 스크립트 제거) |
 | 2026-05-21 | 보조 스크립트 정리: 루트 bat 2개 + `scripts/Get-LanIp.ps1` 만 유지 |

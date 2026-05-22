@@ -1,6 +1,6 @@
 # NRM 스크롤바 정책 (웹 / 모바일)
 
-NullRefer Music UI는 Apple-gallery 스펙(`nullferenceMusicDesign` / `nrmTokens`)을 따릅니다. 스크롤 **동작**은 플랫폼별로 다르고, **스크롤바 표시**는 웹만 허용합니다.
+NullReference Music UI는 Apple-gallery 스펙(`nullferenceMusicDesign` / `nrmTokens`)을 따릅니다. 스크롤 **동작**은 플랫폼별로 다르고, **스크롤바 표시**는 웹만 허용합니다.
 
 ## 원칙
 

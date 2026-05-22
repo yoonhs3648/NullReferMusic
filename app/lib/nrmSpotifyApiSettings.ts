@@ -21,12 +21,9 @@ export async function getSpotifyCredentials(): Promise<NrmSpotifyCredentials | n
     const raw = await AsyncStorage.getItem(CREDS_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as NrmSpotifyCredentials;
-    if (!parsed.clientId?.trim() || !parsed.clientSecret?.trim()) {
-      return null;
-    }
     return {
-      clientId: parsed.clientId.trim(),
-      clientSecret: parsed.clientSecret.trim(),
+      clientId: (parsed.clientId ?? '').trim(),
+      clientSecret: (parsed.clientSecret ?? '').trim(),
     };
   } catch {
     return null;
@@ -34,22 +31,26 @@ export async function getSpotifyCredentials(): Promise<NrmSpotifyCredentials | n
 }
 
 export async function hasSpotifyCredentials(): Promise<boolean> {
-  return (await getSpotifyCredentials()) != null;
+  const c = await getSpotifyCredentials();
+  return !!(c?.clientId && c?.clientSecret);
 }
 
 export async function saveSpotifyCredentials(
   creds: NrmSpotifyCredentials,
 ): Promise<void> {
+  const clientId = creds.clientId.trim();
+  const clientSecret = creds.clientSecret.trim();
+  if (!clientId && !clientSecret) {
+    await AsyncStorage.removeItem(CREDS_KEY);
+    return;
+  }
   await AsyncStorage.setItem(
     CREDS_KEY,
-    JSON.stringify({
-      clientId: creds.clientId.trim(),
-      clientSecret: creds.clientSecret.trim(),
-    }),
+    JSON.stringify({ clientId, clientSecret }),
   );
 }
 
-/** 수동 등록 화면: 액세스 토큰만 저장 */
+/** API 토큰 등록 화면: 액세스 토큰 저장 */
 export async function getManualSpotifyAccessToken(): Promise<string | null> {
   try {
     const raw = await AsyncStorage.getItem(MANUAL_ACCESS_TOKEN_KEY);
@@ -62,6 +63,35 @@ export async function getManualSpotifyAccessToken(): Promise<string | null> {
 
 export async function saveManualSpotifyAccessToken(token: string): Promise<void> {
   await AsyncStorage.setItem(MANUAL_ACCESS_TOKEN_KEY, token.trim());
+}
+
+/** Client Credentials 발급 토큰(차트 API·관리 화면 연동) */
+export async function persistClientCredentialsToken(
+  accessToken: string,
+  expiresInSeconds: number,
+): Promise<void> {
+  const trimmed = accessToken.trim();
+  const expiresAt = Date.now() + expiresInSeconds * 1000;
+  await saveSpotifyAccessTokenCache({ accessToken: trimmed, expiresAt });
+  await saveManualSpotifyAccessToken(trimmed);
+}
+
+/**
+ * 관리 화면에서 사용자가 직접 입력·저장한 토큰.
+ * 차트 API에는 사용하지 않음(Client Credentials만 사용).
+ */
+export async function persistManualSpotifyAccessTokenOnly(
+  accessToken: string,
+): Promise<void> {
+  await saveManualSpotifyAccessToken(accessToken);
+}
+
+/** @deprecated use persistClientCredentialsToken */
+export async function persistSpotifyAccessTokenForApp(
+  accessToken: string,
+  expiresInSeconds: number,
+): Promise<void> {
+  await persistClientCredentialsToken(accessToken, expiresInSeconds);
 }
 
 export async function clearManualSpotifyAccessToken(): Promise<void> {
@@ -77,7 +107,8 @@ export async function hasSpotifyChartAccess(): Promise<boolean> {
   if (manual) return true;
   const cache = await getSpotifyAccessTokenCache();
   if (cache && cache.expiresAt > Date.now()) return true;
-  return (await getSpotifyCredentials()) != null;
+  const c = await getSpotifyCredentials();
+  return !!(c?.clientId && c?.clientSecret);
 }
 
 export async function clearAllSpotifyAppData(): Promise<void> {

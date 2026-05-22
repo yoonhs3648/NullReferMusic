@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class OnDeviceDownloadPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-    return listOf(OnDeviceDownloadModule(reactContext))
+    return listOf(
+        OnDeviceDownloadModule(reactContext),
+        NrmSpotifyCookieModule(reactContext),
+    )
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

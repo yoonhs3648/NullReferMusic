@@ -109,6 +109,10 @@ function isSetup(): boolean {
   return _setup;
 }
 
+function isModuleAvailable(): boolean {
+  return getTrackPlayerModule() !== null;
+}
+
 export const nrmTrackPlayer: NrmTrackPlayerApi = {
   setup,
   play,
@@ -117,6 +121,7 @@ export const nrmTrackPlayer: NrmTrackPlayerApi = {
   stop,
   getState,
   isSetup,
+  isModuleAvailable,
 };
 
 export const Event: Record<string, string> = (getTrackPlayerModule()?.Event ?? {}) as Record<string, string>;

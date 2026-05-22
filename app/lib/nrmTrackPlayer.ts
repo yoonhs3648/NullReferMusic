@@ -28,6 +28,8 @@ export interface NrmTrackPlayerApi {
   stop(): Promise<void>;
   getState(): Promise<NrmPlaybackState>;
   isSetup(): boolean;
+  /** 네이티브 모듈이 실제로 사용 가능한지 확인. Expo Go(표준)에서는 false. */
+  isModuleAvailable(): boolean;
 }
 
 // Metro가 플랫폼별로 .native.ts / .web.ts 를 선택한다.
@@ -41,6 +43,7 @@ export const nrmTrackPlayer: NrmTrackPlayerApi = {
   stop: noop,
   getState: async (): Promise<NrmPlaybackState> => 'idle',
   isSetup: () => false,
+  isModuleAvailable: () => false,
 };
 
 export const Event = {} as Record<string, string>;

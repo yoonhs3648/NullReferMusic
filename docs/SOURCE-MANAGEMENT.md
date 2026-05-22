@@ -1,4 +1,4 @@
-# nullReferMusic — 소스 관리 및 개발 가이드라인
+# NullReferenceMusic — 소스 관리 및 개발 가이드라인
 
 이 문서는 저장소 운영, UI 일관성, 백엔드 규칙, 로깅, 그리고 **웹(IntelliJ)** / **모바일(React Native)** 실행·테스트 방법을 정리한다. `docs/PRODUCT.md`와 함께 개발 시 준수한다. PC에 설치한 JDK·Node·Android Studio·`library` 바이너리 목록은 `docs/SETUP-ENV.md`를 본다.
 
@@ -19,7 +19,7 @@
 
 ### 2.1 권장: BEM 스타일 접두사
 
-프로젝트 전역 접두사 `nrm-`(nullReferMusic)를 붙여 서드파티·브라우저 기본 스타일과 충돌을 줄인다.
+프로젝트 전역 접두사 `nrm-`(NullReferenceMusic)를 붙여 서드파티·브라우저 기본 스타일과 충돌을 줄인다.
 
 - **블록**: 기능/영역 단위 — `nrm-downloader`, `nrm-header`
 - **요소**: 블록 내부 — `nrm-downloader__input`, `nrm-downloader__button`

@@ -35,7 +35,7 @@ export function NrmChartPlatformIcon({ iconKey, size = 28 }: Props) {
       <View style={[styles.wrap, { width: size, height: size }]}>
         <MaterialCommunityIcons
           name="billboard"
-          size={size - 2}
+          size={Math.round(size * 0.88)}
           color={BILLBOARD_RED}
         />
       </View>
@@ -43,18 +43,29 @@ export function NrmChartPlatformIcon({ iconKey, size = 28 }: Props) {
   }
 
   const faBrand =
-    iconKey === 'spotify'
-      ? ('spotify' as const)
-      : iconKey === 'youtubeMusic'
-        ? ('youtube' as const)
-        : null;
+    iconKey === 'appleMusic'
+      ? ('apple' as const)
+      : iconKey === 'spotify'
+        ? ('spotify' as const)
+        : iconKey === 'lastfm'
+          ? ('lastfm' as const)
+          : iconKey === 'youtubeMusic'
+            ? ('youtube' as const)
+            : null;
 
   if (faBrand) {
     const brandColor =
-      iconKey === 'spotify' ? '#1DB954' : '#FF0000';
+      iconKey === 'appleMusic'
+        ? '#FA243C'
+        : iconKey === 'spotify'
+          ? '#1DB954'
+          : iconKey === 'lastfm'
+            ? '#D51007'
+            : '#FF0000';
+    const glyphSize = Math.round(size * 0.88);
     return (
       <View style={[styles.wrap, { width: size, height: size }]}>
-        <FontAwesome5 name={faBrand} size={size - 4} color={brandColor} brand />
+        <FontAwesome5 name={faBrand} size={glyphSize} color={brandColor} brand />
       </View>
     );
   }

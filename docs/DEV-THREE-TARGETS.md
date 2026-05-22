@@ -22,7 +22,7 @@
 - 연결 URL은 반드시 **`exp://10.x.x.x:8081`** (`StartServer.bat` 실행 시 콘솔에 표시).
 - `http://...:8081` 은 **PC 웹 전용**입니다.
 
-### QR을 스캔했는데 설치된 NullReferMusic APK가 열릴 때
+### QR을 스캔했는데 설치된 NullReferenceMusic APK가 열릴 때
 
 - 폰에 **릴리스/개발 APK**가 `exp+` 링크를 가로챕니다 → 테스트 중 삭제하거나 **Expo Go** 선택.
 - `app`에 **`expo-dev-client`를 dependencies에 넣지 마세요** (다시 `http`/`exp+` QR로 바뀜).
@@ -55,7 +55,7 @@ cd app\android
 .\gradlew.bat assembleRelease
 ```
 
-산출물: `app\android\app\build\outputs\apk\release\nullReferenceMusic-v*.apk`
+산출물: `app\android\app\build\outputs\apk\release\NullReferenceMusic-v*.apk`
 
 - Metro·PC Spring Boot **불필요**
 - Android: 기기 내 yt-dlp·Innertube (네이티브 모듈)
