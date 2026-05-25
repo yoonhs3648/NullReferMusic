@@ -216,7 +216,6 @@ export function NrmYoutubeHome({
           }
           const apiBase = await getResolvedApiBaseUrl();
           await persistAudioAfterServerJob(apiBase, jobId, { fileName });
-          notifyUser('다운로드가 완료되었습니다.');
           nrmNotifyDownloadFinished(videoId, displayLabel, true);
           return;
         }
@@ -230,7 +229,7 @@ export function NrmYoutubeHome({
               videoId,
               safeName,
             );
-            notifyUser(savedLabel);
+            void savedLabel; // 인앱 오버레이 없이 시스템 알림으로만 표시
             nrmNotifyDownloadFinished(videoId, displayLabel, true);
             return;
           } catch (nativeErr) {

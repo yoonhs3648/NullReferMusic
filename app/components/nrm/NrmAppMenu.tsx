@@ -104,7 +104,8 @@ type Panel =
   | 'screenSettings'
   | 'spotifyApiManage'
   | 'lastfmApiManage'
-  | 'downloadSettings'
+  | 'downloadManage'
+  | 'downloadPathSettings'
   | ChartMenuPanel
   | SearchMenuPanel;
 
@@ -211,7 +212,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const openDownloadSettingsFromGlobal = useCallback(() => {
     setOpen(true);
-    setPanel('downloadSettings');
+    setPanel('downloadPathSettings');
     translateX.setValue(0);
   }, [translateX]);
 
@@ -303,8 +304,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         if (lastfmBackHandlerRef.current?.()) return;
         setPanel('appSettings');
         break;
-      case 'downloadSettings':
-        setPanel('appSettings');
+      case 'downloadPathSettings':
+        setPanel('downloadManage');
+        break;
+      case 'downloadManage':
+        setPanel('root');
         break;
       case 'appSettings':
       case 'searchSettings':
@@ -542,7 +546,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 paddingBottom:
                   Platform.OS === 'web'
                     ? insets.bottom + 10
-                    : insets.bottom + nrmTokens.space.sm,
+                    : insets.bottom,
                 transform: [{ translateX }],
               },
             ]}
@@ -593,6 +597,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadManage')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    다운로드 관리
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -864,23 +883,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-                {IS_NATIVE_MOBILE ? (
-                  <Pressable
-                    onPress={() => setPanel('downloadSettings')}
-                    style={({ pressed }) => [
-                      styles.row,
-                      pressed && { backgroundColor: rowHover },
-                    ]}>
-                    <Text style={[styles.rowLabel, { color: titleColor }]}>
-                      다운로드 설정
-                    </Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={20}
-                      color={bodyColor}
-                    />
-                  </Pressable>
-                ) : null}
               </DrawerShell>
             ) : null}
 
@@ -930,7 +932,45 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
-            {panel === 'downloadSettings' ? (
+            {panel === 'downloadManage' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <Pressable
+                  onPress={() => setPanel('root')}
+                  style={styles.backRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={nrmTokens.color.primary}
+                  />
+                  <Text style={styles.backText}>뒤로</Text>
+                </Pressable>
+                <Text style={[styles.panelTitle, { color: titleColor }]}>
+                  다운로드 관리
+                </Text>
+                <Pressable
+                  onPress={() => setPanel('downloadPathSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    다운로드 경로 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadPathSettings' ? (
               <DrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
@@ -938,7 +978,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmDownloadSettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
-                  onBack={() => setPanel('appSettings')}
+                  onBack={() => setPanel('downloadManage')}
                 />
               </DrawerShell>
             ) : null}

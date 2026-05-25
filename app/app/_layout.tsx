@@ -1,7 +1,5 @@
 import '@/lib/nrmDomMinimalPolyfills';
 import '@/lib/nrmMetroLogBootstrap';
-// TrackPlayer 백그라운드 서비스 등록 — AppRegistry.registerComponent 이전에 반드시 실행해야 함
-import '@/lib/nrmTrackPlayerBootstrap';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import 'react-native-reanimated';

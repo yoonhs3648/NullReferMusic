@@ -13,11 +13,12 @@
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
-  acquireSafDirUri,
+  loadStoredSafGrant,
+  requestNewSafDirUri,
 } from '@/lib/nrmDownloadSafGrant';
 
 const NRM_FOLDER = 'NullReferenceMusic';
@@ -70,26 +71,43 @@ async function writeToBinarySafUri(sourceUri: string, destUri: string): Promise<
 
 /**
  * SAF로 저장된 파일을 Android MediaStore에 등록합니다.
- * 등록 후 Samsung My Files 등 파일 탐색기 '내장 저장공간' 트리에서 즉시 보입니다.
+ * 등록 후 Samsung My Files 등 파일 탐색기에서 즉시 보입니다.
  * 실패해도 파일 자체는 정상 저장되어 있으므로 무시합니다.
  */
 async function triggerMediaStoreScan(safDocUri: string): Promise<void> {
   try {
-    // SAF document URI에서 물리 경로 추출
-    // content://...document/primary:NullReferenceMusic%2Ffilename.mp3 → /NullReferenceMusic/filename.mp3
-    const decoded = decodeURIComponent(safDocUri);
-    const m = decoded.match(/\/document\/primary:(.+)$/i);
-    if (!m?.[1]) return;
-    const relPath = m[1]; // e.g. NullReferenceMusic/filename.mp3
-    const physUri = `file:///storage/emulated/0/${relPath}`;
-
-    // expo-media-library를 lazy require — READ_MEDIA_AUDIO 권한이 없는 환경에서는 무시
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const ML = require('expo-media-library') as typeof import('expo-media-library');
-    await ML.createAssetAsync(physUri);
+
+    // MediaLibrary 런타임 권한 확인 / 요청
+    let { status } = await ML.getPermissionsAsync();
+    if (status !== 'granted') {
+      const res = await ML.requestPermissionsAsync();
+      status = res.status;
+    }
+    if (status !== 'granted') return;
+
+    // SAF content URI를 MediaStore에 등록만 (이동 없음)
+    // createAlbumAsync(..., false) 는 파일을 MediaStore 관리 위치로 이동시켜
+    // /storage/emulated/0/NullReferenceMusic/ 에서 파일이 사라지므로 사용하지 않음
+    await ML.createAssetAsync(safDocUri);
   } catch {
     /* MediaStore 스캔 실패는 무시 — 파일은 정상 저장됨 */
   }
+}
+
+/**
+ * 폴더 선택 전 가이드 다이얼로그.
+ * SAF 피커가 열리기 전에 어떤 폴더를 선택해야 하는지 안내합니다.
+ */
+function showSafFolderGuide(): Promise<void> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      '다운로드 폴더 선택',
+      '다음 화면에서 파일을 저장할 폴더를 선택하세요.\n폴더가 없다면 우상단 메뉴 → 새 폴더 만들기로 먼저 만들어 주세요.',
+      [{ text: '계속', onPress: () => resolve() }],
+      { cancelable: false },
+    );
+  });
 }
 
 /**
@@ -100,7 +118,15 @@ async function saveViaSaf(
   sourceUri: string,
   safeName: string,
 ): Promise<{ savedLabel: string }> {
-  const dirUri = await acquireSafDirUri(NRM_FOLDER);
+  // 유효한(NullReferenceMusic 폴더) grant가 있는지 먼저 확인
+  let dirUri = await loadStoredSafGrant();
+
+  if (!dirUri) {
+    // 저장된 grant가 없거나 잘못된 폴더 → 가이드 안내 후 폴더 선택 UI 열기
+    await showSafFolderGuide();
+    dirUri = await requestNewSafDirUri(NRM_FOLDER);
+  }
+
   if (!dirUri) {
     throw new Error('다운로드 폴더 접근이 취소되었습니다. 설정 > 앱설정 > 다운로드 설정에서 경로를 먼저 지정하세요.');
   }
@@ -116,7 +142,7 @@ async function saveViaSaf(
   await triggerMediaStoreScan(destUri);
 
   return {
-    savedLabel: `저장했습니다. 내 파일 > 내장 저장공간에서 확인하세요.`,
+    savedLabel: `저장했습니다.`,
   };
 }
 

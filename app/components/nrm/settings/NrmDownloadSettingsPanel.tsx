@@ -66,7 +66,7 @@ export function NrmDownloadSettingsPanel({
         <Text style={styles.backText}>뒤로</Text>
       </Pressable>
 
-      <Text style={[styles.panelTitle, { color: titleColor }]}>다운로드 설정</Text>
+      <Text style={[styles.panelTitle, { color: titleColor }]}>다운로드 경로 설정</Text>
 
       {/* 다운로드 경로 섹션 */}
       <Text style={[styles.sectionLabel, { color: bodyColor }]}>다운로드 경로</Text>
@@ -124,21 +124,16 @@ export function NrmDownloadSettingsPanel({
                 style={styles.pathIcon}
               />
               <Text style={[styles.pathTextEmpty, { color: bodyColor }]}>
-                선택된 경로 없음{'\n'}
-                <Text style={styles.pathHint}>
-                  경로 설정을 눌러 NullReferenceMusic 폴더를 선택하세요
+                  선택된 경로 없음{'\n'}
+                  <Text style={styles.pathHint}>
+                    경로 설정을 눌러 다운로드 폴더를 선택하세요
+                  </Text>
                 </Text>
-              </Text>
             </>
           )}
         </View>
       </View>
 
-      <Text style={[styles.guideText, { color: bodyColor }]}>
-        경로 설정을 누르면 폴더 선택 화면이 열립니다.{'\n'}
-        원하는 폴더를 선택하거나 새 폴더 만들기로 폴더를 생성하세요.{'\n'}
-        /storage/emulated/0 은 생략되어 표시됩니다.
-      </Text>
     </>
   );
 }

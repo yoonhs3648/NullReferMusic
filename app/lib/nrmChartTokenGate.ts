@@ -13,7 +13,7 @@ import {
   nrmChartsSpotifyNotConfiguredMessage,
 } from '@/lib/nrmChartsStrings';
 import { nrmSearchNotConfiguredMessage } from '@/lib/nrmSearchStrings';
-import { confirmUser } from '@/lib/nrmUserNotify';
+import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 async function hasSpotifyOfficialChartAccess(): Promise<boolean> {
   const manual = await getManualSpotifyAccessToken();
@@ -41,7 +41,7 @@ export async function ensureSpotifyOfficialChartAccess(
 
 /**
  * 메뉴 → Spotify 차트 진입 게이트.
- * - Android: Bearer 없거나 무효면 WebView 로그인 오버레이를 띄우고, 성공 시 true (차트 진입)
+ * - Android: Bearer 없거나 무효면 즉시 알림 후 WebView 로그인 오버레이를 띄우고, 성공 시 true (차트 진입)
  * - 그 외: 설정 화면 이동 안내 후 false (차트 진입 차단)
  */
 export async function ensureSpotifyChartsSessionAccess(
@@ -53,6 +53,7 @@ export async function ensureSpotifyChartsSessionAccess(
   }
 
   if (Platform.OS === 'android' && onAndroidRenew) {
+    notifyUser('Spotify 세션 토큰이 없거나 유효하지 않습니다. 로그인 화면을 엽니다.');
     return onAndroidRenew();
   }
 
@@ -66,12 +67,13 @@ export async function ensureSpotifyChartsSessionAccess(
   return false;
 }
 
-/** 실시간 차트 Bearer 만료·인증 실패 — Android는 WebView 갱신(dialog 없음), 그 외는 설정 이동 */
+/** 실시간 차트 Bearer 만료·인증 실패 — Android는 즉시 알림 후 WebView 갱신, 그 외는 설정 이동 */
 export async function promptSpotifyChartsBearerExpired(handlers: {
   onOpenChartsSession: () => void;
   onAndroidRenew?: () => Promise<boolean>;
 }): Promise<boolean> {
   if (Platform.OS === 'android' && handlers.onAndroidRenew) {
+    notifyUser('Spotify Bearer 토큰이 만료되었습니다. 로그인 화면을 엽니다.');
     return handlers.onAndroidRenew();
   }
 

@@ -25,17 +25,22 @@ export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
         ref={webRef}
         style={styles.webview}
         source={{ uri: NRM_CHARTS_SPOTIFY_URL }}
-        originWhitelist={['https://*']}
+        originWhitelist={['https://*', 'http://*']}
         javaScriptEnabled
         domStorageEnabled
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
         setSupportMultipleWindows={false}
+        allowsInlineMediaPlayback
         onNavigationStateChange={onNavigation}
         onLoadEnd={onLoadEnd}
         onMessage={onMessage}
         injectedJavaScriptBeforeContentLoaded={NRM_SPOTIFY_CHARTS_HARVEST_BEFORE_JS}
         injectedJavaScript={NRM_SPOTIFY_CHARTS_HARVEST_JS}
+        onShouldStartLoadWithRequest={(req) => {
+          // https/http 외의 스킴(spotify:// 등)은 WebView 내에서 열지 않음
+          return req.url.startsWith('https://') || req.url.startsWith('http://');
+        }}
       />
     </View>
   );

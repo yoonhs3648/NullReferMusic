@@ -1,5 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
-import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
   getResolvedApiBaseUrl,
@@ -65,9 +65,42 @@ async function issueTokenWithBase(
   }
 }
 
+async function issueTokenDirect(creds: NrmSpotifyCredentials): Promise<SpotifyTokenIssueOutcome> {
+  try {
+    const credentials = btoa(`${creds.clientId}:${creds.clientSecret}`);
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 401) {
+        return { ok: false, message: 'Spotify 인증에 실패했습니다. ID·Secret을 확인하세요.' };
+      }
+      return { ok: false, message: '액세스 토큰을 발급하지 못했습니다.' };
+    }
+    const data = (await res.json()) as { access_token?: string; expires_in?: number; token_type?: string };
+    if (!data.access_token) return { ok: false, message: '액세스 토큰을 발급하지 못했습니다.' };
+    return {
+      ok: true,
+      accessToken: data.access_token,
+      expiresIn: data.expires_in ?? 3600,
+      tokenType: data.token_type ?? 'Bearer',
+    };
+  } catch {
+    return { ok: false, message: '인터넷 연결을 확인하세요.' };
+  }
+}
+
 export async function issueSpotifyAccessToken(
   creds: NrmSpotifyCredentials,
 ): Promise<SpotifyTokenIssueOutcome> {
+  if (isStandaloneApp()) {
+    return issueTokenDirect(creds);
+  }
   const resolved = await getResolvedApiBaseUrl();
   const primary = resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
   if (!primary) {

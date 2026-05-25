@@ -21,9 +21,33 @@ if not exist "%ROOT%\app\package.json" (
   exit /b 1
 )
 if not exist "%ROOT%\app\node_modules" (
-  echo ERROR: app\node_modules missing. Run: cd app ^&^& npm install
-  timeout /t 8 /nobreak >nul
-  exit /b 1
+  echo [app] node_modules missing — running npm install ...
+  pushd "%ROOT%\app"
+  call npm install
+  if errorlevel 1 (
+    echo ERROR: npm install failed in app\
+    popd
+    timeout /t 8 /nobreak >nul
+    exit /b 1
+  )
+  popd
+)
+if not exist "%ROOT%\app\node_modules\expo-notifications" (
+  echo [app] expo-notifications missing — syncing npm dependencies ...
+  pushd "%ROOT%\app"
+  call npm install
+  if errorlevel 1 (
+    echo ERROR: npm install failed. Check Node/npm and app\package-lock.json
+    popd
+    timeout /t 8 /nobreak >nul
+    exit /b 1
+  )
+  popd
+  if not exist "%ROOT%\app\node_modules\expo-notifications" (
+    echo ERROR: expo-notifications still missing after npm install
+    timeout /t 8 /nobreak >nul
+    exit /b 1
+  )
 )
 if not exist "%ROOT%\scripts\Get-LanIp.ps1" (
   echo ERROR: scripts\Get-LanIp.ps1 not found.

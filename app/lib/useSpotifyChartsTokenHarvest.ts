@@ -75,6 +75,12 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
     if (silentTimeoutTimer.current) { clearTimeout(silentTimeoutTimer.current); silentTimeoutTimer.current = null; }
   }, []);
 
+  /** burst·fallback 타이머만 취소 (silentTimeout 은 유지) — 로그인 페이지 체류 중 호출 */
+  const pauseHarvestTimers = useCallback(() => {
+    if (burstTimer.current) { clearInterval(burstTimer.current); burstTimer.current = null; }
+    if (tokenUrlFallbackTimer.current) { clearTimeout(tokenUrlFallbackTimer.current); tokenUrlFallbackTimer.current = null; }
+  }, []);
+
   const finishWithToken = useCallback(
     (bearerToken: string) => {
       if (finished.current || !bearerToken) return;
@@ -130,7 +136,10 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
     (url: string, loading: boolean) => {
       if (finished.current || !url || loading) return;
       if (isHost(url, 'accounts.spotify.com')) {
-        // silent 모드: 로그인 리디렉션 감지 즉시 보고
+        // 로그인 페이지에 도달하면 harvest 타이머를 모두 중단해
+        // 타이머가 강제로 페이지를 이동시키지 않도록 함
+        pauseHarvestTimers();
+        // silent 모드: 로그인 필요 즉시 보고
         // visible 모드: 사용자가 직접 로그인하도록 그냥 통과
         if (onNeedsLogin) finishWithNeedsLogin();
         return;
@@ -146,7 +155,7 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
         onChartsPageReady(url);
       }
     },
-    [finishWithNeedsLogin, onNeedsLogin, onChartsPageReady, onTokenPageReady],
+    [pauseHarvestTimers, finishWithNeedsLogin, onNeedsLogin, onChartsPageReady, onTokenPageReady],
   );
 
   const onNavigation = useCallback(
@@ -189,5 +198,6 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
     onLoadEnd,
     onMessage,
     resetForNewCapture,
+    pauseHarvestTimers,
   };
 }

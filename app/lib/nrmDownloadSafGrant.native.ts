@@ -52,6 +52,7 @@ export async function checkSafDownloadPath(): Promise<SafPathStatus> {
 export async function loadStoredSafGrant(): Promise<string | null> {
   const stored = await AsyncStorage.getItem(SAF_GRANT_KEY).catch(() => null);
   if (!stored) return null;
+
   try {
     await StorageAccessFramework.readDirectoryAsync(stored);
     return stored;
@@ -77,7 +78,11 @@ export async function acquireSafDirUri(folderHint = 'NullReferenceMusic'): Promi
  * 사용자가 취소하면 null 반환.
  */
 export async function requestNewSafDirUri(folderHint = 'NullReferenceMusic'): Promise<string | null> {
-  const hint = StorageAccessFramework.getUriForDirectoryInRoot(folderHint);
+  // getUriForDirectoryInRoot 은 tree/ URI를 반환해 삼성 피커가 "S20 FE" 기기 루트로 열림.
+  // document/primary: 형식을 쓰면 "내장 저장공간" 루트로 바로 열린다.
+  const hint = folderHint
+    ? `content://com.android.externalstorage.documents/document/primary:${encodeURIComponent(folderHint)}`
+    : `content://com.android.externalstorage.documents/document/primary:`;
   let result: Awaited<ReturnType<typeof StorageAccessFramework.requestDirectoryPermissionsAsync>>;
   try {
     result = await StorageAccessFramework.requestDirectoryPermissionsAsync(hint);

@@ -30,7 +30,7 @@ const SPOTIFY_MESSAGES: Record<ChartErrorCode, string> = {
   not_found: '요청한 차트를 찾지 못했습니다.',
   empty: '지금은 표시할 곡이 없습니다.',
   network:
-    '차트 서버에 연결하지 못했습니다. PC 백엔드가 켜져 있는지, 같은 Wi‑Fi인지 확인해 주세요.',
+    '차트를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.',
   server: 'Spotify 차트를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
   unknown: 'Spotify 차트를 불러오지 못했습니다.',
 };
@@ -48,7 +48,7 @@ const LASTFM_MESSAGES: Record<ChartErrorCode, string> = {
   not_found: '요청한 차트를 찾지 못했습니다.',
   empty: '지금은 표시할 곡이 없습니다.',
   network:
-    '차트 서버에 연결하지 못했습니다. PC 백엔드가 켜져 있는지, 같은 Wi‑Fi인지 확인해 주세요.',
+    '차트를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.',
   server: 'Last.fm 차트를 잠시 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.',
   unknown: 'Last.fm 차트를 불러오지 못했습니다.',
 };

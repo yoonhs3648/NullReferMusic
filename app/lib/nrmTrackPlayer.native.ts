@@ -43,7 +43,13 @@ async function setup(): Promise<void> {
       Capability.SeekTo,
     ],
     compactCapabilities: [Capability.Play, Capability.Pause, Capability.Stop],
-    progressUpdateEventInterval: 2,
+    notificationCapabilities: [
+      Capability.Play,
+      Capability.Pause,
+      Capability.Stop,
+      Capability.SeekTo,
+    ],
+    progressUpdateEventInterval: 1,
   });
   await TrackPlayer.setRepeatMode(RepeatMode.Off);
   _setup = true;

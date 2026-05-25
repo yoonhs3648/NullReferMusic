@@ -1,6 +1,6 @@
 {
   "name": "nullrefer-music-app",
-  "main": "expo-router/entry",
+  "main": "index",
   "version": "1.2.1",
   "scripts": {
     "start": "expo start --lan",
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "@types/react-dom": "^19.2.3",
+    "@types/react-dom": "~19.1.0",
     "patch-package": "^8.0.1",
     "react-test-renderer": "19.1.0",
     "sharp": "^0.34.5",

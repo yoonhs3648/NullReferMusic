@@ -9,7 +9,7 @@ import {
   useSpotifyChartsTokenHarvest,
 } from '@/lib/useSpotifyChartsTokenHarvest';
 
-const SILENT_TIMEOUT_MS = 12000;
+const SILENT_TIMEOUT_MS = 3500;
 
 type Props = {
   active: boolean;

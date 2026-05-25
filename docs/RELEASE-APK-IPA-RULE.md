@@ -152,3 +152,70 @@ APK 빌드 완료 후 **앱이 실행 즉시 꺼지거나(crash), 핵심 기능�
 - ffmpeg 다운로드 실패 시 앱은 **ffmpeg 없이 yt-dlp만으로 오디오 추출**을 시도한다 (opus/m4a 원본 포맷).  
 - yt-dlp 바이너리는 GitHub releases에서 ABI별로 자동 다운로드된다 (`YtDlpBootstrap.kt`).  
 - Expo Go 환경에서는 on-device yt-dlp가 비활성화되고 백엔드 서버를 통해 다운로드한다.
+
+---
+
+## 7. APK 자립 동작 원칙 (필수)
+
+### 7-1. 핵심 규칙
+
+> **설치된 APK(IPA)는 이 PC의 Spring 백엔드 서버(`localhost:8787`)와 절대 통신하지 않는다.**  
+> **APK는 모바일 기기 자체에서 모든 기능을 처리한다.**  
+> 이 규칙은 다른 PC에서 APK를 빌드하는 경우에도 동일하게 적용된다.
+
+### 7-2. 개발 방식 — "기능 개발 시 동시 구현" (필수)
+
+> **APK를 말 때마다 리팩토링하지 않는다.**  
+> **새 기능을 개발하는 시점에 Expo Go/웹(백엔드 프록시)용과 Standalone APK(직접 외부 API)용을 동시에 구현한다.**
+
+#### 구체적 흐름
+
+1. **웹 / Expo Go 개발** → 백엔드를 통해 외부 API를 호출하는 방식으로 먼저 동작 확인.
+2. **동시에 Standalone 분기 추가** → `isStandaloneApp()` 블록 안에서 외부 API를 기기에서 직접 호출하는 코드를 함께 작성.
+3. **APK 빌드 시 추가 리팩토링 불필요** → 이미 두 경로가 모두 구현된 상태이므로 그냥 빌드하면 된다.
+
+```typescript
+// ✅ 올바른 패턴 — 기능 개발 시 동시에 작성
+export async function fetchSomeData(params: Params): Promise<Result> {
+  if (isStandaloneApp()) {
+    // APK: 외부 API 직접 호출 (백엔드 없이 동작)
+    return fetchSomeDataDirect(params);
+  }
+  // Expo Go / 웹: 백엔드 프록시 경유
+  return fetchSomeDataViaBackend(params);
+}
+
+// ❌ 잘못된 패턴 — Standalone 분기 없이 백엔드만 구현
+// → APK 빌드 시 localhost:8787 접속 시도 → "인터넷 연결 없음" 오류
+```
+
+### 7-3. Standalone 모드 감지
+
+`app/lib/nrmDevRuntime.ts`의 `isStandaloneApp()` 함수가 `true`를 반환하면 릴리스 APK/IPA다.
+
+```typescript
+// isStandaloneApp() === true → 릴리스 APK/IPA: 모든 기능을 외부 API 직접 호출
+// isStandaloneApp() === false → Expo Go / 웹: PC 백엔드(8787) 사용 가능
+```
+
+### 7-4. 기능별 처리 방식 (현재 구현 상태)
+
+| 기능 | Standalone APK | Expo Go / 웹 |
+|------|----------------|-------------|
+| YouTube 검색 | 기기 내 Innertube | PC 백엔드 `/api/youtube/search` |
+| YouTube 다운로드 | 기기 내 yt-dlp | PC 백엔드 `/api/download` |
+| Spotify Charts | `charts-spotify-com-service.spotify.com` 직접 호출 | PC 백엔드 프록시 |
+| Spotify OAuth 토큰 | `accounts.spotify.com/api/token` 직접 호출 | PC 백엔드 프록시 |
+| Apple Music Charts | `rss.marketingtools.apple.com` 직접 호출 | PC 백엔드 프록시 |
+| Last.fm Charts | `ws.audioscrobbler.com/2.0/` 직접 호출 | PC 백엔드 프록시 |
+| Last.fm 검색 | `ws.audioscrobbler.com/2.0/` 직접 호출 | PC 백엔드 프록시 |
+| Last.fm API Key 검증 | Last.fm API 직접 검증 | PC 백엔드 프록시 |
+
+> 새 기능 추가 시 반드시 이 표에도 행을 추가한다.
+
+### 7-5. 구현 시 준수 사항
+
+1. **새 기능을 백엔드 API에 의존해 구현할 때**, 같은 커밋/PR 안에서 `isStandaloneApp()` 분기와 직접 외부 API 호출 코드를 함께 작성한다. 나중으로 미루지 않는다.
+2. **APK 빌드 요청이 들어왔을 때 Standalone 분기가 없는 기능이 발견되면**, 빌드 전에 먼저 해당 기능에 직접 API 호출을 구현한 뒤 빌드한다.
+3. **"인터넷 연결 없음" 오류가 APK에서만 발생**한다면 `localhost:8787` 호출을 시도하는 것이다. 즉시 직접 API 호출로 전환한다.
+4. **에러 메시지에 "PC 서버(8787)"나 "백엔드" 언급을 포함하지 않는다** (standalone 모드에서는 의미 없는 안내이다).
