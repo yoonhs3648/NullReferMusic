@@ -9,6 +9,7 @@ class OnDeviceDownloadPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
     return listOf(
         OnDeviceDownloadModule(reactContext),
+        NrmAudioMetadataModule(reactContext),
         NrmSpotifyCookieModule(reactContext),
     )
   }

@@ -104,7 +104,13 @@ export function NrmUrlDownloader({ isDark }: Props) {
         const info = await yt.getBasicInfo(videoId);
         const title = info.basic_info.title?.trim() || 'Unknown';
         const author = info.basic_info.author?.trim() || 'Unknown';
-        const fileName = buildAudioFileName(author, title, '.m4a');
+        const { loadDownloadAudioExtension, loadDownloadFileNameFormat } =
+          await import('@/lib/nrmDownloadSettings');
+        const [ext, fileNameFormat] = await Promise.all([
+          loadDownloadAudioExtension(),
+          loadDownloadFileNameFormat(),
+        ]);
+        const fileName = buildAudioFileName(author, title, ext, fileNameFormat);
         const { savedLabel } = await downloadYoutubeAudioOnDevice(
           videoId,
           fileName,
@@ -113,8 +119,13 @@ export function NrmUrlDownloader({ isDark }: Props) {
         return;
       }
 
+      const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
+        await import('@/lib/nrmDownloadSettings');
+      const encode = await loadDownloadEncodeSettings();
       const res = await requestDownload(trimmed, {
         noPlaylist: !fullPlaylist,
+        audioFormat: extensionToYtDlpFormat(encode.extension),
+        audioQuality: encode.audioQuality,
       });
       const line = (res.outputDir || res.message || '').trim();
       if (line) setSuccess(line);

@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { NrmLogo } from '@/components/nrm/NrmLogo';
+import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
 import {
   formatLastfmCount,
   NrmLastfmCoverImage,
@@ -104,9 +104,7 @@ export function NrmLastfmArtistSearchHome({
         { paddingHorizontal },
       ]}
       keyboardShouldPersistTaps="handled">
-      <View style={styles.logoWrap}>
-        <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onBackToHome} />
-      </View>
+      <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
       <NrmSearchPageTitle title="아티스트 검색" color={titleColor} />
       <NrmLastfmSearchBar
         value={query}
@@ -152,13 +150,6 @@ export function NrmLastfmArtistSearchHome({
 
       {detail ? (
         <>
-          <Pressable
-            onPress={() => setDetail(null)}
-            style={styles.backDetail}>
-            <Text style={[styles.backDetailText, { color: nrmTokens.color.primary }]}>
-              ← 검색 결과로
-            </Text>
-          </Pressable>
           <View style={styles.heroRow}>
             <NrmLastfmCoverImage uri={detail.info.imageUrl} size={120} />
             <View style={styles.heroMeta}>
@@ -285,8 +276,6 @@ const styles = StyleSheet.create({
   hitTitle: { fontSize: nrmTokens.font.body, fontWeight: '600' },
   hitSub: { marginTop: 2, fontSize: nrmTokens.font.caption },
   rank: { width: 28, textAlign: 'center', fontWeight: '600' },
-  backDetail: { marginBottom: nrmTokens.space.sm },
-  backDetailText: { fontSize: nrmTokens.font.body, fontWeight: '500' },
   heroRow: { flexDirection: 'row', gap: nrmTokens.space.md, marginBottom: nrmTokens.space.md },
   heroMeta: { flex: 1, minWidth: 0 },
   heroTitle: { fontSize: nrmTokens.font.lead, fontWeight: '700' },

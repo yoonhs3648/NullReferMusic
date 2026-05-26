@@ -20,6 +20,11 @@ import {
   saveLastfmCredentials,
   type NrmLastfmCredentials,
 } from '@/lib/nrmLastfmApiSettings';
+import {
+  NRM_API_SETTINGS_SAVED_MESSAGE,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+} from '@/lib/nrmApiSettingsUi';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue';
@@ -230,10 +235,13 @@ export function NrmLastfmApiManagePanel({
   const handleLeaveEditable = useCallback(
     async (target: 'hub' | 'closeDrawer' | 'appSettings') => {
       if (isDraftDirty()) {
-        const save = await confirmUser('변경된 값을 저장할까요?');
+        const save = await confirmUser(
+          NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+          NRM_API_SETTINGS_UNSAVED_CONFIRM,
+        );
         if (save) {
           await persistAllDrafts();
-          void notifyUser('저장했습니다.');
+          void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
         } else {
           restoreDraftSnapshot();
         }
@@ -317,7 +325,7 @@ export function NrmLastfmApiManagePanel({
 
   const onSaveManage = async () => {
     await persistAllDrafts();
-    void notifyUser('저장했습니다.');
+    void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
   };
 
   const onVerifyAndSave = async () => {

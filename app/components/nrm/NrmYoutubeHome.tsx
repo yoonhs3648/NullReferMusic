@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Fragment, useCallback, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,14 +28,19 @@ import {
   nrmNotifyDownloadStarted,
 } from '@/lib/nrmMobileDownloadNotifications';
 import { persistAudioAfterServerJob } from '@/lib/nrmPersistServerDownload';
+import {
+  buildChartAudioMetadata,
+  buildMainSearchAudioMetadata,
+  buildPlatformTrackAudioMetadata,
+  type NrmAudioFileMetadata,
+} from '@/lib/nrmDownloadAudioMetadata';
+import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
-import { nrmTrackPlayer } from '@/lib/nrmTrackPlayer';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
 import { NrmDownloadModal } from '@/components/nrm/NrmDownloadModal';
-import { NrmNativeAudioPlayer } from '@/components/nrm/NrmNativeAudioPlayer';
 import { YoutubeEmbed } from '@/components/nrm/YoutubeEmbed';
 
 function youtubeWatchUrl(videoId: string): string {
@@ -95,26 +100,26 @@ type Props = {
   isDark: boolean;
   phase: 'welcome' | 'browsing';
   onSearchCommitted?: () => void;
+  /** 차트에서 클릭 시 자동으로 이 쿼리로 검색 */
+  initialQuery?: string;
+  /** 차트·Last.fm에서 넘어온 트랙 — 다운로드 메타데이터·모달 기본값 */
+  chartDownloadTrack?: ChartTrackItem | null;
+  chartDownloadSource?: 'chart' | 'lastfm' | null;
 };
-
-/**
- * TrackPlayer 네이티브 모듈 사용 가능 여부.
- * 표준 Expo Go에는 react-native-track-player가 번들되지 않아 false가 됩니다.
- * APK 빌드에서는 true입니다.
- */
-const CAN_USE_TRACK_PLAYER =
-  Platform.OS !== 'web' && nrmTrackPlayer.isModuleAvailable();
 
 export function NrmYoutubeHome({
   isDark,
   phase,
   onSearchCommitted,
+  initialQuery,
+  chartDownloadTrack = null,
+  chartDownloadSource = null,
 }: Props) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [loading, setLoading] = useState(false);
+  const initialQueryFiredRef = useRef(false);
   const [results, setResults] = useState<YoutubeSearchItem[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [trackLoadingId, setTrackLoadingId] = useState<string | null>(null);
   const [dlBusy, setDlBusy] = useState<Record<string, boolean>>({});
   const dlInFlight = useRef<Set<string>>(new Set());
   const [downloadModalItem, setDownloadModalItem] =
@@ -127,6 +132,30 @@ export function NrmYoutubeHome({
     borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
   };
 
+  useEffect(() => {
+    if (!initialQuery || initialQueryFiredRef.current) return;
+    initialQueryFiredRef.current = true;
+    setQuery(initialQuery);
+    const q = initialQuery.trim();
+    if (!q) return;
+    const token = ++latestSearchTokenRef.current;
+    onSearchCommitted?.();
+    setLoading(true);
+    setPlayingId(null);
+    void searchYoutube(q).then((out) => {
+      if (token !== latestSearchTokenRef.current) return;
+      if (!out.ok) {
+        notifyUser(out.userMessage);
+        setResults([]);
+      } else {
+        setResults(out.items);
+      }
+      setLoading(false);
+    });
+  // only run once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
@@ -134,8 +163,6 @@ export function NrmYoutubeHome({
     onSearchCommitted?.();
     setLoading(true);
     setPlayingId(null);
-    setTrackLoadingId(null);
-    if (Platform.OS !== 'web') void nrmTrackPlayer.stop();
     try {
       const out = await searchYoutube(q);
       if (token !== latestSearchTokenRef.current) return;
@@ -162,7 +189,7 @@ export function NrmYoutubeHome({
   }, [query, onSearchCommitted]);
 
   const runDownloadWithFileName = useCallback(
-    async (videoId: string, fileName: string) => {
+    async (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
       if (dlInFlight.current.has(videoId)) return;
       const consent = await ensureDownloadConsent();
       if (!consent) return;
@@ -173,7 +200,7 @@ export function NrmYoutubeHome({
         const pathStatus = await checkSafDownloadPath();
         if (pathStatus === 'no_path') {
           const ok = await confirmUser(
-            '다운로드 경로가 설정되지 않았습니다.\n설정에서 경로를 먼저 지정하시겠습니까?',
+            '다운로드 경로가 없습니다.\n다운로드 설정에서 경로를 지정할까요?',
             { confirmLabel: '설정하기', cancelLabel: '취소' },
           );
           if (ok) openDownloadSettingsPanel();
@@ -191,13 +218,11 @@ export function NrmYoutubeHome({
 
       dlInFlight.current.add(videoId);
       setDlBusy((m) => ({ ...m, [videoId]: true }));
-      const displayLabel = displayLabelFromAudioFileName(fileName);
-      const safeName =
-        Platform.OS === 'web'
-          ? fileName.endsWith('.mp3')
-            ? fileName
-            : `${fileName}.mp3`
-          : fileName;
+      const { loadDownloadEncodeSettings, applyDownloadExtension, extensionToYtDlpFormat } =
+        await import('@/lib/nrmDownloadSettings');
+      const encode = await loadDownloadEncodeSettings();
+      const safeName = applyDownloadExtension(fileName, encode.extension);
+      const displayLabel = displayLabelFromAudioFileName(safeName);
 
       if (Platform.OS !== 'web') {
         nrmNotifyDownloadStarted(videoId, displayLabel);
@@ -207,6 +232,9 @@ export function NrmYoutubeHome({
         if (Platform.OS !== 'web' && usesPcBackendInDev()) {
           const res = await requestDownload(youtubeWatchUrl(videoId), {
             noPlaylist: true,
+            audioFormat: extensionToYtDlpFormat(encode.extension),
+            audioQuality: encode.audioQuality,
+            metadata,
           });
           const jobId = res.jobId;
           if (!jobId || typeof jobId !== 'string') {
@@ -215,7 +243,7 @@ export function NrmYoutubeHome({
             );
           }
           const apiBase = await getResolvedApiBaseUrl();
-          await persistAudioAfterServerJob(apiBase, jobId, { fileName });
+          await persistAudioAfterServerJob(apiBase, jobId, { fileName: safeName });
           nrmNotifyDownloadFinished(videoId, displayLabel, true);
           return;
         }
@@ -228,6 +256,7 @@ export function NrmYoutubeHome({
             const { savedLabel } = await downloadYoutubeAudioOnDevice(
               videoId,
               safeName,
+              metadata,
             );
             void savedLabel; // 인앱 오버레이 없이 시스템 알림으로만 표시
             nrmNotifyDownloadFinished(videoId, displayLabel, true);
@@ -248,6 +277,9 @@ export function NrmYoutubeHome({
           }
           const res = await requestDownload(youtubeWatchUrl(videoId), {
             noPlaylist: true,
+            audioFormat: extensionToYtDlpFormat(encode.extension),
+            audioQuality: encode.audioQuality,
+            metadata,
           });
           const jobId = res.jobId;
           if (!jobId || typeof jobId !== 'string') {
@@ -264,6 +296,9 @@ export function NrmYoutubeHome({
 
         const res = await requestDownload(youtubeWatchUrl(videoId), {
           noPlaylist: true,
+          audioFormat: extensionToYtDlpFormat(encode.extension),
+          audioQuality: encode.audioQuality,
+          metadata,
         });
         const jobId = res.jobId;
         if (!jobId || typeof jobId !== 'string') {
@@ -272,7 +307,7 @@ export function NrmYoutubeHome({
           );
         }
         const apiBase = await getResolvedApiBaseUrl();
-        await persistAudioAfterServerJob(apiBase, jobId, { fileName });
+        await persistAudioAfterServerJob(apiBase, jobId, { fileName: safeName });
         return;
       } catch (e) {
         if (Platform.OS !== 'web') {
@@ -312,10 +347,33 @@ export function NrmYoutubeHome({
         visible={downloadModalItem !== null}
         item={downloadModalItem}
         isDark={isDark}
+        initialArtist={chartDownloadTrack?.artists}
+        initialTitle={chartDownloadTrack?.title}
+        metadataSource={
+          chartDownloadSource === 'lastfm'
+            ? 'lastfm'
+            : chartDownloadTrack
+              ? 'chart'
+              : 'main'
+        }
         onClose={() => setDownloadModalItem(null)}
-        onConfirm={(videoId, fileName) => {
+        onConfirm={(videoId, fileName, userArtist, userTitle) => {
+          const meta =
+            chartDownloadTrack && chartDownloadSource === 'lastfm'
+              ? buildPlatformTrackAudioMetadata(
+                  chartDownloadTrack,
+                  userArtist,
+                  userTitle,
+                )
+              : chartDownloadTrack
+                ? buildChartAudioMetadata(
+                    chartDownloadTrack,
+                    userArtist,
+                    userTitle,
+                  )
+                : buildMainSearchAudioMetadata(userArtist, userTitle);
           setDownloadModalItem(null);
-          void runDownloadWithFileName(videoId, fileName);
+          void runDownloadWithFileName(videoId, fileName, meta);
         }}
       />
       <View style={styles.searchRowWrap}>
@@ -356,7 +414,6 @@ export function NrmYoutubeHome({
             ? nrmTokens.color.borderOnDark
             : nrmTokens.color.hairline;
           const busy = !!dlBusy[item.videoId];
-          const trackFetching = trackLoadingId === item.videoId;
           return (
             <Fragment key={item.videoId}>
               <View
@@ -367,43 +424,9 @@ export function NrmYoutubeHome({
                 ]}>
                 <Pressable
                   onPress={() => {
-                    if (!CAN_USE_TRACK_PLAYER) {
-                      // 웹 또는 표준 Expo Go: YoutubeEmbed(WebView) 로 재생
-                      setPlayingId(
-                        playingId === item.videoId ? null : item.videoId,
-                      );
-                      return;
-                    }
-                    // APK 네이티브 빌드: TrackPlayer로 재생
-                    if (playingId === item.videoId) {
-                      setPlayingId(null);
-                      setTrackLoadingId(null);
-                      void nrmTrackPlayer.stop();
-                      return;
-                    }
-                    setPlayingId(item.videoId);
-                    setTrackLoadingId(item.videoId);
-                    const currentVideoId = item.videoId;
-                    void (async () => {
-                      try {
-                        const { getAudioStreamUrlWithInnertube } = await import(
-                          '@/lib/nrmInnertubeYoutube'
-                        );
-                        const url = await getAudioStreamUrlWithInnertube(currentVideoId);
-                        await nrmTrackPlayer.play({
-                          id: currentVideoId,
-                          url,
-                          title: item.title,
-                          artist: item.channelTitle ?? 'NullReferenceMusic',
-                          artwork: item.thumbnailUrl ?? undefined,
-                        });
-                      } catch {
-                        setPlayingId(null);
-                        notifyUser('재생할 수 없습니다. 잠시 후 다시 시도하세요.');
-                      } finally {
-                        setTrackLoadingId(null);
-                      }
-                    })();
+                    setPlayingId(
+                      playingId === item.videoId ? null : item.videoId,
+                    );
                   }}
                   style={({ pressed }) => [
                     styles.rowMain,
@@ -417,11 +440,6 @@ export function NrmYoutubeHome({
                         source={{ uri: item.thumbnailUrl }}
                         style={StyleSheet.absoluteFill}
                       />
-                    ) : null}
-                    {trackFetching ? (
-                      <View style={[StyleSheet.absoluteFill, styles.thumbLoadingOverlay]}>
-                        <ActivityIndicator size="small" color="#fff" />
-                      </View>
                     ) : null}
                   </View>
                   <View style={styles.rowText}>
@@ -488,26 +506,9 @@ export function NrmYoutubeHome({
                   )}
                 </Pressable>
               </View>
-              {/* 플레이어 영역
-                  APK: NrmNativeAudioPlayer (TrackPlayer) → 시스템 미디어 알림 지원
-                  웹 / 표준 Expo Go: YoutubeEmbed (WebView) */}
               {active ? (
                 <View style={styles.embedBelow}>
-                  {CAN_USE_TRACK_PLAYER ? (
-                    <NrmNativeAudioPlayer
-                      videoId={item.videoId}
-                      title={item.title}
-                      channelTitle={item.channelTitle ?? ''}
-                      thumbnailUrl={item.thumbnailUrl}
-                      isDark={isDark}
-                      onStop={() => {
-                        setPlayingId(null);
-                        void nrmTrackPlayer.stop();
-                      }}
-                    />
-                  ) : (
-                    <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
-                  )}
+                  <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
                   <Pressable
                     onPress={() => setDownloadModalItem(item)}
                     disabled={busy}
@@ -691,11 +692,6 @@ const styles = StyleSheet.create({
     borderRadius: nrmTokens.radius.sm,
     backgroundColor: '#222',
     overflow: 'hidden',
-  },
-  thumbLoadingOverlay: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   rowText: {
     flex: 1,

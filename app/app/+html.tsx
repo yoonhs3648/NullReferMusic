@@ -72,4 +72,16 @@ body {
     background-color: rgba(0, 0, 0, 0.26);
   }
 }
+
+/* 기간별 차트 — 네이티브 select 펼침 목록 (인라인 option 스타일만으로는 브라우저마다 안 먹는 경우 있음) */
+.nrm-period-select option {
+  background-color: #1c1c1e;
+  color: #f5f5f7;
+}
+@media (prefers-color-scheme: light) {
+  .nrm-period-select option {
+    background-color: #ffffff;
+    color: #111111;
+  }
+}
 `;

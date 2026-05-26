@@ -1,8 +1,8 @@
 export const nrmSearchHint =
-  '검색을 사용하려면 설정에서 API 키를 저장하세요.';
+  'Spotify는 Client ID·Secret, Last.fm은 API Key가 필요합니다. (메뉴 → 앱 설정 → API 설정)';
 
 export const nrmSearchNotConfiguredMessage =
-  '검색 API 키가 등록되지 않았습니다.';
+  '검색 API Key가 없습니다. 메뉴 → 앱 설정 → API 설정에서 등록하세요.';
 
 export const nrmSearchEmptyQuery = '검색어를 입력하세요.';
 

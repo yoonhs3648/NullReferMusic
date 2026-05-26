@@ -33,6 +33,11 @@ public class YtDlpDownloadService {
   }
 
   public DownloadOutcome download(String url, boolean noPlaylist) {
+    return download(url, noPlaylist, "mp3", 0);
+  }
+
+  public DownloadOutcome download(
+      String url, boolean noPlaylist, String audioFormat, int audioQuality) {
     if (!YoutubeUrlValidator.isValid(url)) {
       return DownloadOutcome.error(
           HttpStatus.BAD_REQUEST, Map.of("error", "YouTube URL만 허용됩니다."));
@@ -103,6 +108,21 @@ public class YtDlpDownloadService {
       return DownloadOutcome.error(
           HttpStatus.INTERNAL_SERVER_ERROR, Map.of("error", e.getMessage()));
     }
+  }
+
+  private static String normalizeAudioFormat(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return "mp3";
+    }
+    String f = raw.trim().toLowerCase();
+    if (f.startsWith(".")) {
+      f = f.substring(1);
+    }
+    return switch (f) {
+      case "mp3", "m4a", "opus", "wav", "flac", "aac" -> f;
+      case "ogg", "vorbis" -> "vorbis";
+      default -> "mp3";
+    };
   }
 
   private static Thread startDrain(InputStream in, StringBuilder sink, Charset cs) {

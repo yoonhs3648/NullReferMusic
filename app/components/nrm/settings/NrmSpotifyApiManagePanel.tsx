@@ -34,6 +34,11 @@ import {
   saveSpotifyCredentials,
   type NrmSpotifyCredentials,
 } from '@/lib/nrmSpotifyApiSettings';
+import {
+  NRM_API_SETTINGS_SAVED_MESSAGE,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+} from '@/lib/nrmApiSettingsUi';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue' | 'chartsSession';
@@ -391,7 +396,10 @@ export function NrmSpotifyApiManagePanel({
   const handleLeaveEditable = useCallback(
     async (target: 'hub' | 'closeDrawer' | 'appSettings') => {
       if (isDraftDirty()) {
-        const save = await confirmUser('변경된 값을 저장할까요?');
+        const save = await confirmUser(
+          NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+          NRM_API_SETTINGS_UNSAVED_CONFIRM,
+        );
         if (save) {
           if (screen === 'chartsSession' || isChartsDraftDirty()) {
             await persistChartsSession();
@@ -399,7 +407,7 @@ export function NrmSpotifyApiManagePanel({
           if (screen !== 'chartsSession' && isApiDraftDirty()) {
             await persistAllDrafts();
           }
-          void notifyUser('저장했습니다.');
+          void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
         } else {
           restoreDraftSnapshot();
         }
@@ -492,7 +500,7 @@ export function NrmSpotifyApiManagePanel({
 
   const onSaveManage = async () => {
     await persistAllDrafts();
-    void notifyUser('저장했습니다.');
+    void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
   };
 
   const onFetchAccessToken = async () => {
@@ -597,7 +605,9 @@ export function NrmSpotifyApiManagePanel({
         </View>
         <Pressable
           onPress={() =>
-            void persistChartsSession().then(() => notifyUser('저장했습니다.'))
+            void persistChartsSession().then(() =>
+              notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE),
+            )
           }
           style={({ pressed }) => [
             styles.primaryBtn,

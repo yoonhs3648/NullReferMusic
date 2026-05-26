@@ -20,6 +20,7 @@ import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchHit;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSummaryDto;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -323,10 +324,10 @@ public class LastfmSearchService {
   }
 
   private JsonNode lastfmGet(UriComponentsBuilder builder) {
-    return lastfmGet(builder.build(true).toUriString());
+    return lastfmGet(builder.build().encode().toUri());
   }
 
-  private JsonNode lastfmGet(String uri) {
+  private JsonNode lastfmGet(URI uri) {
     try {
       String body = restClient.get().uri(uri).retrieve().body(String.class);
       if (body == null || body.isBlank()) {

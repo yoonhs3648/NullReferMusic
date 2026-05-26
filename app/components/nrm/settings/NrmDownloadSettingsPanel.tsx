@@ -9,22 +9,50 @@ import {
   View,
 } from 'react-native';
 
+import { NrmDownloadQualitySlider } from '@/components/nrm/settings/NrmDownloadQualitySlider';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   loadStoredSafGrant,
   requestNewSafDirUri,
   safUriToDisplayPath,
 } from '@/lib/nrmDownloadSafGrant';
+import {
+  loadDownloadAudioExtension,
+  loadDownloadAudioQuality,
+  loadDownloadFileNameFormat,
+  NRM_AUDIO_EXTENSIONS,
+  NRM_DOWNLOAD_FILENAME_FORMATS,
+  saveDownloadAudioExtension,
+  saveDownloadAudioQuality,
+  saveDownloadFileNameFormat,
+  type NrmAudioExtension,
+  type NrmDownloadFileNameFormat,
+} from '@/lib/nrmDownloadSettings';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
+export type NrmDownloadSettingsSection =
+  | 'path'
+  | 'extension'
+  | 'quality'
+  | 'filename';
+
+const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
+  path: '다운로드 경로 설정',
+  extension: '확장자 설정',
+  quality: '음질 설정',
+  filename: '파일명 설정',
+};
+
 type Props = {
+  section: NrmDownloadSettingsSection;
   titleColor: string;
   bodyColor: string;
   onBack: () => void;
 };
 
 export function NrmDownloadSettingsPanel({
+  section,
   titleColor,
   bodyColor,
   onBack,
@@ -32,15 +60,46 @@ export function NrmDownloadSettingsPanel({
   const [dirUri, setDirUri] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [extension, setExtension] = useState<NrmAudioExtension>('.mp3');
+  const [audioQuality, setAudioQuality] = useState(0);
+  const [fileNameFormat, setFileNameFormat] =
+    useState<NrmDownloadFileNameFormat>('artist-title');
 
   useEffect(() => {
-    loadStoredSafGrant()
-      .then((uri) => {
-        setDirUri(uri);
+    if (section === 'path') {
+      void loadStoredSafGrant()
+        .then((uri) => {
+          setDirUri(uri);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'extension') {
+      void loadDownloadAudioExtension()
+        .then((ext) => {
+          setExtension(ext);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'filename') {
+      void loadDownloadFileNameFormat()
+        .then((format) => {
+          setFileNameFormat(format);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    void loadDownloadAudioQuality()
+      .then((quality) => {
+        setAudioQuality(quality);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
-  }, []);
+  }, [section]);
 
   const handlePickFolder = useCallback(async () => {
     setPicking(true);
@@ -52,11 +111,25 @@ export function NrmDownloadSettingsPanel({
     }
   }, []);
 
+  const selectExtension = useCallback((ext: NrmAudioExtension) => {
+    setExtension(ext);
+    void saveDownloadAudioExtension(ext);
+  }, []);
+
+  const changeQuality = useCallback((q: number) => {
+    setAudioQuality(q);
+    void saveDownloadAudioQuality(q);
+  }, []);
+
+  const selectFileNameFormat = useCallback((format: NrmDownloadFileNameFormat) => {
+    setFileNameFormat(format);
+    void saveDownloadFileNameFormat(format);
+  }, []);
+
   const displayPath = dirUri ? safUriToDisplayPath(dirUri) : null;
 
   return (
     <>
-      {/* 뒤로 */}
       <Pressable
         onPress={onBack}
         style={styles.backRow}
@@ -66,74 +139,183 @@ export function NrmDownloadSettingsPanel({
         <Text style={styles.backText}>뒤로</Text>
       </Pressable>
 
-      <Text style={[styles.panelTitle, { color: titleColor }]}>다운로드 경로 설정</Text>
+      <Text style={[styles.panelTitle, { color: titleColor }]}>
+        {SECTION_TITLES[section]}
+      </Text>
 
-      {/* 다운로드 경로 섹션 */}
-      <Text style={[styles.sectionLabel, { color: bodyColor }]}>다운로드 경로</Text>
-
-      <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
-        {/* 경로 설정 버튼 */}
-        <Pressable
-          onPress={() => void handlePickFolder()}
-          disabled={picking}
-          style={({ pressed }) => [
-            styles.pickBtn,
-            { borderColor: 'rgba(0,102,204,0.35)', backgroundColor: 'rgba(0,102,204,0.06)' },
-            picking && styles.pickBtnDisabled,
-            pressed && !picking && styles.pickBtnPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="다운로드 폴더 선택">
-          {picking ? (
-            <ActivityIndicator size="small" color={nrmTokens.color.primary} />
-          ) : (
-            <>
-              <Ionicons name="folder-open-outline" size={18} color={nrmTokens.color.primary} />
-              <Text style={[styles.pickBtnLabel, { color: nrmTokens.color.primary }]}>
-                경로 설정
-              </Text>
-            </>
-          )}
-        </Pressable>
-
-        {/* 선택된 경로 표시 */}
-        <View style={styles.pathRow}>
+      {section === 'extension' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
           {!loaded ? (
-            <ActivityIndicator size="small" color={bodyColor} style={styles.pathLoader} />
-          ) : displayPath ? (
-            <>
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={15}
-                color={nrmTokens.color.success ?? nrmTokens.color.primary}
-                style={styles.pathIcon}
-              />
-              <Text
-                style={[styles.pathText, { color: titleColor }]}
-                numberOfLines={2}
-                ellipsizeMode="middle">
-                {displayPath}
-              </Text>
-            </>
+            <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <>
-              <Ionicons
-                name="alert-circle-outline"
-                size={15}
-                color="rgba(128,128,128,0.7)"
-                style={styles.pathIcon}
-              />
-              <Text style={[styles.pathTextEmpty, { color: bodyColor }]}>
-                  선택된 경로 없음{'\n'}
-                  <Text style={styles.pathHint}>
-                    경로 설정을 눌러 다운로드 폴더를 선택하세요
-                  </Text>
-                </Text>
-            </>
+            <View style={styles.extRow}>
+              {NRM_AUDIO_EXTENSIONS.map((ext) => {
+                const active = extension === ext;
+                return (
+                  <Pressable
+                    key={ext}
+                    onPress={() => selectExtension(ext)}
+                    style={({ pressed }) => [
+                      styles.extChip,
+                      {
+                        borderColor: active
+                          ? nrmTokens.color.primary
+                          : 'rgba(128,128,128,0.35)',
+                        backgroundColor: active
+                          ? 'rgba(0,102,204,0.12)'
+                          : 'transparent',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+                    <Text
+                      style={[
+                        styles.extChipLabel,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                      ]}>
+                      {ext}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           )}
         </View>
-      </View>
+      ) : null}
 
+      {section === 'filename' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <View style={styles.formatCol}>
+              {NRM_DOWNLOAD_FILENAME_FORMATS.map((opt) => {
+                const active = fileNameFormat === opt.id;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => selectFileNameFormat(opt.id)}
+                    style={({ pressed }) => [
+                      styles.formatRow,
+                      {
+                        borderColor: active
+                          ? nrmTokens.color.primary
+                          : 'rgba(128,128,128,0.35)',
+                        backgroundColor: active
+                          ? 'rgba(0,102,204,0.12)'
+                          : 'transparent',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+                    <Text
+                      style={[
+                        styles.formatRowLabel,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                      ]}>
+                      {opt.label}
+                    </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : (
+                      <View style={styles.formatRowSpacer} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {section === 'quality' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <NrmDownloadQualitySlider
+              value={audioQuality}
+              onChange={changeQuality}
+              titleColor={titleColor}
+            />
+          )}
+        </View>
+      ) : null}
+
+      {section === 'path' ? (
+        Platform.OS === 'android' ? (
+          <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+            <Pressable
+              onPress={() => void handlePickFolder()}
+              disabled={picking}
+              style={({ pressed }) => [
+                styles.pickBtn,
+                { borderColor: 'rgba(0,102,204,0.35)', backgroundColor: 'rgba(0,102,204,0.06)' },
+                picking && styles.pickBtnDisabled,
+                pressed && !picking && styles.pressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="다운로드 폴더 선택">
+              {picking ? (
+                <ActivityIndicator size="small" color={nrmTokens.color.primary} />
+              ) : (
+                <>
+                  <Ionicons name="folder-open-outline" size={18} color={nrmTokens.color.primary} />
+                  <Text style={[styles.pickBtnLabel, { color: nrmTokens.color.primary }]}>
+                    경로 설정
+                  </Text>
+                </>
+              )}
+            </Pressable>
+
+            <View style={styles.pathRow}>
+              {!loaded ? (
+                <ActivityIndicator size="small" color={bodyColor} style={styles.pathLoader} />
+              ) : displayPath ? (
+                <>
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={15}
+                    color={nrmTokens.color.success ?? nrmTokens.color.primary}
+                    style={styles.pathIcon}
+                  />
+                  <Text
+                    style={[styles.pathText, { color: titleColor }]}
+                    numberOfLines={2}
+                    ellipsizeMode="middle">
+                    {displayPath}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={15}
+                    color="rgba(128,128,128,0.7)"
+                    style={styles.pathIcon}
+                  />
+                  <Text style={[styles.pathTextEmpty, { color: bodyColor }]}>
+                    선택된 경로 없음{'\n'}
+                    <Text style={styles.pathHint}>
+                      경로 설정을 눌러 다운로드 폴더를 선택하세요
+                    </Text>
+                  </Text>
+                </>
+              )}
+            </View>
+          </View>
+        ) : (
+          <Text style={[styles.pathWebNote, { color: bodyColor }]}>
+            다운로드 경로는 Android 앱에서 폴더를 선택해 설정합니다.
+          </Text>
+        )
+      ) : null}
     </>
   );
 }
@@ -158,12 +340,6 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.md,
     letterSpacing: -0.4,
   },
-  sectionLabel: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '500',
-    marginBottom: nrmTokens.space.xs,
-    letterSpacing: 0.2,
-  },
   sectionCard: {
     borderWidth: PANEL_INPUT_BORDER,
     borderRadius: nrmTokens.radius.md,
@@ -172,6 +348,24 @@ const styles = StyleSheet.create({
     paddingBottom: nrmTokens.space.sm,
     gap: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
+  },
+  extRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: nrmTokens.space.xs,
+  },
+  extChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: PANEL_INPUT_BORDER,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  extChipLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   pickBtn: {
     flexDirection: 'row',
@@ -186,7 +380,7 @@ const styles = StyleSheet.create({
   pickBtnDisabled: {
     opacity: 0.55,
   },
-  pickBtnPressed: {
+  pressed: {
     opacity: 0.85,
   },
   pickBtnLabel: {
@@ -222,10 +416,29 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     opacity: 0.7,
   },
-  guideText: {
-    fontSize: nrmTokens.font.finePrint ?? nrmTokens.font.caption,
-    lineHeight: 18,
-    fontWeight: '400',
-    opacity: 0.75,
+  pathWebNote: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 20,
+    opacity: 0.85,
+  },
+  formatCol: {
+    gap: nrmTokens.space.xs,
+  },
+  formatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: nrmTokens.space.md,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: PANEL_INPUT_BORDER,
+    minHeight: nrmTokens.layout?.touchMin ?? 44,
+  },
+  formatRowLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+  },
+  formatRowSpacer: {
+    width: 20,
   },
 });

@@ -1,7 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   Image,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -12,8 +11,17 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { LastfmTag } from '@/lib/nrmLastfmSearchTypes';
 
-export function formatLastfmDuration(sec: number): string {
-  if (sec <= 0) return '—';
+/** Last.fm duration(초). 밀리초로 오는 경우 보정 */
+export function formatLastfmDuration(raw: number): string {
+  if (raw <= 0) return '—';
+  let sec = Math.round(raw);
+  if (sec > 7200) sec = Math.round(sec / 1000);
+  if (sec >= 3600) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
@@ -123,18 +131,11 @@ export function NrmLastfmTagList({
   return (
     <View style={styles.tagWrap}>
       {tags.map((tag) => (
-        <Pressable
+        <View
           key={tag.name}
-          onPress={() => {
-            if (tag.url) void Linking.openURL(tag.url);
-          }}
-          style={({ pressed }) => [
-            styles.tagChip,
-            { backgroundColor: chipBg },
-            pressed && styles.tagChipPressed,
-          ]}>
+          style={[styles.tagChip, { backgroundColor: chipBg }]}>
           <Text style={[styles.tagText, { color: bodyColor }]}>{tag.name}</Text>
-        </Pressable>
+        </View>
       ))}
     </View>
   );
@@ -143,15 +144,18 @@ export function NrmLastfmTagList({
 export function NrmLastfmCoverImage({
   uri,
   size = 96,
+  radius,
 }: {
   uri: string;
   size?: number;
+  radius?: number;
 }) {
+  const r = radius ?? nrmTokens.radius.sm;
   if (uri) {
     return (
       <Image
         source={{ uri }}
-        style={{ width: size, height: size, borderRadius: nrmTokens.radius.sm }}
+        style={{ width: size, height: size, borderRadius: r }}
       />
     );
   }
@@ -159,11 +163,143 @@ export function NrmLastfmCoverImage({
     <View
       style={[
         styles.coverPlaceholder,
-        { width: size, height: size, borderRadius: nrmTokens.radius.sm },
+        { width: size, height: size, borderRadius: r },
       ]}
     />
   );
 }
+
+export type NrmLastfmMetaField = {
+  label: string;
+  value: string;
+  onPress?: () => void;
+};
+
+/** 트랙·앨범 상세 — 커버 + 라벨 - 값 메타 카드 (카드 전체 탭 가능) */
+export function NrmLastfmDetailHeroCard({
+  imageUrl,
+  fields,
+  isDark,
+  titleColor,
+  onCardPress,
+}: {
+  imageUrl: string;
+  fields: NrmLastfmMetaField[];
+  isDark: boolean;
+  titleColor: string;
+  bodyColor?: string;
+  /** 커버·메타 영역 어디를 눌러도 호출 */
+  onCardPress?: () => void;
+}) {
+  const cardBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas;
+  const cardBorder = isDark
+    ? nrmTokens.color.borderOnDark
+    : nrmTokens.color.hairline;
+  const labelColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48;
+  const rowDivider = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  const cardPressedBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+
+  const inner = (
+    <>
+      <View style={detailStyles.coverWrap}>
+        <NrmLastfmCoverImage uri={imageUrl} size={132} radius={nrmTokens.radius.md} />
+      </View>
+      <View style={detailStyles.fieldList}>
+        {fields.map((field, index) => {
+          const isLast = index === fields.length - 1;
+          return (
+            <View
+              key={`${field.label}-${index}`}
+              style={[
+                detailStyles.fieldItem,
+                !isLast && {
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: rowDivider,
+                },
+              ]}>
+              <View style={detailStyles.fieldRow}>
+                <Text style={[detailStyles.fieldLabel, { color: labelColor }]}>
+                  {field.label}
+                </Text>
+                <Text
+                  style={[detailStyles.fieldValue, { color: titleColor }]}
+                  numberOfLines={3}>
+                  {field.value}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </>
+  );
+
+  if (onCardPress) {
+    return (
+      <Pressable
+        onPress={onCardPress}
+        accessibilityRole="button"
+        accessibilityLabel="유튜브에서 이 곡 검색"
+        style={({ pressed }) => [
+          detailStyles.card,
+          { backgroundColor: cardBg, borderColor: cardBorder },
+          pressed && { backgroundColor: cardPressedBg },
+        ]}>
+        {inner}
+      </Pressable>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        detailStyles.card,
+        { backgroundColor: cardBg, borderColor: cardBorder },
+      ]}>
+      {inner}
+    </View>
+  );
+}
+
+const detailStyles = StyleSheet.create({
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.lg,
+    overflow: 'hidden',
+    marginBottom: nrmTokens.space.md,
+  },
+  coverWrap: {
+    alignItems: 'center',
+    paddingTop: nrmTokens.space.lg,
+    paddingBottom: nrmTokens.space.md,
+    paddingHorizontal: nrmTokens.space.lg,
+  },
+  fieldList: {
+    paddingHorizontal: nrmTokens.space.md,
+    paddingBottom: nrmTokens.space.xs,
+  },
+  fieldItem: {
+    paddingVertical: nrmTokens.space.sm,
+    paddingHorizontal: nrmTokens.space.xs,
+    borderRadius: nrmTokens.radius.sm,
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: nrmTokens.space.md,
+  },
+  fieldLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    width: 56,
+  },
+  fieldValue: {
+    flex: 1,
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+});
 
 const styles = StyleSheet.create({
   pageTitle: {

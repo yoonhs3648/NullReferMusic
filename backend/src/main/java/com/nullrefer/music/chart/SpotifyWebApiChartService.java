@@ -171,8 +171,12 @@ public class SpotifyWebApiChartService {
       if (status == 404) {
         throw new IllegalStateException("spotify_playlist_not_accessible");
       }
-      if (status == 401 || status == 403) {
+      if (status == 401) {
         throw new IllegalStateException("spotify_auth_failed");
+      }
+      if (status == 403) {
+        // UX: "Spotify (Premium)" 화면에서는 권한 부족을 명확히 분리한다.
+        throw new IllegalStateException("spotify_premium_required");
       }
       throw new IllegalStateException("spotify_api_error");
     } catch (IllegalStateException e) {

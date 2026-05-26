@@ -128,7 +128,7 @@ async function saveViaSaf(
   }
 
   if (!dirUri) {
-    throw new Error('다운로드 폴더 접근이 취소되었습니다. 설정 > 앱설정 > 다운로드 설정에서 경로를 먼저 지정하세요.');
+    throw new Error('다운로드 폴더 접근이 취소되었습니다. 메뉴 → 다운로드 설정에서 경로를 먼저 지정하세요.');
   }
 
   const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
@@ -247,9 +247,7 @@ export async function persistAudioAfterServerJob(
 ): Promise<{ savedLabel: string }> {
   const base = normalizedApiBase(apiBase);
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
-  const safeName = options.fileName.endsWith('.mp3')
-    ? options.fileName
-    : `${options.fileName}.mp3`;
+  const safeName = options.fileName;
 
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');

@@ -4,6 +4,8 @@ export type ChartTrackItem = {
   title: string;
   artists: string;
   album: string;
+  /** Apple Music RSS 등에서만 채워질 수 있음 */
+  genre?: string;
   imageUrl: string;
   externalUrl: string;
   durationMs: number;

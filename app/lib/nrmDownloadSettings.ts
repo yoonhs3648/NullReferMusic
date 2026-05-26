@@ -1,0 +1,130 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/** 다운로드 파일 확장자 (선택 UI 순서) */
+export const NRM_AUDIO_EXTENSIONS = [
+  '.mp3',
+  '.m4a',
+  '.opus',
+  '.wav',
+  '.flac',
+  '.ogg',
+  '.aac',
+] as const;
+
+export type NrmAudioExtension = (typeof NRM_AUDIO_EXTENSIONS)[number];
+
+const STORAGE_EXT = 'nrm_download_audio_ext_v1';
+const STORAGE_QUALITY = 'nrm_download_audio_quality_v1';
+const STORAGE_FILENAME_FORMAT = 'nrm_download_filename_format_v1';
+
+const DEFAULT_EXT: NrmAudioExtension = '.mp3';
+const DEFAULT_QUALITY = 0;
+
+/** 다운로드 파일명 조합 (가수·트랙 필드 순서) */
+export const NRM_DOWNLOAD_FILENAME_FORMATS = [
+  { id: 'artist-title', label: '가수 - 트랙' },
+  { id: 'title-artist', label: '트랙 - 가수' },
+  { id: 'title', label: '트랙' },
+] as const;
+
+export type NrmDownloadFileNameFormat =
+  (typeof NRM_DOWNLOAD_FILENAME_FORMATS)[number]['id'];
+
+const DEFAULT_FILENAME_FORMAT: NrmDownloadFileNameFormat = 'artist-title';
+
+export function isNrmDownloadFileNameFormat(v: string): v is NrmDownloadFileNameFormat {
+  return (NRM_DOWNLOAD_FILENAME_FORMATS as readonly { id: string }[]).some(
+    (f) => f.id === v,
+  );
+}
+
+export function isNrmAudioExtension(v: string): v is NrmAudioExtension {
+  return (NRM_AUDIO_EXTENSIONS as readonly string[]).includes(v);
+}
+
+/** yt-dlp --audio-format 값 (.ogg → vorbis) */
+export function extensionToYtDlpFormat(ext: NrmAudioExtension): string {
+  if (ext === '.ogg') return 'vorbis';
+  return ext.slice(1);
+}
+
+export function clampAudioQuality(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_QUALITY;
+  return Math.min(9, Math.max(0, Math.round(n)));
+}
+
+export async function loadDownloadAudioExtension(): Promise<NrmAudioExtension> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_EXT);
+    if (raw && isNrmAudioExtension(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_EXT;
+}
+
+export async function saveDownloadAudioExtension(ext: NrmAudioExtension): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_EXT, ext);
+}
+
+export async function loadDownloadAudioQuality(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_QUALITY);
+    if (raw != null) return clampAudioQuality(parseInt(raw, 10));
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_QUALITY;
+}
+
+export async function saveDownloadAudioQuality(quality: number): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_QUALITY, String(clampAudioQuality(quality)));
+}
+
+export async function loadDownloadFileNameFormat(): Promise<NrmDownloadFileNameFormat> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_FILENAME_FORMAT);
+    if (raw && isNrmDownloadFileNameFormat(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_FILENAME_FORMAT;
+}
+
+export async function saveDownloadFileNameFormat(
+  format: NrmDownloadFileNameFormat,
+): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_FILENAME_FORMAT, format);
+}
+
+export type NrmDownloadEncodeSettings = {
+  extension: NrmAudioExtension;
+  audioQuality: number;
+};
+
+export async function loadDownloadEncodeSettings(): Promise<NrmDownloadEncodeSettings> {
+  const [extension, audioQuality] = await Promise.all([
+    loadDownloadAudioExtension(),
+    loadDownloadAudioQuality(),
+  ]);
+  return { extension, audioQuality };
+}
+
+/** 파일명에 선택 확장자가 붙도록 보정 */
+export function applyDownloadExtension(fileName: string, ext: NrmAudioExtension): string {
+  const stem = fileName.replace(/\.(mp3|m4a|opus|wav|flac|ogg|aac|webm|mp4)$/i, '').trim();
+  return `${stem || 'track'}${ext}`;
+}
+
+export function mimeTypeForExtension(ext: NrmAudioExtension): string {
+  const map: Record<NrmAudioExtension, string> = {
+    '.mp3': 'audio/mpeg',
+    '.m4a': 'audio/mp4',
+    '.opus': 'audio/opus',
+    '.wav': 'audio/wav',
+    '.flac': 'audio/flac',
+    '.ogg': 'audio/ogg',
+    '.aac': 'audio/aac',
+  };
+  return map[ext];
+}

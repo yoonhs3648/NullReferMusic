@@ -6,7 +6,7 @@ export const NRM_YOUTUBE_WEBVIEW_REFERER = 'https://com.nullrefer.music';
 
 export function buildYoutubeEmbedUrl(
   videoId: string,
-  options?: { pageOrigin?: string },
+  options?: { pageOrigin?: string; autoplay?: boolean },
 ): string {
   const u = new URL(
     `https://www.youtube.com/embed/${encodeURIComponent(videoId)}`,
@@ -15,6 +15,9 @@ export function buildYoutubeEmbedUrl(
   u.searchParams.set('rel', '0');
   u.searchParams.set('modestbranding', '1');
   u.searchParams.set('enablejsapi', '1');
+  if (options?.autoplay) {
+    u.searchParams.set('autoplay', '1');
+  }
   if (options?.pageOrigin) {
     u.searchParams.set('origin', options.pageOrigin);
   }

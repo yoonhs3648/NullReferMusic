@@ -2,6 +2,7 @@ import '@/lib/nrmYoutubeInnertubeEvalSetup';
 import Innertube, { ClientType, FormatUtils, YTNodes } from 'youtubei.js';
 import { Platform } from 'react-native';
 
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import { downloadGooglevideoAudioToFileUri } from '@/lib/nrmYoutubeGooglevideoDownload.native';
 import {
@@ -165,33 +166,58 @@ export function finalAudioFileName(
  *
  * @returns savedLabel  성공시 사용자에게 보여줄 메시지. 실패시 throw.
  */
+async function tagThenPersist(
+  fileUri: string,
+  safeName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string }> {
+  let uri = fileUri;
+  if (metadata) {
+    try {
+      const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
+      uri = await applyAudioFileMetadata(fileUri, metadata);
+    } catch (e) {
+      logNrmRunError('download.metadata', e);
+    }
+  }
+  const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
+  try {
+    return await persistLocalAudioFile(uri, safeName);
+  } catch (persistErr) {
+    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    throw stageWrapError('persist_media', persistErr);
+  }
+}
+
 async function downloadWithYtDlp(
   videoId: string,
   userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
+  const { loadDownloadEncodeSettings, extensionToYtDlpFormat, mimeTypeForExtension } =
+    await import('@/lib/nrmDownloadSettings');
+  const encode = await loadDownloadEncodeSettings();
+
   const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   let result: { path: string; message?: string };
   try {
-    result = await downloadOnDevice(ytUrl, true);
+    result = await downloadOnDevice(ytUrl, true, {
+      audioFormat: extensionToYtDlpFormat(encode.extension),
+      audioQuality: encode.audioQuality,
+    });
   } catch (e) {
     throw stageWrapError('ondevice_exec', e);
   }
 
-  // yt-dlp 출력 파일은 cacheDir/nrm-ytdlp-tmp/ 아래의 .mp3 경로
   const rawPath: string = result.path;
-  // expo-file-system 은 file:// URI를 요구합니다
   const fileUri = rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 
-  const safeName = finalAudioFileName(userSuggestedFileName, 'audio/mpeg');
+  const safeName = finalAudioFileName(
+    userSuggestedFileName,
+    mimeTypeForExtension(encode.extension),
+  );
 
-  const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
-  try {
-    return await persistLocalAudioFile(fileUri, safeName);
-  } catch (persistErr) {
-    // persist 실패해도 임시 파일은 정리
-    await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
-    throw stageWrapError('persist_media', persistErr);
-  }
+  return tagThenPersist(fileUri, safeName, metadata);
 }
 
 // ── youtubei.js (innertube) 폴백 경로 ────────────────────────────────────────
@@ -202,6 +228,7 @@ async function downloadWithYtDlp(
 async function downloadWithInnertube(
   videoId: string,
   userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
@@ -267,17 +294,7 @@ async function downloadWithInnertube(
         format,
       );
 
-      const { persistLocalAudioFile } = await import(
-        '@/lib/nrmPersistDownload.native'
-      );
-      try {
-        return await persistLocalAudioFile(tempUri, safeName);
-      } catch (persistErr) {
-        await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(
-          () => {},
-        );
-        throw persistErr;
-      }
+      return tagThenPersist(tempUri, safeName, metadata);
     } catch (e) {
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {
@@ -366,6 +383,7 @@ export async function getAudioStreamUrlWithInnertube(
 export async function downloadYoutubeAudioOnDevice(
   videoId: string,
   userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   const ytDlpAvailable =
     Platform.OS === 'android' && isOnDeviceDownloadAvailable();
@@ -379,21 +397,21 @@ export async function downloadYoutubeAudioOnDevice(
   // ── Android: yt-dlp 우선, 실행권한 오류 등은 innertube 폴백 ────────────────
   if (Platform.OS === 'android') {
     if (!ytDlpAvailable) {
-      return await downloadWithInnertube(videoId, userSuggestedFileName);
+      return await downloadWithInnertube(videoId, userSuggestedFileName, metadata);
     }
     try {
-      return await downloadWithYtDlp(videoId, userSuggestedFileName);
+      return await downloadWithYtDlp(videoId, userSuggestedFileName, metadata);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logNrmRunError('download.ytdlp.failed', e, { videoId });
       if (shouldFallbackFromYtDlp(msg)) {
         logNrmRunError('download.ytdlp.fallback_innertube', null, { videoId });
-        return await downloadWithInnertube(videoId, userSuggestedFileName);
+        return await downloadWithInnertube(videoId, userSuggestedFileName, metadata);
       }
       throw e;
     }
   }
 
   // ── iOS: youtubei.js 경로 ──────────────────────────────────────────────────
-  return downloadWithInnertube(videoId, userSuggestedFileName);
+  return downloadWithInnertube(videoId, userSuggestedFileName, metadata);
 }

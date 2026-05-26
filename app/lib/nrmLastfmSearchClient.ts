@@ -4,7 +4,7 @@ import {
   getDefaultApiBaseUrl,
   getResolvedApiBaseUrl,
 } from '@/lib/apiBaseUrl';
-import { nrmSearchNotConfiguredMessage } from '@/lib/nrmSearchStrings';
+import { chartUserMessage } from '@/lib/nrmChartErrors';
 import { buildLastfmChartAuthHeaders } from '@/lib/nrmLastfmTokenSync';
 import type {
   LastfmAlbumDetail,
@@ -34,10 +34,10 @@ function errorFromApi(code: string | undefined, httpStatus: number): LastfmSearc
 }
 
 function messageForError(code: LastfmSearchErrorCode): string {
-  if (code === 'not_configured') return nrmSearchNotConfiguredMessage;
-  if (code === 'auth_failed') return 'API 키가 올바르지 않습니다. 설정에서 키를 확인하세요.';
+  if (code === 'not_configured') return chartUserMessage('lastfm', 'not_configured');
+  if (code === 'auth_failed') return chartUserMessage('lastfm', 'auth_failed');
   if (code === 'bad_request') return '검색어 또는 선택 항목을 확인하세요.';
-  if (code === 'network') return '인터넷 연결을 확인해 주세요.';
+  if (code === 'network') return '네트워크에 연결되지 않았습니다. Wi‑Fi·데이터를 확인하세요.';
   return '검색에 실패했습니다.';
 }
 
@@ -368,7 +368,7 @@ export async function searchLastfmArtists(
 ): Promise<LastfmSearchOutcome<{ artists: LastfmArtistSearchHit[] }>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return searchLastfmArtistsDirect(apiKey, query.trim());
   }
   const q = encodeURIComponent(query.trim());
@@ -381,7 +381,7 @@ export async function fetchLastfmArtistDetail(
 ): Promise<LastfmSearchOutcome<LastfmArtistDetail>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return fetchLastfmArtistDetailDirect(apiKey, artist.trim(), mbid);
   }
   const a = encodeURIComponent(artist.trim());
@@ -394,7 +394,7 @@ export async function searchLastfmAlbums(
 ): Promise<LastfmSearchOutcome<{ albums: LastfmAlbumSearchHit[] }>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return searchLastfmAlbumsDirect(apiKey, query.trim());
   }
   const q = encodeURIComponent(query.trim());
@@ -407,7 +407,7 @@ export async function fetchLastfmAlbumDetail(
 ): Promise<LastfmSearchOutcome<LastfmAlbumDetail>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return fetchLastfmAlbumDetailDirect(apiKey, artist.trim(), album.trim());
   }
   const a = encodeURIComponent(artist.trim());
@@ -422,7 +422,7 @@ export async function searchLastfmTracks(
 ): Promise<LastfmSearchOutcome<{ tracks: LastfmTrackSearchHit[] }>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return searchLastfmTracksDirect(apiKey, query.trim());
   }
   const q = encodeURIComponent(query.trim());
@@ -435,7 +435,7 @@ export async function fetchLastfmTrackDetail(
 ): Promise<LastfmSearchOutcome<LastfmTrackDetail>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: nrmSearchNotConfiguredMessage };
+    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
     return fetchLastfmTrackDetailDirect(apiKey, artist.trim(), track.trim());
   }
   const a = encodeURIComponent(artist.trim());

@@ -95,6 +95,11 @@ export const nrmTokens = {
     /** 메인 로고 블록과 검색 행(입력+버튼) 동일 폭 정렬용 */
     homeSearchClusterMaxWidth: 440,
     touchMin: 44,
+    /**
+     * 메뉴 드로어 「닫기」 버튼 하단 여백(px).
+     * safe area(insets.bottom)와 별도 — UI·패널 변경 시에도 이 값만 사용.
+     */
+    menuDrawerCloseBottomGap: 24,
   },
 } as const;
 

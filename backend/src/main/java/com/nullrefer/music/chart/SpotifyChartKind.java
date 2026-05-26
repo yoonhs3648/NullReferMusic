@@ -1,58 +1,46 @@
 package com.nullrefer.music.chart;
 
-
-
-/** charts.spotify.com 내부 API 차트 슬러그. */
-
+/** Spotify 차트 슬러그 및 플레이리스트 설정. */
 public enum SpotifyChartKind {
 
-  TOP50_KR(
-      "top50-kr",
+  TOP100_KR_DAILY(
+      "top100-kr-daily",
       "regional-kr-daily",
       "37i9dQZEVXbJlXK4fQztZ3",
       "KR",
-      50,
-      "Top 50 - Korea"),
+      100,
+      "Top 100 - Korea Daily"),
 
-  VIRAL50_KR(
-      "viral50-kr",
-      "viral-kr-daily",
-      "37i9dQZEVXbJfc6vjXwHfWy",
+  TOP100_KR_WEEKLY(
+      "top100-kr-weekly",
+      "regional-kr-weekly",
+      "",
       "KR",
-      50,
-      "Viral 50 - Korea"),
+      100,
+      "Top 100 - Korea Weekly"),
 
-  TOP50_GLOBAL(
-      "top50-global",
+  TOP100_GLOBAL_DAILY(
+      "top100-global-daily",
       "regional-global-daily",
       "37i9dQZEVXbMDoHDwVN2tF",
       "US",
-      50,
-      "Top 50 - Global"),
+      100,
+      "Top 100 - Global Daily"),
 
-  VIRAL50_GLOBAL(
-      "viral50-global",
-      "viral-global-daily",
-      "37i9dQZEVXbLiRSasXNY5lA",
+  TOP100_GLOBAL_WEEKLY(
+      "top100-global-weekly",
+      "regional-global-weekly",
+      "",
       "US",
-      50,
-      "Viral 50 - Global");
-
-
+      100,
+      "Top 100 - Global Weekly");
 
   private final String key;
-
   private final String chartSlug;
-
   private final String playlistId;
-
   private final String market;
-
   private final int maxTracks;
-
   private final String displayName;
-
-
 
   SpotifyChartKind(
       String key,
@@ -61,94 +49,48 @@ public enum SpotifyChartKind {
       String market,
       int maxTracks,
       String displayName) {
-
     this.key = key;
-
     this.chartSlug = chartSlug;
-
     this.playlistId = playlistId;
-
     this.market = market;
-
     this.maxTracks = maxTracks;
-
     this.displayName = displayName;
-
   }
-
-
 
   public String key() {
-
     return key;
-
   }
-
-
 
   public String chartSlug() {
-
     return chartSlug;
-
   }
-
-
 
   public String playlistId() {
-
     return playlistId;
-
   }
-
-
 
   public String market() {
-
     return market;
-
   }
-
-
 
   public int maxTracks() {
-
     return maxTracks;
-
   }
-
-
 
   public String displayName() {
-
     return displayName;
-
   }
-
-
 
   public static SpotifyChartKind fromKey(String raw) {
-
     if (raw == null || raw.isBlank()) {
-
-      return TOP50_KR;
-
+      return TOP100_KR_DAILY;
     }
-
     String k = raw.trim().toLowerCase();
-
     for (SpotifyChartKind kind : values()) {
-
       if (kind.key.equals(k)) {
-
         return kind;
-
       }
-
     }
-
     throw new IllegalStateException("spotify_chart_unknown");
-
   }
-
 }
-

@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.nullrefer.music.config.NrmSettings;
 
+import java.time.Duration;
+
 import java.time.Instant;
 
 import java.time.LocalDate;
@@ -16,7 +18,15 @@ import java.time.ZoneOffset;
 
 import java.util.ArrayList;
 
+import java.util.Comparator;
+
+import java.util.HashMap;
+
 import java.util.List;
+
+import java.util.Map;
+
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 
@@ -58,9 +68,26 @@ public class SpotifyChartService {
 
   private static final int LEGACY_MAX_TRACKS = 100;
 
+  private static final int PERIOD_MAX_TRACKS = 1000;
+
+  private static final int SPOTIFY_CHART_SINGLE_MAX = 200;
+
+  private static final int PERIOD_PAGE_SIZE_DEFAULT = 50;
+
   private static final int DATE_LOOKBACK_DAYS = 10;
 
+  private static final long PERIOD_REQUEST_GAP_MS = 750L;
 
+  private static final Duration PERIOD_CACHE_TTL = Duration.ofMinutes(20);
+
+  private record CachedPeriodChart(List<ChartTrackItem> items, Instant expiresAt) {
+    boolean alive() {
+      return Instant.now().isBefore(expiresAt);
+    }
+  }
+
+  private final ConcurrentHashMap<String, CachedPeriodChart> periodChartCache =
+      new ConcurrentHashMap<>();
 
   private final NrmSettings settings;
 
@@ -212,82 +239,490 @@ public class SpotifyChartService {
 
 
 
-  private SpotifyChartResult fetchChartsComChart(SpotifyChartKind kind, String token) {
+  /** 기간별 — 일간 1회 / 주간 1회 / 월간=주간합산 / 연간=월간합산 */
+  public PeriodChartPageResult fetchPeriodPage(
+      String region,
+      String kind,
+      int year,
+      Integer month,
+      Integer day,
+      int weekOfMonth,
+      int offset,
+      int limit,
+      String bearerToken) {
+    if (bearerToken == null || bearerToken.isBlank()) {
+      throw new IllegalStateException("spotify_charts_not_configured");
+    }
+    String chartKind = normalizePeriodKind(kind);
+    int safeLimit = clampPeriodLimit(limit);
+    int safeOffset = Math.max(0, offset);
+    int maxRank = periodMaxRank(chartKind);
+    if (safeOffset >= maxRank) {
+      return emptySpotifyPeriodPage(
+          region, chartKind, year, month, day, safeOffset, safeLimit, maxRank);
+    }
+    boolean isKr = "kr".equalsIgnoreCase(region);
+    int m = month != null ? month : 1;
+    int d = day != null ? day : 1;
+    int week = Math.max(1, weekOfMonth);
+    String market = isKr ? "KR" : "GLOBAL";
+    String chartKey = buildPeriodChartKey(isKr, chartKind, year, m, d, week);
+    String title = buildPeriodChartTitle(isKr, chartKind, year, m, d, week);
 
-    IllegalStateException lastFailure = null;
+    List<ChartTrackItem> all =
+        getOrFetchPeriodChartList(
+            chartKey, isKr, chartKind, year, m, d, week, bearerToken.trim(), maxRank);
+    int end = Math.min(safeOffset + safeLimit, all.size());
+    List<ChartTrackItem> slice = new ArrayList<>();
+    if (safeOffset < all.size()) {
+      slice.addAll(all.subList(safeOffset, end));
+    }
+    boolean hasMore =
+        end < all.size() && end < maxRank && slice.size() >= safeLimit;
 
-    for (String date : chartDateCandidates()) {
+    return new PeriodChartPageResult(
+        "spotify",
+        chartKey,
+        title,
+        market,
+        Instant.now(),
+        List.copyOf(slice),
+        safeOffset,
+        safeLimit,
+        hasMore);
+  }
 
-      String uri =
+  private PeriodChartPageResult emptySpotifyPeriodPage(
+      String region,
+      String kind,
+      int year,
+      Integer month,
+      Integer day,
+      int offset,
+      int limit,
+      int maxRank) {
+    boolean isKr = "kr".equalsIgnoreCase(region);
+    int m = month != null ? month : 1;
+    int d = day != null ? day : 1;
+    String chartKey = buildPeriodChartKey(isKr, normalizePeriodKind(kind), year, m, d, 1);
+    return new PeriodChartPageResult(
+        "spotify",
+        chartKey,
+        chartKey,
+        isKr ? "KR" : "GLOBAL",
+        Instant.now(),
+        List.of(),
+        offset,
+        limit,
+        false);
+  }
 
-          UriComponentsBuilder.fromUriString(
+  private static String normalizePeriodKind(String kind) {
+    if (kind == null || kind.isBlank()) {
+      return "daily";
+    }
+    String k = kind.trim().toLowerCase();
+    return switch (k) {
+      case "yearly", "year" -> "yearly";
+      case "weekly", "week" -> "weekly";
+      case "daily", "day" -> "daily";
+      default -> "monthly";
+    };
+  }
 
-                  CHARTS_API_BASE + "/auth/v0/charts/" + kind.chartSlug() + "/" + date)
+  private static int periodMaxRank(String kind) {
+    return "yearly".equals(kind) ? PERIOD_MAX_TRACKS : SPOTIFY_CHART_SINGLE_MAX;
+  }
 
-              .build(true)
+  private static String buildPeriodChartKey(
+      boolean isKr, String kind, int year, int month, int day, int weekOfMonth) {
+    String r = isKr ? "kr" : "global";
+    return switch (kind) {
+      case "yearly" -> "period-" + r + "-yearly-" + year;
+      case "monthly" -> "period-" + r + "-monthly-" + year + "-" + String.format("%02d", month);
+      case "weekly" -> "period-" + r + "-weekly-" + year + "-" + String.format("%02d", month) + "-w"
+          + weekOfMonth;
+      case "daily" -> "period-" + r + "-daily-" + year + "-" + String.format("%02d", month) + "-"
+          + String.format("%02d", day);
+      default -> "period-" + r + "-daily-" + year;
+    };
+  }
 
-              .toUriString();
+  private static String buildPeriodChartTitle(
+      boolean isKr, String kind, int year, int month, int day, int weekOfMonth) {
+    String region = isKr ? "한국" : "글로벌";
+    String kindLabel =
+        switch (kind) {
+          case "yearly" -> "연간";
+          case "monthly" -> "월간";
+          case "weekly" -> "주간";
+          case "daily" -> "일간";
+          default -> kind;
+        };
+    return switch (kind) {
+      case "yearly" -> region + " · " + year + " · " + kindLabel;
+      case "monthly" -> region + " · " + year + "." + month + " · " + kindLabel;
+      case "weekly" -> region + " · " + year + "." + month + " " + weekOfMonth + "주 · " + kindLabel;
+      default -> region + " · " + year + "." + month + "." + day + " · " + kindLabel;
+    };
+  }
 
-      try {
+  private record WeekInMonth(int weekIndex, int fridayDay, String anchor) {}
 
-        JsonNode root = chartsGet(uri, token);
+  private static int clampPeriodLimit(int limit) {
+    if (limit <= 0) {
+      return PERIOD_PAGE_SIZE_DEFAULT;
+    }
+    return Math.min(100, limit);
+  }
 
-        List<ChartTrackItem> items = parseChartEntries(root, kind.maxTracks());
+  private static String buildPeriodSlug(boolean isKr, String kind) {
+    String r = isKr ? "kr" : "global";
+    return switch (kind) {
+      case "daily" -> "regional-" + r + "-daily";
+      case "weekly" -> "regional-" + r + "-weekly";
+      default -> "regional-" + r + "-weekly";
+    };
+  }
 
-        if (!items.isEmpty()) {
-
-          String playlistName =
-
-              root.path("displayChart")
-
-                  .path("chartMetadata")
-
-                  .path("readableTitle")
-
-                  .asText(kind.displayName());
-
-          return new SpotifyChartResult(
-
-              "spotify",
-
-              kind.chartSlug(),
-
-              playlistName,
-
-              kind.market(),
-
-              Instant.now(),
-
-              List.copyOf(items));
-
-        }
-
-      } catch (IllegalStateException e) {
-
-        lastFailure = e;
-
-        if ("spotify_charts_auth_failed".equals(e.getMessage())
-
-            || "spotify_not_configured".equals(e.getMessage())) {
-
-          throw e;
-
-        }
-
-        log.debug("Spotify charts {} @ {} failed: {}", kind.chartSlug(), date, e.getMessage());
-
+  private static List<WeekInMonth> listWeeksInMonth(int year, int month) {
+    LocalDate today = LocalDate.now(ZoneOffset.UTC);
+    int m = Math.min(12, Math.max(1, month));
+    int lastDay = LocalDate.of(year, m, 1).lengthOfMonth();
+    int maxDay =
+        year == today.getYear() && m == today.getMonthValue()
+            ? Math.min(lastDay, today.getDayOfMonth())
+            : lastDay;
+    List<WeekInMonth> out = new ArrayList<>();
+    int idx = 0;
+    for (int d = 1; d <= maxDay; d++) {
+      LocalDate date = LocalDate.of(year, m, d);
+      if (date.getDayOfWeek() != java.time.DayOfWeek.FRIDAY) {
+        continue;
       }
+      idx++;
+      out.add(new WeekInMonth(idx, d, date.toString()));
+    }
+    return out;
+  }
 
+  private static String weeklyAnchorForWeek(int year, int month, int weekOfMonth) {
+    return listWeeksInMonth(year, month).stream()
+        .filter(w -> w.weekIndex() == weekOfMonth)
+        .map(WeekInMonth::anchor)
+        .findFirst()
+        .orElse(null);
+  }
+
+  private static String weeklySubCacheKey(boolean isKr, int year, int month, int weekOfMonth) {
+    return "week-" + (isKr ? "kr" : "global") + "-" + year + "-" + month + "-w" + weekOfMonth;
+  }
+
+  private static String monthlySubCacheKey(boolean isKr, int year, int month) {
+    return "month-" + (isKr ? "kr" : "global") + "-" + year + "-" + String.format("%02d", month);
+  }
+
+  private List<ChartTrackItem> getOrFetchPeriodChartList(
+      String cacheKey,
+      boolean isKr,
+      String kind,
+      int year,
+      int month,
+      int day,
+      int weekOfMonth,
+      String token,
+      int maxRank) {
+    CachedPeriodChart hit = periodChartCache.get(cacheKey);
+    if (hit != null && hit.alive()) {
+      return hit.items();
+    }
+    List<ChartTrackItem> items =
+        switch (kind) {
+          case "yearly" -> fetchYearlyFromMonths(isKr, year, token, maxRank);
+          case "monthly" -> fetchMonthlyFromWeeks(isKr, year, month, token, maxRank);
+          case "weekly" -> fetchWeeklyOnce(isKr, year, month, weekOfMonth, token, maxRank);
+          case "daily" -> fetchDailyOnce(isKr, year, month, day, token, maxRank);
+          default -> List.of();
+        };
+    if (!items.isEmpty()) {
+      periodChartCache.put(
+          cacheKey,
+          new CachedPeriodChart(List.copyOf(items), Instant.now().plus(PERIOD_CACHE_TTL)));
+    }
+    return items;
+  }
+
+  private List<ChartTrackItem> fetchDailyOnce(
+      boolean isKr, int year, int month, int day, String token, int maxTracks) {
+    int m = Math.min(12, Math.max(1, month));
+    int d = Math.max(1, day);
+    String segment = String.format("%d-%02d-%02d", year, m, d);
+    String slug = buildPeriodSlug(isKr, "daily");
+    return fetchChartsComOnce(slug, segment, token, maxTracks);
+  }
+
+  private List<ChartTrackItem> fetchWeeklyOnce(
+      boolean isKr, int year, int month, int weekOfMonth, String token, int maxTracks) {
+    String subKey = weeklySubCacheKey(isKr, year, month, weekOfMonth);
+    CachedPeriodChart hit = periodChartCache.get(subKey);
+    if (hit != null && hit.alive()) {
+      return hit.items();
+    }
+    String anchor = weeklyAnchorForWeek(year, month, weekOfMonth);
+    if (anchor == null) {
+      return List.of();
+    }
+    String slug = buildPeriodSlug(isKr, "weekly");
+    List<ChartTrackItem> items = fetchChartsComOnce(slug, anchor, token, maxTracks);
+    if (!items.isEmpty()) {
+      periodChartCache.put(
+          subKey,
+          new CachedPeriodChart(List.copyOf(items), Instant.now().plus(PERIOD_CACHE_TTL)));
+    }
+    return items;
+  }
+
+  private List<ChartTrackItem> fetchMonthlyFromWeeks(
+      boolean isKr, int year, int month, String token, int maxRank) {
+    String subKey = monthlySubCacheKey(isKr, year, month);
+    CachedPeriodChart hit = periodChartCache.get(subKey);
+    if (hit != null && hit.alive()) {
+      return hit.items();
+    }
+    List<WeekInMonth> weeks = listWeeksInMonth(year, month);
+    if (weeks.isEmpty()) {
+      return List.of();
+    }
+    Map<String, YearlyTrackAgg> agg = new HashMap<>();
+    boolean first = true;
+    for (WeekInMonth w : weeks) {
+      if (!first) {
+        sleepPeriodGap();
+      }
+      first = false;
+      List<ChartTrackItem> weekItems =
+          fetchWeeklyOnce(isKr, year, month, w.weekIndex(), token, SPOTIFY_CHART_SINGLE_MAX);
+      if (!weekItems.isEmpty()) {
+        mergeMonthlyIntoYearly(agg, weekItems);
+      }
+    }
+    if (agg.isEmpty()) {
+      return List.of();
+    }
+    List<ChartTrackItem> items = finalizeStreamAgg(agg, maxRank);
+    periodChartCache.put(
+        subKey,
+        new CachedPeriodChart(List.copyOf(items), Instant.now().plus(PERIOD_CACHE_TTL)));
+    return items;
+  }
+
+  private List<ChartTrackItem> fetchYearlyFromMonths(
+      boolean isKr, int year, String token, int maxRank) {
+    Map<String, YearlyTrackAgg> agg = new HashMap<>();
+    LocalDate today = LocalDate.now(ZoneOffset.UTC);
+    int lastMonth = year == today.getYear() ? today.getMonthValue() : 12;
+    boolean first = true;
+    for (int mo = 1; mo <= lastMonth; mo++) {
+      if (!first) {
+        sleepPeriodGap();
+      }
+      first = false;
+      List<ChartTrackItem> monthItems =
+          fetchMonthlyFromWeeks(isKr, year, mo, token, SPOTIFY_CHART_SINGLE_MAX);
+      if (!monthItems.isEmpty()) {
+        mergeMonthlyIntoYearly(agg, monthItems);
+      }
+    }
+    if (agg.isEmpty()) {
+      throw new IllegalStateException("spotify_charts_empty");
+    }
+    return finalizeStreamAgg(agg, maxRank);
+  }
+
+  private static List<ChartTrackItem> finalizeStreamAgg(
+      Map<String, YearlyTrackAgg> agg, int maxRank) {
+    List<YearlyTrackAgg> sorted =
+        agg.values().stream()
+            .sorted(Comparator.<YearlyTrackAgg>comparingLong(a -> a.streamSum).reversed())
+            .limit(maxRank)
+            .toList();
+    List<ChartTrackItem> out = new ArrayList<>();
+    int rank = 1;
+    for (YearlyTrackAgg a : sorted) {
+      out.add(a.toItem(rank++));
+    }
+    return out;
+  }
+
+  /** slug+segment 단일 호출. 429 즉시 중단. */
+  private List<ChartTrackItem> fetchChartsComOnce(
+      String slug, String segment, String token, int maxTracks) {
+    try {
+      JsonNode root = chartsGet(buildChartsUri(slug, segment), token);
+      List<ChartTrackItem> items = parseChartEntries(root, maxTracks);
+      if (!items.isEmpty()) {
+        return items;
+      }
+    } catch (IllegalStateException e) {
+      if ("spotify_charts_rate_limited".equals(e.getMessage())
+          || "spotify_charts_auth_failed".equals(e.getMessage())
+          || "spotify_not_configured".equals(e.getMessage())) {
+        throw e;
+      }
+    }
+    return List.of();
+  }
+
+  private String buildChartsUri(String slug, String segment) {
+    return UriComponentsBuilder.fromUriString(
+            CHARTS_API_BASE + "/auth/v0/charts/" + slug + "/" + segment)
+        .build(true)
+        .toUriString();
+  }
+
+  private static void mergeMonthlyIntoYearly(
+      Map<String, YearlyTrackAgg> agg, List<ChartTrackItem> monthItems) {
+    for (ChartTrackItem item : monthItems) {
+      String key = item.trackId().isBlank() ? item.title() + "|" + item.artists() : item.trackId();
+      long streams = Math.max(0, item.popularity());
+      agg.compute(
+          key,
+          (k, prev) -> {
+            if (prev == null) {
+              return new YearlyTrackAgg(item, streams);
+            }
+            prev.addStreams(streams);
+            return prev;
+          });
+    }
+  }
+
+  private static void sleepPeriodGap() {
+    try {
+      Thread.sleep(PERIOD_REQUEST_GAP_MS);
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("spotify_charts_api_error");
+    }
+  }
+
+  private static final class YearlyTrackAgg {
+    final String trackId;
+    final String title;
+    final String artists;
+    final String album;
+    final String imageUrl;
+    final String externalUrl;
+    final String releaseDate;
+    long streamSum;
+
+    YearlyTrackAgg(ChartTrackItem item, long streams) {
+      trackId = item.trackId();
+      title = item.title();
+      artists = item.artists();
+      album = item.album();
+      imageUrl = item.imageUrl();
+      externalUrl = item.externalUrl();
+      releaseDate = item.releaseDate();
+      streamSum = streams;
     }
 
+    void addStreams(long delta) {
+      streamSum += delta;
+    }
+
+    ChartTrackItem toItem(int rank) {
+      int pop = streamSum > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) streamSum;
+      return new ChartTrackItem(
+          rank,
+          trackId,
+          title,
+          artists,
+          album,
+          imageUrl,
+          externalUrl,
+          0L,
+          pop,
+          releaseDate);
+    }
+  }
+
+  private List<ChartTrackItem> fetchChartsComChartEntries(String slug, String date, String token, int maxTracks) {
+    IllegalStateException lastFailure = null;
+    List<String> dates = new ArrayList<>();
+    dates.add(date);
+    dates.add("latest");
+    LocalDate anchor = LocalDate.parse(date.length() >= 10 ? date.substring(0, 10) : date);
+    for (int i = 0; i < DATE_LOOKBACK_DAYS; i++) {
+      String d = anchor.minusDays(i).toString();
+      if (!dates.contains(d)) {
+        dates.add(d);
+      }
+    }
+    for (String tryDate : dates) {
+      String uri =
+          UriComponentsBuilder.fromUriString(
+                  CHARTS_API_BASE + "/auth/v0/charts/" + slug + "/" + tryDate)
+              .build(true)
+              .toUriString();
+      try {
+        JsonNode root = chartsGet(uri, token);
+        List<ChartTrackItem> items = parseChartEntries(root, maxTracks);
+        if (!items.isEmpty()) {
+          return items;
+        }
+      } catch (IllegalStateException e) {
+        lastFailure = e;
+        if ("spotify_charts_auth_failed".equals(e.getMessage())
+            || "spotify_not_configured".equals(e.getMessage())) {
+          throw e;
+        }
+      }
+    }
     if (lastFailure != null) {
-
       throw lastFailure;
-
     }
+    return List.of();
+  }
 
+  private SpotifyChartResult fetchChartsComChart(SpotifyChartKind kind, String token) {
+    IllegalStateException lastFailure = null;
+    for (String date : chartDateCandidates()) {
+      String uri =
+          UriComponentsBuilder.fromUriString(
+                  CHARTS_API_BASE + "/auth/v0/charts/" + kind.chartSlug() + "/" + date)
+              .build(true)
+              .toUriString();
+      try {
+        JsonNode root = chartsGet(uri, token);
+        List<ChartTrackItem> items = parseChartEntries(root, kind.maxTracks());
+        if (!items.isEmpty()) {
+          String playlistName =
+              root.path("displayChart")
+                  .path("chartMetadata")
+                  .path("readableTitle")
+                  .asText(kind.displayName());
+          return new SpotifyChartResult(
+              "spotify",
+              kind.chartSlug(),
+              playlistName,
+              kind.market(),
+              Instant.now(),
+              List.copyOf(items));
+        }
+      } catch (IllegalStateException e) {
+        lastFailure = e;
+        if ("spotify_charts_auth_failed".equals(e.getMessage())
+            || "spotify_not_configured".equals(e.getMessage())) {
+          throw e;
+        }
+        log.debug("Spotify charts {} @ {} failed: {}", kind.chartSlug(), date, e.getMessage());
+      }
+    }
+    if (lastFailure != null) {
+      throw lastFailure;
+    }
     throw new IllegalStateException("spotify_charts_empty");
-
   }
 
 
@@ -321,8 +756,13 @@ public class SpotifyChartService {
       JsonNode responses = root.path("chartEntryViewResponses");
 
       if (responses.isArray() && !responses.isEmpty()) {
-
-        entries = responses.get(0).path("entries");
+        for (JsonNode r : responses) {
+          JsonNode maybe = r.path("entries");
+          if (maybe.isArray() && !maybe.isEmpty()) {
+            entries = maybe;
+            break;
+          }
+        }
 
       }
 
@@ -346,9 +786,9 @@ public class SpotifyChartService {
 
       }
 
-      int rank = row.path("chartEntryData").path("currentRank").asInt(items.size() + 1);
+      int rank = resolveEntryRank(row, items.size() + 1);
 
-      items.add(mapChartsComTrack(meta, rank));
+      items.add(mapChartsComTrack(row, rank));
 
       if (items.size() >= maxTracks) {
 
@@ -364,7 +804,21 @@ public class SpotifyChartService {
 
 
 
-  private ChartTrackItem mapChartsComTrack(JsonNode meta, int rank) {
+  private static int resolveEntryRank(JsonNode row, int fallbackRank) {
+    JsonNode entryData = row.path("chartEntryData");
+    int rank = entryData.path("currentRank").asInt(0);
+    if (rank <= 0) {
+      rank = row.path("currentRank").asInt(0);
+    }
+    if (rank <= 0) {
+      rank = row.path("current_rank").asInt(0);
+    }
+  return rank > 0 ? rank : fallbackRank;
+  }
+
+  private ChartTrackItem mapChartsComTrack(JsonNode row, int rank) {
+
+    JsonNode meta = row.path("trackMetadata");
 
     String title = meta.path("trackName").asText("");
 
@@ -396,6 +850,8 @@ public class SpotifyChartService {
 
         trackId.isBlank() ? "" : "https://open.spotify.com/track/" + trackId;
 
+    int streams = resolveStreamCount(row);
+
     return new ChartTrackItem(
 
         rank,
@@ -414,13 +870,42 @@ public class SpotifyChartService {
 
         0L,
 
-        0,
+        streams,
 
         releaseDate);
 
   }
 
-
+  private static int resolveStreamCount(JsonNode row) {
+    JsonNode entryData = row.path("chartEntryData");
+    long value = 0;
+    String[] keys = {
+      "cumulativePlayCount",
+      "playCount",
+      "streams",
+      "streamingCount",
+      "streamCount"
+    };
+    for (String key : keys) {
+      value = entryData.path(key).asLong(0);
+      if (value > 0) {
+        break;
+      }
+    }
+    if (value <= 0) {
+      JsonNode streaming = entryData.path("streamingData");
+      for (String key : keys) {
+        value = streaming.path(key).asLong(0);
+        if (value > 0) {
+          break;
+        }
+      }
+    }
+    if (value <= 0) {
+      return 0;
+    }
+    return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
+  }
 
   private static String spotifyIdFromUri(String uri) {
 
@@ -512,6 +997,9 @@ public class SpotifyChartService {
 
       log.warn("Spotify charts HTTP {} for {} body={}", status, uri, resp);
 
+      if (status == 429) {
+        throw new IllegalStateException("spotify_charts_rate_limited");
+      }
       if (status == 403) {
         throw new IllegalStateException("spotify_charts_auth_failed");
       }
@@ -519,7 +1007,7 @@ public class SpotifyChartService {
         throw new IllegalStateException("spotify_auth_failed");
       }
 
-      if (status == 404) {
+      if (status == 404 || status == 400) {
 
         throw new IllegalStateException("spotify_charts_not_found");
 

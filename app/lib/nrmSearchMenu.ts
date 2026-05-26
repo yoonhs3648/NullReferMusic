@@ -1,31 +1,46 @@
-export type SearchMenuPanel = 'search';
+import type { ChartPlatformIconKey } from '@/lib/nrmChartsPlatforms';
 
-export type SearchLastfmKind = 'artist' | 'album' | 'track';
+export type SearchMenuPanel = 'search' | 'searchSpotify' | 'searchLastfm';
 
-export type SearchLastfmRow = {
-  kind: SearchLastfmKind;
+export type SearchKind = 'artist' | 'album' | 'track';
+
+/** @deprecated SearchKind 사용 */
+export type SearchLastfmKind = SearchKind;
+
+export type SearchSpotifyKind = SearchKind;
+
+export type SearchPlatformId = 'spotify' | 'lastfm';
+
+export type SearchPlatformRow = {
+  id: SearchPlatformId;
   label: string;
-  subtitle: string;
+  iconKey: ChartPlatformIconKey;
 };
 
-export const NRM_SEARCH_LASTFM_ROWS: SearchLastfmRow[] = [
-  {
-    kind: 'artist',
-    label: '아티스트 검색',
-    subtitle: '상세 · 유사 아티스트 · 인기곡 · 앨범 · 태그',
-  },
-  {
-    kind: 'album',
-    label: '앨범 검색',
-    subtitle: '앨범 상세 · 태그',
-  },
-  {
-    kind: 'track',
-    label: '트랙 검색',
-    subtitle: '곡 상세 · 유사 곡 · 태그',
-  },
+/** 검색 메뉴 플랫폼 (표시 순서) */
+export const NRM_SEARCH_PLATFORM_ROWS: SearchPlatformRow[] = [
+  { id: 'lastfm', label: 'Last.fm', iconKey: 'lastfm' },
+  { id: 'spotify', label: 'Spotify (Premium)', iconKey: 'spotify' },
 ];
 
+export function getSearchPlatformLabel(id: SearchPlatformId): string {
+  return NRM_SEARCH_PLATFORM_ROWS.find((r) => r.id === id)?.label ?? id;
+}
+
+export type SearchKindRow = {
+  kind: SearchKind;
+  label: string;
+};
+
+export const NRM_SEARCH_KIND_ROWS: SearchKindRow[] = [
+  { kind: 'artist', label: '아티스트 검색' },
+  { kind: 'album', label: '앨범 검색' },
+  { kind: 'track', label: '트랙 검색' },
+];
+
+/** @deprecated NRM_SEARCH_KIND_ROWS 사용 */
+export const NRM_SEARCH_LASTFM_ROWS = NRM_SEARCH_KIND_ROWS;
+
 export function isSearchMenuPanel(panel: string): panel is SearchMenuPanel {
-  return panel === 'search';
+  return panel === 'search' || panel === 'searchSpotify' || panel === 'searchLastfm';
 }

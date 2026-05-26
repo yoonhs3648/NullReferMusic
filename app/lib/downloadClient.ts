@@ -1,3 +1,4 @@
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { HealthResponse, DownloadResponse } from '@/lib/downloadTypes';
 import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
@@ -14,7 +15,12 @@ export async function fetchHealth(): Promise<HealthResponse> {
 
 export async function requestDownload(
   url: string,
-  options?: { noPlaylist?: boolean },
+  options?: {
+    noPlaylist?: boolean;
+    audioFormat?: string;
+    audioQuality?: number;
+    metadata?: NrmAudioFileMetadata;
+  },
 ): Promise<DownloadResponse> {
   const base = await getResolvedApiBaseUrl();
   const res = await nrmBackendFetch(`${base}/api/download`, {
@@ -23,6 +29,18 @@ export async function requestDownload(
     body: JSON.stringify({
       url: url.trim(),
       noPlaylist: options?.noPlaylist ?? true,
+      audioFormat: options?.audioFormat,
+      audioQuality: options?.audioQuality,
+      ...(options?.metadata
+        ? {
+            artist: options.metadata.artist,
+            title: options.metadata.title,
+            album: options.metadata.album,
+            genre: options.metadata.genre,
+            releaseDate: options.metadata.releaseDate,
+            coverUrl: options.metadata.coverUrl,
+          }
+        : {}),
     }),
   });
   const data = (await res.json().catch(() => ({}))) as DownloadResponse;

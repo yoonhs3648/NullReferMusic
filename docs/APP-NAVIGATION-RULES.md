@@ -25,3 +25,18 @@ NullReferenceMusic 모바일 UX 일관성을 위한 내비게이션 규칙.
 - 새로운 상태를 추가할 때는 반드시 다음 두 질문을 통과해야 한다.
   - 로고 탭 시 해당 상태는 초기화되는가?
   - Android 뒤로가기 시 홈 복귀 규칙을 깨지 않는가?
+
+## 5) 전체 화면 기능 상단 로고 (필수)
+
+메뉴에서 진입하는 **전체 화면 기능**(실시간 차트, 기간별 차트, 장르별 차트, 검색·상세 등)은 상단 로고를 **동일한 크기·위치**로 맞춘다.
+
+- 컴포넌트: `NrmFeatureScreenLogoHeader` (`app/components/nrm/NrmFeatureScreenLogoHeader.tsx`)
+- 내부: `<NrmLogo compact tone={isDark ? 'dark' : 'light'} onPress={…} />` + 중앙 정렬(`headerRow`)
+- **금지**: 검색·상세 화면에서 `compact` 없이 큰 로고(`NrmLogo` 기본 크기)를 쓰는 것
+- 메인 YouTube 홈(`index` welcome/browsing)의 큰 로고는 이 규칙 대상이 **아님** (초기 화면 전용)
+- 새 화면(기간별·장르별 차트 포함) 추가 시 위 헤더 컴포넌트를 재사용할 것
+
+## 6) 검색 화면 뒤로가기 UI
+
+- 검색·상세 스택에서는 **「← 이전」**, **「← 검색 결과로」** 같은 파란색 인라인 뒤로가기 텍스트를 두지 않는다.
+- 상위로 돌아갈 때는 Android 하드웨어 뒤로가기·스택 내비게이션(Last.fm 라우터 등)만 사용한다.

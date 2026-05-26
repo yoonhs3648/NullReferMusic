@@ -23,7 +23,6 @@ export type ChartPlatformRow = {
   /** 실시간 차트 메뉴 표시 순서 (오름차순) */
   sortOrder: number;
   label: string;
-  subtitle: string;
   /** true면 메뉴에서 선택 가능 */
   enabled: boolean;
   iconKey: ChartPlatformIconKey;
@@ -35,7 +34,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartSpotifyCharts',
     sortOrder: 10,
     label: 'Spotify',
-    subtitle: 'charts.spotify.com · Top 50',
     enabled: true,
     iconKey: 'spotify',
   },
@@ -43,7 +41,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartSpotifyOfficial',
     sortOrder: 20,
     label: 'Spotify (Premium)',
-    subtitle: 'Web API · Top 50',
     enabled: true,
     iconKey: 'spotify',
   },
@@ -51,7 +48,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartAppleMusic',
     sortOrder: 30,
     label: 'Apple Music',
-    subtitle: 'RSS · Top 100',
     enabled: true,
     iconKey: 'appleMusic',
   },
@@ -59,7 +55,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartLastfm',
     sortOrder: 40,
     label: 'Last.fm',
-    subtitle: 'Top 50',
     enabled: true,
     iconKey: 'lastfm',
   },
@@ -67,7 +62,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartMelon',
     sortOrder: 50,
     label: 'Melon',
-    subtitle: 'TOP 100',
     enabled: false,
     iconKey: 'melon',
   },
@@ -75,7 +69,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartYoutubeMusic',
     sortOrder: 60,
     label: 'YouTube Music',
-    subtitle: '차트',
     enabled: false,
     iconKey: 'youtubeMusic',
   },
@@ -83,7 +76,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartGenie',
     sortOrder: 70,
     label: 'Genie',
-    subtitle: 'TOP 100',
     enabled: false,
     iconKey: 'genie',
   },
@@ -91,7 +83,6 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartBillboard',
     sortOrder: 80,
     label: 'Billboard',
-    subtitle: 'Hot 100',
     enabled: false,
     iconKey: 'billboard',
   },

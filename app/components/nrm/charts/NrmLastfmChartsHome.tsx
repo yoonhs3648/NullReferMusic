@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +11,7 @@ import {
 
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
+import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { fetchLastfmChart } from '@/lib/nrmLastfmChartsClient';
@@ -28,55 +27,14 @@ type Props = {
   isDark: boolean;
   paddingHorizontal: number;
   onBackToHome: () => void;
+  onTrackPress?: (item: ChartTrackItem) => void;
 };
-
-function TrackRow({
-  item,
-  titleColor,
-  bodyColor,
-}: {
-  item: ChartTrackItem;
-  titleColor: string;
-  bodyColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={() => {
-        if (item.externalUrl) void Linking.openURL(item.externalUrl);
-      }}
-      style={({ pressed }) => [
-        styles.trackRow,
-        pressed && styles.trackRowPressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.rank}위 ${item.title}`}>
-      <Text style={[styles.rank, { color: bodyColor }]}>{item.rank}</Text>
-      {item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.art} />
-      ) : (
-        <View style={[styles.art, styles.artPlaceholder]} />
-      )}
-      <View style={styles.trackMeta}>
-        <Text style={[styles.trackTitle, { color: titleColor }]} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={[styles.trackSub, { color: bodyColor }]} numberOfLines={1}>
-          {item.artists}
-        </Text>
-        {item.popularity > 0 ? (
-          <Text style={[styles.metaChip, { color: bodyColor }]}>
-            재생 {item.popularity.toLocaleString()}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
 
 export function NrmLastfmChartsHome({
   isDark,
   paddingHorizontal,
   onBackToHome,
+  onTrackPress,
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -194,7 +152,16 @@ export function NrmLastfmChartsHome({
       keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
       renderItem={({ item }) => (
         <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <TrackRow item={item} titleColor={titleColor} bodyColor={bodyColor} />
+          <NrmChartTrackRow
+            item={item}
+            titleColor={titleColor}
+            bodyColor={bodyColor}
+            onPress={
+              onTrackPress
+                ? () => onTrackPress(item)
+                : undefined
+            }
+          />
         </View>
       )}
       ListHeaderComponent={listHeader}
@@ -209,7 +176,6 @@ export function NrmLastfmChartsHome({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingBottom: nrmTokens.space.xxl },
   listContentEmpty: { flexGrow: 1 },
@@ -234,26 +200,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   loader: { marginVertical: nrmTokens.space.lg },
-  trackRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.sm,
-    paddingHorizontal: nrmTokens.space.xs,
-    borderRadius: nrmTokens.radius.sm,
-    marginBottom: nrmTokens.space.xxs,
-  },
-  trackRowPressed: { opacity: 0.88 },
-  rank: {
-    width: 28,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-    textAlign: 'right',
-  },
-  art: { width: 52, height: 52, borderRadius: nrmTokens.radius.sm },
-  artPlaceholder: { backgroundColor: 'rgba(128,128,128,0.2)' },
-  trackMeta: { flex: 1, minWidth: 0 },
-  trackTitle: { fontSize: nrmTokens.font.body, fontWeight: '500' },
-  trackSub: { marginTop: 2, fontSize: nrmTokens.font.caption, fontWeight: '400' },
-  metaChip: { marginTop: 4, fontSize: nrmTokens.font.caption, fontWeight: '400' },
 });

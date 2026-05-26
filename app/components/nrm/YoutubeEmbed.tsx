@@ -1,4 +1,5 @@
-import { Platform, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
 
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -13,10 +14,13 @@ type Props = {
 };
 
 export function YoutubeEmbed({ videoId, isDark }: Props) {
+  const [loading, setLoading] = useState(true);
+
   if (!videoId) return null;
 
   const uri = buildYoutubeEmbedUrl(videoId, {
-    pageOrigin: NRM_YOUTUBE_WEBVIEW_REFERER,
+    pageOrigin: 'https://www.youtube.com',
+    autoplay: true,
   });
   const borderColor = isDark
     ? nrmTokens.color.border
@@ -24,6 +28,11 @@ export function YoutubeEmbed({ videoId, isDark }: Props) {
 
   return (
     <View style={[styles.wrap, { borderColor }]}>
+      {loading ? (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={nrmTokens.color.primary} />
+        </View>
+      ) : null}
       <WebView
         key={videoId}
         source={{
@@ -38,6 +47,9 @@ export function YoutubeEmbed({ videoId, isDark }: Props) {
         mediaPlaybackRequiresUserAction={false}
         javaScriptEnabled
         domStorageEnabled
+        onLoadStart={() => setLoading(true)}
+        onLoadEnd={() => setLoading(false)}
+        onError={() => setLoading(false)}
         {...(Platform.OS === 'android'
           ? { mixedContentMode: 'always' as const }
           : {})}
@@ -59,5 +71,12 @@ const styles = StyleSheet.create({
   web: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    zIndex: 1,
   },
 });

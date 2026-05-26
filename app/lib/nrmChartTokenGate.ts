@@ -12,7 +12,6 @@ import {
   nrmChartsSpotifyChartsSessionMessage,
   nrmChartsSpotifyNotConfiguredMessage,
 } from '@/lib/nrmChartsStrings';
-import { nrmSearchNotConfiguredMessage } from '@/lib/nrmSearchStrings';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 async function hasSpotifyOfficialChartAccess(): Promise<boolean> {
@@ -31,7 +30,7 @@ export async function ensureSpotifyOfficialChartAccess(
   }
   const go = await confirmUser(
     `${nrmChartsSpotifyNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
-    { cancelLabel: '취소', confirmLabel: '설정 열기' },
+    { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
   );
   if (go) {
     onOpenTokenSettings();
@@ -59,7 +58,7 @@ export async function ensureSpotifyChartsSessionAccess(
 
   const go = await confirmUser(
     `${nrmChartsSpotifyChartsSessionMessage}\n\n지금 Charts 세션 설정을 열까요?`,
-    { cancelLabel: '취소', confirmLabel: '설정 열기' },
+    { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
   );
   if (go) {
     onOpenChartsSession();
@@ -94,6 +93,13 @@ export async function promptSpotifyChartsSessionExpired(
   await promptSpotifyChartsBearerExpired({ onOpenChartsSession });
 }
 
+/** Spotify 검색 — 공식 Web API (Client ID·Secret / Bearer) */
+export async function ensureSpotifySearchApiAccess(
+  onOpenTokenSettings: () => void,
+): Promise<boolean> {
+  return ensureSpotifyOfficialChartAccess(onOpenTokenSettings);
+}
+
 export async function ensureSearchApiAccess(
   onOpenTokenSettings: () => void,
 ): Promise<boolean> {
@@ -101,8 +107,8 @@ export async function ensureSearchApiAccess(
     return true;
   }
   const go = await confirmUser(
-    `${nrmSearchNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
-    { cancelLabel: '취소', confirmLabel: '설정 열기' },
+    `${nrmChartsLastfmNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
+    { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
   );
   if (go) {
     onOpenTokenSettings();
@@ -118,7 +124,7 @@ export async function ensureLastfmChartAccess(
   }
   const go = await confirmUser(
     `${nrmChartsLastfmNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
-    { cancelLabel: '취소', confirmLabel: '설정 열기' },
+    { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
   );
   if (go) {
     onOpenTokenSettings();

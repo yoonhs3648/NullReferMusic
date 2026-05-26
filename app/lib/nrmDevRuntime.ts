@@ -5,11 +5,14 @@ import { Platform } from 'react-native';
 
 /** Expo Go 앱에서 실행 중 (Metro 실시간 번들) */
 export function isExpoGo(): boolean {
-  return Constants.appOwnership === 'expo';
+  if (Constants.appOwnership === 'expo') return true;
+  return Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 }
 
 /** 스토어/직접 설치 APK·IPA (PC Metro·개발 서버와 분리된 릴리스 바이너리) */
 export function isStandaloneApp(): boolean {
+  // Web은 브라우저(CORS) 제약이 있어 standalone로 취급하면 안 됩니다.
+  if (Platform.OS === 'web') return false;
   const env = Constants.executionEnvironment;
   return (
     env === ExecutionEnvironment.Standalone ||

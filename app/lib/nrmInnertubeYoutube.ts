@@ -4,6 +4,7 @@
  */
 import { Platform } from 'react-native';
 
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { YoutubeSearchOutcome } from '@/lib/youtubeSearchTypes';
 
 export async function searchYoutubeOnDevice(
@@ -29,13 +30,14 @@ export async function getInnertube() {
 export async function downloadYoutubeAudioOnDevice(
   videoId: string,
   userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   if (Platform.OS === 'web') {
     const m = await import('./nrmInnertubeYoutube.web');
-    return m.downloadYoutubeAudioOnDevice(videoId, userSuggestedFileName);
+    return m.downloadYoutubeAudioOnDevice(videoId, userSuggestedFileName, metadata);
   }
   const m = await import('./nrmInnertubeYoutube.native');
-  return m.downloadYoutubeAudioOnDevice(videoId, userSuggestedFileName);
+  return m.downloadYoutubeAudioOnDevice(videoId, userSuggestedFileName, metadata);
 }
 
 export async function getAudioStreamUrlWithInnertube(

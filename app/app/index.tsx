@@ -25,13 +25,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 
 import { NrmAppleMusicChartsHome } from '@/components/nrm/charts/NrmAppleMusicChartsHome';
+import { NrmGenreChartsPlaceholder } from '@/components/nrm/charts/NrmGenreChartsPlaceholder';
 import { NrmLastfmChartsHome } from '@/components/nrm/charts/NrmLastfmChartsHome';
+import { NrmPeriodChartsHome } from '@/components/nrm/charts/NrmPeriodChartsHome';
 import { NrmSpotifyChartsHome } from '@/components/nrm/charts/NrmSpotifyChartsHome';
 import { NrmSpotifyChartsLoginModal } from '@/components/nrm/settings/NrmSpotifyChartsLoginModal';
 import { NrmSpotifyChartsSilentCapture } from '@/components/nrm/settings/NrmSpotifyChartsSilentCapture';
-import { NrmLastfmAlbumSearchHome } from '@/components/nrm/search/NrmLastfmAlbumSearchHome';
-import { NrmLastfmArtistSearchHome } from '@/components/nrm/search/NrmLastfmArtistSearchHome';
-import { NrmLastfmTrackSearchHome } from '@/components/nrm/search/NrmLastfmTrackSearchHome';
+import {
+  NrmLastfmSearchRouter,
+  type LastfmSearchKind,
+  type LastfmSearchNavHandle,
+  type LastfmSearchRouterState,
+  type LastfmYoutubeNavigateParams,
+} from '@/components/nrm/search/NrmLastfmSearchRouter';
+import { lastfmFieldsToChartTrack } from '@/lib/nrmLastfmDownloadMetadata';
+import { NrmSpotifyAlbumSearchHome } from '@/components/nrm/search/NrmSpotifyAlbumSearchHome';
+import { NrmSpotifyArtistSearchHome } from '@/components/nrm/search/NrmSpotifyArtistSearchHome';
+import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTrackSearchHome';
 
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
 import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
@@ -46,6 +56,7 @@ import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { saveSpotifyChartsSession } from '@/lib/nrmSpotifyChartsSession';
+import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 
 
 
@@ -59,9 +70,26 @@ type MainView =
   | 'spotifyChartsOfficial'
   | 'spotifyChartsCharts'
   | 'lastfmCharts'
+  | 'periodLastfmCharts'
+  | 'periodSpotifyCharts'
+  | 'genreCharts'
+  | 'spotifySearchArtist'
+  | 'spotifySearchAlbum'
+  | 'spotifySearchTrack'
   | 'lastfmSearchArtist'
   | 'lastfmSearchAlbum'
   | 'lastfmSearchTrack';
+
+type ChartView = Exclude<
+  MainView,
+  | 'youtube'
+  | 'spotifySearchArtist'
+  | 'spotifySearchAlbum'
+  | 'spotifySearchTrack'
+  | 'lastfmSearchArtist'
+  | 'lastfmSearchAlbum'
+  | 'lastfmSearchTrack'
+>;
 
 
 
@@ -80,6 +108,22 @@ export default function HomeScreen() {
   );
 
   const [homeEpoch, setHomeEpoch] = useState(0);
+  /** 차트 아이템 클릭으로 youtube 검색 화면으로 왔을 때 복귀할 차트 뷰 */
+  const [chartReturnView, setChartReturnView] = useState<ChartView | null>(null);
+  /** 차트 아이템 클릭으로 전달된 초기 검색 쿼리 */
+  const [chartSearchQuery, setChartSearchQuery] = useState<string | undefined>(undefined);
+  const [chartDownloadTrack, setChartDownloadTrack] =
+    useState<ChartTrackItem | null>(null);
+  const [chartDownloadSource, setChartDownloadSource] = useState<
+    'chart' | 'lastfm' | null
+  >(null);
+  /** Last.fm 검색 → 유튜브 복귀용 */
+  const [searchReturnView, setSearchReturnView] = useState<MainView | null>(null);
+  const [lastfmNavSnapshot, setLastfmNavSnapshot] =
+    useState<LastfmSearchRouterState | null>(null);
+  const [lastfmNavRestore, setLastfmNavRestore] =
+    useState<LastfmSearchRouterState | null>(null);
+  const lastfmNavRef = useRef<LastfmSearchNavHandle>(null);
   const [chartsBearerModalOpen, setChartsBearerModalOpen] = useState(false);
   const [silentCaptureActive, setSilentCaptureActive] = useState(false);
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
@@ -101,6 +145,14 @@ export default function HomeScreen() {
   const isSpotifyChartsOfficial = mainView === 'spotifyChartsOfficial';
   const isSpotifyChartsCharts = mainView === 'spotifyChartsCharts';
   const isLastfmCharts = mainView === 'lastfmCharts';
+  const isPeriodLastfmCharts = mainView === 'periodLastfmCharts';
+  const isPeriodSpotifyCharts = mainView === 'periodSpotifyCharts';
+  const isGenreCharts = mainView === 'genreCharts';
+  const isSpotifySearchArtist = mainView === 'spotifySearchArtist';
+  const isSpotifySearchAlbum = mainView === 'spotifySearchAlbum';
+  const isSpotifySearchTrack = mainView === 'spotifySearchTrack';
+  const isSpotifySearchView =
+    isSpotifySearchArtist || isSpotifySearchAlbum || isSpotifySearchTrack;
   const isLastfmSearchArtist = mainView === 'lastfmSearchArtist';
   const isLastfmSearchAlbum = mainView === 'lastfmSearchAlbum';
   const isLastfmSearchTrack = mainView === 'lastfmSearchTrack';
@@ -110,8 +162,12 @@ export default function HomeScreen() {
     isAppleMusicCharts ||
     isSpotifyChartsOfficial ||
     isSpotifyChartsCharts ||
-    isLastfmCharts;
-  const isFullScreenFeature = isChartsView || isLastfmSearchView;
+    isLastfmCharts ||
+    isPeriodLastfmCharts ||
+    isPeriodSpotifyCharts ||
+    isGenreCharts;
+  const isFullScreenFeature =
+    isChartsView || isSpotifySearchView || isLastfmSearchView;
 
 
 
@@ -122,8 +178,33 @@ export default function HomeScreen() {
     setLayoutPhase('welcome');
 
     setHomeEpoch((v) => v + 1);
+    setChartReturnView(null);
+    setChartSearchQuery(undefined);
+    setChartDownloadTrack(null);
+    setChartDownloadSource(null);
+    setSearchReturnView(null);
+    setLastfmNavRestore(null);
 
   }, []);
+
+  /** 차트 아이템 클릭: 유튜브 검색으로 이동하고 이전 차트 뷰를 저장 */
+  const navigateToSearchFromChart = useCallback(
+    (item: ChartTrackItem) => {
+      const q =
+        item.artists && item.title
+          ? `${item.artists} - ${item.title}`
+          : item.title || item.artists;
+      if (!q) return;
+      setChartReturnView(mainView as ChartView);
+      setChartSearchQuery(q);
+      setChartDownloadTrack(item);
+      setChartDownloadSource('chart');
+      setMainView('youtube');
+      setLayoutPhase('browsing');
+      setHomeEpoch((v) => v + 1);
+    },
+    [mainView],
+  );
 
 
 
@@ -155,20 +236,81 @@ export default function HomeScreen() {
     setLayoutPhase('browsing');
   }, []);
 
-  const openLastfmArtistSearch = useCallback(() => {
-    setMainView('lastfmSearchArtist');
+  const openPeriodLastfmCharts = useCallback(() => {
+    setMainView('periodLastfmCharts');
     setLayoutPhase('browsing');
   }, []);
 
-  const openLastfmAlbumSearch = useCallback(() => {
-    setMainView('lastfmSearchAlbum');
+  const openPeriodSpotifyCharts = useCallback(() => {
+    setMainView('periodSpotifyCharts');
     setLayoutPhase('browsing');
   }, []);
 
-  const openLastfmTrackSearch = useCallback(() => {
-    setMainView('lastfmSearchTrack');
+  const openGenreCharts = useCallback(() => {
+    setMainView('genreCharts');
     setLayoutPhase('browsing');
   }, []);
+
+  const openSpotifyArtistSearch = useCallback(() => {
+    setMainView('spotifySearchArtist');
+    setLayoutPhase('browsing');
+  }, []);
+
+  const openSpotifyAlbumSearch = useCallback(() => {
+    setMainView('spotifySearchAlbum');
+    setLayoutPhase('browsing');
+  }, []);
+
+  const openSpotifyTrackSearch = useCallback(() => {
+    setMainView('spotifySearchTrack');
+    setLayoutPhase('browsing');
+  }, []);
+
+  const openLastfmSearch = useCallback((kind: LastfmSearchKind) => {
+    setLastfmNavRestore(null);
+    setLastfmNavSnapshot(null);
+    setSearchReturnView(null);
+    const view: MainView =
+      kind === 'artist'
+        ? 'lastfmSearchArtist'
+        : kind === 'album'
+          ? 'lastfmSearchAlbum'
+          : 'lastfmSearchTrack';
+    setMainView(view);
+    setLayoutPhase('browsing');
+  }, []);
+
+  const openLastfmArtistSearch = useCallback(
+    () => openLastfmSearch('artist'),
+    [openLastfmSearch],
+  );
+  const openLastfmAlbumSearch = useCallback(
+    () => openLastfmSearch('album'),
+    [openLastfmSearch],
+  );
+  const openLastfmTrackSearch = useCallback(
+    () => openLastfmSearch('track'),
+    [openLastfmSearch],
+  );
+
+  const navigateToYoutubeFromLastfm = useCallback(
+    (params: LastfmYoutubeNavigateParams) => {
+      const artist = params.artist.trim();
+      const title = params.title.trim();
+      if (!artist && !title) return;
+      const displayQ =
+        artist && title ? `${artist} - ${title}` : title || artist;
+      setSearchReturnView(mainView);
+      setLastfmNavSnapshot(lastfmNavRef.current?.captureState() ?? null);
+      setChartSearchQuery(displayQ);
+      setChartDownloadTrack(lastfmFieldsToChartTrack(params));
+      setChartDownloadSource('lastfm');
+      setMainView('youtube');
+      setLayoutPhase('browsing');
+      setHomeEpoch((v) => v + 1);
+    },
+    [mainView],
+  );
 
   const openChartsSessionSettings = useCallback(() => {
     menuRef.current?.openChartsSession();
@@ -234,8 +376,39 @@ export default function HomeScreen() {
 
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
 
+      if (isLastfmSearchView) {
+        if (lastfmNavRef.current?.goBack()) return true;
+        resetToYoutubeHome();
+        return true;
+      }
+
       if (isFullScreenFeature) {
         resetToYoutubeHome();
+        return true;
+      }
+
+      // Last.fm 검색 → 유튜브 복귀
+      if (mainView === 'youtube' && searchReturnView) {
+        const snap = lastfmNavSnapshot;
+        setMainView(searchReturnView);
+        setLayoutPhase('browsing');
+        setChartSearchQuery(undefined);
+        setChartDownloadTrack(null);
+        setChartDownloadSource(null);
+        setSearchReturnView(null);
+        setLastfmNavSnapshot(null);
+        setLastfmNavRestore(snap);
+        return true;
+      }
+
+      // 차트에서 검색으로 이동했다면 뒤로가기 시 해당 차트로 복귀
+      if (mainView === 'youtube' && chartReturnView) {
+        setMainView(chartReturnView);
+        setLayoutPhase('browsing');
+        setChartReturnView(null);
+        setChartSearchQuery(undefined);
+        setChartDownloadTrack(null);
+        setChartDownloadSource(null);
         return true;
       }
 
@@ -253,7 +426,23 @@ export default function HomeScreen() {
 
     return () => sub.remove();
 
-  }, [isFullScreenFeature, layoutPhase, resetToYoutubeHome]);
+  }, [
+    isFullScreenFeature,
+    isLastfmSearchView,
+    layoutPhase,
+    resetToYoutubeHome,
+    mainView,
+    chartReturnView,
+    searchReturnView,
+    lastfmNavSnapshot,
+  ]);
+
+  useEffect(() => {
+    if (isLastfmSearchView && lastfmNavRestore) {
+      const id = setTimeout(() => setLastfmNavRestore(null), 0);
+      return () => clearTimeout(id);
+    }
+  }, [isLastfmSearchView, lastfmNavRestore]);
 
 
 
@@ -274,6 +463,7 @@ export default function HomeScreen() {
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
           />
         ) : isSpotifyChartsOfficial ? (
           <NrmSpotifyChartsHome
@@ -281,6 +471,7 @@ export default function HomeScreen() {
             paddingHorizontal={pad}
             chartSource="official"
             onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
           />
         ) : isSpotifyChartsCharts ? (
           <NrmSpotifyChartsHome
@@ -290,30 +481,72 @@ export default function HomeScreen() {
             onBackToHome={resetToYoutubeHome}
             onOpenChartsSession={openChartsSessionSettings}
             onRenewChartsBearer={renewChartsBearerViaWebView}
+            onTrackPress={navigateToSearchFromChart}
           />
         ) : isLastfmCharts ? (
           <NrmLastfmChartsHome
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
           />
-        ) : isLastfmSearchArtist ? (
-          <NrmLastfmArtistSearchHome
+        ) : isPeriodLastfmCharts ? (
+          <NrmPeriodChartsHome
+            platform="lastfm"
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+          />
+        ) : isPeriodSpotifyCharts ? (
+          <NrmPeriodChartsHome
+            platform="spotify"
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+            onOpenChartsSession={openChartsSessionSettings}
+            onRenewChartsBearer={renewChartsBearerViaWebView}
+          />
+        ) : isGenreCharts ? (
+          <NrmGenreChartsPlaceholder
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
           />
-        ) : isLastfmSearchAlbum ? (
-          <NrmLastfmAlbumSearchHome
+        ) : isSpotifySearchArtist ? (
+          <NrmSpotifyArtistSearchHome
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
           />
-        ) : isLastfmSearchTrack ? (
-          <NrmLastfmTrackSearchHome
+        ) : isSpotifySearchAlbum ? (
+          <NrmSpotifyAlbumSearchHome
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
+          />
+        ) : isSpotifySearchTrack ? (
+          <NrmSpotifyTrackSearchHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+          />
+        ) : isLastfmSearchView ? (
+          <NrmLastfmSearchRouter
+            ref={lastfmNavRef}
+            initialKind={
+              isLastfmSearchArtist
+                ? 'artist'
+                : isLastfmSearchAlbum
+                  ? 'album'
+                  : 'track'
+            }
+            restoredState={lastfmNavRestore}
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onNavigateYoutube={navigateToYoutubeFromLastfm}
           />
         ) : (
 
@@ -403,6 +636,10 @@ export default function HomeScreen() {
 
                   onSearchCommitted={() => setLayoutPhase('browsing')}
 
+                  initialQuery={chartSearchQuery}
+                  chartDownloadTrack={chartDownloadTrack}
+                  chartDownloadSource={chartDownloadSource}
+
                 />
 
               </View>
@@ -423,6 +660,12 @@ export default function HomeScreen() {
           onNavigateSpotifyChartsOfficial={openSpotifyChartsOfficial}
           onNavigateSpotifyChartsCharts={openSpotifyChartsCharts}
           onNavigateLastfmCharts={openLastfmCharts}
+          onNavigatePeriodLastfmCharts={openPeriodLastfmCharts}
+          onNavigatePeriodSpotifyCharts={openPeriodSpotifyCharts}
+          onNavigateGenreCharts={openGenreCharts}
+          onNavigateSpotifyArtistSearch={openSpotifyArtistSearch}
+          onNavigateSpotifyAlbumSearch={openSpotifyAlbumSearch}
+          onNavigateSpotifyTrackSearch={openSpotifyTrackSearch}
           onNavigateLastfmArtistSearch={openLastfmArtistSearch}
           onNavigateLastfmAlbumSearch={openLastfmAlbumSearch}
           onNavigateLastfmTrackSearch={openLastfmTrackSearch}

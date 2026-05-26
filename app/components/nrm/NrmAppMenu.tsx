@@ -22,12 +22,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { NrmMenuNotifyHost } from '@/components/nrm/NrmMenuNotifyHost';
 import { NrmMenuChartPanels } from '@/components/nrm/charts/NrmMenuChartPanels';
+import { NrmMenuPeriodChartPanels } from '@/components/nrm/charts/NrmMenuPeriodChartPanels';
 import { NrmMenuSearchPanels } from '@/components/nrm/search/NrmMenuSearchPanels';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
 import { registerOpenDownloadSettingsListener } from '@/lib/nrmDownloadNavEvents';
+import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagSettingsPanel';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import {
@@ -35,15 +38,18 @@ import {
   ensureSearchApiAccess,
   ensureSpotifyChartsSessionAccess,
   ensureSpotifyOfficialChartAccess,
+  ensureSpotifySearchApiAccess,
 } from '@/lib/nrmChartTokenGate';
 import {
   isChartMenuPanel,
   type ChartMenuPanel,
 } from '@/lib/nrmChartsPlatforms';
+import { isPeriodChartMenuPanel } from '@/lib/nrmChartsMenu';
 import {
   isSearchMenuPanel,
-  type SearchLastfmKind,
+  type SearchKind,
   type SearchMenuPanel,
+  type SearchPlatformId,
 } from '@/lib/nrmSearchMenu';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
@@ -56,10 +62,6 @@ import {
   getNrmAppVersionLabel,
   NRM_APP_AUTHOR_DISPLAY,
 } from '@/lib/nrmAppInfo';
-import {
-  getReleaseNoteEntries,
-  type ReleaseNoteEntry,
-} from '@/lib/nrmReleaseNotes';
 import {
   getYoutubeSearchSuffixMode,
   listYoutubeSearchSuffixModes,
@@ -75,6 +77,12 @@ type Props = {
   onNavigateSpotifyChartsOfficial?: () => void;
   onNavigateSpotifyChartsCharts?: () => void;
   onNavigateLastfmCharts?: () => void;
+  onNavigatePeriodLastfmCharts?: () => void;
+  onNavigatePeriodSpotifyCharts?: () => void;
+  onNavigateGenreCharts?: () => void;
+  onNavigateSpotifyArtistSearch?: () => void;
+  onNavigateSpotifyAlbumSearch?: () => void;
+  onNavigateSpotifyTrackSearch?: () => void;
   onNavigateLastfmArtistSearch?: () => void;
   onNavigateLastfmAlbumSearch?: () => void;
   onNavigateLastfmTrackSearch?: () => void;
@@ -90,23 +98,25 @@ const EDGE_HIT_WIDTH = 32;
 /** 터치가 이 X(px) 안에서 시작하면 메뉴 스와이프로 인식 */
 const MOBILE_SWIPE_START_MAX_X = 80;
 const EDGE_SWIPE_OPEN_PX = 44;
-
 const IS_NATIVE_MOBILE = Platform.OS === 'ios' || Platform.OS === 'android';
 
 type Panel =
   | 'root'
   | 'version'
-  | 'releases'
-  | 'releaseDetail'
   | 'settings'
   | 'appSettings'
   | 'searchSettings'
   | 'screenSettings'
   | 'spotifyApiManage'
   | 'lastfmApiManage'
+  | 'genreTagSettings'
   | 'downloadManage'
   | 'downloadPathSettings'
+  | 'downloadExtensionSettings'
+  | 'downloadQualitySettings'
+  | 'downloadFilenameSettings'
   | ChartMenuPanel
+  | 'periodCharts'
   | SearchMenuPanel;
 
 export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMenu(
@@ -117,6 +127,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateSpotifyChartsOfficial,
     onNavigateSpotifyChartsCharts,
     onNavigateLastfmCharts,
+    onNavigatePeriodLastfmCharts,
+    onNavigatePeriodSpotifyCharts,
+    onNavigateGenreCharts,
+    onNavigateSpotifyArtistSearch,
+    onNavigateSpotifyAlbumSearch,
+    onNavigateSpotifyTrackSearch,
     onNavigateLastfmArtistSearch,
     onNavigateLastfmAlbumSearch,
     onNavigateLastfmTrackSearch,
@@ -137,9 +153,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>('root');
-  const [detailEntry, setDetailEntry] = useState<ReleaseNoteEntry | null>(
-    null,
-  );
   const [suffixMode, setSuffixMode] =
     useState<NrmYoutubeSearchSuffixMode>('default');
 
@@ -156,7 +169,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const openMenu = useCallback(() => {
     setPanel('root');
-    setDetailEntry(null);
     setOpen(true);
   }, []);
 
@@ -169,7 +181,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       if (finished) {
         setOpen(false);
         setPanel('root');
-        setDetailEntry(null);
       }
     });
   }, [drawerW, translateX]);
@@ -178,7 +189,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateAppleMusicCharts?.();
     setOpen(false);
     setPanel('root');
-    setDetailEntry(null);
     translateX.setValue(-drawerW);
   }, [drawerW, onNavigateAppleMusicCharts, translateX]);
 
@@ -229,7 +239,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateSpotifyChartsOfficial?.();
     setOpen(false);
     setPanel('root');
-    setDetailEntry(null);
     translateX.setValue(-drawerW);
   }, [
     drawerW,
@@ -247,7 +256,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateSpotifyChartsCharts?.();
     setOpen(false);
     setPanel('root');
-    setDetailEntry(null);
     translateX.setValue(-drawerW);
   }, [
     drawerW,
@@ -263,12 +271,71 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateLastfmCharts?.();
     setOpen(false);
     setPanel('root');
-    setDetailEntry(null);
     translateX.setValue(-drawerW);
   }, [drawerW, onNavigateLastfmCharts, openLastfmTokenSettings, translateX]);
 
+  const closeMenuAndNavigatePeriodLastfmCharts = useCallback(async () => {
+    const ok = await ensureLastfmChartAccess(openLastfmTokenSettings);
+    if (!ok) return;
+    onNavigatePeriodLastfmCharts?.();
+    setOpen(false);
+    setPanel('root');
+    translateX.setValue(-drawerW);
+  }, [
+    drawerW,
+    onNavigatePeriodLastfmCharts,
+    openLastfmTokenSettings,
+    translateX,
+  ]);
+
+  const closeMenuAndNavigatePeriodSpotifyCharts = useCallback(async () => {
+    const ok = await ensureSpotifyChartsSessionAccess(
+      openSpotifyChartsSessionSettings,
+      onRequestChartsBearerWebView,
+    );
+    if (!ok) return;
+    onNavigatePeriodSpotifyCharts?.();
+    setOpen(false);
+    setPanel('root');
+    translateX.setValue(-drawerW);
+  }, [
+    drawerW,
+    onNavigatePeriodSpotifyCharts,
+    onRequestChartsBearerWebView,
+    openSpotifyChartsSessionSettings,
+    translateX,
+  ]);
+
+  const closeMenuAndNavigateGenreCharts = useCallback(() => {
+    onNavigateGenreCharts?.();
+    setOpen(false);
+    setPanel('root');
+    translateX.setValue(-drawerW);
+  }, [drawerW, onNavigateGenreCharts, translateX]);
+
+  const closeMenuAndNavigateSpotifySearch = useCallback(
+    async (kind: SearchKind) => {
+      const ok = await ensureSpotifySearchApiAccess(openSpotifyTokenSettings);
+      if (!ok) return;
+      if (kind === 'artist') onNavigateSpotifyArtistSearch?.();
+      else if (kind === 'album') onNavigateSpotifyAlbumSearch?.();
+      else onNavigateSpotifyTrackSearch?.();
+      setOpen(false);
+      setPanel('root');
+      translateX.setValue(-drawerW);
+    },
+    [
+      drawerW,
+      onNavigateSpotifyAlbumSearch,
+      onNavigateSpotifyArtistSearch,
+      onNavigateSpotifyTrackSearch,
+      openSpotifyTokenSettings,
+      translateX,
+    ],
+  );
+
   const closeMenuAndNavigateLastfmSearch = useCallback(
-    async (kind: SearchLastfmKind) => {
+    async (kind: SearchKind) => {
       const ok = await ensureSearchApiAccess(openLastfmTokenSettings);
       if (!ok) return;
       if (kind === 'artist') onNavigateLastfmArtistSearch?.();
@@ -276,7 +343,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       else onNavigateLastfmTrackSearch?.();
       setOpen(false);
       setPanel('root');
-      setDetailEntry(null);
       translateX.setValue(-drawerW);
     },
     [
@@ -292,10 +358,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   /** Android 하드웨어 뒤로: 하위 패널이면 한 단계 위로, 루트면 드로어 닫기 */
   const goBackInMenu = useCallback(() => {
     switch (panel) {
-      case 'releaseDetail':
-        setDetailEntry(null);
-        setPanel('releases');
-        break;
       case 'spotifyApiManage':
         if (spotifyBackHandlerRef.current?.()) return;
         setPanel('appSettings');
@@ -304,7 +366,13 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         if (lastfmBackHandlerRef.current?.()) return;
         setPanel('appSettings');
         break;
+      case 'genreTagSettings':
+        setPanel('settings');
+        break;
       case 'downloadPathSettings':
+      case 'downloadExtensionSettings':
+      case 'downloadQualitySettings':
+      case 'downloadFilenameSettings':
         setPanel('downloadManage');
         break;
       case 'downloadManage':
@@ -328,11 +396,17 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'charts':
         setPanel('root');
         break;
+      case 'periodCharts':
+        setPanel('root');
+        break;
+      case 'searchSpotify':
+      case 'searchLastfm':
+        setPanel('search');
+        break;
       case 'search':
         setPanel('root');
         break;
       case 'version':
-      case 'releases':
       case 'settings':
         setPanel('root');
         break;
@@ -384,10 +458,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const rowHover = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
 
-  const entries = getReleaseNoteEntries();
-
   const openMenuRef = useRef(openMenu);
   openMenuRef.current = openMenu;
+
+  const requestDrawerDismissRef = useRef(requestDrawerDismiss);
+  requestDrawerDismissRef.current = requestDrawerDismiss;
 
   const edgePanHandlers = useRef(
     PanResponder.create({
@@ -542,11 +617,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 backgroundColor: cardBg,
                 borderColor: cardBorder,
                 paddingTop: insets.top + nrmTokens.space.lg,
-                // NOTE: 닫기 버튼 하단공백은 여기서만 결정됩니다 — 변경 금지
-                paddingBottom:
-                  Platform.OS === 'web'
-                    ? insets.bottom + 10
-                    : insets.bottom,
+                paddingBottom: insets.bottom,
                 transform: [{ translateX }],
               },
             ]}
@@ -567,6 +638,36 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     실시간 차트
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('periodCharts')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    기간별 차트
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={closeMenuAndNavigateGenreCharts}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    장르별 차트
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -596,7 +697,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    설정
+                    앱 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -611,22 +712,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    다운로드 관리
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
-                  onPress={() => setPanel('releases')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    릴리즈 노트
+                    다운로드 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -688,83 +774,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
-            {panel === 'releases' ? (
-              <DrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <Pressable
-                  onPress={() => setPanel('root')}
-                  style={styles.backRow}
-                  accessibilityRole="button"
-                  accessibilityLabel="뒤로">
-                  <Ionicons
-                    name="chevron-back"
-                    size={22}
-                    color={nrmTokens.color.primary}
-                  />
-                  <Text style={styles.backText}>뒤로</Text>
-                </Pressable>
-                <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  릴리즈 노트
-                </Text>
-                {entries.map((e) => (
-                  <Pressable
-                    key={e.version}
-                    onPress={() => {
-                      setDetailEntry(e);
-                      setPanel('releaseDetail');
-                    }}
-                    style={({ pressed }) => [
-                      styles.versionRow,
-                      pressed && { backgroundColor: rowHover },
-                    ]}>
-                    <Text style={[styles.versionBadge, { color: titleColor }]}>
-                      v{e.version}
-                    </Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={18}
-                      color={bodyColor}
-                    />
-                  </Pressable>
-                ))}
-              </DrawerShell>
-            ) : null}
-
-            {panel === 'releaseDetail' && detailEntry ? (
-              <DrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <Pressable
-                  onPress={() => {
-                    setDetailEntry(null);
-                    setPanel('releases');
-                  }}
-                  style={styles.backRow}
-                  accessibilityRole="button"
-                  accessibilityLabel="뒤로">
-                  <Ionicons
-                    name="chevron-back"
-                    size={22}
-                    color={nrmTokens.color.primary}
-                  />
-                  <Text style={styles.backText}>뒤로</Text>
-                </Pressable>
-                <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  v{detailEntry.version}
-                </Text>
-                {detailEntry.lines.map((line, i) => (
-                  <Text
-                    key={`${detailEntry.version}-${i}`}
-                    style={[styles.bulletLine, { color: bodyColor }]}>
-                    · {line}
-                  </Text>
-                ))}
-              </DrawerShell>
-            ) : null}
-
             {panel === 'settings' ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -783,7 +792,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   <Text style={styles.backText}>뒤로</Text>
                 </Pressable>
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  설정
+                  앱 설정
                 </Text>
                 <Pressable
                   onPress={() => setPanel('appSettings')}
@@ -792,7 +801,22 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    앱 설정
+                    API 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('genreTagSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    장르 태그 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -851,7 +875,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   <Text style={styles.backText}>뒤로</Text>
                 </Pressable>
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  앱 설정
+                  API 설정
                 </Text>
                 <Pressable
                   onPress={() => setPanel('spotifyApiManage')}
@@ -883,6 +907,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'genreTagSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmGenreTagSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={() => setPanel('settings')}
+                />
               </DrawerShell>
             ) : null}
 
@@ -950,7 +988,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   <Text style={styles.backText}>뒤로</Text>
                 </Pressable>
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  다운로드 관리
+                  다운로드 설정
                 </Text>
                 <Pressable
                   onPress={() => setPanel('downloadPathSettings')}
@@ -967,6 +1005,51 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadExtensionSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    확장자 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadQualitySettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    음질 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadFilenameSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    파일명 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -976,6 +1059,49 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
+                  section="path"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadExtensionSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="extension"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadQualitySettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="quality"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadFilenameSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="filename"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={() => setPanel('downloadManage')}
@@ -1003,6 +1129,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
+            {isPeriodChartMenuPanel(panel) ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmMenuPeriodChartPanels
+                  panel={panel}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBackToRoot={() => setPanel('root')}
+                  onOpenLastfm={() => void closeMenuAndNavigatePeriodLastfmCharts()}
+                  onOpenSpotify={() => void closeMenuAndNavigatePeriodSpotifyCharts()}
+                />
+              </DrawerShell>
+            ) : null}
+
             {isSearchMenuPanel(panel) ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -1014,6 +1157,13 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   rowHover={rowHover}
                   onBackToRoot={() => setPanel('root')}
+                  onBackToSearch={() => setPanel('search')}
+                  onOpenPlatform={(platform) => {
+                    setPanel(platform === 'spotify' ? 'searchSpotify' : 'searchLastfm');
+                  }}
+                  onOpenSpotifySearch={(kind) =>
+                    void closeMenuAndNavigateSpotifySearch(kind)
+                  }
                   onOpenLastfmSearch={(kind) =>
                     void closeMenuAndNavigateLastfmSearch(kind)
                   }
@@ -1140,6 +1290,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
           </Animated.View>
+          <NrmMenuNotifyHost isDark={isDark} active={open} />
         </View>
       </Modal>
 
@@ -1352,6 +1503,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 11,
     marginTop: nrmTokens.space.sm,
+    marginBottom: nrmTokens.layout.menuDrawerCloseBottomGap,
     borderRadius: nrmTokens.radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(128,128,128,0.35)',
@@ -1364,7 +1516,6 @@ const styles = StyleSheet.create({
   },
   footerCloseCompact: {
     marginTop: nrmTokens.space.xs,
-    // NOTE: marginBottom은 drawer paddingBottom(insets.bottom + sm)이 담당 — 이 값을 변경하지 마세요
   },
   footerClosePressed: {
     opacity: 0.92,

@@ -2,6 +2,7 @@
  * 웹 번들은 `youtubei.js` → `jintr` 등을 타지 않습니다.
  * 검색·다운로드는 `youtubeSearchClient` / 웹 전용 경로를 쓰며 이 모듈은 번들 링크용입니다.
  */
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import type { YoutubeSearchOutcome } from '@/lib/youtubeSearchTypes';
 import {
@@ -51,6 +52,7 @@ export function finalAudioFileName(
 export async function downloadYoutubeAudioOnDevice(
   _videoId: string,
   _userSuggestedFileName: string,
+  _metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   throw new Error('기기 저장 다운로드는 iOS/Android 앱에서만 사용됩니다.');
 }

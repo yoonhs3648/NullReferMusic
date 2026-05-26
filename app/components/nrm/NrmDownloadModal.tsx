@@ -11,8 +11,12 @@ import {
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
+  loadDownloadAudioExtension,
+  loadDownloadFileNameFormat,
+  type NrmDownloadFileNameFormat,
+} from '@/lib/nrmDownloadSettings';
+import {
   buildAudioFileName,
-  buildMp3FileName,
   guessInitialDownloadFields,
 } from '@/lib/nrmYoutubeDownloadMeta';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
@@ -21,29 +25,59 @@ type Props = {
   visible: boolean;
   item: YoutubeSearchItem | null;
   isDark: boolean;
+  /** 차트에서 진입 시 플랫폼 API 가수·곡 제목 (모달 기본값) */
+  initialArtist?: string;
+  initialTitle?: string;
+  metadataSource?: 'chart' | 'main' | 'lastfm';
   onClose: () => void;
-  onConfirm: (videoId: string, fileName: string) => void;
+  onConfirm: (
+    videoId: string,
+    fileName: string,
+    artist: string,
+    title: string,
+  ) => void;
 };
 
 export function NrmDownloadModal({
   visible,
   item,
   isDark,
+  initialArtist,
+  initialTitle,
+  metadataSource = 'main',
   onClose,
   onConfirm,
 }: Props) {
   const [artist, setArtist] = useState('');
   const [title, setTitle] = useState('');
+  const [extension, setExtension] = useState('.mp3');
+  const [fileNameFormat, setFileNameFormat] =
+    useState<NrmDownloadFileNameFormat>('artist-title');
 
   useEffect(() => {
     if (item && visible) {
-      const fields = guessInitialDownloadFields(item);
-      setArtist(fields.artist);
-      setTitle(fields.title);
+      if (
+        (metadataSource === 'chart' || metadataSource === 'lastfm') &&
+        (initialArtist != null || initialTitle != null)
+      ) {
+        setArtist((initialArtist ?? '').trim());
+        setTitle((initialTitle ?? '').trim());
+      } else {
+        const fields = guessInitialDownloadFields(item);
+        setArtist(fields.artist);
+        setTitle(fields.title);
+      }
+      void Promise.all([
+        loadDownloadAudioExtension(),
+        loadDownloadFileNameFormat(),
+      ]).then(([ext, format]) => {
+        setExtension(ext);
+        setFileNameFormat(format);
+      });
     }
-  }, [item, visible]);
+  }, [item, visible, initialArtist, initialTitle, metadataSource]);
 
-  const preview = buildMp3FileName(artist, title);
+  const preview = buildAudioFileName(artist, title, extension, fileNameFormat);
 
   const inputColors = {
     backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
@@ -57,9 +91,9 @@ export function NrmDownloadModal({
     if (!item || !canSubmit) return;
     onConfirm(
       item.videoId,
-      Platform.OS === 'web'
-        ? buildMp3FileName(artist, title)
-        : buildAudioFileName(artist, title, '.m4a'),
+      buildAudioFileName(artist, title, extension, fileNameFormat),
+      artist.trim(),
+      title.trim(),
     );
   };
 
@@ -104,7 +138,11 @@ export function NrmDownloadModal({
                   : nrmTokens.color.inkMuted48,
               },
             ]}>
-            유튜브 정보를 바탕으로 채웠습니다. 필요하면 수정하세요.
+            {metadataSource === 'chart'
+              ? '차트 정보를 기본값으로 넣었습니다. 가수·곡 제목은 저장 시 입력한 값이 적용됩니다.'
+              : metadataSource === 'lastfm'
+                ? 'Last.fm 정보를 기본값으로 넣었습니다. 가수·곡 제목은 저장 시 입력한 값이 적용됩니다.'
+                : '유튜브 검색 결과를 바탕으로 채웠습니다. 필요하면 수정하세요.'}
           </Text>
 
           <Text

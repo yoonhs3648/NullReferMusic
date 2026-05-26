@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +11,7 @@ import {
 
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
+import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { fetchSpotifyPlaylistChart } from '@/lib/nrmChartsClient';
@@ -32,64 +31,30 @@ type Props = {
   chartSource: SpotifyChartSource;
   onBackToHome: () => void;
   onOpenChartsSession?: () => void;
-  /** Android — Bearer 만료 시 WebView 갱신 후 true면 차트 재시도 */
   onRenewChartsBearer?: () => Promise<boolean>;
+  onTrackPress?: (item: ChartTrackItem) => void;
 };
 
-function formatReleaseDate(raw: string): string {
-  const t = raw.trim();
-  if (!t) return '—';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
-    const [y, m, d] = t.split('-');
-    return `${y}. ${m}. ${d}.`;
-  }
-  return t;
-}
+type TabSnapshot = {
+  items: ChartTrackItem[];
+  playlistTitle: string | null;
+  errorCode: ChartErrorCode | null;
+  loading: boolean;
+};
 
-function TrackRow({
-  item,
-  titleColor,
-  bodyColor,
-}: {
-  item: ChartTrackItem;
-  titleColor: string;
-  bodyColor: string;
-}) {
-  return (
-    <Pressable
-      onPress={() => {
-        if (item.externalUrl) void Linking.openURL(item.externalUrl);
-      }}
-      style={({ pressed }) => [
-        styles.trackRow,
-        pressed && styles.trackRowPressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.rank}위 ${item.title}`}>
-      <Text style={[styles.rank, { color: bodyColor }]}>{item.rank}</Text>
-      {item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.art} />
-      ) : (
-        <View style={[styles.art, styles.artPlaceholder]} />
-      )}
-      <View style={styles.trackMeta}>
-        <Text style={[styles.trackTitle, { color: titleColor }]} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={[styles.trackSub, { color: bodyColor }]} numberOfLines={1}>
-          {item.artists}
-        </Text>
-        <View style={styles.metaRow}>
-          <Text style={[styles.metaChip, { color: bodyColor }]}>
-            인기도 {item.popularity}
-          </Text>
-          <Text style={[styles.metaChip, { color: bodyColor }]}>
-            발매 {formatReleaseDate(item.releaseDate)}
-          </Text>
-        </View>
-      </View>
-    </Pressable>
-  );
+const EMPTY_SNAPSHOT: TabSnapshot = {
+  items: [],
+  playlistTitle: null,
+  errorCode: null,
+  loading: false,
+};
+
+function mapChartItems(rows: ChartTrackItem[]): ChartTrackItem[] {
+  return rows.map((row) => ({
+    ...row,
+    popularity: row.popularity ?? 0,
+    releaseDate: row.releaseDate ?? '',
+  }));
 }
 
 export function NrmSpotifyChartsHome({
@@ -99,6 +64,7 @@ export function NrmSpotifyChartsHome({
   onBackToHome,
   onOpenChartsSession,
   onRenewChartsBearer,
+  onTrackPress,
 }: Props) {
   const pageTitle =
     chartSource === 'official' ? 'Spotify (Premium)' : 'Spotify';
@@ -115,79 +81,150 @@ export function NrmSpotifyChartsHome({
   const [activeTab, setActiveTab] = useState<SpotifyChartTabId>(
     NRM_SPOTIFY_CHART_DEFAULT_TAB,
   );
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ChartTrackItem[]>([]);
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
-  const [items, setItems] = useState<ChartTrackItem[]>([]);
+  const [tabLoading, setTabLoading] = useState(true);
 
-  const loadChart = useCallback(async (tab: SpotifyChartTabId) => {
-    setLoading(true);
-    setErrorCode(null);
-    setItems([]);
-    setPlaylistTitle(null);
-    const out = await fetchSpotifyPlaylistChart(tab, chartSource);
-    if (!out.ok) {
-      const isChartsAuthError =
-        chartSource === 'charts' &&
-        (out.errorCode === 'auth_failed' ||
-          out.errorCode === 'premium_required' ||
-          out.errorCode === 'charts_session');
+  const tabCacheRef = useRef<Map<SpotifyChartTabId, TabSnapshot>>(new Map());
+  const loadGenRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
-      if (isChartsAuthError && onRenewChartsBearer) {
-        // spinner 유지 상태에서 조용히 토큰 갱신 (불가시 WebView → 필요 시 visible 오버레이)
-        const renewed = await onRenewChartsBearer();
-        if (renewed) {
-          const retry = await fetchSpotifyPlaylistChart(tab, chartSource);
-          if (retry.ok) {
-            setPlaylistTitle(retry.data.playlistName);
-            setItems(
-              retry.data.items.map((row) => ({
-                ...row,
-                popularity: row.popularity ?? 0,
-                releaseDate: row.releaseDate ?? '',
-              })),
-            );
-            setLoading(false);
-            return;
-          }
-          setErrorCode(retry.errorCode);
-        } else {
-          setErrorCode(out.errorCode);
+  const applySnapshot = useCallback((snap: TabSnapshot) => {
+    setItems(snap.items);
+    setPlaylistTitle(snap.playlistTitle);
+    setErrorCode(snap.errorCode);
+    setTabLoading(snap.loading);
+  }, []);
+
+  const selectTab = useCallback(
+    (tab: SpotifyChartTabId) => {
+      if (tab === activeTab) return;
+      abortRef.current?.abort();
+      setActiveTab(tab);
+      const cached = tabCacheRef.current.get(tab);
+      applySnapshot(cached ?? { ...EMPTY_SNAPSHOT, loading: !cached });
+    },
+    [activeTab, applySnapshot],
+  );
+
+  const loadChart = useCallback(
+    async (tab: SpotifyChartTabId, generation: number) => {
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      const loadingSnap: TabSnapshot = {
+        ...(tabCacheRef.current.get(tab) ?? EMPTY_SNAPSHOT),
+        loading: true,
+        errorCode: null,
+      };
+      tabCacheRef.current.set(tab, loadingSnap);
+      if (generation === loadGenRef.current) {
+        applySnapshot(loadingSnap);
+      }
+
+      const out = await fetchSpotifyPlaylistChart(tab, chartSource, ac.signal);
+      if (ac.signal.aborted || generation !== loadGenRef.current) {
+        const stale = tabCacheRef.current.get(tab);
+        if (stale?.loading) {
+          tabCacheRef.current.set(tab, { ...stale, loading: false });
         }
-        setLoading(false);
         return;
       }
 
-      setErrorCode(out.errorCode);
-      setLoading(false);
-      if (
-        isChartsAuthError &&
-        onOpenChartsSession
-      ) {
-        const renewed = await promptSpotifyChartsBearerExpired({
-          onOpenChartsSession,
-          onAndroidRenew: onRenewChartsBearer,
-        });
-        if (renewed) {
-          void loadChart(tab);
+      if (!out.ok) {
+        const isChartsAuthError =
+          chartSource === 'charts' &&
+          (out.errorCode === 'auth_failed' ||
+            out.errorCode === 'premium_required' ||
+            out.errorCode === 'charts_session' ||
+            out.errorCode === 'forbidden');
+
+        if (isChartsAuthError && onRenewChartsBearer) {
+          const renewed = await onRenewChartsBearer();
+          if (generation !== loadGenRef.current || ac.signal.aborted) return;
+          if (renewed) {
+            const retry = await fetchSpotifyPlaylistChart(
+              tab,
+              chartSource,
+              ac.signal,
+            );
+            if (ac.signal.aborted || generation !== loadGenRef.current) return;
+            if (retry.ok) {
+              const okSnap: TabSnapshot = {
+                items: mapChartItems(retry.data.items),
+                playlistTitle: retry.data.playlistName,
+                errorCode: null,
+                loading: false,
+              };
+              tabCacheRef.current.set(tab, okSnap);
+              applySnapshot(okSnap);
+              return;
+            }
+            const failSnap: TabSnapshot = {
+              items: [],
+              playlistTitle: null,
+              errorCode: retry.errorCode,
+              loading: false,
+            };
+            tabCacheRef.current.set(tab, failSnap);
+            applySnapshot(failSnap);
+            return;
+          }
         }
+
+        const errSnap: TabSnapshot = {
+          items: [],
+          playlistTitle: null,
+          errorCode: out.errorCode,
+          loading: false,
+        };
+        tabCacheRef.current.set(tab, errSnap);
+        applySnapshot(errSnap);
+
+        if (isChartsAuthError && onOpenChartsSession) {
+          const renewed = await promptSpotifyChartsBearerExpired({
+            onOpenChartsSession,
+            onAndroidRenew: onRenewChartsBearer,
+          });
+          if (renewed && generation === loadGenRef.current) {
+            void loadChart(tab, generation);
+          }
+        }
+        return;
       }
-      return;
-    }
-    setPlaylistTitle(out.data.playlistName);
-    setItems(
-      out.data.items.map((row) => ({
-        ...row,
-        popularity: row.popularity ?? 0,
-        releaseDate: row.releaseDate ?? '',
-      })),
-    );
-    setLoading(false);
-  }, [chartSource, onOpenChartsSession, onRenewChartsBearer]);
+
+      const okSnap: TabSnapshot = {
+        items: mapChartItems(out.data.items),
+        playlistTitle: out.data.playlistName,
+        errorCode: null,
+        loading: false,
+      };
+      tabCacheRef.current.set(tab, okSnap);
+      applySnapshot(okSnap);
+    },
+    [applySnapshot, chartSource, onOpenChartsSession, onRenewChartsBearer],
+  );
 
   useEffect(() => {
-    void loadChart(activeTab);
-  }, [activeTab, loadChart]);
+    abortRef.current?.abort();
+    loadGenRef.current += 1;
+    tabCacheRef.current.clear();
+    applySnapshot({ ...EMPTY_SNAPSHOT, loading: true });
+  }, [chartSource, applySnapshot]);
+
+  useEffect(() => {
+    const generation = ++loadGenRef.current;
+    abortRef.current?.abort();
+
+    const cached = tabCacheRef.current.get(activeTab);
+    if (cached && !cached.loading) {
+      applySnapshot(cached);
+      return;
+    }
+
+    void loadChart(activeTab, generation);
+  }, [activeTab, chartSource, applySnapshot, loadChart]);
 
   const listHeader = (
     <View style={{ paddingHorizontal: paddingHorizontal }}>
@@ -206,10 +243,12 @@ export function NrmSpotifyChartsHome({
         style={styles.tabScroll}>
         {NRM_SPOTIFY_CHART_TABS.map((tab) => {
           const selected = tab.id === activeTab;
+          const cached = tabCacheRef.current.get(tab.id);
+          const showTabSpinner = selected && tabLoading && !cached?.items.length;
           return (
             <Pressable
               key={tab.id}
-              onPress={() => setActiveTab(tab.id)}
+              onPress={() => selectTab(tab.id)}
               style={({ pressed }) => [
                 styles.tabChip,
                 {
@@ -233,6 +272,13 @@ export function NrmSpotifyChartsHome({
                 numberOfLines={1}>
                 {tab.label}
               </Text>
+              {showTabSpinner ? (
+                <ActivityIndicator
+                  size="small"
+                  color={nrmTokens.color.primary}
+                  style={styles.tabSpinner}
+                />
+              ) : null}
             </Pressable>
           );
         })}
@@ -242,7 +288,7 @@ export function NrmSpotifyChartsHome({
           {playlistTitle} · {items.length}곡
         </Text>
       ) : null}
-      {loading ? (
+      {tabLoading && !items.length && !errorCode ? (
         <ActivityIndicator
           style={styles.loader}
           color={nrmTokens.color.primary}
@@ -251,30 +297,42 @@ export function NrmSpotifyChartsHome({
     </View>
   );
 
-  const listEmpty = loading ? null : errorCode ? (
-    <NrmChartErrorHero
-      isDark={isDark}
-      platform="spotify"
-      errorCode={errorCode}
-      paddingHorizontal={paddingHorizontal}
-    />
-  ) : null;
+  const listEmpty =
+    tabLoading && !items.length && !errorCode ? null : errorCode ? (
+      <NrmChartErrorHero
+        isDark={isDark}
+        platform="spotify"
+        errorCode={errorCode}
+        paddingHorizontal={paddingHorizontal}
+      />
+    ) : null;
 
   return (
     <FlatList
       style={styles.list}
-      data={loading || errorCode ? [] : items}
-      keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
+      data={tabLoading && !items.length ? [] : items}
+      keyExtractor={(item) =>
+        `${chartSource}-${activeTab}-${item.trackId}-${item.rank}`
+      }
       renderItem={({ item }) => (
         <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <TrackRow item={item} titleColor={titleColor} bodyColor={bodyColor} />
+          <NrmChartTrackRow
+            item={item}
+            titleColor={titleColor}
+            bodyColor={bodyColor}
+            onPress={
+              onTrackPress
+                ? () => onTrackPress(item)
+                : undefined
+            }
+          />
         </View>
       )}
       ListHeaderComponent={listHeader}
       ListEmptyComponent={() => listEmpty}
       contentContainerStyle={[
         styles.listContent,
-        (loading || errorCode) && styles.listContentEmpty,
+        (tabLoading || errorCode) && !items.length && styles.listContentEmpty,
       ]}
       keyboardShouldPersistTaps="handled"
     />
@@ -305,6 +363,9 @@ const styles = StyleSheet.create({
     paddingBottom: nrmTokens.space.xs,
   },
   tabChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: nrmTokens.space.md,
     paddingVertical: nrmTokens.space.sm,
     borderRadius: nrmTokens.radius.pill,
@@ -312,6 +373,9 @@ const styles = StyleSheet.create({
   },
   tabChipPressed: {
     opacity: 0.9,
+  },
+  tabSpinner: {
+    marginLeft: 2,
   },
   tabLabel: {
     fontSize: nrmTokens.font.caption,
@@ -323,54 +387,5 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginVertical: nrmTokens.space.lg,
-  },
-  trackRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.sm,
-    paddingHorizontal: nrmTokens.space.xs,
-    borderRadius: nrmTokens.radius.sm,
-    marginBottom: nrmTokens.space.xxs,
-  },
-  trackRowPressed: {
-    opacity: 0.88,
-  },
-  rank: {
-    width: 28,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-    textAlign: 'right',
-  },
-  art: {
-    width: 52,
-    height: 52,
-    borderRadius: nrmTokens.radius.sm,
-  },
-  artPlaceholder: {
-    backgroundColor: 'rgba(128,128,128,0.2)',
-  },
-  trackMeta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  trackTitle: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-  },
-  trackSub: {
-    marginTop: 2,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '400',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: nrmTokens.space.sm,
-    marginTop: 4,
-  },
-  metaChip: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '400',
   },
 });

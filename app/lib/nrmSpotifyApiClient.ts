@@ -91,7 +91,7 @@ async function issueTokenDirect(creds: NrmSpotifyCredentials): Promise<SpotifyTo
       tokenType: data.token_type ?? 'Bearer',
     };
   } catch {
-    return { ok: false, message: '인터넷 연결을 확인하세요.' };
+    return { ok: false, message: '네트워크에 연결되지 않았습니다. Wi‑Fi·데이터를 확인하세요.' };
   }
 }
 

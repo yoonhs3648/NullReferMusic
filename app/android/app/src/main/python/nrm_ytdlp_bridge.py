@@ -63,9 +63,11 @@ def get_audio_stream_url(video_id, cookie_file=""):
     raise RuntimeError(f"STREAM_URL_FAILED: {last_error}")
 
 
-def download_audio(url, out_dir, cookie_file=""):
+def download_audio(url, out_dir, cookie_file="", audio_format="mp3", audio_quality="0"):
     os.makedirs(out_dir, exist_ok=True)
     outtmpl = os.path.join(out_dir, "%(title).100s.%(ext)s")
+    fmt = (audio_format or "mp3").strip().lower() or "mp3"
+    quality = str(audio_quality if audio_quality is not None else "0").strip() or "0"
 
     last_error = None
     for clients in _CLIENT_PROFILES:
@@ -74,6 +76,13 @@ def download_audio(url, out_dir, cookie_file=""):
         opts["format"] = "bestaudio/best"
         opts["outtmpl"] = outtmpl
         opts["nopart"] = False
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": fmt,
+                "preferredquality": quality,
+            }
+        ]
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:

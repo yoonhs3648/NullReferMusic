@@ -101,7 +101,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
   // ── 다운로드 ────────────────────────────────────────────────────────────────
   @ReactMethod
   @Suppress("UNUSED_PARAMETER")
-  fun downloadAudio(url: String, noPlaylist: Boolean, promise: Promise) {
+  fun downloadAudio(
+    url: String,
+    noPlaylist: Boolean,
+    audioFormat: String,
+    audioQuality: Int,
+    promise: Promise,
+  ) {
     Thread {
       var cookieFilePath = ""
       try {
@@ -115,7 +121,17 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         cookieFilePath = getCookieFilePathSync()
         val outDir = File(ctx.cacheDir, "nrm-ytdlp-tmp").apply { mkdirs() }
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
-        val outPath = py.callAttr("download_audio", url, outDir.absolutePath, cookieFilePath).toString()
+        val fmt = audioFormat.trim().ifBlank { "mp3" }
+        val quality = audioQuality.coerceIn(0, 9)
+        val outPath =
+          py.callAttr(
+            "download_audio",
+            url,
+            outDir.absolutePath,
+            cookieFilePath,
+            fmt,
+            quality.toString(),
+          ).toString()
         val outFile = File(outPath)
         if (!outFile.exists()) {
           throw Exception("다운로드 결과 파일을 찾지 못했습니다.")

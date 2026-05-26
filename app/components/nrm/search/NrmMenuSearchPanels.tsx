@@ -1,13 +1,16 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { NrmChartPlatformIcon } from '@/components/nrm/charts/NrmChartPlatformIcon';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  NRM_SEARCH_LASTFM_ROWS,
-  type SearchLastfmKind,
+  getSearchPlatformLabel,
+  NRM_SEARCH_KIND_ROWS,
+  NRM_SEARCH_PLATFORM_ROWS,
+  type SearchKind,
   type SearchMenuPanel,
+  type SearchPlatformId,
 } from '@/lib/nrmSearchMenu';
-import { nrmSearchHint } from '@/lib/nrmSearchStrings';
 
 type Props = {
   panel: SearchMenuPanel;
@@ -15,7 +18,10 @@ type Props = {
   bodyColor: string;
   rowHover: string;
   onBackToRoot: () => void;
-  onOpenLastfmSearch: (kind: SearchLastfmKind) => void;
+  onBackToSearch: () => void;
+  onOpenPlatform: (platform: SearchPlatformId) => void;
+  onOpenSpotifySearch: (kind: SearchKind) => void;
+  onOpenLastfmSearch: (kind: SearchKind) => void;
 };
 
 function MenuBackRow({ onPress }: { onPress: () => void }) {
@@ -31,46 +37,108 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
+function KindRows({
+  titleColor,
+  bodyColor,
+  rowHover,
+  onPress,
+}: {
+  titleColor: string;
+  bodyColor: string;
+  rowHover: string;
+  onPress: (kind: SearchKind) => void;
+}) {
+  return (
+    <>
+      {NRM_SEARCH_KIND_ROWS.map((row) => (
+        <Pressable
+          key={row.kind}
+          onPress={() => onPress(row.kind)}
+          style={({ pressed }) => [
+            styles.row,
+            pressed && { backgroundColor: rowHover },
+          ]}>
+          <Text style={[styles.rowLabel, { color: titleColor }]}>{row.label}</Text>
+          <Ionicons name="chevron-forward" size={20} color={bodyColor} />
+        </Pressable>
+      ))}
+    </>
+  );
+}
+
 export function NrmMenuSearchPanels({
   panel,
   titleColor,
   bodyColor,
   rowHover,
   onBackToRoot,
+  onBackToSearch,
+  onOpenPlatform,
+  onOpenSpotifySearch,
   onOpenLastfmSearch,
 }: Props) {
-  if (panel !== 'search') return null;
+  if (panel === 'search') {
+    return (
+      <>
+        <MenuBackRow onPress={onBackToRoot} />
+        <Text style={[styles.panelTitle, { color: titleColor }]}>검색</Text>
+        {NRM_SEARCH_PLATFORM_ROWS.map((row) => (
+          <Pressable
+            key={row.id}
+            onPress={() => onOpenPlatform(row.id)}
+            style={({ pressed }) => [
+              styles.row,
+              pressed && { backgroundColor: rowHover },
+            ]}
+            accessibilityRole="button">
+            <NrmChartPlatformIcon iconKey={row.iconKey} size={28} />
+            <View style={styles.rowTextBlock}>
+              <Text style={[styles.rowLabel, { color: titleColor }]}>
+                {row.label}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={bodyColor} />
+          </Pressable>
+        ))}
+      </>
+    );
+  }
 
-  return (
-    <>
-      <MenuBackRow onPress={onBackToRoot} />
-      <Text style={[styles.panelTitle, { color: titleColor }]}>검색</Text>
-      <Text style={[styles.sectionHint, { color: bodyColor }]}>
-        {nrmSearchHint}
-      </Text>
-      {NRM_SEARCH_LASTFM_ROWS.map((row) => (
-        <Pressable
-          key={row.kind}
-          onPress={() => onOpenLastfmSearch(row.kind)}
-          style={({ pressed }) => [
-            styles.row,
-            pressed && { backgroundColor: rowHover },
-          ]}>
-          <View style={styles.rowTextBlock}>
-            <Text style={[styles.rowLabel, { color: titleColor }]}>
-              {row.label}
-            </Text>
-            <Text
-              style={[styles.rowSubtitle, { color: bodyColor }]}
-              numberOfLines={2}>
-              {row.subtitle}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={bodyColor} />
-        </Pressable>
-      ))}
-    </>
-  );
+  if (panel === 'searchSpotify') {
+    return (
+      <>
+        <MenuBackRow onPress={onBackToSearch} />
+        <Text style={[styles.panelTitle, { color: titleColor }]}>
+          {getSearchPlatformLabel('spotify')}
+        </Text>
+        <KindRows
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          rowHover={rowHover}
+          onPress={onOpenSpotifySearch}
+        />
+      </>
+    );
+  }
+
+  if (panel === 'searchLastfm') {
+    return (
+      <>
+        <MenuBackRow onPress={onBackToSearch} />
+        <Text style={[styles.panelTitle, { color: titleColor }]}>
+          {getSearchPlatformLabel('lastfm')}
+        </Text>
+        <KindRows
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          rowHover={rowHover}
+          onPress={onOpenLastfmSearch}
+        />
+      </>
+    );
+  }
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -93,12 +161,6 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.md,
     letterSpacing: -0.4,
   },
-  sectionHint: {
-    marginBottom: nrmTokens.space.md,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '400',
-    lineHeight: 20,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -117,10 +179,5 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
-  },
-  rowSubtitle: {
-    marginTop: 2,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '400',
   },
 });

@@ -9,9 +9,10 @@ import {
   type ChartErrorCode,
 } from '@/lib/nrmChartErrors';
 import { nrmChartsSpotifyNotConfiguredMessage } from '@/lib/nrmChartsStrings';
-import type {
-  SpotifyChartSource,
-  SpotifyChartTabId,
+import {
+  isSpotifyChartsDirectTabSupported,
+  type SpotifyChartSource,
+  type SpotifyChartTabId,
 } from '@/lib/nrmSpotifyChartCatalog';
 import type {
   ChartFetchOutcome,
@@ -46,11 +47,23 @@ function isAuthError(code: string | undefined, httpStatus: number): boolean {
 
 const CHARTS_API_BASE = 'https://charts-spotify-com-service.spotify.com';
 
+/** APK 직접 호출 — 탭 연타 시 Spotify rate limit 완화 */
+let spotifyDirectFetchChain: Promise<unknown> = Promise.resolve();
+
+function runSpotifyDirectSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const next = spotifyDirectFetchChain.then(() => fn(), () => fn());
+  spotifyDirectFetchChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
 const SPOTIFY_CHART_SLUGS: Record<SpotifyChartTabId, { slug: string; market: string; name: string }> = {
-  'top50-kr':      { slug: 'regional-kr-daily',    market: 'KR',     name: 'Top 50 - Korea' },
-  'viral50-kr':    { slug: 'viral-kr-daily',        market: 'KR',     name: 'Viral 50 - Korea' },
-  'top50-global':  { slug: 'regional-global-daily', market: 'GLOBAL', name: 'Top 50 - Global' },
-  'viral50-global':{ slug: 'viral-global-daily',    market: 'GLOBAL', name: 'Viral 50 - Global' },
+  'top100-kr-daily':      { slug: 'regional-kr-daily',     market: 'KR',     name: 'Top 100 - Korea Daily' },
+  'top100-kr-weekly':     { slug: 'regional-kr-weekly',    market: 'KR',     name: 'Top 100 - Korea Weekly' },
+  'top100-global-daily':  { slug: 'regional-global-daily', market: 'GLOBAL', name: 'Top 100 - Global Daily' },
+  'top100-global-weekly': { slug: 'regional-global-weekly',market: 'GLOBAL', name: 'Top 100 - Global Weekly' },
 };
 
 function chartDateCandidates(): string[] {
@@ -69,7 +82,13 @@ function parseSpotifyChartEntries(root: Record<string, unknown>, maxTracks: numb
   if (!Array.isArray(entries) || entries.length === 0) {
     const responses = root.chartEntryViewResponses as { entries?: unknown[] }[] | undefined;
     if (Array.isArray(responses) && responses.length > 0) {
-      entries = responses[0]?.entries;
+      for (const r of responses) {
+        const maybe = r?.entries;
+        if (Array.isArray(maybe) && maybe.length > 0) {
+          entries = maybe;
+          break;
+        }
+      }
     }
   }
   if (!Array.isArray(entries)) return [];
@@ -78,20 +97,24 @@ function parseSpotifyChartEntries(root: Record<string, unknown>, maxTracks: numb
     const r = row as Record<string, unknown>;
     const meta = r.trackMetadata as Record<string, unknown> | undefined;
     if (!meta) continue;
-    const rankData = (r.chartEntryData as Record<string, unknown> | undefined)?.currentRank;
-    const rank = typeof rankData === 'number' ? rankData : items.length + 1;
+    const entryData = r.chartEntryData as Record<string, unknown> | undefined;
+    const rankFromData = entryData?.currentRank ?? entryData?.current_rank;
+    const rankFromRow = r.currentRank ?? r.current_rank;
+    const rankRaw = rankFromData ?? rankFromRow;
+    const rank = typeof rankRaw === 'number' ? rankRaw : items.length + 1;
     const trackUri = String(meta.trackUri ?? '');
     const trackId = trackUri.includes(':') ? (trackUri.split(':').pop() ?? '') : trackUri;
     const artists = (meta.artists as { name?: string }[] | undefined ?? [])
       .map((a) => a?.name ?? '')
       .filter(Boolean)
       .join(', ');
+    const album = String(meta.albumName ?? meta.album ?? '');
     items.push({
       rank,
       trackId,
       title: String(meta.trackName ?? ''),
       artists,
-      album: '',
+      album,
       imageUrl: String(meta.displayImageUri ?? ''),
       externalUrl: trackId ? `https://open.spotify.com/track/${trackId}` : '',
       durationMs: 0,
@@ -103,15 +126,23 @@ function parseSpotifyChartEntries(root: Record<string, unknown>, maxTracks: numb
   return items;
 }
 
-async function fetchSpotifyChartDirect(
+async function fetchSpotifyChartDirectInner(
   chart: SpotifyChartTabId,
   bearerToken: string,
+  signal?: AbortSignal,
 ): Promise<SpotifyFetchResult> {
+  if (!isSpotifyChartsDirectTabSupported(chart)) {
+    return { ok: false, errorCode: 'empty', authFailed: false, premiumBlocked: false };
+  }
   const meta = SPOTIFY_CHART_SLUGS[chart];
   if (!meta) {
     return { ok: false, errorCode: 'not_found', authFailed: false, premiumBlocked: false };
   }
+  let hadNetworkFailure = false;
   for (const date of chartDateCandidates()) {
+    if (signal?.aborted) {
+      return { ok: false, errorCode: 'unknown', authFailed: false, premiumBlocked: false };
+    }
     try {
       const url = `${CHARTS_API_BASE}/auth/v0/charts/${meta.slug}/${date}`;
       const res = await fetch(url, {
@@ -121,15 +152,26 @@ async function fetchSpotifyChartDirect(
           Origin: 'https://charts.spotify.com',
           Referer: 'https://charts.spotify.com/',
         },
+        signal,
       });
       if (!res.ok) {
         if (res.status === 401) return { ok: false, errorCode: 'auth_failed', authFailed: true, premiumBlocked: false };
-        if (res.status === 403) return { ok: false, errorCode: 'auth_failed', authFailed: true, premiumBlocked: false };
+        if (res.status === 403) {
+          return {
+            ok: false,
+            errorCode: 'forbidden',
+            authFailed: true,
+            premiumBlocked: false,
+          };
+        }
         if (res.status === 404) continue;
+        if (res.status === 429) {
+          return { ok: false, errorCode: 'server', authFailed: false, premiumBlocked: false };
+        }
         return { ok: false, errorCode: 'server', authFailed: false, premiumBlocked: false };
       }
       const root = (await res.json()) as Record<string, unknown>;
-      const items = parseSpotifyChartEntries(root, 50);
+      const items = parseSpotifyChartEntries(root, 100);
       if (items.length === 0) continue;
       const displayChart = root.displayChart as { chartMetadata?: { readableTitle?: string } } | undefined;
       const playlistName = displayChart?.chartMetadata?.readableTitle ?? meta.name;
@@ -143,10 +185,23 @@ async function fetchSpotifyChartDirect(
       };
       return { ok: true, data };
     } catch {
-      return { ok: false, errorCode: 'network', authFailed: false, premiumBlocked: false };
+      hadNetworkFailure = true;
+      continue;
     }
   }
-  return { ok: false, errorCode: 'empty', authFailed: false, premiumBlocked: false };
+  return hadNetworkFailure
+    ? { ok: false, errorCode: 'network', authFailed: false, premiumBlocked: false }
+    : { ok: false, errorCode: 'empty', authFailed: false, premiumBlocked: false };
+}
+
+async function fetchSpotifyChartDirect(
+  chart: SpotifyChartTabId,
+  bearerToken: string,
+  signal?: AbortSignal,
+): Promise<SpotifyFetchResult> {
+  return runSpotifyDirectSerialized(() =>
+    fetchSpotifyChartDirectInner(chart, bearerToken, signal),
+  );
 }
 
 async function fetchSpotifyPlaylistWithBase(
@@ -191,7 +246,7 @@ async function fetchSpotifyPlaylistWithBase(
   } catch {
     return {
       ok: false,
-      errorCode: 'network',
+      errorCode: 'backend_unreachable',
       authFailed: false,
       premiumBlocked: false,
     };
@@ -202,14 +257,18 @@ async function fetchPlaylistWithDevFallback(
   chart: SpotifyChartTabId,
   source: SpotifyChartSource,
   headers: HeadersInit,
+  signal?: AbortSignal,
 ): Promise<SpotifyFetchResult> {
+  if (signal?.aborted) {
+    return { ok: false, errorCode: 'unknown', authFailed: false, premiumBlocked: false };
+  }
   if (isStandaloneApp() && source === 'charts') {
     const h = headers as Record<string, string>;
     const bearer = (h.Authorization ?? h.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
     if (!bearer) {
       return { ok: false, errorCode: 'charts_session', authFailed: false, premiumBlocked: false };
     }
-    return fetchSpotifyChartDirect(chart, bearer);
+    return fetchSpotifyChartDirect(chart, bearer, signal);
   }
 
   const resolved = await getResolvedApiBaseUrl();
@@ -218,7 +277,7 @@ async function fetchPlaylistWithDevFallback(
   if (!primary) {
     return {
       ok: false,
-      errorCode: 'network',
+      errorCode: 'backend_unreachable',
       authFailed: false,
       premiumBlocked: false,
     };
@@ -270,9 +329,10 @@ async function fetchSpotifyChartWithAuthRetry(
 export async function fetchSpotifyPlaylistChart(
   chart: SpotifyChartTabId,
   source: SpotifyChartSource = 'charts',
+  signal?: AbortSignal,
 ): Promise<ChartFetchOutcome> {
   return fetchSpotifyChartWithAuthRetry(source, (headers) =>
-    fetchPlaylistWithDevFallback(chart, source, headers),
+    fetchPlaylistWithDevFallback(chart, source, headers, signal),
   );
 }
 

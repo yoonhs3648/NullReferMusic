@@ -3,7 +3,7 @@ import type { ExpoConfig } from 'expo/config';
 const config: ExpoConfig = {
   name: 'NullReferenceMusic',
   slug: 'nullrefer-music',
-  version: '1.2.4',
+  version: '1.3.1',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',
@@ -20,7 +20,6 @@ const config: ExpoConfig = {
     infoPlist: {
       UIFileSharingEnabled: true,
       LSSupportsOpeningDocumentsInPlace: true,
-      UIBackgroundModes: ['audio'],
     },
   },
   android: {
@@ -44,8 +43,9 @@ const config: ExpoConfig = {
     [
       'expo-notifications',
       {
-        icon: './assets/images/adaptive-icon.png',
-        color: '#0066cc',
+        /** 흰 실루엣 + 검은 배경 원 (scripts/generate-android-notification-icon.mjs) */
+        icon: './assets/images/notification-icon.png',
+        color: '#000000',
         sounds: [],
         enableBackgroundRemoteNotifications: false,
       },

@@ -179,24 +179,6 @@ export function NrmMenuChartPanels({
 
               </Text>
 
-              <Text
-
-                style={[
-
-                  styles.rowSubtitle,
-
-                  { color: bodyColor },
-
-                  disabled && styles.rowSubtitleDisabled,
-
-                ]}
-
-                numberOfLines={2}>
-
-                {row.subtitle}
-
-              </Text>
-
             </View>
 
             {!disabled ? (

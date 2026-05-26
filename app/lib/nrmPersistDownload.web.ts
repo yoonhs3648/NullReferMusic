@@ -1,6 +1,22 @@
 /** 웹 전용: expo-file-system 미사용 (Metro가 legacy 서브패스를 못 찾는 문제 회피) */
 
+import {
+  applyDownloadExtension,
+  loadDownloadAudioExtension,
+  mimeTypeForExtension,
+  type NrmAudioExtension,
+} from '@/lib/nrmDownloadSettings';
+
 export const NRM_DOWNLOAD_DIR_NAME = 'NullReferenceMusic';
+
+function pickerTypesForExtension(ext: NrmAudioExtension) {
+  return [
+    {
+      description: `${ext} 오디오`,
+      accept: { [mimeTypeForExtension(ext)]: [ext] },
+    },
+  ];
+}
 
 function normalizedApiBase(base: string): string {
   return base.trim().replace(/\/+$/, '');
@@ -36,15 +52,12 @@ export async function pickWebSaveFileHandle(
 ): Promise<FileSystemFileHandle | null> {
   const picker = getShowSaveFilePicker();
   if (!picker) return null;
+  const ext = await loadDownloadAudioExtension();
+  const name = applyDownloadExtension(suggestedName, ext);
   try {
     return await picker({
-      suggestedName,
-      types: [
-        {
-          description: 'MP3 오디오',
-          accept: { 'audio/mpeg': ['.mp3'] },
-        },
-      ],
+      suggestedName: name,
+      types: pickerTypesForExtension(ext),
     });
   } catch (e) {
     if (
@@ -91,14 +104,11 @@ async function persistAudioOnWeb(
   const picker = getShowSaveFilePicker();
   if (picker) {
     try {
+      const ext = await loadDownloadAudioExtension();
+      const name = applyDownloadExtension(suggestedName, ext);
       const handle = await picker({
-        suggestedName,
-        types: [
-          {
-            description: 'MP3 오디오',
-            accept: { 'audio/mpeg': ['.mp3'] },
-          },
-        ],
+        suggestedName: name,
+        types: pickerTypesForExtension(ext),
       });
       const writable = await handle.createWritable();
       try {
@@ -139,9 +149,8 @@ export async function persistAudioAfterServerJob(
 ): Promise<{ savedLabel: string }> {
   const base = normalizedApiBase(apiBase);
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
-  const suggestedName = options.fileName.endsWith('.mp3')
-    ? options.fileName
-    : `${options.fileName}.mp3`;
+  const ext = await loadDownloadAudioExtension();
+  const suggestedName = applyDownloadExtension(options.fileName, ext);
 
   const mode = await persistAudioOnWeb(url, suggestedName);
   return {

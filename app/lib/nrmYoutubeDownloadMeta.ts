@@ -1,7 +1,8 @@
+import type { NrmDownloadFileNameFormat } from '@/lib/nrmDownloadSettings';
+
 /**
  * 검색 결과(채널명·제목)에서 다운로드 파일명용 가수/곡 추정.
  */
-
 export function guessArtistFromChannel(channelTitle: string): string {
   const t = channelTitle.trim();
   if (!t) return 'Unknown';
@@ -49,24 +50,49 @@ export function guessInitialDownloadFields(item: {
   };
 }
 
+export function formatDownloadFileStem(
+  artist: string,
+  title: string,
+  format: NrmDownloadFileNameFormat,
+): string {
+  const a = artist.trim() || 'Unknown';
+  const t = title.trim() || 'Unknown';
+  switch (format) {
+    case 'title-artist':
+      return `${t} - ${a}`;
+    case 'title':
+      return t;
+    case 'artist-title':
+    default:
+      return `${a} - ${t}`;
+  }
+}
+
 export function buildAudioFileName(
   artist: string,
   title: string,
   ext: string,
+  format: NrmDownloadFileNameFormat = 'artist-title',
 ): string {
   const e = ext.startsWith('.') ? ext : `.${ext}`;
-  const base = `${artist.trim() || 'Unknown'} - ${title.trim() || 'Unknown'}`;
+  const base = formatDownloadFileStem(artist, title, format);
   return `${sanitizeFileBase(base)}${e}`;
 }
 
-export function buildMp3FileName(artist: string, title: string): string {
-  return buildAudioFileName(artist, title, '.mp3');
+export function buildMp3FileName(
+  artist: string,
+  title: string,
+  format: NrmDownloadFileNameFormat = 'artist-title',
+): string {
+  return buildAudioFileName(artist, title, '.mp3', format);
 }
 
 /** 알림·표시용: 오디오 확장자 제거한 `가수 - 제목` */
 export function displayLabelFromAudioFileName(fileName: string): string {
   return (
-    fileName.replace(/\.(mp3|m4a|webm|opus)$/i, '').trim() || fileName.trim()
+    fileName
+      .replace(/\.(mp3|m4a|opus|wav|flac|ogg|aac|webm|mp4)$/i, '')
+      .trim() || fileName.trim()
   );
 }
 

@@ -3,11 +3,15 @@ package com.nullrefer.music.web;
 import com.nullrefer.music.chart.AppleMusicRssChartService;
 import com.nullrefer.music.chart.LastfmChartService;
 import com.nullrefer.music.search.LastfmSearchService;
+import com.nullrefer.music.search.SpotifySearchService;
+import com.nullrefer.music.chart.PeriodChartPageResult;
 import com.nullrefer.music.chart.SpotifyChartResult;
 import com.nullrefer.music.chart.SpotifyChartService;
 import com.nullrefer.music.chart.SpotifyTokenProvider;
 import com.nullrefer.music.chart.SpotifyTokenResponse;
 import com.nullrefer.music.config.NrmPaths;
+import com.nullrefer.music.download.AudioMetadataRequest;
+import com.nullrefer.music.download.AudioMetadataService;
 import com.nullrefer.music.download.YtDlpDownloadService;
 import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
 import com.nullrefer.music.config.NrmSettings;
@@ -35,10 +39,12 @@ public class ApiController {
   private static final Pattern SAFE_JOB_ID = Pattern.compile("^[a-z0-9]{4,48}$");
 
   private final YtDlpDownloadService downloadService;
+  private final AudioMetadataService audioMetadataService;
   private final YoutubeSearchService youtubeSearchService;
   private final SpotifyChartService spotifyChartService;
   private final LastfmChartService lastfmChartService;
   private final LastfmSearchService lastfmSearchService;
+  private final SpotifySearchService spotifySearchService;
   private final AppleMusicRssChartService appleMusicRssChartService;
   private final SpotifyTokenProvider spotifyTokenProvider;
   private final NrmSettings settings;
@@ -46,19 +52,23 @@ public class ApiController {
 
   public ApiController(
       YtDlpDownloadService downloadService,
+      AudioMetadataService audioMetadataService,
       YoutubeSearchService youtubeSearchService,
       SpotifyChartService spotifyChartService,
       LastfmChartService lastfmChartService,
       LastfmSearchService lastfmSearchService,
+      SpotifySearchService spotifySearchService,
       AppleMusicRssChartService appleMusicRssChartService,
       SpotifyTokenProvider spotifyTokenProvider,
       NrmSettings settings,
       NrmPaths paths) {
     this.downloadService = downloadService;
+    this.audioMetadataService = audioMetadataService;
     this.youtubeSearchService = youtubeSearchService;
     this.spotifyChartService = spotifyChartService;
     this.lastfmChartService = lastfmChartService;
     this.lastfmSearchService = lastfmSearchService;
+    this.spotifySearchService = spotifySearchService;
     this.appleMusicRssChartService = appleMusicRssChartService;
     this.spotifyTokenProvider = spotifyTokenProvider;
     this.settings = settings;
@@ -96,6 +106,12 @@ public class ApiController {
                 "/api/search/lastfm/album/detail?artist=...&album=...",
                 "/api/search/lastfm/track?q=...",
                 "/api/search/lastfm/track/detail?artist=...&track=...",
+                "/api/search/spotify/artist?q=...",
+                "/api/search/spotify/artist/detail?id=...",
+                "/api/search/spotify/album?q=...",
+                "/api/search/spotify/album/detail?id=...",
+                "/api/search/spotify/track?q=...",
+                "/api/search/spotify/track/detail?id=...",
                 "/api/download",
                 "/api/download/file?jobId=..."));
   }
@@ -123,6 +139,19 @@ public class ApiController {
     } catch (IllegalStateException e) {
       return spotifyErrorResponse(e);
     }
+  }
+
+  private static String resolveSpotifyPeriodKind(String kind, String legacyGranularity) {
+    if (kind != null && !kind.isBlank()) {
+      String k = kind.trim().toLowerCase();
+      if ("yearly".equals(k) || "monthly".equals(k) || "weekly".equals(k) || "daily".equals(k)) {
+        return k;
+      }
+    }
+    if (legacyGranularity != null && "year".equalsIgnoreCase(legacyGranularity.trim())) {
+      return "yearly";
+    }
+    return "daily";
   }
 
   private static String extractBearerToken(String authorization) {
@@ -195,6 +224,67 @@ public class ApiController {
       return ResponseEntity.ok(result);
     } catch (IllegalStateException e) {
       return appleMusicErrorResponse(e);
+    }
+  }
+
+  @GetMapping("/api/charts/period/spotify")
+  public ResponseEntity<?> spotifyPeriodChart(
+      @RequestParam(value = "region", defaultValue = "kr") String region,
+      @RequestParam(value = "kind", defaultValue = "daily") String kind,
+      @RequestParam(value = "granularity", required = false) String granularity,
+      @RequestParam(value = "year") int year,
+      @RequestParam(value = "month", required = false) Integer month,
+      @RequestParam(value = "day", required = false) Integer day,
+      @RequestParam(value = "week", defaultValue = "1") int week,
+      @RequestParam(value = "offset", defaultValue = "0") int offset,
+      @RequestParam(value = "limit", defaultValue = "50") int limit,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization) {
+    try {
+      String bearer = extractBearerToken(authorization);
+      if (bearer == null || bearer.isBlank()) {
+        throw new IllegalStateException("spotify_charts_not_configured");
+      }
+      String resolvedKind = resolveSpotifyPeriodKind(kind, granularity);
+      PeriodChartPageResult result =
+          spotifyChartService.fetchPeriodPage(
+              region, resolvedKind, year, month, day, week, offset, limit, bearer);
+      return ResponseEntity.ok(result);
+    } catch (IllegalStateException e) {
+      return spotifyErrorResponse(e);
+    }
+  }
+
+  @GetMapping("/api/charts/period/lastfm")
+  public ResponseEntity<?> lastfmPeriodChart(
+      @RequestParam(value = "region", defaultValue = "kr") String region,
+      @RequestParam(value = "granularity", defaultValue = "month") String granularity,
+      @RequestParam(value = "year") int year,
+      @RequestParam(value = "month", required = false) Integer month,
+      @RequestParam(value = "offset", defaultValue = "0") int offset,
+      @RequestParam(value = "limit", defaultValue = "50") int limit,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Lastfm-Api-Key",
+              required = false)
+          String apiKeyHeader) {
+    try {
+      String bearer = extractBearerToken(authorization);
+      String apiKey =
+          apiKeyHeader != null && !apiKeyHeader.isBlank()
+              ? apiKeyHeader.trim()
+              : bearer;
+      PeriodChartPageResult result =
+          lastfmChartService.fetchPeriodPage(
+              region, granularity, year, month, offset, limit, apiKey);
+      return ResponseEntity.ok(result);
+    } catch (IllegalStateException e) {
+      return lastfmErrorResponse(e);
     }
   }
 
@@ -327,6 +417,144 @@ public class ApiController {
         key -> lastfmSearchService.fetchTrackDetail(key, artist, track));
   }
 
+  @GetMapping("/api/search/spotify/artist")
+  public ResponseEntity<?> spotifySearchArtist(
+      @RequestParam("q") String query,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.searchArtists(clientId, clientSecret, bearer, query));
+  }
+
+  @GetMapping("/api/search/spotify/artist/detail")
+  public ResponseEntity<?> spotifyArtistDetail(
+      @RequestParam("id") String id,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.fetchArtistDetail(clientId, clientSecret, bearer, id));
+  }
+
+  @GetMapping("/api/search/spotify/album")
+  public ResponseEntity<?> spotifySearchAlbum(
+      @RequestParam("q") String query,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.searchAlbums(clientId, clientSecret, bearer, query));
+  }
+
+  @GetMapping("/api/search/spotify/album/detail")
+  public ResponseEntity<?> spotifyAlbumDetail(
+      @RequestParam("id") String id,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.fetchAlbumDetail(clientId, clientSecret, bearer, id));
+  }
+
+  @GetMapping("/api/search/spotify/track")
+  public ResponseEntity<?> spotifySearchTrack(
+      @RequestParam("q") String query,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.searchTracks(clientId, clientSecret, bearer, query));
+  }
+
+  @GetMapping("/api/search/spotify/track/detail")
+  public ResponseEntity<?> spotifyTrackDetail(
+      @RequestParam("id") String id,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Id",
+              required = false)
+          String clientIdHeader,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Spotify-Client-Secret",
+              required = false)
+          String clientSecretHeader) {
+    return spotifySearchWithAuth(
+        authorization,
+        clientIdHeader,
+        clientSecretHeader,
+        (clientId, clientSecret, bearer) ->
+            spotifySearchService.fetchTrackDetail(clientId, clientSecret, bearer, id));
+  }
+
   @PostMapping("/api/charts/lastfm/token")
   public ResponseEntity<?> lastfmToken(@RequestBody LastfmTokenRequest req) {
     try {
@@ -360,7 +588,6 @@ public class ApiController {
     if ("spotify_not_configured".equals(code)
         || "spotify_playlist_not_configured".equals(code)
         || "spotify_chart_unknown".equals(code)
-        || "spotify_premium_required".equals(code)
         || "spotify_charts_not_configured".equals(code)
         || "spotify_charts_login_failed".equals(code)
         || "spotify_charts_access_blocked".equals(code)) {
@@ -371,13 +598,41 @@ public class ApiController {
         || "spotify_charts_empty".equals(code)) {
       return ResponseEntity.status(404).body(Map.of("error", code));
     }
+    if ("spotify_charts_rate_limited".equals(code)) {
+      return ResponseEntity.status(429).body(Map.of("error", "spotify_charts_rate_limited"));
+    }
     if ("spotify_charts_auth_failed".equals(code)) {
       return ResponseEntity.status(401).body(Map.of("error", "spotify_charts_auth_failed"));
     }
     if ("spotify_auth_failed".equals(code)) {
       return ResponseEntity.status(403).body(Map.of("error", "spotify_auth_failed"));
     }
+    if ("spotify_premium_required".equals(code)) {
+      return ResponseEntity.status(403).body(Map.of("error", "spotify_premium_required"));
+    }
+    if ("spotify_search_query_required".equals(code) || "spotify_search_id_required".equals(code)) {
+      return ResponseEntity.status(400).body(Map.of("error", code));
+    }
     return ResponseEntity.status(502).body(Map.of("error", code));
+  }
+
+  @FunctionalInterface
+  private interface SpotifySearchAction<T> {
+    T run(String clientId, String clientSecret, String bearer);
+  }
+
+  private <T> ResponseEntity<?> spotifySearchWithAuth(
+      String authorization,
+      String clientIdHeader,
+      String clientSecretHeader,
+      SpotifySearchAction<T> action) {
+    try {
+      String bearer = extractBearerToken(authorization);
+      T result = action.run(clientIdHeader, clientSecretHeader, bearer);
+      return ResponseEntity.ok(result);
+    } catch (IllegalStateException e) {
+      return spotifyErrorResponse(e);
+    }
   }
 
   private static ResponseEntity<Map<String, String>> appleMusicErrorResponse(
@@ -462,8 +717,38 @@ public class ApiController {
   @PostMapping("/api/download")
   public ResponseEntity<Map<String, Object>> download(@RequestBody DownloadRequest req) {
     boolean noPlaylist = req.noPlaylist == null || req.noPlaylist;
-    DownloadOutcome out = downloadService.download(req.url != null ? req.url : "", noPlaylist);
+    String format = req.audioFormat != null ? req.audioFormat : "mp3";
+    int quality = req.audioQuality != null ? req.audioQuality : 0;
+    DownloadOutcome out =
+        downloadService.download(
+            req.url != null ? req.url : "", noPlaylist, format, quality);
+    if (out.status().is2xxSuccessful() && req.hasMetadata()) {
+      Object jobId = out.body().get("jobId");
+      if (jobId instanceof String job && SAFE_JOB_ID.matcher(job).matches()) {
+        try {
+          audioMetadataService.applyToJobFile(job, req.toMetadataRequest());
+        } catch (Exception e) {
+          return ResponseEntity.status(500)
+              .body(Map.of("error", "metadata_apply_failed", "jobId", job));
+        }
+      }
+    }
     return ResponseEntity.status(out.status()).body(out.body());
+  }
+
+  @PostMapping("/api/download/metadata")
+  public ResponseEntity<Map<String, Object>> applyDownloadMetadata(
+      @RequestBody AudioMetadataRequest req) {
+    if (req.jobId == null || !SAFE_JOB_ID.matcher(req.jobId).matches()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
+    }
+    try {
+      audioMetadataService.applyToJobFile(req.jobId, req);
+      return ResponseEntity.ok(Map.of("ok", true));
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "metadata_apply_failed";
+      return ResponseEntity.status(500).body(Map.of("error", code));
+    }
   }
 
   /**
@@ -475,23 +760,85 @@ public class ApiController {
       return ResponseEntity.badRequest().build();
     }
     Path baseDir = paths.getOutputDir().toAbsolutePath().normalize();
-    Path file = baseDir.resolve("nrm_" + jobId + ".mp3").normalize();
-    if (!file.startsWith(baseDir)) {
-      return ResponseEntity.badRequest().build();
-    }
-    if (!Files.isRegularFile(file)) {
+    Path file = resolveDownloadJobFile(baseDir, jobId);
+    if (file == null || !file.startsWith(baseDir)) {
       return ResponseEntity.notFound().build();
     }
     Resource resource = new FileSystemResource(file);
     String filename = file.getFileName().toString();
+  String ext =
+        filename.contains(".")
+            ? filename.substring(filename.lastIndexOf('.')).toLowerCase()
+            : ".mp3";
     return ResponseEntity.ok()
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-        .contentType(MediaType.parseMediaType("audio/mpeg"))
+        .contentType(MediaType.parseMediaType(mimeTypeForExtension(ext)))
         .body(resource);
+  }
+
+  private static Path resolveDownloadJobFile(Path baseDir, String jobId) {
+    try (var stream = Files.newDirectoryStream(baseDir, "nrm_" + jobId + ".*")) {
+      for (Path candidate : stream) {
+        if (Files.isRegularFile(candidate) && candidate.normalize().startsWith(baseDir)) {
+          return candidate.normalize();
+        }
+      }
+    } catch (Exception ignored) {
+      // fall through
+    }
+    Path fallback = baseDir.resolve("nrm_" + jobId + ".mp3").normalize();
+    if (Files.isRegularFile(fallback)) {
+      return fallback;
+    }
+    return null;
+  }
+
+  private static String mimeTypeForExtension(String ext) {
+    return switch (ext) {
+      case ".m4a" -> "audio/mp4";
+      case ".opus" -> "audio/opus";
+      case ".wav" -> "audio/wav";
+      case ".flac" -> "audio/flac";
+      case ".ogg" -> "audio/ogg";
+      case ".aac" -> "audio/aac";
+      default -> "audio/mpeg";
+    };
   }
 
   public static class DownloadRequest {
     public String url;
     public Boolean noPlaylist;
+    public String audioFormat;
+    public Integer audioQuality;
+    public String artist;
+    public String title;
+    public String album;
+    public String genre;
+    public String releaseDate;
+    public String coverUrl;
+
+    boolean hasMetadata() {
+      return isNonBlank(artist)
+          || isNonBlank(title)
+          || isNonBlank(album)
+          || isNonBlank(genre)
+          || isNonBlank(releaseDate)
+          || isNonBlank(coverUrl);
+    }
+
+    AudioMetadataRequest toMetadataRequest() {
+      AudioMetadataRequest m = new AudioMetadataRequest();
+      m.artist = artist;
+      m.title = title;
+      m.album = album;
+      m.genre = genre;
+      m.releaseDate = releaseDate;
+      m.coverUrl = coverUrl;
+      return m;
+    }
+
+    private static boolean isNonBlank(String s) {
+      return s != null && !s.isBlank();
+    }
   }
 }

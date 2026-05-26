@@ -39,18 +39,26 @@ async function fetchAppleMusicDirect(chart: AppleMusicChartTabId): Promise<Fetch
     if (!results || !Array.isArray(results) || results.length === 0) {
       return { ok: false, errorCode: 'empty' };
     }
-    const items: ChartTrackItem[] = results.slice(0, 100).map((row, i) => ({
-      rank: i + 1,
-      trackId: String(row?.id ?? ''),
-      title: String(row?.name ?? ''),
-      artists: String(row?.artistName ?? ''),
-      album: '',
-      imageUrl: String(row?.artworkUrl100 ?? ''),
-      externalUrl: String(row?.url ?? ''),
-      durationMs: 0,
-      popularity: 0,
-      releaseDate: String(row?.releaseDate ?? ''),
-    }));
+    const items: ChartTrackItem[] = results.slice(0, 100).map((row, i) => {
+      const genres = row?.genres as { name?: string }[] | undefined;
+      const genre =
+        Array.isArray(genres) && genres.length > 0
+          ? String(genres[0]?.name ?? '').trim()
+          : '';
+      return {
+        rank: i + 1,
+        trackId: String(row?.id ?? ''),
+        title: String(row?.name ?? ''),
+        artists: String(row?.artistName ?? ''),
+        album: '',
+        genre,
+        imageUrl: String(row?.artworkUrl100 ?? ''),
+        externalUrl: String(row?.url ?? ''),
+        durationMs: 0,
+        popularity: 0,
+        releaseDate: String(row?.releaseDate ?? ''),
+      };
+    });
     const data: SpotifyChartPayload = {
       platform: 'appleMusic',
       playlistId: chart,
@@ -94,7 +102,7 @@ async function fetchWithBase(
     }
     return { ok: true, data };
   } catch {
-    return { ok: false, errorCode: 'network' };
+    return { ok: false, errorCode: 'backend_unreachable' };
   }
 }
 
@@ -105,7 +113,7 @@ async function fetchWithDevFallback(
   const primary =
     resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
   if (!primary) {
-    return { ok: false, errorCode: 'network' };
+    return { ok: false, errorCode: 'backend_unreachable' };
   }
 
   const first = await fetchWithBase(primary, chart);
