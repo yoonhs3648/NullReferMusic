@@ -30,17 +30,18 @@ import {
 import { persistAudioAfterServerJob } from '@/lib/nrmPersistServerDownload';
 import {
   buildChartAudioMetadata,
-  buildMainSearchAudioMetadata,
-  buildPlatformTrackAudioMetadata,
+  normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
+import { enrichLastfmDownloadMetadata } from '@/lib/nrmLastfmMetadataEnricher';
+import { normalizeLastfmMbid } from '@/lib/nrmLastfmMbid';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
-import { NrmDownloadModal } from '@/components/nrm/NrmDownloadModal';
+import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { YoutubeEmbed } from '@/components/nrm/YoutubeEmbed';
 
 function youtubeWatchUrl(videoId: string): string {
@@ -50,7 +51,8 @@ function youtubeWatchUrl(videoId: string): string {
 const DOWNLOAD_CONSENT_KEY = 'nrm_download_user_consent_v1';
 
 function mapDownloadUserMessage(err: unknown): string {
-  const raw = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const full = err instanceof Error ? err.message : String(err);
+  const raw = full.toLowerCase();
   if (
     raw.includes('permission denied') ||
     raw.includes('error-13') ||
@@ -63,8 +65,28 @@ function mapDownloadUserMessage(err: unknown): string {
   ) {
     return '저장 권한 문제로 다운로드하지 못했습니다.';
   }
+  if (
+    raw.includes('다운로드 폴더') ||
+    raw.includes('saf') ||
+    raw.includes('[stage:persist_media]')
+  ) {
+    return '저장 폴더 문제로 다운로드하지 못했습니다. 메뉴 → 다운로드 설정에서 경로를 확인하세요.';
+  }
+  if (raw.includes('ffmpeg_required') || raw.includes('transcode_failed')) {
+    return '오디오 변환(ffmpeg)에 실패했습니다. 앱을 완전히 종료한 뒤 다시 시도하거나, 확장자를 m4a로 바꿔 보세요.';
+  }
+  if (
+    raw.includes('ffmpeg') ||
+    raw.includes('postprocessor') ||
+    raw.includes('download_failed')
+  ) {
+    return 'YouTube에서 오디오를 받지 못했습니다. 잠시 후 다시 시도하거나, 네트워크·YouTube 로그인 상태를 확인하세요.';
+  }
   if (raw.includes('network') || raw.includes('timeout') || raw.includes('http')) {
     return '네트워크 문제로 다운로드하지 못했습니다.';
+  }
+  if (__DEV__ && full.trim()) {
+    return `다운로드에 실패했습니다. (${full.slice(0, 120)})`;
   }
   return '알 수 없는 오류가 발생했습니다.';
 }
@@ -124,6 +146,10 @@ export function NrmYoutubeHome({
   const dlInFlight = useRef<Set<string>>(new Set());
   const [downloadModalItem, setDownloadModalItem] =
     useState<YoutubeSearchItem | null>(null);
+  const [downloadModalInitialFields, setDownloadModalInitialFields] = useState<
+    Omit<NrmAudioFileMetadata, 'artist' | 'title'> | undefined
+  >(undefined);
+  const [dlMetaBusy, setDlMetaBusy] = useState<Record<string, boolean>>({});
   const latestSearchTokenRef = useRef(0);
 
   const inputColors = {
@@ -334,6 +360,63 @@ export function NrmYoutubeHome({
     [],
   );
 
+  const openDownloadModalForItem = useCallback(
+    async (item: YoutubeSearchItem) => {
+      const videoId = item.videoId;
+      if (dlInFlight.current.has(videoId)) return;
+      setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
+      setDownloadModalItem(null);
+      setDownloadModalInitialFields(undefined);
+      try {
+        // metadataSource 분류는 모달에서 UI 힌트용으로 사용합니다.
+        const source: 'chart' | 'lastfm' | 'main' =
+          chartDownloadTrack && chartDownloadSource === 'lastfm'
+            ? 'lastfm'
+            : chartDownloadTrack
+              ? 'chart'
+              : 'main';
+
+        if (source === 'lastfm' && chartDownloadTrack) {
+          const t = chartDownloadTrack;
+          const meta = await enrichLastfmDownloadMetadata(
+            {
+              mbid:
+                normalizeLastfmMbid(t.mbid) ||
+                normalizeLastfmMbid(t.trackId) ||
+                undefined,
+              artist: t.artists,
+              title: t.title,
+              album: t.album,
+              genre: t.genre,
+              releaseDate: t.releaseDate,
+              imageUrl: t.imageUrl,
+            },
+            t.artists,
+            t.title,
+          );
+          const { artist: _a, title: _t, ...fields } = meta;
+          setDownloadModalInitialFields(fields);
+        } else if (source === 'chart' && chartDownloadTrack) {
+          const t = chartDownloadTrack;
+          const meta = buildChartAudioMetadata(t, t.artists, t.title);
+          const { artist: _a, title: _t, ...fields } = meta;
+          setDownloadModalInitialFields(fields);
+        } else {
+          setDownloadModalInitialFields(undefined);
+        }
+
+        setDownloadModalItem(item);
+      } finally {
+        setDlMetaBusy((m) => {
+          const n = { ...m };
+          delete n[videoId];
+          return n;
+        });
+      }
+    },
+    [chartDownloadSource, chartDownloadTrack],
+  );
+
   const isWelcome = phase === 'welcome';
 
   return (
@@ -343,12 +426,10 @@ export function NrmYoutubeHome({
         !isWelcome && styles.block,
         !isWelcome && (isDark ? styles.blockDark : styles.blockLight),
       ]}>
-      <NrmDownloadModal
+      <NrmMetadataEditModal
         visible={downloadModalItem !== null}
         item={downloadModalItem}
         isDark={isDark}
-        initialArtist={chartDownloadTrack?.artists}
-        initialTitle={chartDownloadTrack?.title}
         metadataSource={
           chartDownloadSource === 'lastfm'
             ? 'lastfm'
@@ -356,24 +437,22 @@ export function NrmYoutubeHome({
               ? 'chart'
               : 'main'
         }
-        onClose={() => setDownloadModalItem(null)}
-        onConfirm={(videoId, fileName, userArtist, userTitle) => {
-          const meta =
-            chartDownloadTrack && chartDownloadSource === 'lastfm'
-              ? buildPlatformTrackAudioMetadata(
-                  chartDownloadTrack,
-                  userArtist,
-                  userTitle,
-                )
-              : chartDownloadTrack
-                ? buildChartAudioMetadata(
-                    chartDownloadTrack,
-                    userArtist,
-                    userTitle,
-                  )
-                : buildMainSearchAudioMetadata(userArtist, userTitle);
+        initialArtist={chartDownloadTrack?.artists}
+        initialTitle={chartDownloadTrack?.title}
+        initialMetadataFields={downloadModalInitialFields}
+        busy={false}
+        onClose={() => {
           setDownloadModalItem(null);
-          void runDownloadWithFileName(videoId, fileName, meta);
+          setDownloadModalInitialFields(undefined);
+        }}
+        onConfirm={(videoId, fileName, metadata) => {
+          setDownloadModalItem(null);
+          setDownloadModalInitialFields(undefined);
+          void runDownloadWithFileName(
+            videoId,
+            fileName,
+            normalizeDownloadMetadata(metadata),
+          );
         }}
       />
       <View style={styles.searchRowWrap}>
@@ -413,7 +492,7 @@ export function NrmYoutubeHome({
           const rowBorder = isDark
             ? nrmTokens.color.borderOnDark
             : nrmTokens.color.hairline;
-          const busy = !!dlBusy[item.videoId];
+          const busy = !!dlBusy[item.videoId] || !!dlMetaBusy[item.videoId];
           return (
             <Fragment key={item.videoId}>
               <View
@@ -470,7 +549,7 @@ export function NrmYoutubeHome({
                   </View>
                 </Pressable>
                 <Pressable
-                  onPress={() => setDownloadModalItem(item)}
+                  onPress={() => void openDownloadModalForItem(item)}
                   disabled={busy}
                   style={({ pressed }) => [
                     styles.rowDownloadBtn,
@@ -510,7 +589,7 @@ export function NrmYoutubeHome({
                 <View style={styles.embedBelow}>
                   <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
                   <Pressable
-                    onPress={() => setDownloadModalItem(item)}
+                    onPress={() => void openDownloadModalForItem(item)}
                     disabled={busy}
                     style={({ pressed }) => [
                       styles.embedDownloadBtn,

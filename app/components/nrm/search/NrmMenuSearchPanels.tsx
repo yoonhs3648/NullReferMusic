@@ -100,6 +100,23 @@ export function NrmMenuSearchPanels({
             <Ionicons name="chevron-forward" size={20} color={bodyColor} />
           </Pressable>
         ))}
+        <Pressable
+          disabled
+          style={[styles.row, styles.rowDisabled]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: true }}>
+          <Ionicons
+            name="logo-soundcloud"
+            size={28}
+            color="#FF5500"
+            style={styles.monoIcon}
+          />
+          <View style={styles.rowTextBlock}>
+            <Text style={[styles.rowLabel, { color: bodyColor }, styles.rowLabelDisabled]}>
+              SoundCloud
+            </Text>
+          </View>
+        </Pressable>
       </>
     );
   }
@@ -171,6 +188,13 @@ const styles = StyleSheet.create({
     borderRadius: nrmTokens.radius.sm,
     marginBottom: nrmTokens.space.xs,
   },
+  rowDisabled: {
+    opacity: 0.5,
+  },
+  monoIcon: {
+    width: 28,
+    textAlign: 'center',
+  },
   rowTextBlock: {
     flex: 1,
     minWidth: 0,
@@ -179,5 +203,8 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
+  },
+  rowLabelDisabled: {
+    color: nrmTokens.color.textMuted,
   },
 });

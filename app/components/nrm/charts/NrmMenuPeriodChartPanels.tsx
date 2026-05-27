@@ -44,18 +44,22 @@ export function NrmMenuPeriodChartPanels({
       <MenuBackRow onPress={onBackToRoot} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>기간별 차트</Text>
       <Pressable
-        onPress={onOpenLastfm}
-        style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
-        <NrmChartPlatformIcon iconKey="lastfm" size={28} />
-        <Text style={[styles.rowLabel, { color: titleColor }]}>Last.fm</Text>
-        <Ionicons name="chevron-forward" size={20} color={bodyColor} />
-      </Pressable>
-      <Pressable
         onPress={onOpenSpotify}
         style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
         <NrmChartPlatformIcon iconKey="spotify" size={28} />
         <View style={styles.rowTextBlock}>
           <Text style={[styles.rowLabel, { color: titleColor }]}>Spotify</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={bodyColor} />
+      </Pressable>
+      <Pressable
+        disabled
+        style={[styles.row, styles.rowDisabled]}>
+        <NrmChartPlatformIcon iconKey="lastfm" size={28} />
+        <View style={styles.rowTextBlock}>
+          <Text style={[styles.rowLabel, { color: bodyColor }, styles.rowLabelDisabled]}>
+            Last.fm
+          </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color={bodyColor} />
       </Pressable>
@@ -92,6 +96,12 @@ const styles = StyleSheet.create({
     borderRadius: nrmTokens.radius.sm,
     marginBottom: nrmTokens.space.xs,
   },
+  rowDisabled: {
+    opacity: 0.5,
+  },
   rowTextBlock: { flex: 1, minWidth: 0 },
   rowLabel: { flex: 1, fontSize: nrmTokens.font.body, fontWeight: '500' },
+  rowLabelDisabled: {
+    color: nrmTokens.color.textMuted,
+  },
 });

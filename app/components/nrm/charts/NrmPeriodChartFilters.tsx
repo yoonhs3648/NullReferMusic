@@ -145,19 +145,20 @@ export function NrmPeriodChartFilters({
         })}
       </ScrollView>
 
-      <View style={styles.filterRow}>
+      <View style={styles.dateRow}>
         <NrmPeriodChartDropdown
-          label="연도"
+          flex
+          label="연"
           value={year}
           options={yearOptions}
           onChange={handleYearChange}
           isDark={isDark}
           titleColor={titleColor}
           bodyColor={bodyColor}
-          boxWidth={108}
         />
         {granularity === 'month' ? (
           <NrmPeriodChartDropdown
+            flex
             label="월"
             value={month}
             options={monthOptions}
@@ -165,13 +166,13 @@ export function NrmPeriodChartFilters({
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            boxWidth={84}
           />
         ) : null}
-        <View style={styles.regionGroup}>
-          {renderRegionChip('kr', 'Korea')}
-          {renderRegionChip('global', 'Global')}
-        </View>
+      </View>
+
+      <View style={styles.regionRow}>
+        {renderRegionChip('kr', 'Korea')}
+        {renderRegionChip('global', 'Global')}
       </View>
     </View>
   );
@@ -197,17 +198,18 @@ const styles = StyleSheet.create({
   },
   tabChipPressed: { opacity: 0.9 },
   tabLabel: { fontSize: nrmTokens.font.caption },
-  filterRow: {
+  dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: nrmTokens.space.sm,
+    flexWrap: 'nowrap',
+    gap: nrmTokens.space.xxs,
+    width: '100%',
   },
-  regionGroup: {
+  regionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: nrmTokens.space.xs,
-    flexShrink: 0,
+    marginTop: nrmTokens.space.sm,
   },
   regionChip: {
     paddingHorizontal: nrmTokens.space.md,

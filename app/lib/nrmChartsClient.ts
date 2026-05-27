@@ -23,6 +23,7 @@ import {
   buildSpotifyChartAuthHeaders,
   refreshSpotifyChartToken,
 } from '@/lib/nrmSpotifyTokenSync';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 
 type SpotifyFetchFail = {
   ok: false;
@@ -115,7 +116,7 @@ function parseSpotifyChartEntries(root: Record<string, unknown>, maxTracks: numb
       title: String(meta.trackName ?? ''),
       artists,
       album,
-      imageUrl: String(meta.displayImageUri ?? ''),
+      imageUrl: normalizeCoverArtUrl(String(meta.displayImageUri ?? '')),
       externalUrl: trackId ? `https://open.spotify.com/track/${trackId}` : '',
       durationMs: 0,
       popularity: 0,

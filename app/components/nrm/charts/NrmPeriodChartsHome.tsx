@@ -21,7 +21,7 @@ import {
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
-import { promptSpotifyChartsBearerExpired } from '@/lib/nrmChartTokenGate';
+import type { SpotifyChartsAuthHandlers } from '@/lib/nrmSpotifyChartsAuthFlow';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
   PERIOD_CHART_MAX_RANK,
@@ -33,10 +33,10 @@ import {
 } from '@/lib/nrmPeriodChartCatalog';
 import { fetchPeriodChartPage } from '@/lib/nrmPeriodChartsClient';
 import {
-  spotifyPeriodChartKindLabel,
   spotifyPeriodChartMaxRank,
   type SpotifyPeriodChartKind,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
+import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
 
 type Props = {
   platform: PeriodChartPlatform;
@@ -46,6 +46,7 @@ type Props = {
   onTrackPress?: (item: ChartTrackItem) => void;
   onOpenChartsSession?: () => void;
   onRenewChartsBearer?: () => Promise<boolean>;
+  onShowBearerExpired?: () => void;
 };
 
 export function NrmPeriodChartsHome({
@@ -56,6 +57,7 @@ export function NrmPeriodChartsHome({
   onTrackPress,
   onOpenChartsSession,
   onRenewChartsBearer,
+  onShowBearerExpired,
 }: Props) {
   const pageTitle = platform === 'spotify' ? 'Spotify' : 'Last.fm';
   const iconKey = platform;
@@ -74,6 +76,7 @@ export function NrmPeriodChartsHome({
   );
   const [day, setDay] = useState(initialSpotify.day);
   const [weekOfMonth, setWeekOfMonth] = useState(initialSpotify.weekOfMonth);
+  const [snapshotDow, setSnapshotDow] = useState(DEFAULT_WEEKLY_SNAPSHOT_DAY);
   const [region, setRegion] = useState<PeriodChartRegion>('kr');
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
@@ -94,48 +97,48 @@ export function NrmPeriodChartsHome({
 
   const queryKey =
     platform === 'spotify'
-      ? `${platform}-${region}-${spotifyKind}-${year}-${month}-${day}-${weekOfMonth}`
+      ? `${platform}-${region}-${spotifyKind}-${year}-${month}-${day}-${weekOfMonth}-${snapshotDow}`
       : `${platform}-${region}-${granularity}-${year}-${month}`;
+
+  useEffect(() => {
+    if (platform !== 'spotify') return;
+    let cancelled = false;
+    void loadWeeklySnapshotDay().then((d) => {
+      if (!cancelled) setSnapshotDow(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [platform]);
 
   const loadPage = useCallback(
     async (offset: number, append: boolean, generation: number) => {
       const ac = new AbortController();
       abortRef.current = ac;
-      const out = await fetchPeriodChartPage(
-        platform,
-        {
-          region,
-          granularity,
-          spotifyKind,
-          year,
-          month,
-          day,
-          weekOfMonth,
-          offset,
-          limit: PERIOD_CHART_PAGE_SIZE,
-        },
-        ac.signal,
-      );
+      const query = {
+        region,
+        granularity,
+        spotifyKind,
+        year,
+        month,
+        day,
+        weekOfMonth,
+        snapshotDow,
+        offset,
+        limit: PERIOD_CHART_PAGE_SIZE,
+      };
+      const chartsAuth: SpotifyChartsAuthHandlers | undefined =
+        platform === 'spotify' && !append
+          ? {
+              onRenewChartsBearer,
+              onOpenChartsSession,
+              onShowBearerExpired,
+            }
+          : undefined;
+      const out = await fetchPeriodChartPage(platform, query, ac.signal, chartsAuth);
       if (ac.signal.aborted || generation !== loadGenRef.current) return;
 
       if (!out.ok) {
-        if (
-          !append &&
-          platform === 'spotify' &&
-          (out.errorCode === 'auth_failed' ||
-            out.errorCode === 'charts_session' ||
-            out.errorCode === 'forbidden') &&
-          onRenewChartsBearer
-        ) {
-          const renewed = await promptSpotifyChartsBearerExpired({
-            onOpenChartsSession: onOpenChartsSession ?? (() => {}),
-            onAndroidRenew: onRenewChartsBearer,
-          });
-          if (renewed && generation === loadGenRef.current) {
-            void loadPage(offset, append, generation);
-          }
-          return;
-        }
         if (!append) {
           setErrorCode(out.errorCode);
           setItems([]);
@@ -159,8 +162,10 @@ export function NrmPeriodChartsHome({
       month,
       day,
       weekOfMonth,
+      snapshotDow,
       onOpenChartsSession,
       onRenewChartsBearer,
+      onShowBearerExpired,
     ],
   );
 
@@ -209,6 +214,7 @@ export function NrmPeriodChartsHome({
           month={month}
           day={day}
           weekOfMonth={weekOfMonth}
+          snapshotDow={snapshotDow}
           region={region}
           onKindChange={setSpotifyKind}
           onYearChange={setYear}
@@ -233,12 +239,9 @@ export function NrmPeriodChartsHome({
         />
       )}
 
-      {playlistTitle && !errorCode ? (
+      {platform !== 'spotify' && playlistTitle && !errorCode ? (
         <Text style={[styles.hint, { color: bodyColor }]}>
-          {playlistTitle} ·{' '}
-          {platform === 'spotify'
-            ? spotifyPeriodChartKindLabel(spotifyKind)
-            : periodChartGranularityLabel(granularity)}{' '}
+          {playlistTitle} · {periodChartGranularityLabel(granularity)}{' '}
           · 최대 {maxRank}곡 · {items.length}곡 표시
         </Text>
       ) : null}
@@ -284,7 +287,13 @@ export function NrmPeriodChartsHome({
             item={item}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            countLabel={platform === 'spotify' ? '스트림' : undefined}
+            countLabel={
+              platform === 'spotify'
+                ? spotifyKind === 'monthly'
+                  ? '평균 순위'
+                  : '스트림'
+                : undefined
+            }
             onPress={onTrackPress ? () => onTrackPress(item) : undefined}
           />
         </View>

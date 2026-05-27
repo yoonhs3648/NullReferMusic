@@ -67,9 +67,9 @@ public class YtDlpDownloadService {
     }
     cmd.add("-x");
     cmd.add("--audio-format");
-    cmd.add("mp3");
+    cmd.add(audioFormat != null && !audioFormat.isBlank() ? audioFormat.trim() : "mp3");
     cmd.add("--audio-quality");
-    cmd.add("0");
+    cmd.add(String.valueOf(Math.min(9, Math.max(0, audioQuality))));
     cmd.add("-P");
     cmd.add(paths.getOutputDir().toString());
     cmd.add("-o");

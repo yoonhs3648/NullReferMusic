@@ -14,6 +14,7 @@ import {
   buildLastfmChartAuthHeaders,
   refreshLastfmChartToken,
 } from '@/lib/nrmLastfmTokenSync';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 
 type LastfmFetchFail = {
   ok: false;
@@ -73,14 +74,18 @@ function mapLastfmTrack(
   const artistNode = track.artist as { name?: string } | string | undefined;
   const artists =
     typeof artistNode === 'object' ? (artistNode?.name ?? '') : String(artistNode ?? '');
-  const imageUrl = pickLastfmImage(
-    (track.image as { '#text'?: string; size?: string }[] | undefined) ?? [],
+  const imageUrl = normalizeCoverArtUrl(
+    pickLastfmImage(
+      (track.image as { '#text'?: string; size?: string }[] | undefined) ?? [],
+    ),
   );
   const externalUrl = String(track.url ?? '');
-  const trackId = String(track.mbid ?? externalUrl);
+  const mbidRaw = String(track.mbid ?? '').trim();
+  const trackId = mbidRaw || externalUrl;
   return {
     rank,
     trackId,
+    mbid: mbidRaw || undefined,
     title: String(track.name ?? ''),
     artists,
     album: '',

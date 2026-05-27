@@ -28,6 +28,8 @@ import {
   type NrmAudioExtension,
   type NrmDownloadFileNameFormat,
 } from '@/lib/nrmDownloadSettings';
+import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
+import { isStandaloneIos, isYtDlpEncodeSettingsEffective } from '@/lib/nrmStandalonePlatform';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
@@ -40,7 +42,7 @@ export type NrmDownloadSettingsSection =
 const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   path: '다운로드 경로 설정',
   extension: '확장자 설정',
-  quality: '음질 설정',
+  quality: '비트레이트 설정',
   filename: '파일명 설정',
 };
 
@@ -67,6 +69,10 @@ export function NrmDownloadSettingsPanel({
 
   useEffect(() => {
     if (section === 'path') {
+      if (Platform.OS !== 'android') {
+        setLoaded(true);
+        return;
+      }
       void loadStoredSafGrant()
         .then((uri) => {
           setDirUri(uri);
@@ -145,6 +151,12 @@ export function NrmDownloadSettingsPanel({
 
       {section === 'extension' ? (
         <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {isStandaloneIos() ? (
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              iOS IPA는 YouTube가 제공하는 오디오 포맷 중에서 선택한 확장자에 가장 가까운
+              스트림을 우선 사용합니다. (yt-dlp 변환 없음)
+            </Text>
+          ) : null}
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
@@ -236,6 +248,21 @@ export function NrmDownloadSettingsPanel({
 
       {section === 'quality' ? (
         <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {isStandaloneIos() ? (
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              비트레이트 설정은 Android APK(yt-dlp)에서만 적용됩니다. iOS는 YouTube 원본
+              비트레이트로 저장됩니다.
+            </Text>
+          ) : null}
+          {!isStandaloneIos() && !isYtDlpEncodeSettingsEffective() && Platform.OS === 'android' ? (
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              비트레이트·확장자 변환은 릴리스 APK(yt-dlp)에서 적용됩니다.
+            </Text>
+          ) : null}
+          <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
+            비트레이트(Bit rate)는 오디오 파일이 1초 동안 담는 데이터 양(kbps)입니다.{'\n'}
+            비트레이트가 높을수록 음질이 좋지만 파일 용량은 커집니다.
+          </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
@@ -249,7 +276,17 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'path' ? (
-        Platform.OS === 'android' ? (
+        Platform.OS === 'ios' ? (
+          <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              iOS에서는 사용자가 고른 폴더(SAF) 대신 앱 전용 저장소에 파일을 둡니다.
+            </Text>
+            <Text style={[styles.pathHint, { color: bodyColor }]}>
+              «파일» 앱 → «내 iPhone» → NullReferenceMusic → «{NRM_DOWNLOAD_PUBLIC_FOLDER_NAME}»
+              폴더에서 확인할 수 있습니다. (설정에서 «파일» 공유가 켜져 있어야 합니다.)
+            </Text>
+          </View>
+        ) : Platform.OS === 'android' ? (
           <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
             <Pressable
               onPress={() => void handlePickFolder()}
@@ -420,6 +457,17 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.caption,
     lineHeight: 20,
     opacity: 0.85,
+  },
+  platformNote: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 20,
+    opacity: 0.88,
+  },
+  bitrateDesc: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 20,
+    opacity: 0.9,
+    marginBottom: nrmTokens.space.xs,
   },
   formatCol: {
     gap: nrmTokens.space.xs,

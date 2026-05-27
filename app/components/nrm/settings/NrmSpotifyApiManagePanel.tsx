@@ -547,7 +547,7 @@ export function NrmSpotifyApiManagePanel({
       <>
         <MenuBackRow onPress={() => void handleLeaveEditable('hub')} />
         <Text style={[styles.panelTitle, { color: titleColor }]}>
-          Charts 세션
+          Charts 세션 관리
         </Text>
         <Text style={[styles.chartsSessionDesc, { color: bodyColor }]}>
           https://charts.spotify.com 에 로그인 후 Bearer 토큰을 가져옵니다.
@@ -805,7 +805,7 @@ export function NrmSpotifyApiManagePanel({
         <Text
           style={[styles.hubRowTitleSm, { color: titleColor }]}
           numberOfLines={1}>
-          Charts 세션
+          Charts 세션 관리
         </Text>
       </Pressable>
     </>

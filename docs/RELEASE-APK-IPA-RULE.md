@@ -80,6 +80,21 @@
 
 사용자가 **"APK 말아줘 / APK 생성 / APK 빌드"** 등을 요청하면 아래 순서를 **자동으로** 수행한다.
 
+### 6-0. APK 요청 시 버전·메뉴 표시 동기화 (필수)
+
+사용자가 **버전 번호와 함께** APK 빌드를 요청하면(예: `v1.3.3으로 apk 말아줘`), **별도로 “메뉴 버전 정보도 바꿔줘”라고 말하지 않아도** 아래를 먼저 맞춘 뒤 빌드한다.
+
+| 동기화 대상 | 파일·필드 |
+|-------------|-----------|
+| npm / Expo | `app/package.json` → `"version"` |
+| Expo config | `app/app.config.ts` → `version` |
+| Android | `app/android/app/build.gradle` → `versionName`, `versionCode`(매 릴리스 +1) |
+| **메뉴 > 버전 정보** | `app/lib/nrmAppInfo.ts`의 `getNrmAppVersionLabel()`이 **`package.json`의 `version`을 읽음** → 위 세 곳만 맞추면 오버레이에 자동 반영 |
+
+- 사용자가 **명시한 버전 문자열**을 기준으로 한다(접두 `v`는 제거 후 `1.3.3` 형식으로 통일).
+- 버전만 말하고 APK 빌드를 생략한 요청이 아니면, **항상 빌드까지** 수행한다.
+- Cursor 규칙 요약: `.cursor/rules/nrm-release-apk.mdc`
+
 ### 6-1. 사전 체크
 ```
 cd C:\NullReferMusic\app
@@ -113,7 +128,7 @@ cd C:\NullReferMusic\app\android
 APK 파일명은 **`NullReferenceMusic-v{버전}.apk`** 형식을 사용한다.
 
 ```
-app\android\app\build\outputs\apk\release\NullReferenceMusic-v1.2.1.apk
+app\android\app\build\outputs\apk\release\NullReferenceMusic-v1.3.3.apk
 ```
 
 파일명은 `android/app/build.gradle`의 `applicationVariants` 블록에서 자동으로 설정된다:
@@ -203,7 +218,7 @@ export async function fetchSomeData(params: Params): Promise<Result> {
 | 기능 | Standalone APK | Expo Go / 웹 |
 |------|----------------|-------------|
 | YouTube 검색 | 기기 내 Innertube | PC 백엔드 `/api/youtube/search` |
-| YouTube 다운로드 | 기기 내 yt-dlp | PC 백엔드 `/api/download` |
+| YouTube 다운로드 | Android: yt-dlp / iOS IPA: innertube | PC 백엔드 `/api/download` |
 | Spotify Charts | `charts-spotify-com-service.spotify.com` 직접 호출 | PC 백엔드 프록시 |
 | Spotify OAuth 토큰 | `accounts.spotify.com/api/token` 직접 호출 | PC 백엔드 프록시 |
 | Apple Music Charts | `rss.marketingtools.apple.com` 직접 호출 | PC 백엔드 프록시 |
@@ -211,6 +226,7 @@ export async function fetchSomeData(params: Params): Promise<Result> {
 | Last.fm 검색 | `ws.audioscrobbler.com/2.0/` 직접 호출 | PC 백엔드 프록시 |
 | Last.fm API Key 검증 | Last.fm API 직접 검증 | PC 백엔드 프록시 |
 
+> iOS IPA 제약·parity 상세: [`docs/IOS-IPA-PARITY.md`](./IOS-IPA-PARITY.md)  
 > 새 기능 추가 시 반드시 이 표에도 행을 추가한다.
 
 ### 7-5. 구현 시 준수 사항

@@ -28,6 +28,8 @@ export type ChartErrorCode =
 
   | 'backend_unreachable'
 
+  | 'rate_limited'
+
   | 'server'
 
   | 'unknown';
@@ -70,6 +72,8 @@ const SPOTIFY_MESSAGES: Record<ChartErrorCode, string> = {
 
     'PC 차트 서버(8787)에 연결하지 못했습니다. 서버 실행·같은 Wi‑Fi를 확인하세요.',
 
+  rate_limited: 'API 요청이 너무 많습니다. 나중에 다시 시도하세요.',
+
   server: 'Spotify 서버 오류입니다. 잠시 후 다시 시도하세요.',
 
   unknown: 'Spotify 차트를 불러올 수 없습니다.',
@@ -106,6 +110,8 @@ const LASTFM_MESSAGES: Record<ChartErrorCode, string> = {
 
     'PC 차트 서버(8787)에 연결하지 못했습니다. 서버 실행·같은 Wi‑Fi를 확인하세요.',
 
+  rate_limited: 'API 요청이 너무 많습니다. 나중에 다시 시도하세요.',
+
   server: 'Last.fm 서버 오류입니다. 잠시 후 다시 시도하세요.',
 
   unknown: 'Last.fm 차트를 불러올 수 없습니다.',
@@ -137,6 +143,8 @@ const APPLE_MESSAGES: Record<ChartErrorCode, string> = {
   backend_unreachable:
 
     'PC 차트 서버(8787)에 연결하지 못했습니다. 서버 실행·같은 Wi‑Fi를 확인하세요.',
+
+  rate_limited: 'API 요청이 너무 많습니다. 나중에 다시 시도하세요.',
 
   server: 'Apple Music 차트 서버 오류입니다. 잠시 후 다시 시도하세요.',
 
@@ -230,7 +238,7 @@ export function spotifyErrorFromApi(
 
   if (httpStatus === 429 || apiCode === 'spotify_charts_rate_limited') {
 
-    return 'server';
+    return 'rate_limited';
 
   }
 
@@ -294,6 +302,12 @@ export function lastfmErrorFromApi(
 
   }
 
+  if (httpStatus === 429) {
+
+    return 'rate_limited';
+
+  }
+
   if (httpStatus === 503) {
 
     return 'not_configured';
@@ -335,6 +349,12 @@ export function appleMusicErrorFromApi(
   if (apiCode === 'apple_music_forbidden' || httpStatus === 403) {
 
     return 'forbidden';
+
+  }
+
+  if (httpStatus === 429) {
+
+    return 'rate_limited';
 
   }
 

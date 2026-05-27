@@ -30,6 +30,7 @@ public final class LastfmSearchDtos {
   public record LastfmTrackSummaryDto(
       String name,
       String artist,
+      String mbid,
       String url,
       String imageUrl,
       int rank,
@@ -50,7 +51,7 @@ public final class LastfmSearchDtos {
 
   public record LastfmAlbumSearchResult(List<LastfmAlbumSearchHit> albums) {}
 
-  public record LastfmAlbumTrackDto(String name, int rank, int durationSec) {}
+  public record LastfmAlbumTrackDto(String name, String mbid, int rank, int durationSec) {}
 
   public record LastfmAlbumInfoDto(
       String name,
@@ -67,19 +68,23 @@ public final class LastfmSearchDtos {
   public record LastfmAlbumDetailResult(LastfmAlbumInfoDto info, List<LastfmTagDto> tags) {}
 
   public record LastfmTrackSearchHit(
-      String name, String artist, String url, String imageUrl) {}
+      String name, String artist, String mbid, String url, String imageUrl) {}
 
   public record LastfmTrackSearchResult(List<LastfmTrackSearchHit> tracks) {}
 
   public record LastfmTrackInfoDto(
       String name,
       String artist,
+      String mbid,
       String album,
+      String albumMbid,
+      String artistMbid,
       String url,
       String imageUrl,
       int durationSec,
       long playcount,
-      long listeners) {}
+      long listeners,
+      String albumTrackPosition) {}
 
   public record LastfmTrackDetailResult(
       LastfmTrackInfoDto info,

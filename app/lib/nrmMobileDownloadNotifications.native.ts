@@ -7,7 +7,8 @@
  * - 릴리스 APK에서는 동일 API로 정상 동작.
  *
  * 진행 알림 : 다운로드 중 (N개) — 하나의 알림을 업데이트
- * 완료 알림 : 파일명 + "다운로드 완료" + Android GroupSummary "다운로드 완료 (N)"
+ * 완료 알림 : 파일명 + "다운로드 완료" / 동시에 여러 개면 "다운로드 완료 (N)"
+ *   (이전에 끝난 뒤 새로 받기 시작하면 완료 목록은 초기화 — 지운 알림이 다시 묶이지 않음)
  */
 import { Platform } from 'react-native';
 import {
@@ -27,7 +28,8 @@ const NOTIF_DONE_SUMMARY_ID = 'nrm-dl-done-summary';
 const GROUP_DONE = 'nrm_dl_complete';
 
 const activeDownloads = new Map<string, string>();
-const completedLabels: string[] = [];
+/** 현재 다운로드 묶음에서 완료된 항목 (videoId → 표시 이름) */
+const completedByVideoId = new Map<string, string>();
 let setupDone = false;
 
 export async function setupNrmMobileDownloadNotifications(): Promise<void> {
@@ -105,22 +107,20 @@ async function refreshProgressNotif(): Promise<void> {
   });
 }
 
-async function refreshCompleteNotif(newLabel: string, _videoId: string): Promise<void> {
+async function refreshCompleteNotif(newLabel: string, videoId: string): Promise<void> {
   if (!setupDone) return;
 
-  completedLabels.push(newLabel);
-  const count = completedLabels.length;
+  completedByVideoId.set(videoId, newLabel);
+  const labels = [...completedByVideoId.values()];
+  const count = labels.length;
 
   // ▸ 개별 알림 없음 — 항상 하나의 요약 알림만 업데이트
   // ▸ 1건: "파일명 다운로드 완료", 다건: "다운로드 완료 (N)" + 목록
   const title =
     count === 1
-      ? `${newLabel} 다운로드 완료`
+      ? `${labels[0]} 다운로드 완료`
       : `다운로드 완료 (${count})`;
-  const body =
-    count === 1
-      ? ''
-      : completedLabels.join('\n');
+  const body = count === 1 ? '' : labels.join('\n');
 
   await scheduleNotificationAsync({
     identifier: NOTIF_DONE_SUMMARY_ID,
@@ -141,7 +141,11 @@ export function nrmNotifyDownloadStarted(
   videoId: string,
   displayLabel: string,
 ): void {
+  const wasIdle = activeDownloads.size === 0;
   activeDownloads.set(videoId, displayLabel);
+  if (wasIdle) {
+    completedByVideoId.clear();
+  }
   void refreshProgressNotif();
 }
 

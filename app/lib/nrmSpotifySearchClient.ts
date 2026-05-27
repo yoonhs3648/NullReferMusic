@@ -22,6 +22,7 @@ import type {
   SpotifyTrackDetail,
   SpotifyTrackSearchHit,
 } from '@/lib/nrmSpotifySearchTypes';
+import { pickSpotifyCoverUrl } from '@/lib/nrmCoverArtUrl';
 
 const SPOTIFY_API = 'https://api.spotify.com/v1';
 const MARKET = 'KR';
@@ -143,8 +144,8 @@ async function fetchSpotifySearchWithRetry<T>(
 }
 
 function mapArtistHit(node: Record<string, unknown>): SpotifyArtistSearchHit {
-  const images = node.images as { url?: string }[] | undefined;
-  const imageUrl = Array.isArray(images) && images.length > 0 ? (images[0].url ?? '') : '';
+  const images = node.images as { url?: string; width?: number }[] | undefined;
+  const imageUrl = pickSpotifyCoverUrl(images);
   const followers = node.followers as { total?: number } | undefined;
   const external = node.external_urls as { spotify?: string } | undefined;
   return {
@@ -157,8 +158,8 @@ function mapArtistHit(node: Record<string, unknown>): SpotifyArtistSearchHit {
 }
 
 function mapAlbumHit(node: Record<string, unknown>): SpotifyAlbumSearchHit {
-  const images = node.images as { url?: string }[] | undefined;
-  const imageUrl = Array.isArray(images) && images.length > 0 ? (images[0].url ?? '') : '';
+  const images = node.images as { url?: string; width?: number }[] | undefined;
+  const imageUrl = pickSpotifyCoverUrl(images);
   const artists = (node.artists as { name?: string }[] | undefined) ?? [];
   const external = node.external_urls as { spotify?: string } | undefined;
   return {
@@ -173,8 +174,8 @@ function mapAlbumHit(node: Record<string, unknown>): SpotifyAlbumSearchHit {
 
 function mapTrackHit(node: Record<string, unknown>): SpotifyTrackSearchHit {
   const album = node.album as Record<string, unknown> | undefined;
-  const images = album?.images as { url?: string }[] | undefined;
-  const imageUrl = Array.isArray(images) && images.length > 0 ? (images[0].url ?? '') : '';
+  const images = album?.images as { url?: string; width?: number }[] | undefined;
+  const imageUrl = pickSpotifyCoverUrl(images);
   const artists = (node.artists as { name?: string }[] | undefined) ?? [];
   const external = node.external_urls as { spotify?: string } | undefined;
   return {
@@ -242,7 +243,7 @@ export async function fetchSpotifyArtistDetail(
           info: {
             id: String(artist.id ?? id),
             name: String(artist.name ?? ''),
-            imageUrl: images?.[0]?.url ?? '',
+            imageUrl: pickSpotifyCoverUrl(images),
             spotifyUrl: external?.spotify ?? '',
             followers: followers?.total ?? 0,
             popularity: typeof artist.popularity === 'number' ? artist.popularity : 0,
@@ -338,7 +339,7 @@ export async function fetchSpotifyAlbumDetail(
           id: String(album.id ?? id),
           name: String(album.name ?? ''),
           artists: artists.map((a) => a.name ?? '').filter(Boolean).join(', '),
-          imageUrl: images?.[0]?.url ?? '',
+          imageUrl: pickSpotifyCoverUrl(images),
           spotifyUrl: external?.spotify ?? '',
           releaseDate: String(album.release_date ?? ''),
           totalTracks: typeof album.total_tracks === 'number' ? album.total_tracks : 0,

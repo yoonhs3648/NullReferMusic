@@ -106,6 +106,8 @@ export type LastfmSearchNavHandle = {
 export type LastfmYoutubeNavigateParams = {
   artist: string;
   title: string;
+  /** 트랙 MusicBrainz ID — UI 비표시 */
+  mbid?: string;
   album?: string;
   genre?: string;
   releaseDate?: string;
@@ -374,59 +376,6 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       [pushFrame],
     );
 
-    const openTrackSearch = useCallback(
-      (artist: string, track: string) => {
-        const q = [artist, track].filter(Boolean).join(' ').trim() || track;
-        const frame: ListFrame = {
-          id: nextFrameId(),
-          type: 'track-list',
-          query: q,
-          hits: [],
-          searched: false,
-          loading: true,
-          error: null,
-        };
-        pushFrame(frame);
-        void runListSearch(frame, q);
-      },
-      [pushFrame, runListSearch],
-    );
-
-    const openAlbumSearch = useCallback(
-      (artist: string, album: string) => {
-        const q = [artist, album].filter(Boolean).join(' ').trim() || album;
-        const frame: ListFrame = {
-          id: nextFrameId(),
-          type: 'album-list',
-          query: q,
-          hits: [],
-          searched: false,
-          loading: true,
-          error: null,
-        };
-        pushFrame(frame);
-        void runListSearch(frame, q);
-      },
-      [pushFrame, runListSearch],
-    );
-
-    const openArtistSearch = useCallback(
-      (name: string) => {
-        const frame: ListFrame = {
-          id: nextFrameId(),
-          type: 'artist-list',
-          query: name.trim(),
-          hits: [],
-          searched: false,
-          loading: true,
-          error: null,
-        };
-        pushFrame(frame);
-        void runListSearch(frame, name.trim());
-      },
-      [pushFrame, runListSearch],
-    );
-
     const goYoutubeFromTrack = useCallback(
       (detail: LastfmTrackDetail) => {
         const info = detail.info;
@@ -438,6 +387,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         onNavigateYoutube({
           artist: info.artist,
           title: info.name,
+          mbid: info.mbid || undefined,
           album: info.album,
           genre,
           imageUrl: info.imageUrl,
@@ -639,7 +589,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           {detail.topTracks.map((t) => (
             <Pressable
               key={`${t.rank}-${t.name}`}
-              onPress={() => openTrackSearch(t.artist || detail.info.name, t.name)}
+              onPress={() =>
+                void openTrackDetail(t.artist || detail.info.name, t.name, {
+                  name: t.name,
+                  artist: t.artist || detail.info.name,
+                  mbid: t.mbid,
+                  url: t.url,
+                  imageUrl: t.imageUrl,
+                })
+              }
               style={({ pressed }) => [
                 styles.hitRow,
                 pressed && { backgroundColor: rowHover },
@@ -661,7 +619,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           {detail.topAlbums.map((al) => (
             <Pressable
               key={`${al.name}-${al.artist}`}
-              onPress={() => openAlbumSearch(al.artist, al.name)}
+              onPress={() => void openAlbumDetail(al.artist, al.name)}
               style={({ pressed }) => [
                 styles.hitRow,
                 pressed && { backgroundColor: rowHover },
@@ -704,7 +662,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
                 {detail.info.name}
               </Text>
               <Pressable
-                onPress={() => openArtistSearch(artistName)}
+                onPress={() =>
+                  void openArtistDetail({
+                    name: artistName,
+                    mbid: '',
+                    url: '',
+                    imageUrl: detail.info.imageUrl,
+                    listeners: 0,
+                  })
+                }
                 style={({ pressed }) => pressed && styles.pressedMeta}>
                 <Text style={[styles.stat, { color: nrmTokens.color.primary }]}>
                   {artistName}
@@ -736,7 +702,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
               {detail.info.tracks.map((t) => (
                 <Pressable
                   key={`${t.rank}-${t.name}`}
-                  onPress={() => openTrackSearch(artistName, t.name)}
+                  onPress={() => void openTrackDetail(artistName, t.name)}
                   style={({ pressed }) => [
                     styles.trackRow,
                     pressed && { backgroundColor: rowHover },
@@ -801,7 +767,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
             detail.similarTracks.map((t) => (
               <Pressable
                 key={`${t.rank}-${t.name}-${t.artist}`}
-                onPress={() => openTrackSearch(t.artist, t.name)}
+                onPress={() =>
+                  void openTrackDetail(t.artist, t.name, {
+                    name: t.name,
+                    artist: t.artist,
+                    mbid: t.mbid,
+                    url: t.url,
+                    imageUrl: t.imageUrl,
+                  })
+                }
                 style={({ pressed }) => [
                   styles.hitRow,
                   pressed && { backgroundColor: rowHover },

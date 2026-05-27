@@ -10,6 +10,7 @@ import {
   type ChartErrorCode,
 } from '@/lib/nrmChartErrors';
 import type { ChartFetchOutcome, ChartTrackItem, SpotifyChartPayload } from '@/lib/nrmChartsTypes';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 
 type FetchFail = { ok: false; errorCode: ChartErrorCode };
 type FetchSuccess = { ok: true; data: SpotifyChartPayload };
@@ -52,7 +53,7 @@ async function fetchAppleMusicDirect(chart: AppleMusicChartTabId): Promise<Fetch
         artists: String(row?.artistName ?? ''),
         album: '',
         genre,
-        imageUrl: String(row?.artworkUrl100 ?? ''),
+        imageUrl: normalizeCoverArtUrl(String(row?.artworkUrl100 ?? '')),
         externalUrl: String(row?.url ?? ''),
         durationMs: 0,
         popularity: 0,

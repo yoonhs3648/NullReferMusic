@@ -7,6 +7,9 @@ type Props = {
   isDark: boolean;
   paddingHorizontal: number;
   onBackToHome: () => void;
+  onOpenChartsSession?: () => void;
+  onRenewChartsBearer?: () => Promise<boolean>;
+  onShowBearerExpired?: () => void;
 };
 
 export function NrmGenreChartsPlaceholder({

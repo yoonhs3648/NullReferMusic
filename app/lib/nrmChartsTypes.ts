@@ -1,6 +1,8 @@
 export type ChartTrackItem = {
   rank: number;
   trackId: string;
+  /** Last.fm 트랙 MusicBrainz ID (있을 때만) — UI 비표시 */
+  mbid?: string;
   title: string;
   artists: string;
   album: string;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
 
+  Animated,
   BackHandler,
 
   KeyboardAvoidingView,
@@ -13,6 +14,7 @@ import {
   ScrollView,
 
   StyleSheet,
+  Text,
 
   useWindowDimensions,
 
@@ -91,6 +93,13 @@ type ChartView = Exclude<
   | 'lastfmSearchTrack'
 >;
 
+function formatYoutubeDisplayQuery(artist?: string | null, title?: string | null): string {
+  const a = (artist ?? '').trim();
+  const t = (title ?? '').trim();
+  if (a && t) return `${a} - ${t}`;
+  return t || a;
+}
+
 
 
 export default function HomeScreen() {
@@ -108,6 +117,11 @@ export default function HomeScreen() {
   );
 
   const [homeEpoch, setHomeEpoch] = useState(0);
+  const [searchViewEpoch, setSearchViewEpoch] = useState(0);
+  const [easterVisible, setEasterVisible] = useState(false);
+  const easterOpacity = useRef(new Animated.Value(0)).current;
+  const logoTapCountRef = useRef(0);
+  const easterHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 차트 아이템 클릭으로 youtube 검색 화면으로 왔을 때 복귀할 차트 뷰 */
   const [chartReturnView, setChartReturnView] = useState<ChartView | null>(null);
   /** 차트 아이템 클릭으로 전달된 초기 검색 쿼리 */
@@ -125,6 +139,7 @@ export default function HomeScreen() {
     useState<LastfmSearchRouterState | null>(null);
   const lastfmNavRef = useRef<LastfmSearchNavHandle>(null);
   const [chartsBearerModalOpen, setChartsBearerModalOpen] = useState(false);
+  const [chartsBearerModalExpired, setChartsBearerModalExpired] = useState(false);
   const [silentCaptureActive, setSilentCaptureActive] = useState(false);
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
   const menuRef = useRef<NrmAppMenuHandle>(null);
@@ -189,16 +204,13 @@ export default function HomeScreen() {
 
   /** 차트 아이템 클릭: 유튜브 검색으로 이동하고 이전 차트 뷰를 저장 */
   const navigateToSearchFromChart = useCallback(
-    (item: ChartTrackItem) => {
-      const q =
-        item.artists && item.title
-          ? `${item.artists} - ${item.title}`
-          : item.title || item.artists;
+    (item: ChartTrackItem, source: 'chart' | 'lastfm' = 'chart') => {
+      const q = formatYoutubeDisplayQuery(item.artists, item.title);
       if (!q) return;
       setChartReturnView(mainView as ChartView);
       setChartSearchQuery(q);
       setChartDownloadTrack(item);
-      setChartDownloadSource('chart');
+      setChartDownloadSource(source);
       setMainView('youtube');
       setLayoutPhase('browsing');
       setHomeEpoch((v) => v + 1);
@@ -209,10 +221,37 @@ export default function HomeScreen() {
 
 
   const onMainLogoPress = useCallback(() => {
+    logoTapCountRef.current += 1;
+    if (logoTapCountRef.current >= 10) {
+      logoTapCountRef.current = 0;
+      if (easterHoldTimerRef.current) {
+        clearTimeout(easterHoldTimerRef.current);
+        easterHoldTimerRef.current = null;
+      }
+      setEasterVisible(true);
+      easterOpacity.setValue(1);
+      easterHoldTimerRef.current = setTimeout(() => {
+        Animated.timing(easterOpacity, {
+          toValue: 0,
+          duration: 420,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) setEasterVisible(false);
+        });
+      }, 1000);
+    }
 
     resetToYoutubeHome();
 
-  }, [resetToYoutubeHome]);
+  }, [easterOpacity, resetToYoutubeHome]);
+
+  useEffect(() => {
+    return () => {
+      if (easterHoldTimerRef.current) {
+        clearTimeout(easterHoldTimerRef.current);
+      }
+    };
+  }, []);
 
 
 
@@ -252,21 +291,25 @@ export default function HomeScreen() {
   }, []);
 
   const openSpotifyArtistSearch = useCallback(() => {
+    setSearchViewEpoch((v) => v + 1);
     setMainView('spotifySearchArtist');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyAlbumSearch = useCallback(() => {
+    setSearchViewEpoch((v) => v + 1);
     setMainView('spotifySearchAlbum');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyTrackSearch = useCallback(() => {
+    setSearchViewEpoch((v) => v + 1);
     setMainView('spotifySearchTrack');
     setLayoutPhase('browsing');
   }, []);
 
   const openLastfmSearch = useCallback((kind: LastfmSearchKind) => {
+    setSearchViewEpoch((v) => v + 1);
     setLastfmNavRestore(null);
     setLastfmNavSnapshot(null);
     setSearchReturnView(null);
@@ -298,12 +341,21 @@ export default function HomeScreen() {
       const artist = params.artist.trim();
       const title = params.title.trim();
       if (!artist && !title) return;
-      const displayQ =
-        artist && title ? `${artist} - ${title}` : title || artist;
+      const displayQ = formatYoutubeDisplayQuery(artist, title);
       setSearchReturnView(mainView);
       setLastfmNavSnapshot(lastfmNavRef.current?.captureState() ?? null);
       setChartSearchQuery(displayQ);
-      setChartDownloadTrack(lastfmFieldsToChartTrack(params));
+      setChartDownloadTrack(
+        lastfmFieldsToChartTrack({
+          artist,
+          title,
+          mbid: params.mbid,
+          album: params.album,
+          genre: params.genre,
+          releaseDate: params.releaseDate,
+          imageUrl: params.imageUrl,
+        }),
+      );
       setChartDownloadSource('lastfm');
       setMainView('youtube');
       setLayoutPhase('browsing');
@@ -317,13 +369,26 @@ export default function HomeScreen() {
   }, []);
 
   const renewChartsBearerViaWebView = useCallback((): Promise<boolean> => {
-    if (Platform.OS !== 'android') {
+    if (Platform.OS === 'web') {
       return Promise.resolve(false);
+    }
+    if (Platform.OS === 'android') {
+      return new Promise((resolve) => {
+        chartsBearerRenewResolver.current = resolve;
+        setChartsBearerModalExpired(false);
+        setSilentCaptureActive(true);
+      });
     }
     return new Promise((resolve) => {
       chartsBearerRenewResolver.current = resolve;
-      setSilentCaptureActive(true);
+      setChartsBearerModalExpired(false);
+      setChartsBearerModalOpen(true);
     });
+  }, []);
+
+  const showChartsBearerExpiredOverlay = useCallback(() => {
+    setChartsBearerModalExpired(true);
+    setChartsBearerModalOpen(true);
   }, []);
 
   const onSilentCaptured = useCallback(
@@ -348,6 +413,7 @@ export default function HomeScreen() {
 
   const closeChartsBearerModal = useCallback((ok: boolean) => {
     setChartsBearerModalOpen(false);
+    setChartsBearerModalExpired(false);
     const resolve = chartsBearerRenewResolver.current;
     chartsBearerRenewResolver.current = null;
     resolve?.(ok);
@@ -361,7 +427,12 @@ export default function HomeScreen() {
         return;
       }
       await saveSpotifyChartsSession({ bearerToken: token });
-      closeChartsBearerModal(true);
+      const resolve = chartsBearerRenewResolver.current;
+      closeChartsBearerModal(resolve ? true : false);
+      if (resolve) {
+        resolve(true);
+        chartsBearerRenewResolver.current = null;
+      }
     },
     [closeChartsBearerModal],
   );
@@ -481,6 +552,7 @@ export default function HomeScreen() {
             onBackToHome={resetToYoutubeHome}
             onOpenChartsSession={openChartsSessionSettings}
             onRenewChartsBearer={renewChartsBearerViaWebView}
+            onShowBearerExpired={showChartsBearerExpiredOverlay}
             onTrackPress={navigateToSearchFromChart}
           />
         ) : isLastfmCharts ? (
@@ -488,7 +560,7 @@ export default function HomeScreen() {
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
-            onTrackPress={navigateToSearchFromChart}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
           />
         ) : isPeriodLastfmCharts ? (
           <NrmPeriodChartsHome
@@ -496,7 +568,7 @@ export default function HomeScreen() {
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
-            onTrackPress={navigateToSearchFromChart}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
           />
         ) : isPeriodSpotifyCharts ? (
           <NrmPeriodChartsHome
@@ -507,33 +579,41 @@ export default function HomeScreen() {
             onTrackPress={navigateToSearchFromChart}
             onOpenChartsSession={openChartsSessionSettings}
             onRenewChartsBearer={renewChartsBearerViaWebView}
+            onShowBearerExpired={showChartsBearerExpiredOverlay}
           />
         ) : isGenreCharts ? (
           <NrmGenreChartsPlaceholder
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
+            onOpenChartsSession={openChartsSessionSettings}
+            onRenewChartsBearer={renewChartsBearerViaWebView}
+            onShowBearerExpired={showChartsBearerExpiredOverlay}
           />
         ) : isSpotifySearchArtist ? (
           <NrmSpotifyArtistSearchHome
+            key={`spotify-artist-${searchViewEpoch}`}
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
           />
         ) : isSpotifySearchAlbum ? (
           <NrmSpotifyAlbumSearchHome
+            key={`spotify-album-${searchViewEpoch}`}
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
           />
         ) : isSpotifySearchTrack ? (
           <NrmSpotifyTrackSearchHome
+            key={`spotify-track-${searchViewEpoch}`}
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
           />
         ) : isLastfmSearchView ? (
           <NrmLastfmSearchRouter
+            key={`lastfm-${mainView}-${searchViewEpoch}`}
             ref={lastfmNavRef}
             initialKind={
               isLastfmSearchArtist
@@ -672,15 +752,40 @@ export default function HomeScreen() {
           onRequestChartsBearerWebView={renewChartsBearerViaWebView}
         />
 
-        {Platform.OS === 'android' ? (
+        {easterVisible ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.easterEggOverlay,
+              {
+                opacity: easterOpacity,
+                backgroundColor: isDark
+                  ? 'rgba(18,18,20,0.84)'
+                  : 'rgba(255,255,255,0.84)',
+              },
+            ]}>
+            <Text
+              style={[
+                styles.easterEggText,
+                { color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink },
+              ]}>
+              Made by hsyoon
+            </Text>
+          </Animated.View>
+        ) : null}
+
+        {Platform.OS !== 'web' ? (
           <>
-            <NrmSpotifyChartsSilentCapture
-              active={silentCaptureActive}
-              onCaptured={(token) => void onSilentCaptured(token)}
-              onNeedsLogin={onSilentNeedsLogin}
-            />
+            {Platform.OS === 'android' ? (
+              <NrmSpotifyChartsSilentCapture
+                active={silentCaptureActive}
+                onCaptured={(token) => void onSilentCaptured(token)}
+                onNeedsLogin={onSilentNeedsLogin}
+              />
+            ) : null}
             <NrmSpotifyChartsLoginModal
               visible={chartsBearerModalOpen}
+              bearerExpired={chartsBearerModalExpired}
               titleColor={titleColor}
               bodyColor={bodyColor}
               onClose={() => closeChartsBearerModal(false)}
@@ -741,6 +846,21 @@ const styles = StyleSheet.create({
 
     maxWidth: nrmTokens.layout.maxContentWidth,
 
+  },
+  easterEggOverlay: {
+    position: 'absolute',
+    left: nrmTokens.space.xl,
+    right: nrmTokens.space.xl,
+    top: '42%',
+    borderRadius: nrmTokens.radius.lg,
+    paddingVertical: nrmTokens.space.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  easterEggText: {
+    fontSize: nrmTokens.font.lead,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 
   logoWrap: {

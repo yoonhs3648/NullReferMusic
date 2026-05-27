@@ -1,0 +1,10 @@
+{
+  "name": "nrm-audio-metadata",
+  "version": "1.0.0",
+  "main": "index.js",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

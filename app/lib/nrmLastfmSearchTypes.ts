@@ -28,6 +28,8 @@ export type LastfmSimilarArtist = {
 export type LastfmTrackSummary = {
   name: string;
   artist: string;
+  /** MusicBrainz ID — UI 비표시, 다운로드 메타 보강용 */
+  mbid: string;
   url: string;
   imageUrl: string;
   rank: number;
@@ -60,6 +62,7 @@ export type LastfmAlbumSearchHit = {
 
 export type LastfmAlbumTrack = {
   name: string;
+  mbid: string;
   rank: number;
   durationSec: number;
 };
@@ -85,6 +88,8 @@ export type LastfmAlbumDetail = {
 export type LastfmTrackSearchHit = {
   name: string;
   artist: string;
+  /** MusicBrainz ID — UI 비표시 */
+  mbid: string;
   url: string;
   imageUrl: string;
 };
@@ -92,12 +97,18 @@ export type LastfmTrackSearchHit = {
 export type LastfmTrackInfo = {
   name: string;
   artist: string;
+  /** MusicBrainz ID */
+  mbid: string;
   album: string;
+  albumMbid: string;
+  artistMbid: string;
   url: string;
   imageUrl: string;
   durationSec: number;
   playcount: number;
   listeners: number;
+  /** album @attr position */
+  albumTrackPosition: string;
 };
 
 export type LastfmTrackDetail = {

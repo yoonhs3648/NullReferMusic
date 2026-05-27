@@ -20,18 +20,21 @@ type Props = {
   titleColor: string;
 };
 
-/** 음질 0(최고) ~ 9(최저) — 눈금 탭 + 드래그 */
+/** 비트레이트 0(최고) ~ 9(최저) — 눈금 탭 + 트랙 드래그 */
 export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props) {
   const q = clampAudioQuality(value);
   const [trackWidth, setTrackWidth] = useState(0);
   const trackWidthRef = useRef(0);
+  const grantXRef = useRef(0);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const valueFromX = useCallback((x: number) => {
     const w = trackWidthRef.current;
-    if (w <= 0) return q;
+    if (w <= 0) return 0;
     const ratio = Math.min(1, Math.max(0, x / w));
     return clampAudioQuality(Math.round(ratio * 9));
-  }, [q]);
+  }, []);
 
   const panHandlers = useMemo(
     () =>
@@ -40,13 +43,17 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (evt) => {
-          onChange(valueFromX(evt.nativeEvent.locationX));
+          grantXRef.current = evt.nativeEvent.locationX;
+          onChangeRef.current(valueFromX(grantXRef.current));
         },
-        onPanResponderMove: (evt) => {
-          onChange(valueFromX(evt.nativeEvent.locationX));
+        onPanResponderMove: (_evt, gestureState) => {
+          const w = trackWidthRef.current;
+          if (w <= 0) return;
+          const x = Math.min(w, Math.max(0, grantXRef.current + gestureState.dx));
+          onChangeRef.current(valueFromX(x));
         },
       }),
-    [onChange, valueFromX],
+    [valueFromX],
   );
 
   const onLayout = (e: LayoutChangeEvent) => {
@@ -56,8 +63,7 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
   };
 
   const fillWidth = trackWidth > 0 ? (q / 9) * trackWidth : 0;
-  const thumbLeft =
-    trackWidth > 0 ? (q / 9) * trackWidth - 11 : 0;
+  const thumbLeft = trackWidth > 0 ? (q / 9) * trackWidth - 11 : 0;
 
   return (
     <View style={styles.wrap}>
@@ -71,7 +77,7 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
         </View>
 
         {trackWidth > 0 ? (
-          <View style={[styles.tickRow, { width: trackWidth, height: 44 }]}>
+          <View style={[styles.tickRow, { width: trackWidth, height: 44 }]} pointerEvents="box-none">
             {STEPS.map((n) => {
               const active = n === q;
               const edgeHint = n === 0 ? '최고' : n === 9 ? '최저' : null;
@@ -92,7 +98,7 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                   accessibilityLabel={
-                    edgeHint ? `음질 ${n} ${edgeHint}` : `음질 ${n}`
+                    edgeHint ? `비트레이트 ${n} ${edgeHint}` : `비트레이트 ${n}`
                   }>
                   <Text
                     style={[

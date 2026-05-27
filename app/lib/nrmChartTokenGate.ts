@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 
+import type { ChartErrorCode } from '@/lib/nrmChartErrors';
+import { chartUserMessage } from '@/lib/nrmChartErrors';
 import { hasLastfmChartAccess } from '@/lib/nrmLastfmApiSettings';
 import { hasSpotifyChartsSessionAccess } from '@/lib/nrmSpotifyChartsSession';
 import { hasSpotifyCredentials } from '@/lib/nrmSpotifyApiSettings';
@@ -66,31 +68,78 @@ export async function ensureSpotifyChartsSessionAccess(
   return false;
 }
 
-/** 실시간 차트 Bearer 만료·인증 실패 — Android는 즉시 알림 후 WebView 갱신, 그 외는 설정 이동 */
+/** Web 제외 — APK·Expo Go(iOS/Android) Charts Bearer WebView 로그인 UI */
+export function usesSpotifyChartsWebViewBearerUi(): boolean {
+  return Platform.OS === 'android' || Platform.OS === 'ios';
+}
+
+/** Charts API(실시간·기간별·장르별) 인증 실패 코드 */
+export function isSpotifyChartsAuthErrorCode(code: ChartErrorCode): boolean {
+  return (
+    code === 'auth_failed' ||
+    code === 'charts_session' ||
+    code === 'forbidden' ||
+    code === 'premium_required'
+  );
+}
+
+/**
+ * Bearer 만료 시 1차 갱신 — 네이티브(Android/iOS) WebView만. Web은 false.
+ */
+export async function renewSpotifyChartsBearerSilently(
+  onRenew?: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!usesSpotifyChartsWebViewBearerUi() || !onRenew) {
+    return false;
+  }
+  return onRenew();
+}
+
+/**
+ * 1차 갱신·재시도 후에도 인증 실패할 때만 호출.
+ * - Web: confirm 다이얼로그(1번) → API 설정
+ * - APK·Expo Go: WebView 로그인 모달(만료 문구)
+ */
+export async function promptSpotifyChartsBearerInvalid(handlers?: {
+  onOpenChartsSession?: () => void;
+  /** 네이티브 전용 — WebView 로그인 모달 */
+  onShowBearerExpired?: () => void;
+}): Promise<void> {
+  const message = chartUserMessage('spotify', 'auth_failed');
+
+  if (usesSpotifyChartsWebViewBearerUi() && handlers?.onShowBearerExpired) {
+    handlers.onShowBearerExpired();
+    return;
+  }
+
+  if (!handlers?.onOpenChartsSession) {
+    notifyUser(message);
+    return;
+  }
+  const go = await confirmUser(
+    `${message}\n\nAPI 설정에서 Charts Bearer를 다시 등록할까요?`,
+    { cancelLabel: '닫기', confirmLabel: 'API 설정 열기' },
+  );
+  if (go) {
+    handlers.onOpenChartsSession();
+  }
+}
+
+/**
+ * @deprecated renewSpotifyChartsBearerSilently + promptSpotifyChartsBearerInvalid 사용
+ */
 export async function promptSpotifyChartsBearerExpired(handlers: {
   onOpenChartsSession: () => void;
   onAndroidRenew?: () => Promise<boolean>;
 }): Promise<boolean> {
-  if (Platform.OS === 'android' && handlers.onAndroidRenew) {
-    notifyUser('Spotify Bearer 토큰이 만료되었습니다. 로그인 화면을 엽니다.');
-    return handlers.onAndroidRenew();
-  }
-
-  const go = await confirmUser('토큰이 만료되었습니다. 갱신하시겠습니까?', {
-    cancelLabel: '취소',
-    confirmLabel: '갱신',
-  });
-  if (!go) return false;
-
-  handlers.onOpenChartsSession();
-  return false;
+  return renewSpotifyChartsBearerSilently(handlers.onAndroidRenew);
 }
 
-/** @deprecated promptSpotifyChartsBearerExpired 사용 */
+/** @deprecated promptSpotifyChartsBearerInvalid 사용 */
 export async function promptSpotifyChartsSessionExpired(
   onOpenChartsSession: () => void,
 ): Promise<void> {
-  await promptSpotifyChartsBearerExpired({ onOpenChartsSession });
+  await promptSpotifyChartsBearerInvalid({ onOpenChartsSession });
 }
 
 /** Spotify 검색 — 공식 Web API (Client ID·Secret / Bearer) */

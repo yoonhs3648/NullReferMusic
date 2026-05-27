@@ -2,12 +2,15 @@ import '@/lib/nrmYoutubeInnertubeEvalSetup';
 import Innertube, { ClientType, FormatUtils, YTNodes } from 'youtubei.js';
 import { Platform } from 'react-native';
 
+import { isStandaloneIos } from '@/lib/nrmStandalonePlatform';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import type { NrmAudioExtension, NrmDownloadEncodeSettings } from '@/lib/nrmDownloadSettings';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import { downloadGooglevideoAudioToFileUri } from '@/lib/nrmYoutubeGooglevideoDownload.native';
 import {
   isOnDeviceDownloadAvailable,
   downloadOnDevice,
+  transcodeAudioOnDevice,
 } from '@/lib/onDeviceDownload';
 import type {
   YoutubeSearchItem,
@@ -144,6 +147,51 @@ function extensionFromMime(mime: string): string {
   return '.m4a';
 }
 
+function mimeMatchesPreferredExtension(mime: string | undefined, ext: NrmAudioExtension): boolean {
+  const m = (mime ?? '').toLowerCase();
+  switch (ext) {
+    case '.mp3':
+      return m.includes('mpeg') || m.includes('mp3');
+    case '.m4a':
+      return m.includes('mp4') || m.includes('m4a');
+    case '.opus':
+      return m.includes('opus');
+    case '.ogg':
+      return m.includes('ogg');
+    case '.aac':
+      return m.includes('aac');
+    case '.flac':
+      return m.includes('flac');
+    case '.wav':
+      return m.includes('wav');
+    default:
+      return false;
+  }
+}
+
+/** IPA 전용: 사용자 확장자 설정에 맞는 오디오 포맷 우선 선택 */
+function chooseInnertubeAudioFormat(
+  streamingData: NonNullable<Awaited<ReturnType<Innertube['getBasicInfo']>>['streaming_data']>,
+  preferredExt: NrmAudioExtension,
+): ReturnType<typeof FormatUtils.chooseFormat> {
+  const candidates = [
+    ...(streamingData.adaptive_formats ?? []),
+    ...(streamingData.formats ?? []),
+  ].filter((f) => f.has_audio && !f.has_video);
+
+  const preferred = candidates.filter((f) =>
+    mimeMatchesPreferredExtension(f.mime_type, preferredExt),
+  );
+  const pool = preferred.length > 0 ? preferred : candidates;
+
+  if (pool.length > 0) {
+    const best = [...pool].sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+    return best;
+  }
+
+  return FormatUtils.chooseFormat({ type: 'audio', quality: 'best' }, streamingData);
+}
+
 function stageWrapError(stage: string, err: unknown): Error {
   const msg = err instanceof Error ? err.message : String(err);
   return new Error(`[stage:${stage}] ${msg}`);
@@ -156,6 +204,31 @@ export function finalAudioFileName(
   const stem = userFileName.replace(/\.(mp3|m4a|webm|opus|mp4)$/i, '').trim();
   const base = sanitizeFileBase(stem || 'track');
   return `${base}${extensionFromMime(streamMime)}`;
+}
+
+/** Android: 실제 파일 확장자가 설정과 다르면 ffmpeg로 변환 */
+async function ensureAudioMatchesUserExtension(
+  fileUri: string,
+  encode: NrmDownloadEncodeSettings,
+): Promise<string> {
+  if (Platform.OS !== 'android' || !isOnDeviceDownloadAvailable()) {
+    return fileUri;
+  }
+  const wantExt = encode.extension.slice(1).toLowerCase();
+  const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
+  const haveExt = path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (haveExt === wantExt) {
+    return fileUri;
+  }
+
+  const { extensionToYtDlpFormat } = await import('@/lib/nrmDownloadSettings');
+  const { path: outPath } = await transcodeAudioOnDevice(
+    path,
+    extensionToYtDlpFormat(encode.extension),
+    encode.audioQuality,
+  );
+  await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+  return outPath.startsWith('file://') ? outPath : `file://${outPath}`;
 }
 
 // ── yt-dlp (Chaquopy) 경로 ────────────────────────────────────────────────────
@@ -173,16 +246,35 @@ async function tagThenPersist(
 ): Promise<{ savedLabel: string }> {
   let uri = fileUri;
   if (metadata) {
-    try {
-      const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
-      uri = await applyAudioFileMetadata(fileUri, metadata);
-    } catch (e) {
-      logNrmRunError('download.metadata', e);
+    const { hasEmbeddableAudioMetadata, normalizeDownloadMetadata } = await import(
+      '@/lib/nrmDownloadAudioMetadata',
+    );
+    const normalized = normalizeDownloadMetadata(metadata);
+    if (hasEmbeddableAudioMetadata(normalized)) {
+      try {
+        const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
+        uri = await applyAudioFileMetadata(fileUri, normalized);
+      } catch (e) {
+        logNrmRunError('download.metadata', e, {
+          artist: normalized.artist,
+          title: normalized.title,
+          coverUrl: normalized.coverUrl.slice(0, 120),
+        });
+        // 1회 재시도 (m4a remux·커버 임베딩 간헐 실패)
+        try {
+          const { applyAudioFileMetadata: retryApply } = await import(
+            '@/lib/nrmApplyAudioMetadata',
+          );
+          uri = await retryApply(uri, normalized);
+        } catch (retryErr) {
+          logNrmRunError('download.metadata.retry', retryErr, {});
+        }
+      }
     }
   }
   const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
   try {
-    return await persistLocalAudioFile(uri, safeName);
+    return await persistLocalAudioFile(uri, safeName, metadata);
   } catch (persistErr) {
     await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
     throw stageWrapError('persist_media', persistErr);
@@ -194,7 +286,7 @@ async function downloadWithYtDlp(
   userSuggestedFileName: string,
   metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
-  const { loadDownloadEncodeSettings, extensionToYtDlpFormat, mimeTypeForExtension } =
+  const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
     await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
 
@@ -210,14 +302,10 @@ async function downloadWithYtDlp(
   }
 
   const rawPath: string = result.path;
-  const fileUri = rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
+  let fileUri = rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
+  fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
 
-  const safeName = finalAudioFileName(
-    userSuggestedFileName,
-    mimeTypeForExtension(encode.extension),
-  );
-
-  return tagThenPersist(fileUri, safeName, metadata);
+  return tagThenPersist(fileUri, userSuggestedFileName, metadata);
 }
 
 // ── youtubei.js (innertube) 폴백 경로 ────────────────────────────────────────
@@ -254,6 +342,8 @@ async function downloadWithInnertube(
   ];
 
   let lastError: unknown;
+  const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
+  const encode = await loadDownloadEncodeSettings();
 
   for (let i = 0; i < attempts.length; i++) {
     let tempUriForCleanup: string | undefined;
@@ -269,18 +359,21 @@ async function downloadWithInnertube(
       }
       Object.assign(info, { streaming_data: filtered });
 
-      const format = FormatUtils.chooseFormat(
+      let format = FormatUtils.chooseFormat(
         { type: 'audio', quality: 'best' },
         filtered,
       );
+      if (Platform.OS === 'android' || isStandaloneIos()) {
+        format = chooseInnertubeAudioFormat(filtered, encode.extension);
+      }
       const mime = format.mime_type ?? 'audio/mp4';
-      const safeName = finalAudioFileName(userSuggestedFileName, mime);
+      const tempStemName = finalAudioFileName(userSuggestedFileName, mime);
 
       const tempBase =
         cacheRoot.endsWith('/') || cacheRoot.endsWith('\\')
           ? `${cacheRoot}nrm-local-${videoId}-`
           : `${cacheRoot}/nrm-local-${videoId}-`;
-      const tempUri = `${tempBase}${Date.now()}-${safeName}`;
+      const tempUri = `${tempBase}${Date.now()}-${tempStemName}`;
       tempUriForCleanup = tempUri;
 
       const formatUrl = await format.decipher(info.actions.session.player);
@@ -294,7 +387,9 @@ async function downloadWithInnertube(
         format,
       );
 
-      return tagThenPersist(tempUri, safeName, metadata);
+      let fileUri = tempUri;
+      fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
+      return tagThenPersist(fileUri, userSuggestedFileName, metadata);
     } catch (e) {
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {

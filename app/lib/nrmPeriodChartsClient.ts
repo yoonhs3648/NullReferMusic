@@ -10,7 +10,7 @@ import {
   type ChartErrorCode,
 } from '@/lib/nrmChartErrors';
 import { buildLastfmChartAuthHeaders, refreshLastfmChartToken } from '@/lib/nrmLastfmTokenSync';
-import { buildSpotifyChartAuthHeaders, refreshSpotifyChartToken } from '@/lib/nrmSpotifyTokenSync';
+import { buildSpotifyChartAuthHeaders } from '@/lib/nrmSpotifyTokenSync';
 import type {
   PeriodChartGranularity,
   PeriodChartPlatform,
@@ -27,7 +27,13 @@ import {
   type SpotifyPeriodChartQuery,
 } from '@/lib/nrmSpotifyPeriodChartsClient';
 import type { SpotifyPeriodChartKind } from '@/lib/nrmSpotifyPeriodChartCatalog';
+import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
 import type { PeriodChartPagePayload } from '@/lib/nrmPeriodChartsTypes';
+import {
+  isSpotifyChartsFetchAuthError,
+  runSpotifyChartsAuthFlow,
+  type SpotifyChartsAuthHandlers,
+} from '@/lib/nrmSpotifyChartsAuthFlow';
 
 export type PeriodChartQuery = {
   region: PeriodChartRegion;
@@ -39,6 +45,7 @@ export type PeriodChartQuery = {
   month: number;
   day: number;
   weekOfMonth: number;
+  snapshotDow: number;
   offset: number;
   limit?: number;
 };
@@ -51,6 +58,7 @@ function toSpotifyQuery(query: PeriodChartQuery): SpotifyPeriodChartQuery {
     month: query.month,
     day: query.day,
     weekOfMonth: query.weekOfMonth,
+    snapshotDow: query.snapshotDow,
     offset: query.offset,
     limit: query.limit,
   };
@@ -118,9 +126,11 @@ async function fetchLastfmPeriodDirect(
       const artistNode = t.artist as { name?: string } | string | undefined;
       const artists =
         typeof artistNode === 'object' ? (artistNode?.name ?? '') : String(artistNode ?? '');
+      const mbidRaw = String(t.mbid ?? '').trim();
       return {
         rank: query.offset + i + 1,
-        trackId: String(t.mbid ?? t.url ?? ''),
+        trackId: mbidRaw || String(t.url ?? ''),
+        mbid: mbidRaw || undefined,
         title: String(t.name ?? ''),
         artists,
         album: '',
@@ -178,6 +188,7 @@ async function fetchPeriodWithBase(
           q.set('month', String(query.month));
           q.set('day', String(query.day));
           q.set('week', String(query.weekOfMonth));
+          q.set('snapshotDay', String(query.snapshotDow));
           return `/api/charts/period/spotify?${q}`;
         })()
       : (() => {
@@ -224,11 +235,20 @@ export type PeriodChartFetchOutcome =
   | PageOk
   | { ok: false; errorCode: ChartErrorCode };
 
-export async function fetchPeriodChartPage(
+async function fetchPeriodChartPageInner(
   platform: PeriodChartPlatform,
   query: PeriodChartQuery,
   signal?: AbortSignal,
 ): Promise<PeriodChartFetchOutcome> {
+  const spotifyQuery: PeriodChartQuery =
+    platform === 'spotify'
+      ? {
+          ...query,
+          snapshotDow:
+            query.snapshotDow ?? (await loadWeeklySnapshotDay()),
+        }
+      : query;
+
   if (platform === 'spotify') {
     const auth = await buildSpotifyChartAuthHeaders('charts');
     if ('error' in auth) {
@@ -238,30 +258,24 @@ export async function fetchPeriodChartPage(
       const h = auth.headers as Record<string, string>;
       const bearer = (h.Authorization ?? '').replace(/^Bearer\s+/i, '').trim();
       if (!bearer) return { ok: false, errorCode: 'charts_session' };
-      let r = await fetchSpotifyPeriodChartPage(toSpotifyQuery(query), bearer, signal);
-      if (!r.ok && r.authFailed) {
-        const refreshed = await refreshSpotifyChartToken();
-        if (refreshed.ok) {
-          const b = (refreshed.headers as Record<string, string>).Authorization?.replace(
-            /^Bearer\s+/i,
-            '',
-          ).trim();
-          if (b) r = await fetchSpotifyPeriodChartPage(toSpotifyQuery(query), b, signal);
-        }
-      }
+      const r = await fetchSpotifyPeriodChartPage(
+        toSpotifyQuery(spotifyQuery),
+        bearer,
+        signal,
+      );
       return r.ok ? r : { ok: false, errorCode: r.errorCode };
     }
     const resolved = await getResolvedApiBaseUrl();
     const primary =
       resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
     if (!primary) return { ok: false, errorCode: 'backend_unreachable' };
-    let r = await fetchPeriodWithBase('spotify', primary, query, auth.headers);
+    let r = await fetchPeriodWithBase('spotify', primary, spotifyQuery, auth.headers);
     if (r.ok || !usesPcBackendInDev()) {
       return r.ok ? r : { ok: false, errorCode: r.errorCode };
     }
     const fb = getDefaultApiBaseUrl();
     if (fb !== primary) {
-      r = await fetchPeriodWithBase('spotify', fb, query, auth.headers);
+      r = await fetchPeriodWithBase('spotify', fb, spotifyQuery, auth.headers);
     }
     return r.ok ? r : { ok: false, errorCode: r.errorCode };
   }
@@ -310,4 +324,27 @@ export async function fetchPeriodChartPage(
     r = await fetchPeriodWithBase('lastfm', fb, query, auth.headers);
   }
   return r.ok ? r : { ok: false, errorCode: r.errorCode };
+}
+
+export async function fetchPeriodChartPage(
+  platform: PeriodChartPlatform,
+  query: PeriodChartQuery,
+  signal?: AbortSignal,
+  chartsAuth?: SpotifyChartsAuthHandlers,
+): Promise<PeriodChartFetchOutcome> {
+  const fetchOnce = () => fetchPeriodChartPageInner(platform, query, signal);
+  if (
+    platform === 'spotify' &&
+    chartsAuth &&
+    (chartsAuth.onRenewChartsBearer ||
+      chartsAuth.onShowBearerExpired ||
+      chartsAuth.onOpenChartsSession)
+  ) {
+    return runSpotifyChartsAuthFlow(
+      fetchOnce,
+      (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
+      chartsAuth,
+    );
+  }
+  return fetchOnce();
 }

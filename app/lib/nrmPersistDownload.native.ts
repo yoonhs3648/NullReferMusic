@@ -15,6 +15,10 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
 import { Alert, Platform } from 'react-native';
 
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { hasEmbeddableAudioMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
+import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
   loadStoredSafGrant,
@@ -31,15 +35,13 @@ function normalizedApiBase(base: string): string {
   return base.trim().replace(/\/+$/, '');
 }
 
-function safeStem(name: string): string {
-  const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const s = sanitizeFileBase(stem)
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .slice(0, 80);
-  return s || `t${Date.now()}`;
+/** 저장 파일명 — 공백 유지, 금지 문자만 제거 */
+function storageFileName(safeName: string): string {
+  const dot = safeName.lastIndexOf('.');
+  const stem = dot > 0 ? safeName.slice(0, dot) : safeName;
+  const ext = dot > 0 ? safeName.slice(dot).toLowerCase() : '.m4a';
+  const base = sanitizeFileBase(stem) || `track-${Date.now()}`;
+  return `${base}${ext}`;
 }
 
 function mimeFromExt(ext: string): string {
@@ -65,6 +67,15 @@ function mimeFromExt(ext: string): string {
  * base64 read → write 방식을 사용합니다.
  */
 async function writeToBinarySafUri(sourceUri: string, destUri: string): Promise<void> {
+  try {
+    await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+    const info = await FileSystem.getInfoAsync(destUri);
+    if (info.exists && 'size' in info && (info.size ?? 0) > 0) {
+      return;
+    }
+  } catch {
+    /* copyAsync가 SAF에서 0바이트가 되는 기기 → base64 폴백 */
+  }
   const b64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: 'base64' });
   await FileSystem.writeAsStringAsync(destUri, b64, { encoding: 'base64' });
 }
@@ -74,7 +85,10 @@ async function writeToBinarySafUri(sourceUri: string, destUri: string): Promise<
  * 등록 후 Samsung My Files 등 파일 탐색기에서 즉시 보입니다.
  * 실패해도 파일 자체는 정상 저장되어 있으므로 무시합니다.
  */
-async function triggerMediaStoreScan(safDocUri: string): Promise<void> {
+async function triggerMediaStoreScan(
+  safDocUri: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<void> {
   try {
     const ML = require('expo-media-library') as typeof import('expo-media-library');
 
@@ -87,9 +101,11 @@ async function triggerMediaStoreScan(safDocUri: string): Promise<void> {
     if (status !== 'granted') return;
 
     // SAF content URI를 MediaStore에 등록만 (이동 없음)
-    // createAlbumAsync(..., false) 는 파일을 MediaStore 관리 위치로 이동시켜
-    // /storage/emulated/0/NullReferenceMusic/ 에서 파일이 사라지므로 사용하지 않음
-    await ML.createAssetAsync(safDocUri);
+    const asset = await ML.createAssetAsync(safDocUri);
+    const mediaUri = asset?.uri?.trim();
+    if (mediaUri && metadata && hasEmbeddableAudioMetadata(metadata)) {
+      await syncMediaStoreAudioTags(mediaUri, metadata).catch(() => {});
+    }
   } catch {
     /* MediaStore 스캔 실패는 무시 — 파일은 정상 저장됨 */
   }
@@ -117,6 +133,7 @@ function showSafFolderGuide(): Promise<void> {
 async function saveViaSaf(
   sourceUri: string,
   safeName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   // 유효한(NullReferenceMusic 폴더) grant가 있는지 먼저 확인
   let dirUri = await loadStoredSafGrant();
@@ -131,15 +148,21 @@ async function saveViaSaf(
     throw new Error('다운로드 폴더 접근이 취소되었습니다. 메뉴 → 다운로드 설정에서 경로를 먼저 지정하세요.');
   }
 
-  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
-  const fileName = `${safeStem(safeName)}${ext}`;
+  const fileName = storageFileName(safeName);
+  const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase() || '.m4a';
   const mimeType = mimeFromExt(ext);
 
-  const destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
-  await writeToBinarySafUri(sourceUri, destUri);
+  let destUri: string;
+  try {
+    const srcPath = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
+    destUri = await copyLocalFileToSaf(srcPath, dirUri, fileName, mimeType);
+  } catch {
+    destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
+    await writeToBinarySafUri(sourceUri, destUri);
+  }
 
-  // MediaStore 등록 → Samsung My Files 내장 저장공간 트리에 즉시 노출
-  await triggerMediaStoreScan(destUri);
+  // MediaStore 등록 → Samsung My Files·뮤직 앱 인덱스
+  await triggerMediaStoreScan(destUri, metadata);
 
   return {
     savedLabel: `저장했습니다.`,
@@ -153,12 +176,12 @@ async function saveViaSaf(
 async function saveToExternalDirect(
   sourceUri: string,
   safeName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   const dirUri = `file:///storage/emulated/0/${NRM_FOLDER}`;
   await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true });
 
-  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
-  const fileName = `${safeStem(safeName)}${ext}`;
+  const fileName = storageFileName(safeName);
   const destUri = `${dirUri}/${fileName}`;
   await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
   await FileSystem.copyAsync({ from: sourceUri, to: destUri });
@@ -177,8 +200,7 @@ async function saveToAppDocumentsFallback(
   const folderUri = `${docRoot}${NRM_FOLDER}/`;
   await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
 
-  const ext = safeName.slice(safeName.lastIndexOf('.')).toLowerCase() || '.m4a';
-  const fileName = `${safeStem(safeName)}${ext}`;
+  const fileName = storageFileName(safeName);
   const destUri = `${folderUri}${fileName}`;
   await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
   await FileSystem.copyAsync({ from: sourceUri, to: destUri });
@@ -191,11 +213,12 @@ async function saveToAppDocumentsFallback(
 async function androidSaveToNrmFolder(
   tempUri: string,
   safeName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   // Android 9(API 28) 이하: 직접 쓰기 시도
   if ((Platform.Version as number) < 29) {
     try {
-      return await saveToExternalDirect(tempUri, safeName);
+      return await saveToExternalDirect(tempUri, safeName, metadata);
     } catch {
       /* fall through to SAF */
     }
@@ -203,7 +226,7 @@ async function androidSaveToNrmFolder(
 
   // Android 10+(API 29+): SAF
   try {
-    return await saveViaSaf(tempUri, safeName);
+    return await saveViaSaf(tempUri, safeName, metadata);
   } catch (safErr) {
     const msg = safErr instanceof Error ? safErr.message : String(safErr);
     if (msg.includes('취소')) throw safErr;
@@ -217,7 +240,9 @@ async function androidSaveToNrmFolder(
 export async function persistLocalAudioFile(
   tempUri: string,
   safeName: string,
+  metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
+  const storedName = storageFileName(safeName);
   try {
     if (Platform.OS === 'ios') {
       const docRoot = FileSystem.documentDirectory;
@@ -225,7 +250,7 @@ export async function persistLocalAudioFile(
 
       const folderUri = `${docRoot}${NRM_FOLDER}/`;
       await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
-      const destUri = `${folderUri}${safeName}`;
+      const destUri = `${folderUri}${storedName}`;
       await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
       await FileSystem.copyAsync({ from: tempUri, to: destUri });
 
@@ -234,7 +259,7 @@ export async function persistLocalAudioFile(
       };
     }
 
-    return await androidSaveToNrmFolder(tempUri, safeName);
+    return await androidSaveToNrmFolder(tempUri, safeName, metadata);
   } finally {
     await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
   }

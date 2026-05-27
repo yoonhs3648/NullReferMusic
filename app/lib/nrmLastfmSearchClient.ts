@@ -1,3 +1,4 @@
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
@@ -47,15 +48,16 @@ const LASTFM_API = 'https://ws.audioscrobbler.com/2.0/';
 
 function pickLastfmImage(images: { '#text'?: string; size?: string }[] | undefined): string {
   if (!Array.isArray(images)) return '';
-  let large = '';
-  let medium = '';
-  for (const img of images) {
-    const url = img['#text'] ?? '';
-    const size = img.size ?? '';
-    if (size === 'extralarge' || size === 'large') large = url;
-    else if (size === 'medium') medium = url;
+  const priority = ['mega', 'extralarge', 'large', 'medium', 'small', ''];
+  for (const size of priority) {
+    for (const img of images) {
+      const url = (img['#text'] ?? '').trim();
+      const imgSize = img.size ?? '';
+      if (!url || url.includes('2a96cbd8b46e442fc41c2b86b821562f')) continue;
+      if (imgSize === size || (size === '' && imgSize)) return normalizeCoverArtUrl(url);
+    }
   }
-  return large || medium;
+  return '';
 }
 
 function arrayOrSingle<T>(node: T | T[] | undefined | null): T[] {
@@ -165,7 +167,15 @@ async function fetchLastfmArtistDetailDirect(
     const artists = typeof n.artist === 'object' && n.artist
       ? String((n.artist as Record<string, string>).name ?? '')
       : String(n.artist ?? '');
-    return { name: String(n.name ?? ''), artist: artists, url: String(n.url ?? ''), imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined), rank, playcount: parseLong(n.playcount as string | undefined) };
+    return {
+      name: String(n.name ?? ''),
+      artist: artists,
+      mbid: String(n.mbid ?? ''),
+      url: String(n.url ?? ''),
+      imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
+      rank,
+      playcount: parseLong(n.playcount as string | undefined),
+    };
   });
   const topAlbums = arrayOrSingle(
     topAR.ok ? (topAR.data.topalbums as Record<string, unknown>)?.album as Record<string, unknown>[] | undefined : undefined,
@@ -219,6 +229,7 @@ async function fetchLastfmAlbumDetailDirect(
     (albumNode.tracks as Record<string, unknown>)?.track as Record<string, unknown>[] | undefined,
   ).map((t) => ({
     name: String(t.name ?? ''),
+    mbid: String(t.mbid ?? ''),
     rank: parseInt(String((t['@attr'] as Record<string, string> | undefined)?.rank ?? '0'), 10) || ti++,
     durationSec: parseInt(String(t.duration ?? '0'), 10),
   }));
@@ -250,35 +261,78 @@ async function searchLastfmTracksDirect(
   const tracks: LastfmTrackSearchHit[] = nodes.map((n) => ({
     name: String(n.name ?? ''),
     artist: String(n.artist ?? ''),
+    mbid: String(n.mbid ?? ''),
     url: String(n.url ?? ''),
     imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
   }));
   return { ok: true, data: { tracks } };
 }
 
-async function fetchLastfmTrackDetailDirect(
-  apiKey: string,
-  artist: string,
-  track: string,
-): Promise<LastfmSearchOutcome<LastfmTrackDetail>> {
-  const [infoR, simR, tagsR] = await Promise.all([
-    lastfmGet({ api_key: apiKey, method: 'track.getInfo', artist, track }),
-    lastfmGet({ api_key: apiKey, method: 'track.getSimilar', artist, track, limit: '12' }),
-    lastfmGet({ api_key: apiKey, method: 'track.getTopTags', artist, track, limit: '15' }),
-  ]);
-  if (!infoR.ok) return infoR;
-  const trackNode = infoR.data.track as Record<string, unknown>;
+function mapLastfmTrackInfo(
+  trackNode: Record<string, unknown>,
+  fallbackArtist: string,
+  fallbackTrack: string,
+): import('@/lib/nrmLastfmSearchTypes').LastfmTrackInfo {
   const albumNode = trackNode.album as Record<string, unknown> | undefined;
-  const info = {
-    name: String(trackNode.name ?? track),
-    artist: String((trackNode.artist as Record<string, string> | undefined)?.name ?? artist),
+  const albumAttr = albumNode?.['@attr'] as Record<string, string> | undefined;
+  const artistNode = trackNode.artist as Record<string, string> | undefined;
+  return {
+    name: String(trackNode.name ?? fallbackTrack),
+    artist: String(artistNode?.name ?? fallbackArtist),
+    mbid: String(trackNode.mbid ?? ''),
     album: String(albumNode?.title ?? ''),
+    albumMbid: String(albumNode?.mbid ?? ''),
+    artistMbid: String(artistNode?.mbid ?? ''),
     url: String(trackNode.url ?? ''),
     imageUrl: pickLastfmImage(albumNode?.image as { '#text'?: string; size?: string }[] | undefined),
     durationSec: Math.floor(parseInt(String(trackNode.duration ?? '0'), 10) / 1000),
     playcount: parseLong(trackNode.playcount as string | undefined),
     listeners: parseLong(trackNode.listeners as string | undefined),
+    albumTrackPosition: String(albumAttr?.position ?? ''),
   };
+}
+
+async function fetchLastfmTrackDetailDirect(
+  apiKey: string,
+  artist: string,
+  track: string,
+  trackMbid?: string,
+): Promise<LastfmSearchOutcome<LastfmTrackDetail>> {
+  const infoParams: Record<string, string> = {
+    api_key: apiKey,
+    method: 'track.getInfo',
+  };
+  const mbid = (trackMbid ?? '').trim();
+  if (mbid) {
+    infoParams.mbid = mbid;
+  } else {
+    infoParams.artist = artist;
+    infoParams.track = track;
+  }
+  const infoR = await lastfmGet(infoParams);
+  if (!infoR.ok) return infoR;
+  const trackNode = infoR.data.track as Record<string, unknown>;
+  const resolvedArtist = String(
+    (trackNode.artist as Record<string, string> | undefined)?.name ?? artist,
+  );
+  const resolvedTrack = String(trackNode.name ?? track);
+  const [simR, tagsR] = await Promise.all([
+    lastfmGet({
+      api_key: apiKey,
+      method: 'track.getSimilar',
+      artist: resolvedArtist,
+      track: resolvedTrack,
+      limit: '12',
+    }),
+    lastfmGet({
+      api_key: apiKey,
+      method: 'track.getTopTags',
+      artist: resolvedArtist,
+      track: resolvedTrack,
+      limit: '15',
+    }),
+  ]);
+  const info = mapLastfmTrackInfo(trackNode, resolvedArtist, resolvedTrack);
   let sr = 1;
   const similarTracks = arrayOrSingle(
     simR.ok ? (simR.data.similartracks as Record<string, unknown>)?.track as Record<string, unknown>[] | undefined : undefined,
@@ -288,7 +342,15 @@ async function fetchLastfmTrackDetailDirect(
     const artists = typeof n.artist === 'object' && n.artist
       ? String((n.artist as Record<string, string>).name ?? '')
       : String(n.artist ?? '');
-    return { name: String(n.name ?? ''), artist: artists, url: String(n.url ?? ''), imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined), rank, playcount: parseLong(n.playcount as string | undefined) };
+    return {
+      name: String(n.name ?? ''),
+      artist: artists,
+      mbid: String(n.mbid ?? ''),
+      url: String(n.url ?? ''),
+      imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
+      rank,
+      playcount: parseLong(n.playcount as string | undefined),
+    };
   });
   const tags = tagsR.ok ? mapTags((tagsR.data.toptags as Record<string, unknown>)?.tag) : [];
   return { ok: true, data: { info, similarTracks, tags } };
@@ -432,15 +494,19 @@ export async function searchLastfmTracks(
 export async function fetchLastfmTrackDetail(
   artist: string,
   track: string,
+  trackMbid?: string,
 ): Promise<LastfmSearchOutcome<LastfmTrackDetail>> {
   if (isStandaloneApp()) {
     const apiKey = await getLastfmApiKey();
     if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return fetchLastfmTrackDetailDirect(apiKey, artist.trim(), track.trim());
+    return fetchLastfmTrackDetailDirect(apiKey, artist.trim(), track.trim(), trackMbid);
   }
   const a = encodeURIComponent(artist.trim());
   const t = encodeURIComponent(track.trim());
+  const mbidQ = trackMbid?.trim()
+    ? `&mbid=${encodeURIComponent(trackMbid.trim())}`
+    : '';
   return fetchLastfmSearch(
-    `/api/search/lastfm/track/detail?artist=${a}&track=${t}`,
+    `/api/search/lastfm/track/detail?artist=${a}&track=${t}${mbidQ}`,
   );
 }

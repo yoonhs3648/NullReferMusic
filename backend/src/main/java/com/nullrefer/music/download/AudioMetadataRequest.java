@@ -9,4 +9,14 @@ public class AudioMetadataRequest {
   public String genre;
   public String releaseDate;
   public String coverUrl;
+  public String albumArtist;
+  public String trackNumber;
+  public String discNumber;
+  public String composer;
+  public String lyrics;
+  public String bpm;
+  public String copyright;
+  public String website;
+  public String producer;
+  public String remixer;
 }

@@ -4,7 +4,6 @@ import type { PeriodChartRegion } from '@/lib/nrmPeriodChartCatalog';
 import type { PeriodChartPagePayload } from '@/lib/nrmPeriodChartsTypes';
 import {
   buildSpotifyPeriodSlug,
-  getPeriodChartCurrentDate,
   listSpotifyWeeksInMonth,
   spotifyDailyChartSegment,
   spotifyPeriodChartMaxRank,
@@ -14,6 +13,8 @@ import {
   SPOTIFY_PERIOD_CHART_SINGLE_MAX,
   type SpotifyPeriodChartKind,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
+import { DEFAULT_WEEKLY_SNAPSHOT_DAY } from '@/lib/nrmWeeklySnapshotSettings';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 
 const CHARTS_API = 'https://charts-spotify-com-service.spotify.com/auth/v0/charts';
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -25,6 +26,7 @@ export type SpotifyPeriodChartQuery = {
   month: number;
   day: number;
   weekOfMonth: number;
+  snapshotDow: number;
   offset: number;
   limit?: number;
 };
@@ -32,7 +34,7 @@ export type SpotifyPeriodChartQuery = {
 type PageFail = { ok: false; errorCode: ChartErrorCode; authFailed: boolean };
 type PageOk = { ok: true; data: PeriodChartPagePayload };
 
-type StreamAgg = ChartTrackItem & { _streamSum: number };
+type AvgRankAgg = ChartTrackItem & { _rankSum: number; _appearances: number };
 
 const listCache = new Map<string, { items: ChartTrackItem[]; expiresAt: number }>();
 
@@ -41,16 +43,14 @@ function cacheKey(parts: string): string {
 }
 
 function queryCacheKey(q: SpotifyPeriodChartQuery): string {
+  const sd = q.snapshotDow;
   if (q.spotifyKind === 'daily') {
     return cacheKey(`d-${q.region}-${q.year}-${q.month}-${q.day}`);
   }
   if (q.spotifyKind === 'weekly') {
-    return cacheKey(`w-${q.region}-${q.year}-${q.month}-${q.weekOfMonth}`);
+    return cacheKey(`w-${q.region}-${q.year}-${q.month}-${q.weekOfMonth}-sd${sd}`);
   }
-  if (q.spotifyKind === 'monthly') {
-    return cacheKey(`m-${q.region}-${q.year}-${q.month}`);
-  }
-  return cacheKey(`y-${q.region}-${q.year}`);
+  return cacheKey(`m-${q.region}-${q.year}-${q.month}-sd${sd}`);
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -133,7 +133,7 @@ export function parseSpotifyPeriodChartEntries(
       title: String(meta.trackName ?? ''),
       artists,
       album: String(meta.albumName ?? meta.album ?? ''),
-      imageUrl: String(meta.displayImageUri ?? ''),
+      imageUrl: normalizeCoverArtUrl(String(meta.displayImageUri ?? '')),
       externalUrl: trackId ? `https://open.spotify.com/track/${trackId}` : '',
       durationMs: 0,
       popularity: resolveStreamCount(r),
@@ -172,29 +172,34 @@ async function chartsGet(
   return { ok: true, root };
 }
 
-function mergeIntoAgg(map: Map<string, StreamAgg>, items: ChartTrackItem[]) {
+function mergeIntoAgg(map: Map<string, AvgRankAgg>, items: ChartTrackItem[]) {
   for (const item of items) {
     const key = item.trackId || `${item.title}|${item.artists}`;
-    const streams = item.popularity ?? 0;
+    const rank = item.rank > 0 ? item.rank : 9999;
     const prev = map.get(key);
     if (!prev) {
-      map.set(key, { ...item, _streamSum: streams });
+      map.set(key, { ...item, _rankSum: rank, _appearances: 1 });
     } else {
-      prev._streamSum += streams;
-      prev.popularity = prev._streamSum;
+      prev._rankSum += rank;
+      prev._appearances += 1;
     }
   }
 }
 
-function finalizeAgg(map: Map<string, StreamAgg>, maxRank: number): ChartTrackItem[] {
+function finalizeAgg(map: Map<string, AvgRankAgg>, maxRank: number): ChartTrackItem[] {
   return [...map.values()]
-    .sort((a, b) => b._streamSum - a._streamSum)
+    .sort((a, b) => {
+      const avgA = a._rankSum / a._appearances;
+      const avgB = b._rankSum / b._appearances;
+      if (avgA !== avgB) return avgA - avgB;
+      if (a._appearances !== b._appearances) return b._appearances - a._appearances;
+      return a.title.localeCompare(b.title);
+    })
     .slice(0, maxRank)
     .map((row, i) => ({
       ...row,
       rank: i + 1,
-      popularity:
-        row._streamSum > 2_147_483_647 ? 2_147_483_647 : row._streamSum,
+      popularity: Math.max(1, Math.round(row._rankSum / row._appearances)),
     }));
 }
 
@@ -210,21 +215,15 @@ function setCachedList(key: string, items: ChartTrackItem[]) {
   }
 }
 
-/** 주간 — 선택 주 1회 API만 */
-async function fetchWeeklyChartOnce(
+async function fetchWeeklyAnchorOnce(
   region: PeriodChartRegion,
-  year: number,
-  month: number,
-  weekOfMonth: number,
+  anchor: string,
   bearer: string,
   signal?: AbortSignal,
 ): Promise<ChartTrackItem[] | PageFail> {
-  const key = cacheKey(`w-${region}-${year}-${month}-${weekOfMonth}`);
+  const key = cacheKey(`wa-${region}-${anchor}`);
   const cached = getCachedList(key);
   if (cached) return cached;
-
-  const anchor = spotifyWeeklyAnchorForWeek(year, month, weekOfMonth);
-  if (!anchor) return { ok: false, errorCode: 'empty', authFailed: false };
 
   const slug = buildSpotifyPeriodSlug(region, 'weekly');
   const out = await chartsGet(slug, anchor, bearer, signal);
@@ -249,7 +248,6 @@ async function fetchWeeklyChartOnce(
   return items;
 }
 
-/** 일간 — 1회 API */
 async function fetchDailyChartOnce(
   query: SpotifyPeriodChartQuery,
   bearer: string,
@@ -286,7 +284,6 @@ async function fetchDailyChartOnce(
   return items;
 }
 
-/** 월간 — 해당 월 각 주(금요일) 주간 차트 합산, 주마다 1회만 */
 async function fetchMonthlyFromWeeks(
   query: SpotifyPeriodChartQuery,
   bearer: string,
@@ -296,24 +293,17 @@ async function fetchMonthlyFromWeeks(
   const cached = getCachedList(key);
   if (cached) return cached;
 
-  const weeks = listSpotifyWeeksInMonth(query.year, query.month);
+  const weeks = listSpotifyWeeksInMonth(query.year, query.month, query.snapshotDow);
   if (weeks.length === 0) {
     return { ok: false, errorCode: 'empty', authFailed: false };
   }
 
-  const map = new Map<string, StreamAgg>();
+  const map = new Map<string, AvgRankAgg>();
   let first = true;
   for (const w of weeks) {
     if (!first) await sleep(SPOTIFY_PERIOD_CHART_REQUEST_GAP_MS, signal);
     first = false;
-    const weekData = await fetchWeeklyChartOnce(
-      query.region,
-      query.year,
-      query.month,
-      w.weekIndex,
-      bearer,
-      signal,
-    );
+    const weekData = await fetchWeeklyAnchorOnce(query.region, w.anchor, bearer, signal);
     if (!Array.isArray(weekData)) {
       if (weekData.errorCode === 'auth_failed' || weekData.errorCode === 'forbidden') {
         return weekData;
@@ -332,48 +322,6 @@ async function fetchMonthlyFromWeeks(
   return items;
 }
 
-/** 연간 — 1~12월 월간(주간 합산) 합산, 월마다 캐시 활용 */
-async function fetchYearlyFromMonths(
-  query: SpotifyPeriodChartQuery,
-  bearer: string,
-  signal?: AbortSignal,
-): Promise<ChartTrackItem[] | PageFail> {
-  const key = queryCacheKey(query);
-  const cached = getCachedList(key);
-  if (cached) return cached;
-
-  const { year: cy, month: cm } = getPeriodChartCurrentDate();
-  const lastMonth = query.year === cy ? cm : 12;
-  const map = new Map<string, StreamAgg>();
-  let first = true;
-
-  for (let mo = 1; mo <= lastMonth; mo++) {
-    if (!first) await sleep(SPOTIFY_PERIOD_CHART_REQUEST_GAP_MS, signal);
-    first = false;
-    const monthQuery: SpotifyPeriodChartQuery = {
-      ...query,
-      month: mo,
-      spotifyKind: 'monthly',
-    };
-    const monthData = await fetchMonthlyFromWeeks(monthQuery, bearer, signal);
-    if (!Array.isArray(monthData)) {
-      if (monthData.errorCode === 'auth_failed' || monthData.errorCode === 'forbidden') {
-        return monthData;
-      }
-      if (monthData.errorCode === 'server') return monthData;
-      continue;
-    }
-    mergeIntoAgg(map, monthData);
-  }
-
-  if (map.size === 0) {
-    return { ok: false, errorCode: 'empty', authFailed: false };
-  }
-  const items = finalizeAgg(map, spotifyPeriodChartMaxRank('yearly'));
-  setCachedList(key, items);
-  return items;
-}
-
 async function loadFullList(
   query: SpotifyPeriodChartQuery,
   bearer: string,
@@ -382,19 +330,18 @@ async function loadFullList(
   switch (query.spotifyKind) {
     case 'daily':
       return fetchDailyChartOnce(query, bearer, signal);
-    case 'weekly':
-      return fetchWeeklyChartOnce(
-        query.region,
+    case 'weekly': {
+      const anchor = spotifyWeeklyAnchorForWeek(
         query.year,
         query.month,
         query.weekOfMonth,
-        bearer,
-        signal,
+        query.snapshotDow,
       );
+      if (!anchor) return { ok: false, errorCode: 'empty', authFailed: false };
+      return fetchWeeklyAnchorOnce(query.region, anchor, bearer, signal);
+    }
     case 'monthly':
       return fetchMonthlyFromWeeks(query, bearer, signal);
-    case 'yearly':
-      return fetchYearlyFromMonths(query, bearer, signal);
     default:
       return { ok: false, errorCode: 'unknown', authFailed: false };
   }
@@ -432,9 +379,13 @@ export async function fetchSpotifyPeriodChartPage(
   signal?: AbortSignal,
 ): Promise<PageOk | PageFail> {
   try {
-    const loaded = await loadFullList(query, bearer, signal);
+    const q = {
+      ...query,
+      snapshotDow: query.snapshotDow ?? DEFAULT_WEEKLY_SNAPSHOT_DAY,
+    };
+    const loaded = await loadFullList(q, bearer, signal);
     if (!Array.isArray(loaded)) return loaded;
-    return slicePage(query, loaded);
+    return slicePage(q, loaded);
   } catch {
     return { ok: false, errorCode: 'network', authFailed: false };
   }

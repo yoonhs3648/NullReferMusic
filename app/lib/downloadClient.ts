@@ -13,6 +13,34 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return data;
 }
 
+function metadataPayload(meta: NrmAudioFileMetadata): Record<string, string> {
+  const body: Record<string, string> = {
+    artist: meta.artist,
+    title: meta.title,
+    album: meta.album,
+    genre: meta.genre,
+    releaseDate: meta.releaseDate,
+    coverUrl: meta.coverUrl,
+  };
+  const opt = [
+    'albumArtist',
+    'trackNumber',
+    'discNumber',
+    'composer',
+    'lyrics',
+    'bpm',
+    'copyright',
+    'website',
+    'producer',
+    'remixer',
+  ] as const;
+  for (const k of opt) {
+    const v = meta[k];
+    if (v?.trim()) body[k] = v.trim();
+  }
+  return body;
+}
+
 export async function requestDownload(
   url: string,
   options?: {
@@ -31,16 +59,7 @@ export async function requestDownload(
       noPlaylist: options?.noPlaylist ?? true,
       audioFormat: options?.audioFormat,
       audioQuality: options?.audioQuality,
-      ...(options?.metadata
-        ? {
-            artist: options.metadata.artist,
-            title: options.metadata.title,
-            album: options.metadata.album,
-            genre: options.metadata.genre,
-            releaseDate: options.metadata.releaseDate,
-            coverUrl: options.metadata.coverUrl,
-          }
-        : {}),
+      ...(options?.metadata ? metadataPayload(options.metadata) : {}),
     }),
   });
   const data = (await res.json().catch(() => ({}))) as DownloadResponse;

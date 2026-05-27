@@ -1,4 +1,5 @@
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import type {
   LastfmAlbumDetail,
   LastfmArtistDetail,
@@ -69,31 +70,22 @@ export function buildLastfmArtistAudioMetadata(
 export function lastfmFieldsToChartTrack(fields: {
   artist: string;
   title: string;
+  mbid?: string;
   album?: string;
   genre?: string;
   releaseDate?: string;
   imageUrl?: string;
-}): {
-  rank: number;
-  trackId: string;
-  title: string;
-  artists: string;
-  album: string;
-  genre?: string;
-  imageUrl: string;
-  externalUrl: string;
-  durationMs: number;
-  popularity: number;
-  releaseDate: string;
-} {
+}): import('@/lib/nrmChartsTypes').ChartTrackItem {
+  const mbid = (fields.mbid ?? '').trim();
   return {
     rank: 0,
-    trackId: '',
+    trackId: mbid || '',
+    mbid: mbid || undefined,
     title: fields.title,
     artists: fields.artist,
     album: fields.album ?? '',
     genre: fields.genre,
-    imageUrl: fields.imageUrl ?? '',
+    imageUrl: normalizeCoverArtUrl(fields.imageUrl),
     externalUrl: '',
     durationMs: 0,
     popularity: 0,

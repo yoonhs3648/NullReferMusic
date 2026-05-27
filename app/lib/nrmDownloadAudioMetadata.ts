@@ -1,4 +1,5 @@
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
+import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 
 /** 오디오 파일에 쓸 ID3/컨테이너 메타데이터 (빈 문자열 = 태그 미설정) */
 export type NrmAudioFileMetadata = {
@@ -8,42 +9,132 @@ export type NrmAudioFileMetadata = {
   genre: string;
   releaseDate: string;
   coverUrl: string;
+  /** ffmpeg: album_artist */
+  albumArtist?: string;
+  /** ffmpeg: track */
+  trackNumber?: string;
+  /** ffmpeg: disc */
+  discNumber?: string;
+  /** ffmpeg: composer */
+  composer?: string;
+  /** ffmpeg: lyrics */
+  lyrics?: string;
+  /** ffmpeg: bpm */
+  bpm?: string;
+  /** ffmpeg: copyright */
+  copyright?: string;
+  /** ffmpeg: website / url */
+  website?: string;
+  /** ffmpeg: producer (일부 컨테이너) */
+  producer?: string;
+  /** ffmpeg: remixer (일부 컨테이너) */
+  remixer?: string;
 };
 
-export type NrmDownloadMetadataSource = 'mainSearch' | 'chart' | 'lastfm';
+export type NrmDownloadMetadataSource =
+  | 'mainSearch'
+  | 'chart'
+  | 'lastfm'
+  | 'spotify'
+  | 'apple';
 
-/** 메인 검색: 가수·곡 제목만 사용자 입력, 나머지 비움 */
+function trimOpt(s: string | undefined): string {
+  return (s ?? '').trim();
+}
+
+/** 플랫폼별 필드 → 다운로드용 메타 (커버 URL 정규화 포함) */
+export function normalizeDownloadMetadata(
+  meta: NrmAudioFileMetadata,
+): NrmAudioFileMetadata {
+  const base = {
+    artist: meta.artist.trim(),
+    title: meta.title.trim(),
+    album: meta.album.trim(),
+    genre: meta.genre.trim(),
+    releaseDate: meta.releaseDate.trim(),
+    coverUrl: normalizeCoverArtUrl(meta.coverUrl),
+    albumArtist: trimOpt(meta.albumArtist),
+    trackNumber: trimOpt(meta.trackNumber),
+    discNumber: trimOpt(meta.discNumber),
+    composer: trimOpt(meta.composer),
+    lyrics: trimOpt(meta.lyrics),
+    bpm: trimOpt(meta.bpm),
+    copyright: trimOpt(meta.copyright),
+    website: trimOpt(meta.website),
+    producer: trimOpt(meta.producer),
+    remixer: trimOpt(meta.remixer),
+  };
+  const out: NrmAudioFileMetadata = { ...base };
+  for (const k of [
+    'albumArtist',
+    'trackNumber',
+    'discNumber',
+    'composer',
+    'lyrics',
+    'bpm',
+    'copyright',
+    'website',
+    'producer',
+    'remixer',
+  ] as const) {
+    if (!out[k]) delete out[k];
+  }
+  return out;
+}
+
+/** 메인 검색: 가수·곡 제목만 사용자 입력 */
 export function buildMainSearchAudioMetadata(
   userArtist: string,
   userTitle: string,
 ): NrmAudioFileMetadata {
-  return {
-    artist: userArtist.trim(),
-    title: userTitle.trim(),
+  return normalizeDownloadMetadata({
+    artist: userArtist,
+    title: userTitle,
     album: '',
     genre: '',
     releaseDate: '',
     coverUrl: '',
-  };
+  });
 }
 
-/** 차트 플랫폼 API 필드 + 가수·곡 제목은 사용자가 모달에서 확정한 값 */
+/** 차트(Apple·Spotify·Last.fm 차트에서 YouTube 유입) 트랙 — Spotify 등 기존 동작 유지 */
 export function buildChartAudioMetadata(
   track: ChartTrackItem,
   userArtist: string,
   userTitle: string,
 ): NrmAudioFileMetadata {
-  return {
-    artist: userArtist.trim(),
-    title: userTitle.trim(),
-    album: (track.album ?? '').trim(),
-    genre: (track.genre ?? '').trim(),
-    releaseDate: (track.releaseDate ?? '').trim(),
-    coverUrl: (track.imageUrl ?? '').trim(),
-  };
+  return normalizeDownloadMetadata({
+    artist: userArtist,
+    title: userTitle,
+    album: track.album ?? '',
+    genre: track.genre ?? '',
+    releaseDate: track.releaseDate ?? '',
+    coverUrl: track.imageUrl ?? '',
+  });
 }
 
-/** Last.fm·차트와 동일 필드 — 가수·곡 제목만 사용자 확정 */
+/** Last.fm 검색 유입(차트 아님) — 시드 필드만 (enrich 전) */
+export function buildLastfmSeedAudioMetadata(
+  fields: {
+    album?: string;
+    genre?: string;
+    releaseDate?: string;
+    imageUrl?: string;
+  },
+  userArtist: string,
+  userTitle: string,
+): NrmAudioFileMetadata {
+  return normalizeDownloadMetadata({
+    artist: userArtist,
+    title: userTitle,
+    album: fields.album ?? '',
+    genre: fields.genre ?? '',
+    releaseDate: fields.releaseDate ?? '',
+    coverUrl: fields.imageUrl ?? '',
+  });
+}
+
+/** @deprecated Last.fm 검색 시드 — buildLastfmSeedAudioMetadata 사용 */
 export function buildPlatformTrackAudioMetadata(
   fields: {
     album?: string;
@@ -54,14 +145,7 @@ export function buildPlatformTrackAudioMetadata(
   userArtist: string,
   userTitle: string,
 ): NrmAudioFileMetadata {
-  return {
-    artist: userArtist.trim(),
-    title: userTitle.trim(),
-    album: (fields.album ?? '').trim(),
-    genre: (fields.genre ?? '').trim(),
-    releaseDate: (fields.releaseDate ?? '').trim(),
-    coverUrl: (fields.imageUrl ?? '').trim(),
-  };
+  return buildLastfmSeedAudioMetadata(fields, userArtist, userTitle);
 }
 
 export function hasEmbeddableAudioMetadata(meta: NrmAudioFileMetadata): boolean {
@@ -71,6 +155,13 @@ export function hasEmbeddableAudioMetadata(meta: NrmAudioFileMetadata): boolean 
     meta.album ||
     meta.genre ||
     meta.releaseDate ||
-    meta.coverUrl
+    meta.coverUrl ||
+    meta.albumArtist ||
+    meta.trackNumber ||
+    meta.website
   );
+}
+
+export function hasAlbumCoverUrl(meta: NrmAudioFileMetadata): boolean {
+  return !!meta.coverUrl.trim();
 }

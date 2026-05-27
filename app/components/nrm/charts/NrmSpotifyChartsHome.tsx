@@ -15,7 +15,10 @@ import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { fetchSpotifyPlaylistChart } from '@/lib/nrmChartsClient';
-import { promptSpotifyChartsBearerExpired } from '@/lib/nrmChartTokenGate';
+import {
+  isSpotifyChartsFetchAuthError,
+  runSpotifyChartsAuthFlow,
+} from '@/lib/nrmSpotifyChartsAuthFlow';
 import type { SpotifyChartSource } from '@/lib/nrmSpotifyChartCatalog';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
@@ -32,6 +35,7 @@ type Props = {
   onBackToHome: () => void;
   onOpenChartsSession?: () => void;
   onRenewChartsBearer?: () => Promise<boolean>;
+  onShowBearerExpired?: () => void;
   onTrackPress?: (item: ChartTrackItem) => void;
 };
 
@@ -64,6 +68,7 @@ export function NrmSpotifyChartsHome({
   onBackToHome,
   onOpenChartsSession,
   onRenewChartsBearer,
+  onShowBearerExpired,
   onTrackPress,
 }: Props) {
   const pageTitle =
@@ -123,7 +128,20 @@ export function NrmSpotifyChartsHome({
         applySnapshot(loadingSnap);
       }
 
-      const out = await fetchSpotifyPlaylistChart(tab, chartSource, ac.signal);
+      const fetchTab = () => fetchSpotifyPlaylistChart(tab, chartSource, ac.signal);
+      const out =
+        chartSource === 'charts' &&
+        (onRenewChartsBearer || onShowBearerExpired)
+          ? await runSpotifyChartsAuthFlow(
+              fetchTab,
+              (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
+              {
+                onRenewChartsBearer,
+                onOpenChartsSession,
+                onShowBearerExpired,
+              },
+            )
+          : await fetchTab();
       if (ac.signal.aborted || generation !== loadGenRef.current) {
         const stale = tabCacheRef.current.get(tab);
         if (stale?.loading) {
@@ -133,46 +151,6 @@ export function NrmSpotifyChartsHome({
       }
 
       if (!out.ok) {
-        const isChartsAuthError =
-          chartSource === 'charts' &&
-          (out.errorCode === 'auth_failed' ||
-            out.errorCode === 'premium_required' ||
-            out.errorCode === 'charts_session' ||
-            out.errorCode === 'forbidden');
-
-        if (isChartsAuthError && onRenewChartsBearer) {
-          const renewed = await onRenewChartsBearer();
-          if (generation !== loadGenRef.current || ac.signal.aborted) return;
-          if (renewed) {
-            const retry = await fetchSpotifyPlaylistChart(
-              tab,
-              chartSource,
-              ac.signal,
-            );
-            if (ac.signal.aborted || generation !== loadGenRef.current) return;
-            if (retry.ok) {
-              const okSnap: TabSnapshot = {
-                items: mapChartItems(retry.data.items),
-                playlistTitle: retry.data.playlistName,
-                errorCode: null,
-                loading: false,
-              };
-              tabCacheRef.current.set(tab, okSnap);
-              applySnapshot(okSnap);
-              return;
-            }
-            const failSnap: TabSnapshot = {
-              items: [],
-              playlistTitle: null,
-              errorCode: retry.errorCode,
-              loading: false,
-            };
-            tabCacheRef.current.set(tab, failSnap);
-            applySnapshot(failSnap);
-            return;
-          }
-        }
-
         const errSnap: TabSnapshot = {
           items: [],
           playlistTitle: null,
@@ -181,16 +159,6 @@ export function NrmSpotifyChartsHome({
         };
         tabCacheRef.current.set(tab, errSnap);
         applySnapshot(errSnap);
-
-        if (isChartsAuthError && onOpenChartsSession) {
-          const renewed = await promptSpotifyChartsBearerExpired({
-            onOpenChartsSession,
-            onAndroidRenew: onRenewChartsBearer,
-          });
-          if (renewed && generation === loadGenRef.current) {
-            void loadChart(tab, generation);
-          }
-        }
         return;
       }
 
@@ -203,7 +171,7 @@ export function NrmSpotifyChartsHome({
       tabCacheRef.current.set(tab, okSnap);
       applySnapshot(okSnap);
     },
-    [applySnapshot, chartSource, onOpenChartsSession, onRenewChartsBearer],
+    [applySnapshot, chartSource, onOpenChartsSession, onRenewChartsBearer, onShowBearerExpired],
   );
 
   useEffect(() => {

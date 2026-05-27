@@ -31,6 +31,7 @@ import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
 import { registerOpenDownloadSettingsListener } from '@/lib/nrmDownloadNavEvents';
 import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagSettingsPanel';
+import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWeeklySnapshotSettingsPanel';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import {
@@ -102,7 +103,6 @@ const IS_NATIVE_MOBILE = Platform.OS === 'ios' || Platform.OS === 'android';
 
 type Panel =
   | 'root'
-  | 'version'
   | 'settings'
   | 'appSettings'
   | 'searchSettings'
@@ -110,6 +110,7 @@ type Panel =
   | 'spotifyApiManage'
   | 'lastfmApiManage'
   | 'genreTagSettings'
+  | 'weeklySnapshotSettings'
   | 'downloadManage'
   | 'downloadPathSettings'
   | 'downloadExtensionSettings'
@@ -153,6 +154,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>('root');
+  const [versionOverlayOpen, setVersionOverlayOpen] = useState(false);
   const [suffixMode, setSuffixMode] =
     useState<NrmYoutubeSearchSuffixMode>('default');
 
@@ -169,10 +171,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const openMenu = useCallback(() => {
     setPanel('root');
+    setVersionOverlayOpen(false);
     setOpen(true);
   }, []);
 
   const dismissDrawer = useCallback(() => {
+    setVersionOverlayOpen(false);
     Animated.timing(translateX, {
       toValue: -drawerW,
       duration: 220,
@@ -184,6 +188,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       }
     });
   }, [drawerW, translateX]);
+
+  useEffect(() => {
+    if (!open) setVersionOverlayOpen(false);
+  }, [open]);
 
   const closeMenuAndNavigateAppleMusicCharts = useCallback(() => {
     onNavigateAppleMusicCharts?.();
@@ -306,12 +314,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX,
   ]);
 
-  const closeMenuAndNavigateGenreCharts = useCallback(() => {
+  const closeMenuAndNavigateGenreCharts = useCallback(async () => {
+    const ok = await ensureSpotifyChartsSessionAccess(
+      openSpotifyChartsSessionSettings,
+      onRequestChartsBearerWebView,
+    );
+    if (!ok) return;
     onNavigateGenreCharts?.();
     setOpen(false);
     setPanel('root');
     translateX.setValue(-drawerW);
-  }, [drawerW, onNavigateGenreCharts, translateX]);
+  }, [
+    drawerW,
+    onNavigateGenreCharts,
+    onRequestChartsBearerWebView,
+    openSpotifyChartsSessionSettings,
+    translateX,
+  ]);
 
   const closeMenuAndNavigateSpotifySearch = useCallback(
     async (kind: SearchKind) => {
@@ -406,7 +425,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'search':
         setPanel('root');
         break;
-      case 'version':
       case 'settings':
         setPanel('root');
         break;
@@ -721,7 +739,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => setPanel('version')}
+                  onPress={() => setVersionOverlayOpen(true)}
                   style={({ pressed }) => [
                     styles.row,
                     pressed && { backgroundColor: rowHover },
@@ -735,42 +753,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
-            ) : null}
-
-            {panel === 'version' ? (
-              <DrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <Pressable
-                  onPress={() => setPanel('root')}
-                  style={styles.backRow}
-                  accessibilityRole="button"
-                  accessibilityLabel="뒤로">
-                  <Ionicons
-                    name="chevron-back"
-                    size={22}
-                    color={nrmTokens.color.primary}
-                  />
-                  <Text style={styles.backText}>뒤로</Text>
-                </Pressable>
-                <Text style={[styles.panelTitle, { color: titleColor }]}>
-                  버전 정보
-                </Text>
-                <Text style={[styles.versionLine, { color: bodyColor }]}>
-                  {getNrmAppVersionLabel()}
-                </Text>
-                <View style={styles.versionMetaBlock}>
-                  <Text
-                    style={[styles.versionMetaText, { color: bodyColor }]}>
-                    {getNrmAppCopyrightNotice()}
-                  </Text>
-                  <Text
-                    style={[styles.versionMetaText, { color: bodyColor }]}>
-                    제작 · {NRM_APP_AUTHOR_DISPLAY}
-                  </Text>
-                </View>
               </DrawerShell>
             ) : null}
 
@@ -802,6 +784,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     API 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('weeklySnapshotSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    주간차트 스냅샷 요일 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -910,6 +907,19 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
+            {panel === 'weeklySnapshotSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmWeeklySnapshotSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('settings')}
+                />
+              </DrawerShell>
+            ) : null}
+
             {panel === 'genreTagSettings' ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -997,7 +1007,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    다운로드 경로 설정
+                    {Platform.OS === 'ios' ? '저장 위치 안내' : '다운로드 경로 설정'}
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1027,7 +1037,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    음질 설정
+                    비트레이트 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1294,6 +1304,70 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         </View>
       </Modal>
 
+      <Modal
+        visible={versionOverlayOpen && open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVersionOverlayOpen(false)}
+        statusBarTranslucent>
+        <View style={styles.versionOverlayModalRoot}>
+          <Pressable
+            style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
+            onPress={() => setVersionOverlayOpen(false)}
+            accessibilityLabel="버전 정보 닫기"
+          />
+          <View
+            style={[
+              styles.versionOverlayCard,
+              {
+                width: Math.min(windowWidth * 0.86, 440),
+                backgroundColor: cardBg,
+                borderColor: cardBorder,
+              },
+            ]}>
+            <View style={styles.versionOverlayTopRow}>
+              <Text
+                style={[
+                  styles.panelTitle,
+                  { color: titleColor, marginBottom: 0 },
+                ]}>
+                버전 정보
+              </Text>
+            </View>
+
+            <Text style={[styles.versionLine, { color: bodyColor }]}>
+              {getNrmAppVersionLabel()}
+            </Text>
+
+            <View style={styles.versionMetaBlock}>
+              <Text style={[styles.versionMetaText, { color: bodyColor }]}>
+                {getNrmAppCopyrightNotice()}
+              </Text>
+              <Text style={[styles.versionMetaText, { color: bodyColor }]}>
+                제작 · {NRM_APP_AUTHOR_DISPLAY}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setVersionOverlayOpen(false)}
+              style={({ pressed }) => [
+                styles.versionOverlayBottomClose,
+                { borderColor: cardBorder },
+                pressed && styles.versionOverlayBottomClosePressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="닫기">
+              <Text
+                style={[
+                  styles.versionOverlayBottomCloseLabel,
+                  { color: titleColor },
+                ]}>
+                닫기
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {IS_NATIVE_MOBILE && !open ? (
         <View
           style={styles.mobileSwipeLayer}
@@ -1476,6 +1550,43 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.finePrint,
     lineHeight: 18,
     fontWeight: '400',
+  },
+  versionOverlayModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: nrmTokens.space.lg,
+  },
+  versionOverlayCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.lg,
+    paddingVertical: nrmTokens.space.lg,
+    paddingHorizontal: nrmTokens.space.lg,
+    zIndex: 1,
+    ...Platform.select({
+      android: { elevation: 8 },
+    }),
+  },
+  versionOverlayTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: nrmTokens.space.md,
+  },
+  versionOverlayBottomClose: {
+    marginTop: nrmTokens.space.lg,
+    height: 42,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  versionOverlayBottomClosePressed: {
+    opacity: 0.88,
+  },
+  versionOverlayBottomCloseLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
   },
   drawerColumn: {
     flex: 1,

@@ -180,6 +180,7 @@ export function NrmLastfmTrackSearchHome({
                   void openDetail({
                     name: t.name,
                     artist: t.artist,
+                    mbid: t.mbid,
                     url: t.url,
                     imageUrl: t.imageUrl,
                   })

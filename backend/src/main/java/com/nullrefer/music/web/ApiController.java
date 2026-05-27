@@ -144,12 +144,12 @@ public class ApiController {
   private static String resolveSpotifyPeriodKind(String kind, String legacyGranularity) {
     if (kind != null && !kind.isBlank()) {
       String k = kind.trim().toLowerCase();
-      if ("yearly".equals(k) || "monthly".equals(k) || "weekly".equals(k) || "daily".equals(k)) {
+      if ("monthly".equals(k) || "weekly".equals(k) || "daily".equals(k)) {
         return k;
       }
     }
-    if (legacyGranularity != null && "year".equalsIgnoreCase(legacyGranularity.trim())) {
-      return "yearly";
+    if (legacyGranularity != null && "month".equalsIgnoreCase(legacyGranularity.trim())) {
+      return "monthly";
     }
     return "daily";
   }
@@ -236,6 +236,7 @@ public class ApiController {
       @RequestParam(value = "month", required = false) Integer month,
       @RequestParam(value = "day", required = false) Integer day,
       @RequestParam(value = "week", defaultValue = "1") int week,
+      @RequestParam(value = "snapshotDay", defaultValue = "4") int snapshotDay,
       @RequestParam(value = "offset", defaultValue = "0") int offset,
       @RequestParam(value = "limit", defaultValue = "50") int limit,
       @org.springframework.web.bind.annotation.RequestHeader(
@@ -250,7 +251,7 @@ public class ApiController {
       String resolvedKind = resolveSpotifyPeriodKind(kind, granularity);
       PeriodChartPageResult result =
           spotifyChartService.fetchPeriodPage(
-              region, resolvedKind, year, month, day, week, offset, limit, bearer);
+              region, resolvedKind, year, month, day, week, snapshotDay, offset, limit, bearer);
       return ResponseEntity.ok(result);
     } catch (IllegalStateException e) {
       return spotifyErrorResponse(e);
@@ -403,6 +404,7 @@ public class ApiController {
   public ResponseEntity<?> lastfmTrackDetail(
       @RequestParam("artist") String artist,
       @RequestParam("track") String track,
+      @RequestParam(value = "mbid", required = false) String mbid,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -414,7 +416,7 @@ public class ApiController {
     return lastfmSearchWithKey(
         apiKeyHeader,
         authorization,
-        key -> lastfmSearchService.fetchTrackDetail(key, artist, track));
+        key -> lastfmSearchService.fetchTrackDetail(key, artist, track, mbid));
   }
 
   @GetMapping("/api/search/spotify/artist")
@@ -605,7 +607,7 @@ public class ApiController {
       return ResponseEntity.status(401).body(Map.of("error", "spotify_charts_auth_failed"));
     }
     if ("spotify_auth_failed".equals(code)) {
-      return ResponseEntity.status(403).body(Map.of("error", "spotify_auth_failed"));
+      return ResponseEntity.status(401).body(Map.of("error", "spotify_auth_failed"));
     }
     if ("spotify_premium_required".equals(code)) {
       return ResponseEntity.status(403).body(Map.of("error", "spotify_premium_required"));
@@ -816,6 +818,16 @@ public class ApiController {
     public String genre;
     public String releaseDate;
     public String coverUrl;
+    public String albumArtist;
+    public String trackNumber;
+    public String discNumber;
+    public String composer;
+    public String lyrics;
+    public String bpm;
+    public String copyright;
+    public String website;
+    public String producer;
+    public String remixer;
 
     boolean hasMetadata() {
       return isNonBlank(artist)
@@ -823,7 +835,10 @@ public class ApiController {
           || isNonBlank(album)
           || isNonBlank(genre)
           || isNonBlank(releaseDate)
-          || isNonBlank(coverUrl);
+          || isNonBlank(coverUrl)
+          || isNonBlank(albumArtist)
+          || isNonBlank(trackNumber)
+          || isNonBlank(website);
     }
 
     AudioMetadataRequest toMetadataRequest() {
@@ -834,6 +849,16 @@ public class ApiController {
       m.genre = genre;
       m.releaseDate = releaseDate;
       m.coverUrl = coverUrl;
+      m.albumArtist = albumArtist;
+      m.trackNumber = trackNumber;
+      m.discNumber = discNumber;
+      m.composer = composer;
+      m.lyrics = lyrics;
+      m.bpm = bpm;
+      m.copyright = copyright;
+      m.website = website;
+      m.producer = producer;
+      m.remixer = remixer;
       return m;
     }
 

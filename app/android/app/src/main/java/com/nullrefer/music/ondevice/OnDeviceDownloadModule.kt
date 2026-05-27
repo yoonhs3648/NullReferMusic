@@ -1,7 +1,9 @@
 package com.nullrefer.music.ondevice
 
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.webkit.CookieManager
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -119,6 +121,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         val ctx = reactApplicationContext.applicationContext
         ensurePython()
         cookieFilePath = getCookieFilePathSync()
+        val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
         val outDir = File(ctx.cacheDir, "nrm-ytdlp-tmp").apply { mkdirs() }
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
         val fmt = audioFormat.trim().ifBlank { "mp3" }
@@ -131,6 +134,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
             cookieFilePath,
             fmt,
             quality.toString(),
+            ffmpegPath,
           ).toString()
         val outFile = File(outPath)
         if (!outFile.exists()) {
@@ -146,6 +150,91 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         if (cookieFilePath.isNotBlank()) {
           try { File(cookieFilePath).delete() } catch (_: Exception) {}
         }
+      }
+    }.start()
+  }
+
+  /** innertube 등 원본 포맷 파일을 설정 확장자로 ffmpeg 변환 */
+  @ReactMethod
+  fun transcodeAudio(
+    inputPath: String,
+    audioFormat: String,
+    audioQuality: Int,
+    promise: Promise,
+  ) {
+    Thread {
+      try {
+        val srcPath = inputPath.removePrefix("file://")
+        val src = File(srcPath)
+        if (!src.isFile) {
+          promise.reject("E_ARG", "입력 파일이 없습니다.")
+          return@Thread
+        }
+        val ctx = reactApplicationContext.applicationContext
+        ensurePython()
+        val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
+        if (ffmpegPath.isBlank()) {
+          promise.reject("E_FFMPEG", "ffmpeg를 사용할 수 없습니다.")
+          return@Thread
+        }
+        val fmt = audioFormat.trim().ifBlank { "mp3" }
+        val quality = audioQuality.coerceIn(0, 9)
+        val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
+        val outPath =
+          py.callAttr(
+            "transcode_audio",
+            src.absolutePath,
+            fmt,
+            quality.toString(),
+            ffmpegPath,
+          ).toString()
+        val outFile = File(outPath)
+        if (!outFile.isFile) {
+          throw Exception("변환 결과 파일을 찾지 못했습니다.")
+        }
+        val map = Arguments.createMap()
+        map.putString("path", outFile.absolutePath)
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("E_TRANSCODE", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
+  /** SAF tree URI 아래에 로컬 파일을 스트리밍 복사 (JS base64 로드 없음). */
+  @ReactMethod
+  fun copyFileToSaf(
+    sourcePath: String,
+    treeUri: String,
+    displayName: String,
+    mimeType: String,
+    promise: Promise,
+  ) {
+    Thread {
+      try {
+        val srcPath = sourcePath.removePrefix("file://")
+        val src = File(srcPath)
+        if (!src.isFile) {
+          promise.reject("E_ARG", "소스 파일이 없습니다.")
+          return@Thread
+        }
+        val tree = Uri.parse(treeUri)
+        val resolver = reactApplicationContext.contentResolver
+        val destUri =
+          DocumentsContract.createDocument(
+            resolver,
+            tree,
+            mimeType.trim().ifBlank { "audio/mpeg" },
+            displayName.trim().ifBlank { src.name },
+          ) ?: throw Exception("SAF 파일을 만들지 못했습니다.")
+        resolver.openOutputStream(destUri)?.use { out ->
+          src.inputStream().use { input -> input.copyTo(out) }
+        } ?: throw Exception("SAF에 쓸 수 없습니다.")
+        val map = Arguments.createMap()
+        map.putString("uri", destUri.toString())
+        promise.resolve(map)
+      } catch (e: Exception) {
+        promise.reject("E_SAF_COPY", e.message ?: e.toString(), e)
       }
     }.start()
   }

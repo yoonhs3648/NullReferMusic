@@ -8,18 +8,19 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { PeriodChartRegion } from '@/lib/nrmPeriodChartCatalog';
 import {
-  clampPeriodChartMonth,
   clampSpotifyPeriodChartDay,
+  clampSpotifyPeriodChartMonth,
   clampSpotifyWeekOfMonth,
   createInitialSpotifyPeriodDate,
   defaultSpotifyWeekOfMonth,
-  listPeriodChartSelectableMonths,
   listPeriodChartSelectableYears,
   listSpotifyPeriodChartSelectableDays,
+  listSpotifyPeriodChartSelectableMonths,
   listSpotifyWeekOfMonthOptions,
   SPOTIFY_PERIOD_KIND_TABS,
   type SpotifyPeriodChartKind,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
+import { DEFAULT_WEEKLY_SNAPSHOT_DAY } from '@/lib/nrmWeeklySnapshotSettings';
 
 type Props = {
   isDark: boolean;
@@ -30,6 +31,7 @@ type Props = {
   month: number;
   day: number;
   weekOfMonth: number;
+  snapshotDow: number;
   region: PeriodChartRegion;
   onKindChange: (kind: SpotifyPeriodChartKind) => void;
   onYearChange: (year: number) => void;
@@ -40,7 +42,7 @@ type Props = {
 };
 
 export function createInitialSpotifyPeriodChartDate() {
-  return createInitialSpotifyPeriodDate();
+  return createInitialSpotifyPeriodDate(DEFAULT_WEEKLY_SNAPSHOT_DAY);
 }
 
 export function NrmSpotifyPeriodChartFilters({
@@ -52,6 +54,7 @@ export function NrmSpotifyPeriodChartFilters({
   month,
   day,
   weekOfMonth,
+  snapshotDow,
   region,
   onKindChange,
   onYearChange,
@@ -79,42 +82,46 @@ export function NrmSpotifyPeriodChartFilters({
     [now],
   );
   const monthOptions = useMemo(
-    () => listPeriodChartSelectableMonths(year, now),
-    [year, now],
+    () => listSpotifyPeriodChartSelectableMonths(year, kind, snapshotDow, now),
+    [year, kind, snapshotDow, now],
   );
   const weekOptions = useMemo(
-    () => listSpotifyWeekOfMonthOptions(year, month, now),
-    [year, month, now],
+    () => listSpotifyWeekOfMonthOptions(year, month, snapshotDow, now),
+    [year, month, snapshotDow, now],
   );
   const dayOptions = useMemo(
     () => listSpotifyPeriodChartSelectableDays(year, month, now),
     [year, month, now],
   );
 
-  const showMonth = kind !== 'yearly';
+  const showMonth = true;
   const showWeek = kind === 'weekly';
   const showDay = kind === 'daily';
 
   const handleYearChange = (y: number) => {
     onYearChange(y);
-    const m = clampPeriodChartMonth(y, month, now);
+    const m = clampSpotifyPeriodChartMonth(y, month, kind, snapshotDow, now);
     onMonthChange(m);
-    onWeekOfMonthChange(defaultSpotifyWeekOfMonth(y, m, now));
+    onWeekOfMonthChange(defaultSpotifyWeekOfMonth(y, m, snapshotDow, now));
     onDayChange(clampSpotifyPeriodChartDay(y, m, day, now));
   };
 
   const handleMonthChange = (m: number) => {
     onMonthChange(m);
-    onWeekOfMonthChange(defaultSpotifyWeekOfMonth(year, m, now));
+    onWeekOfMonthChange(defaultSpotifyWeekOfMonth(year, m, snapshotDow, now));
     onDayChange(clampSpotifyPeriodChartDay(year, m, day, now));
   };
 
   const handleKindChange = (next: SpotifyPeriodChartKind) => {
     onKindChange(next);
+    const m = clampSpotifyPeriodChartMonth(year, month, next, snapshotDow, now);
+    if (m !== month) onMonthChange(m);
     if (next === 'weekly') {
-      onWeekOfMonthChange(clampSpotifyWeekOfMonth(year, month, weekOfMonth, now));
+      onWeekOfMonthChange(
+        clampSpotifyWeekOfMonth(year, m, weekOfMonth, snapshotDow, now),
+      );
     } else if (next === 'daily') {
-      onDayChange(clampSpotifyPeriodChartDay(year, month, day, now));
+      onDayChange(clampSpotifyPeriodChartDay(year, m, day, now));
     }
   };
 
@@ -186,74 +193,62 @@ export function NrmSpotifyPeriodChartFilters({
         })}
       </ScrollView>
 
-      {kind === 'yearly' ? (
-        <Text style={[styles.hint, { color: bodyColor }]}>
-          연간 = 12개월 월간(주간 합산) 스트림 합계. 첫 로딩에 시간이 걸릴 수 있습니다.
-        </Text>
-      ) : null}
-      {kind === 'monthly' ? (
-        <Text style={[styles.hint, { color: bodyColor }]}>
-          월간 = 해당 월의 주간 차트(금요일 기준)를 합산합니다.
-        </Text>
-      ) : null}
-      {kind === 'weekly' ? (
-        <Text style={[styles.hint, { color: bodyColor }]}>
-          주간 = 선택한 주의 금요일 차트 1회만 조회합니다.
-        </Text>
-      ) : null}
-
-      <View style={styles.filterRow}>
+      <View style={styles.dateRow}>
         <NrmPeriodChartDropdown
-          label="연도"
+          flex
+          label="연"
           value={year}
           options={yearOptions}
           onChange={handleYearChange}
           isDark={isDark}
           titleColor={titleColor}
           bodyColor={bodyColor}
-          boxWidth={108}
         />
         {showMonth ? (
           <NrmPeriodChartDropdown
+            flex
             label="월"
             value={month}
-            options={monthOptions}
+            options={
+              monthOptions.length > 0 ? monthOptions : [{ value: 1, label: '1월' }]
+            }
             onChange={handleMonthChange}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            boxWidth={84}
           />
         ) : null}
         {showWeek ? (
           <NrmPeriodChartDropdown
+            flex
             label="주"
             value={weekOfMonth}
-            options={weekOptions.length > 0 ? weekOptions : [{ value: 1, label: '1주' }]}
+            options={
+              weekOptions.length > 0 ? weekOptions : [{ value: 1, label: '1주' }]
+            }
             onChange={onWeekOfMonthChange}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            boxWidth={72}
           />
         ) : null}
         {showDay ? (
           <NrmPeriodChartDropdown
+            flex
             label="일"
             value={day}
-            options={dayOptions}
+            options={
+              dayOptions.length > 0 ? dayOptions : [{ value: 1, label: '1일' }]
+            }
             onChange={onDayChange}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            boxWidth={84}
           />
         ) : null}
-        <View style={styles.regionGroup}>
-          {renderRegionChip('kr', 'Korea')}
-          {renderRegionChip('global', 'Global')}
-        </View>
       </View>
+
+      <View style={styles.regionRow}>{renderRegionChip('kr', 'Korea')}{renderRegionChip('global', 'Global')}</View>
     </View>
   );
 }
@@ -273,22 +268,19 @@ const styles = StyleSheet.create({
   },
   tabChipPressed: { opacity: 0.9 },
   tabLabel: { fontSize: nrmTokens.font.caption },
-  hint: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 18,
-    marginBottom: nrmTokens.space.sm,
-  },
-  filterRow: {
+  /** 연·월·(일|주) — 줄바꿈 없이 한 줄 */
+  dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: nrmTokens.space.sm,
+    flexWrap: 'nowrap',
+    gap: nrmTokens.space.xxs,
+    width: '100%',
   },
-  regionGroup: {
+  regionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: nrmTokens.space.xs,
-    flexShrink: 0,
+    marginTop: nrmTokens.space.sm,
   },
   regionChip: {
     paddingHorizontal: nrmTokens.space.md,

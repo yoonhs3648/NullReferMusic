@@ -195,6 +195,7 @@ public class LastfmSearchService {
       tracks.add(
           new LastfmAlbumTrackDto(
               track.path("name").asText(""),
+              track.path("mbid").asText(""),
               track.path("@attr").path("rank").asInt(rank),
               track.path("duration").asInt(0)));
       rank++;
@@ -231,48 +232,59 @@ public class LastfmSearchService {
           new LastfmTrackSearchHit(
               node.path("name").asText(""),
               node.path("artist").asText(""),
+              node.path("mbid").asText(""),
               node.path("url").asText(""),
               pickImage(node.path("image"))));
     }
     return new LastfmTrackSearchResult(List.copyOf(hits));
   }
 
-  public LastfmTrackDetailResult fetchTrackDetail(String apiKey, String artist, String track) {
+  public LastfmTrackDetailResult fetchTrackDetail(
+      String apiKey, String artist, String track, String trackMbid) {
     String artistName = requireName(artist);
     String trackName = requireName(track);
-    JsonNode infoRoot =
-        lastfmGet(
-            baseBuilder(apiKey)
-                .queryParam("method", "track.getInfo")
-                .queryParam("artist", artistName)
-                .queryParam("track", trackName));
+    UriComponentsBuilder infoBuilder =
+        baseBuilder(apiKey).queryParam("method", "track.getInfo");
+    if (trackMbid != null && !trackMbid.isBlank()) {
+      infoBuilder.queryParam("mbid", trackMbid.trim());
+    } else {
+      infoBuilder.queryParam("artist", artistName).queryParam("track", trackName);
+    }
+    JsonNode infoRoot = lastfmGet(infoBuilder);
     JsonNode trackNode = infoRoot.path("track");
+    String resolvedArtist = trackNode.path("artist").path("name").asText(artistName);
+    String resolvedTrack = trackNode.path("name").asText(trackName);
 
     JsonNode similarRoot =
         lastfmGet(
             baseBuilder(apiKey)
                 .queryParam("method", "track.getSimilar")
-                .queryParam("artist", artistName)
-                .queryParam("track", trackName)
+                .queryParam("artist", resolvedArtist)
+                .queryParam("track", resolvedTrack)
                 .queryParam("limit", 12));
     JsonNode tagsRoot =
         lastfmGet(
             baseBuilder(apiKey)
                 .queryParam("method", "track.getTopTags")
-                .queryParam("artist", artistName)
-                .queryParam("track", trackName)
+                .queryParam("artist", resolvedArtist)
+                .queryParam("track", resolvedTrack)
                 .queryParam("limit", 15));
 
+    JsonNode albumNode = trackNode.path("album");
     LastfmTrackInfoDto info =
         new LastfmTrackInfoDto(
             trackNode.path("name").asText(trackName),
-            trackNode.path("artist").path("name").asText(artistName),
-            trackNode.path("album").path("title").asText(""),
+            resolvedArtist,
+            trackNode.path("mbid").asText(""),
+            albumNode.path("title").asText(""),
+            albumNode.path("mbid").asText(""),
+            trackNode.path("artist").path("mbid").asText(""),
             trackNode.path("url").asText(""),
-            pickImage(trackNode.path("album").path("image")),
+            pickImage(albumNode.path("image")),
             trackNode.path("duration").asInt(0),
             parseLong(trackNode.path("playcount").asText("0")),
-            parseLong(trackNode.path("listeners").asText("0")));
+            parseLong(trackNode.path("listeners").asText("0")),
+            albumNode.path("@attr").path("position").asText(""));
 
     List<LastfmTrackSummaryDto> similar = new ArrayList<>();
     int rank = 1;
@@ -300,6 +312,7 @@ public class LastfmSearchService {
     return new LastfmTrackSummaryDto(
         node.path("name").asText(""),
         artists,
+        node.path("mbid").asText(""),
         node.path("url").asText(""),
         pickImage(node.path("image")),
         rank,

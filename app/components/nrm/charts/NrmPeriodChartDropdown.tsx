@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -27,66 +27,11 @@ type Props = {
   isDark: boolean;
   titleColor: string;
   bodyColor: string;
+  /** 고정 너비 (flex 미사용 시) */
   boxWidth?: number;
+  /** true면 한 줄 dateRow 안에서 균등 분할 (모바일 전체 너비) */
+  flex?: boolean;
 };
-
-function WebSelect({
-  label,
-  value,
-  options,
-  onChange,
-  isDark,
-  boxWidth,
-}: {
-  label: string;
-  value: number;
-  options: PeriodChartDropdownOption[];
-  onChange: (value: number) => void;
-  isDark: boolean;
-  boxWidth: number;
-}) {
-  const border = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
-  const bg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
-  const color = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
-  const optionBg = isDark ? '#1c1c1e' : '#ffffff';
-  const optionColor = isDark ? '#f5f5f7' : '#111111';
-
-  return (
-    <select
-      className="nrm-period-select"
-      value={String(value)}
-      onChange={(e) => onChange(Number(e.target.value))}
-      aria-label={label}
-      style={{
-        width: boxWidth,
-        height: PERIOD_FILTER_CONTROL_HEIGHT,
-        paddingLeft: 10,
-        paddingRight: 26,
-        borderRadius: nrmTokens.radius.sm,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: border,
-        backgroundColor: bg,
-        color,
-        fontSize: 14,
-        fontWeight: '500',
-        cursor: 'pointer',
-        appearance: 'none',
-        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'right 8px center',
-      }}>
-      {options.map((o) => (
-        <option
-          key={o.value}
-          value={o.value}
-          style={{ backgroundColor: optionBg, color: optionColor }}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 export function NrmPeriodChartDropdown({
   label,
@@ -97,12 +42,27 @@ export function NrmPeriodChartDropdown({
   titleColor,
   bodyColor,
   boxWidth = 104,
+  flex = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
 
   const border = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const bg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+  const optionRowBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const webScrollbarStyle = useMemo(
+    () =>
+      Platform.OS === 'web'
+        ? ({
+            colorScheme: isDark ? 'dark' : 'light',
+            scrollbarWidth: 'thin',
+            scrollbarColor: isDark
+              ? 'rgba(170,170,170,0.55) rgba(255,255,255,0.08)'
+              : 'rgba(120,120,120,0.6) rgba(0,0,0,0.08)',
+          } as const)
+        : null,
+    [isDark],
+  );
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -114,86 +74,80 @@ export function NrmPeriodChartDropdown({
     [close, onChange],
   );
 
-  const control =
-    Platform.OS === 'web' ? (
-      <WebSelect
-        label={label}
-        value={value}
-        options={options}
-        onChange={onChange}
-        isDark={isDark}
-        boxWidth={boxWidth}
-      />
-    ) : (
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={({ pressed }) => [
-          styles.trigger,
-          { width: boxWidth, borderColor: border, backgroundColor: bg },
-          pressed && styles.triggerPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`${label} ${selected?.label ?? value}`}>
-        <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
-          {selected?.label ?? String(value)}
-        </Text>
-        <Ionicons name="chevron-down" size={16} color={bodyColor} />
-      </Pressable>
-    );
+  const control = (
+    <Pressable
+      onPress={() => setOpen(true)}
+      style={({ pressed }) => [
+        styles.trigger,
+        flex ? styles.triggerFlex : { width: boxWidth },
+        { borderColor: border, backgroundColor: bg },
+        pressed && styles.triggerPressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} ${selected?.label ?? value}`}>
+      <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
+        {selected?.label ?? String(value)}
+      </Text>
+      <Ionicons name="chevron-down" size={16} color={bodyColor} />
+    </Pressable>
+  );
 
   return (
-    <View style={styles.inlineRow}>
+    <View style={[styles.inlineRow, flex && styles.inlineRowFlex]}>
       <Text style={[styles.inlineLabel, { color: bodyColor }]}>{label}</Text>
       {control}
-      {Platform.OS !== 'web' ? (
-        <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
-          <Pressable style={styles.modalScrim} onPress={close}>
-            <View
-              style={[
-                styles.sheet,
-                {
-                  backgroundColor: isDark
-                    ? nrmTokens.color.surfaceTile1
-                    : nrmTokens.color.canvas,
-                  borderColor: border,
-                },
-              ]}>
-              <Text style={[styles.sheetTitle, { color: titleColor }]}>{label}</Text>
-              <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-                {options.map((o) => {
-                  const active = o.value === value;
-                  return (
-                    <Pressable
-                      key={o.value}
-                      onPress={() => pick(o.value)}
-                      style={({ pressed }) => [
-                        styles.optionRow,
-                        active && styles.optionRowActive,
-                        pressed && styles.optionRowPressed,
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        <Pressable style={styles.modalScrim} onPress={close}>
+          <View
+            style={[
+              styles.sheet,
+              {
+                backgroundColor: isDark
+                  ? nrmTokens.color.surfaceTile1
+                  : nrmTokens.color.canvas,
+                borderColor: border,
+              },
+            ]}>
+            <Text style={[styles.sheetTitle, { color: titleColor }]}>
+              {label.length === 1 ? `${label} 선택` : label}
+            </Text>
+            <ScrollView
+              style={[styles.sheetScroll, webScrollbarStyle as object]}
+              keyboardShouldPersistTaps="handled">
+              {options.map((o) => {
+                const active = o.value === value;
+                return (
+                  <Pressable
+                    key={o.value}
+                    onPress={() => pick(o.value)}
+                    style={({ pressed }) => [
+                      styles.optionRow,
+                      { borderBottomColor: optionRowBorder },
+                      active && styles.optionRowActive,
+                      pressed && styles.optionRowPressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.optionText,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                        active && styles.optionTextActive,
                       ]}>
-                      <Text
-                        style={[
-                          styles.optionText,
-                          { color: active ? nrmTokens.color.primary : titleColor },
-                          active && styles.optionTextActive,
-                        ]}>
-                        {o.label}
-                      </Text>
-                      {active ? (
-                        <Ionicons
-                          name="checkmark"
-                          size={20}
-                          color={nrmTokens.color.primary}
-                        />
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </Pressable>
-        </Modal>
-      ) : null}
+                      {o.label}
+                    </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark"
+                        size={20}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -202,13 +156,19 @@ const styles = StyleSheet.create({
   inlineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: nrmTokens.space.xs,
+    gap: nrmTokens.space.xxs,
     flexShrink: 0,
+  },
+  inlineRowFlex: {
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
   },
   inlineLabel: {
     fontSize: nrmTokens.font.caption,
     fontWeight: '600',
-    minWidth: 28,
+    minWidth: 18,
+    textAlign: 'center',
   },
   trigger: {
     flexDirection: 'row',
@@ -219,6 +179,10 @@ const styles = StyleSheet.create({
     borderRadius: nrmTokens.radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
     gap: 4,
+  },
+  triggerFlex: {
+    flex: 1,
+    minWidth: 0,
   },
   triggerPressed: { opacity: 0.9 },
   triggerText: {
@@ -251,6 +215,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: nrmTokens.space.md,
     paddingHorizontal: nrmTokens.space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   optionRowActive: {
     backgroundColor: 'rgba(0, 102, 204, 0.1)',
