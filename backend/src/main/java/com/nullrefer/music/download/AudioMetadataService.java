@@ -15,9 +15,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,8 +33,12 @@ public class AudioMetadataService {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final String AUTO_WHISPER_LYRICS_PREFIX = "__AUTO_FROM_WHISPER__:";
   private static final String LEGACY_AUTO_SUBTITLE_PREFIX = "__AUTO_FROM_SUBTITLE__:";
-  private static final int MAX_EMBED_LYRICS_CHARS = 100000;
-
+  private static final ExecutorService POST_PROCESS_EXECUTOR =
+      Executors.newFixedThreadPool(2, r -> {
+        Thread t = new Thread(r, "nrm-post-process");
+        t.setDaemon(true);
+        return t;
+      });
   private final NrmPaths paths;
   private final WhisperLyricsService whisperLyricsService;
 
@@ -39,24 +47,83 @@ public class AudioMetadataService {
     this.whisperLyricsService = whisperLyricsService;
   }
 
+  /** 2단계 + 3단계 병렬 실행. Whisper 실패해도 ffmpeg 결과는 유지 */
   public ApplyMetadataResult applyToJobFile(String jobId, AudioMetadataRequest req) {
+    if (!isAutoWhisperLyrics(trim(req.lyrics))) {
+      return applyFfmpegMetadataToJobFile(jobId, req);
+    }
+    return applyPostProcessToJobFileParallel(jobId, req);
+  }
+
+  /**
+   * ffmpeg 메타·커버(2단계)와 Whisper LRC(3단계)를 병렬 실행.
+   * Whisper는 작업 파일 복사본으로 전사해 ffmpeg의 in-place 교체와 충돌하지 않습니다.
+   */
+  public ApplyMetadataResult applyPostProcessToJobFileParallel(
+      String jobId, AudioMetadataRequest req) {
+    log.info("[post-process] PARALLEL START jobId={}", jobId);
+    CompletableFuture<ApplyMetadataResult> ffmpegFuture =
+        CompletableFuture.supplyAsync(
+            () -> applyFfmpegMetadataToJobFile(jobId, req), POST_PROCESS_EXECUTOR);
+    CompletableFuture<ApplyMetadataResult> whisperFuture =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                return applyWhisperLyricsToJobFile(jobId, req);
+              } catch (Exception e) {
+                log.warn("[post-process] whisper FAIL jobId={} error={}", jobId, e.getMessage());
+                return new ApplyMetadataResult(true, false, false, "", "", false);
+              }
+            },
+            POST_PROCESS_EXECUTOR);
+    ApplyMetadataResult ffmpeg = ffmpegFuture.join();
+    ApplyMetadataResult whisper = whisperFuture.join();
+    log.info(
+        "[post-process] PARALLEL DONE jobId={} ffmpegOk={} whisperEmbedded={} lrcSidecar={}",
+        jobId,
+        true,
+        whisper.lyricsEmbedded(),
+        whisper.lyricsSidecarWritten());
+    return new ApplyMetadataResult(
+        whisper.lyricsRequested(),
+        whisper.lyricsEmbedded(),
+        whisper.lyricsTranslationFailed(),
+        whisper.whisperModelFile(),
+        whisper.whisperModelMissing(),
+        whisper.lyricsSidecarWritten() || ffmpeg.lyricsSidecarWritten(),
+        whisper.lrcText());
+  }
+
+  /** 2단계: ffmpeg 메타·커버만 (Whisper sentinel 무시) */
+  public ApplyMetadataResult applyFfmpegMetadataToJobFile(String jobId, AudioMetadataRequest req) {
     if (jobId == null || !jobId.matches("[a-zA-Z0-9_-]+")) {
       throw new IllegalArgumentException("invalid_job_id");
     }
+    log.info(
+        "[ffmpeg] API REQUEST jobId={} artist={} title={} album={} genre={} cover={}",
+        jobId,
+        trim(req.artist),
+        trim(req.title),
+        trim(req.album),
+        trim(req.genre),
+        coverUrlSummary(req.coverUrl));
     Path file = resolveJobFile(jobId);
     if (file == null) {
+      log.warn("[ffmpeg] REJECT job_file_not_found jobId={}", jobId);
       throw new IllegalStateException("job_file_not_found");
     }
+    log.info(
+        "[ffmpeg] INPUT jobId={} file={} size={}",
+        jobId,
+        file.getFileName(),
+        safeFileSize(file));
     if (!Files.isRegularFile(paths.getFfmpegExe())) {
-      log.warn("ffmpeg missing; skip metadata for job {}", jobId);
-      return new ApplyMetadataResult(false, false, false);
+      log.warn("[ffmpeg] REJECT missing_binary jobId={} path={}", jobId, paths.getFfmpegExe());
+      return new ApplyMetadataResult(false, false, false, "", "", false);
     }
 
     String ext = fileExtension(file);
-    boolean lyricsRequested = "mp3".equals(ext) && !trim(req.lyrics).isEmpty();
-    LyricsResolveResult lyricsResolved = resolveLyricsForRequest(file, req, ext);
-    String effectiveLyrics = lyricsResolved.lyrics();
-    boolean hasTextTags = hasAnyTextTag(req, effectiveLyrics);
+    boolean hasTextTags = hasAnyTextTag(req);
     Path coverFile = null;
     try {
       String coverUrl = trim(req.coverUrl);
@@ -64,7 +131,8 @@ public class AudioMetadataService {
         coverFile = downloadCover(coverUrl, file.getParent());
       }
       if (!hasTextTags && coverFile == null) {
-        return new ApplyMetadataResult(lyricsRequested, false, lyricsResolved.translationFailed());
+        log.info("[ffmpeg] SKIP jobId={} (no tags, no cover)", jobId);
+        return metadataResult(false, false, emptyLyricsResolve(), false);
       }
 
       boolean mp4 = isMp4Family(ext);
@@ -83,37 +151,19 @@ public class AudioMetadataService {
                   new FfmpegStrategy(true, false),
                   new FfmpegStrategy(false, true));
 
-      Exception firstError = null;
-      Exception secondError = null;
-      boolean withLyrics = !trim(effectiveLyrics).isEmpty();
-
-      Exception tryWithRequested = runMetadataStrategies(
-          file, out, coverFile, ext, req, effectiveLyrics, strategies);
-      if (tryWithRequested == null) {
-        return new ApplyMetadataResult(lyricsRequested, withLyrics, lyricsResolved.translationFailed());
-      }
-      firstError = tryWithRequested;
-
-      if (lyricsRequested) {
-        log.warn(
-            "lyrics embed failed for job {}, retrying without lyrics: {}",
+      Exception err =
+          runMetadataStrategies(jobId, file, out, coverFile, ext, req, strategies);
+      if (err == null) {
+        log.info(
+            "[ffmpeg] API OK jobId={} file={} size={}",
             jobId,
-            firstError.getMessage());
-        Exception retryWithoutLyrics =
-            runMetadataStrategies(file, out, coverFile, ext, req, "", strategies);
-        if (retryWithoutLyrics == null) {
-          return new ApplyMetadataResult(true, false, lyricsResolved.translationFailed());
-        }
-        secondError = retryWithoutLyrics;
+            file.getFileName(),
+            safeFileSize(file));
+        return metadataResult(false, false, emptyLyricsResolve(), false);
       }
-
-      throw secondError != null
-          ? secondError
-          : firstError != null
-              ? firstError
-              : new IllegalStateException("metadata_apply_failed");
+      throw err;
     } catch (Exception e) {
-      log.warn("metadata apply failed for job {}: {}", jobId, e.getMessage());
+      log.warn("[ffmpeg] API FAIL jobId={} error={}", jobId, e.getMessage(), e);
       throw new IllegalStateException("metadata_apply_failed");
     } finally {
       if (coverFile != null) {
@@ -126,20 +176,89 @@ public class AudioMetadataService {
     }
   }
 
+  /** 3단계: Whisper 전사 → LRC 사이드카만 (ffmpeg 가사 태그 없음) */
+  public ApplyMetadataResult applyWhisperLyricsToJobFile(String jobId, AudioMetadataRequest req) {
+    if (jobId == null || !jobId.matches("[a-zA-Z0-9_-]+")) {
+      throw new IllegalArgumentException("invalid_job_id");
+    }
+    log.info(
+        "[whisper] API REQUEST jobId={} lyricsMode={} modelPref={} deeplKey={}",
+        jobId,
+        trim(req.lyrics),
+        trim(req.whisperModelPreference),
+        trim(req.deeplApiKey).isEmpty() ? "no" : "yes");
+    if (!isAutoWhisperLyrics(trim(req.lyrics))) {
+      log.info("[whisper] SKIP jobId={} (not auto whisper lyrics)", jobId);
+      return new ApplyMetadataResult(false, false, false, "", "", false);
+    }
+    Path file = resolveJobFile(jobId);
+    if (file == null) {
+      log.warn("[whisper] REJECT job_file_not_found jobId={}", jobId);
+      throw new IllegalStateException("job_file_not_found");
+    }
+    log.info(
+        "[whisper] INPUT jobId={} file={} size={}",
+        jobId,
+        file.getFileName(),
+        safeFileSize(file));
+    String ext = fileExtension(file);
+    if (!"mp3".equals(ext)) {
+      return new ApplyMetadataResult(true, false, false, "", "", false);
+    }
+    LyricsResolveResult resolved = resolveWhisperLyricsForRequest(jobId, file, req);
+    boolean lrcOk = resolved.sidecarWritten() && !trim(resolved.lyrics()).isEmpty();
+    if (!lrcOk) {
+      log.warn(
+          "[whisper] API FAIL jobId={} lrc_missing model={} missing={}",
+          jobId,
+          resolved.whisperModelFile(),
+          resolved.whisperModelMissing());
+    } else {
+      log.info(
+          "[whisper] API OK jobId={} lrcChars={} sidecar=true",
+          jobId,
+          resolved.lyrics().length());
+    }
+    return whisperMetadataResult(resolved, lrcOk);
+  }
+
+  private static LyricsResolveResult emptyLyricsResolve() {
+    return new LyricsResolveResult("", false, false, "", "");
+  }
+
+  private static ApplyMetadataResult whisperMetadataResult(
+      LyricsResolveResult resolved, boolean embedded) {
+    return new ApplyMetadataResult(
+        true,
+        embedded,
+        resolved.translationFailed(),
+        resolved.whisperModelFile(),
+        resolved.whisperModelMissing(),
+        resolved.sidecarWritten(),
+        embedded ? resolved.lyrics() : "");
+  }
+
   private Exception runMetadataStrategies(
+      String jobId,
       Path file,
       Path out,
       Path coverFile,
       String ext,
       AudioMetadataRequest req,
-      String effectiveLyrics,
       List<FfmpegStrategy> strategies) {
     Exception lastError = null;
     for (FfmpegStrategy s : strategies) {
       if (s.withCover && coverFile == null) continue;
       try {
+        String ctx =
+            "jobId="
+                + jobId
+                + " strategy=cover:"
+                + s.withCover
+                + ",copy:"
+                + s.audioCopy;
         runFfmpegMetadata(
-            file, out, s.withCover ? coverFile : null, ext, s.audioCopy, req, effectiveLyrics);
+            ctx, file, out, s.withCover ? coverFile : null, ext, s.audioCopy, req);
         if (!Files.isRegularFile(out) || Files.size(out) <= 0) {
           throw new IllegalStateException("metadata_output_empty");
         }
@@ -161,13 +280,13 @@ public class AudioMetadataService {
   private record FfmpegStrategy(boolean withCover, boolean audioCopy) {}
 
   private void runFfmpegMetadata(
+      String context,
       Path inFile,
       Path outFile,
       Path coverFile,
       String ext,
       boolean audioCopy,
-      AudioMetadataRequest req,
-      String effectiveLyrics)
+      AudioMetadataRequest req)
       throws Exception {
 
     boolean mp4 = isMp4Family(ext);
@@ -223,14 +342,13 @@ public class AudioMetadataService {
       cmd.add("3");
     }
 
-    appendAllTags(cmd, mp4, req, effectiveLyrics);
+    appendAllTags(cmd, mp4, req);
 
     cmd.add(outFile.toString());
-    runFfmpeg(cmd);
+    runFfmpeg(cmd, context + " op=metadata");
   }
 
-  private static void appendAllTags(
-      List<String> cmd, boolean mp4, AudioMetadataRequest req, String effectiveLyrics) {
+  private static void appendAllTags(List<String> cmd, boolean mp4, AudioMetadataRequest req) {
     String artist = trim(req.artist);
     String title = trim(req.title);
     String albumArtist = trim(req.albumArtist);
@@ -247,9 +365,6 @@ public class AudioMetadataService {
     appendTagPair(cmd, mp4, "track", trim(req.trackNumber));
     appendTagPair(cmd, mp4, "disc", trim(req.discNumber));
     appendTagPair(cmd, mp4, "composer", trim(req.composer));
-    if (!mp4) {
-      appendTagPair(cmd, mp4, "lyrics", trim(effectiveLyrics));
-    }
     appendTagPair(cmd, mp4, "bpm", trim(req.bpm));
     appendTagPair(cmd, mp4, "copyright", trim(req.copyright));
     appendTagPair(cmd, mp4, "website", trim(req.website));
@@ -257,7 +372,7 @@ public class AudioMetadataService {
     appendTagPair(cmd, mp4, "remixer", trim(req.remixer));
   }
 
-  private static boolean hasAnyTextTag(AudioMetadataRequest req, String effectiveLyrics) {
+  private static boolean hasAnyTextTag(AudioMetadataRequest req) {
     return !trim(req.artist).isEmpty()
         || !trim(req.title).isEmpty()
         || !trim(req.album).isEmpty()
@@ -265,7 +380,6 @@ public class AudioMetadataService {
         || !trim(req.releaseDate).isEmpty()
         || !trim(req.albumArtist).isEmpty()
         || !trim(req.trackNumber).isEmpty()
-        || !trim(effectiveLyrics).isEmpty()
         || !trim(req.website).isEmpty();
   }
 
@@ -274,16 +388,18 @@ public class AudioMetadataService {
     return v.startsWith(AUTO_WHISPER_LYRICS_PREFIX) || v.startsWith(LEGACY_AUTO_SUBTITLE_PREFIX);
   }
 
-  private LyricsResolveResult resolveLyricsForRequest(Path audioFile, AudioMetadataRequest req, String ext) {
+  private LyricsResolveResult resolveWhisperLyricsForRequest(
+      String jobId, Path audioFile, AudioMetadataRequest req) {
+    String ext = fileExtension(audioFile);
     if (!"mp3".equals(ext)) {
-      return new LyricsResolveResult("", false);
+      return new LyricsResolveResult("", false, false, "", "");
     }
     String raw = trim(req.lyrics);
     if (raw.isEmpty()) {
-      return new LyricsResolveResult("", false);
+      return new LyricsResolveResult("", false, false, "", "");
     }
     if (!isAutoWhisperLyrics(raw)) {
-      return new LyricsResolveResult(raw, false);
+      return new LyricsResolveResult("", false, false, "", "");
     }
     String modeValue =
         raw.startsWith(AUTO_WHISPER_LYRICS_PREFIX)
@@ -291,46 +407,65 @@ public class AudioMetadataService {
             : raw.substring(LEGACY_AUTO_SUBTITLE_PREFIX.length());
     LyricsWhisperMode mode = LyricsWhisperMode.from(modeValue);
     if (mode == null) {
-      return new LyricsResolveResult("", false);
+      return new LyricsResolveResult("", false, false, "", "");
     }
     boolean translation = mode == LyricsWhisperMode.TRANSLATION;
-    String fromWhisper =
-        whisperLyricsService.transcribeToLrc(audioFile, translation, trim(req.whisperModelPreference));
-    if (fromWhisper.isEmpty()) {
-      return new LyricsResolveResult("", false);
-    }
-    boolean translationFailed = false;
-    String finalLrc = fromWhisper;
-    if (translation) {
-      String translated = translateLrcWithDeepL(fromWhisper, trim(req.deeplApiKey));
-      if (translated.isEmpty()) {
-        translationFailed = true;
-      } else {
-        finalLrc = translated;
+    Path whisperInput = audioFile;
+    Path whisperCopy = null;
+    try {
+      try {
+        whisperCopy = audioFile.resolveSibling("nrm_" + jobId + ".whisper-src.mp3");
+        Files.copy(audioFile, whisperCopy, StandardCopyOption.REPLACE_EXISTING);
+        whisperInput = whisperCopy;
+      } catch (Exception e) {
+        log.warn(
+            "[whisper] RESOLVE copy_for_parallel FAIL jobId={} fallback=in_place error={}",
+            jobId,
+            e.getMessage());
+      }
+      log.info(
+          "[whisper] RESOLVE audio={} mode={} translation={} modelPref={}",
+          whisperInput.getFileName(),
+          modeValue,
+          translation,
+          trim(req.whisperModelPreference));
+      WhisperLyricsService.TranscribeResult whisper =
+          whisperLyricsService.transcribeToLrcDetailed(
+              whisperInput, translation, trim(req.whisperModelPreference));
+      String fromWhisper = whisper.lrc();
+      if (fromWhisper.isEmpty()) {
+        log.warn(
+            "[whisper] RESOLVE empty_lrc model={} missing={}",
+            whisper.modelFile(),
+            whisper.missingPreference());
+        return new LyricsResolveResult(
+            "", false, false, whisper.modelFile(), whisper.missingPreference());
+      }
+      boolean translationFailed = false;
+      String finalLrc = fromWhisper;
+      if (translation) {
+        log.info("[whisper] DEEPL REQUEST lrcChars={}", fromWhisper.length());
+        String translated = translateLrcWithDeepL(fromWhisper, trim(req.deeplApiKey));
+        if (translated.isEmpty()) {
+          translationFailed = true;
+          log.warn("[whisper] DEEPL FAIL (empty result)");
+        } else {
+          finalLrc = translated;
+          log.info("[whisper] DEEPL OK lrcChars={}", finalLrc.length());
+        }
+      }
+      writeLrcSidecar(jobId, audioFile, finalLrc);
+      return new LyricsResolveResult(
+          finalLrc, translationFailed, true, whisper.modelFile(), whisper.missingPreference());
+    } finally {
+      if (whisperCopy != null) {
+        try {
+          Files.deleteIfExists(whisperCopy);
+        } catch (Exception ignored) {
+          // ignore
+        }
       }
     }
-    writeLrcSidecar(audioFile, finalLrc);
-    if (finalLrc.length() > MAX_EMBED_LYRICS_CHARS) {
-      String truncated = truncateForEmbed(finalLrc, MAX_EMBED_LYRICS_CHARS);
-      log.info(
-          "lyrics too long for id3 embed: {} chars, truncating to {} chars",
-          finalLrc.length(),
-          truncated.length());
-      return new LyricsResolveResult(truncated, translationFailed);
-    }
-    return new LyricsResolveResult(finalLrc, translationFailed);
-  }
-
-  private static String truncateForEmbed(String text, int maxChars) {
-    if (text == null) return "";
-    String t = text.trim();
-    if (t.length() <= maxChars) return t;
-    int cut = Math.min(maxChars, t.length());
-    int newline = t.lastIndexOf('\n', cut);
-    if (newline > maxChars * 0.6) {
-      cut = newline;
-    }
-    return t.substring(0, Math.max(1, cut)).trim();
   }
 
   private String translateLrcWithDeepL(String lrc, String apiKey) {
@@ -389,16 +524,43 @@ public class AudioMetadataService {
     }
   }
 
-  private void writeLrcSidecar(Path audioFile, String lrcText) {
+  private void writeLrcSidecar(String jobId, Path audioFile, String lrcText) {
     try {
-      String name = audioFile.getFileName().toString();
-      int dot = name.lastIndexOf('.');
-      String stem = dot > 0 ? name.substring(0, dot) : name;
-      Path out = audioFile.resolveSibling(stem + ".lrc");
+      Path parent = audioFile.getParent();
+      if (parent == null) {
+        throw new IllegalStateException("no_parent_dir");
+      }
+      Path out = parent.resolve("nrm_" + jobId + ".lrc").normalize();
       Files.writeString(out, lrcText + "\n", StandardCharsets.UTF_8);
+      log.info(
+          "[whisper] LRC_SIDECAR written path={} chars={}",
+          out.getFileName(),
+          lrcText.length());
     } catch (Exception e) {
-      log.warn("lrc sidecar write failed for {}: {}", audioFile, e.getMessage());
+      log.warn("[whisper] LRC_SIDECAR FAIL jobId={} error={}", jobId, e.getMessage());
     }
+  }
+
+  /** jobId 기준 LRC 사이드카 (다운로드 API·클라이언트 저장용) */
+  public Path resolveJobLrcFile(String jobId) {
+    if (jobId == null || !jobId.matches("[a-zA-Z0-9_-]+")) {
+      return null;
+    }
+    Path baseDir = paths.getOutputDir().toAbsolutePath().normalize();
+    Path explicit = baseDir.resolve("nrm_" + jobId + ".lrc").normalize();
+    if (Files.isRegularFile(explicit) && explicit.startsWith(baseDir)) {
+      return explicit;
+    }
+    Path audio = resolveJobFile(jobId);
+    if (audio == null) return null;
+    String name = audio.getFileName().toString();
+    int dot = name.lastIndexOf('.');
+    String stem = dot > 0 ? name.substring(0, dot) : name;
+    Path sibling = audio.resolveSibling(stem + ".lrc").normalize();
+    if (Files.isRegularFile(sibling) && sibling.startsWith(baseDir)) {
+      return sibling;
+    }
+    return null;
   }
 
   private static String coverVideoCodec(Path coverFile, boolean mp4Family) {
@@ -540,32 +702,85 @@ public class AudioMetadataService {
     return out;
   }
 
-  private void runFfmpeg(List<String> cmd) throws Exception {
-    Charset cs = Charset.defaultCharset();
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    pb.redirectErrorStream(true);
-    Process p = pb.start();
-    StringBuilder out = new StringBuilder();
-    try (BufferedReader r =
-        new BufferedReader(new InputStreamReader(p.getInputStream(), cs))) {
-      String line;
-      while ((line = r.readLine()) != null) out.append(line).append('\n');
-    }
-    int code = p.waitFor();
-    if (code != 0) {
-      throw new IllegalStateException(
-          "ffmpeg_exit_" + code + ": " + tail(out.toString(), 2000));
+  private void runFfmpeg(List<String> cmd, String context) throws Exception {
+    NrmProcessLogger.ProcessRunResult run =
+        NrmProcessLogger.run(
+            log, NrmProcessLogger.Tool.FFMPEG, context, cmd, null, true, 0);
+    if (!run.success()) {
+      String detail = NrmProcessLogger.tail(run.stdout(), 2000);
+      throw new IllegalStateException("ffmpeg_exit_" + run.exitCode() + ": " + detail);
     }
   }
 
-  private static String tail(String s, int max) {
-    if (s == null || s.length() <= max) return s == null ? "" : s;
-    return s.substring(s.length() - max);
+  private static String coverUrlSummary(String coverUrl) {
+    String v = trim(coverUrl);
+    if (v.isEmpty()) return "no";
+    if (v.startsWith("data:")) return "data-url(len=" + v.length() + ")";
+    if (v.length() > 80) return v.substring(0, 80) + "…";
+    return v;
   }
 
-  public record ApplyMetadataResult(boolean lyricsRequested, boolean lyricsEmbedded, boolean lyricsTranslationFailed) {}
+  private static long safeFileSize(Path file) {
+    try {
+      return Files.size(file);
+    } catch (Exception e) {
+      return -1;
+    }
+  }
 
-  private record LyricsResolveResult(String lyrics, boolean translationFailed) {}
+  public record ApplyMetadataResult(
+      boolean lyricsRequested,
+      boolean lyricsEmbedded,
+      boolean lyricsTranslationFailed,
+      String whisperModelFile,
+      String whisperModelMissing,
+      boolean lyricsSidecarWritten,
+      String lrcText) {
+
+    public ApplyMetadataResult(
+        boolean lyricsRequested,
+        boolean lyricsEmbedded,
+        boolean lyricsTranslationFailed,
+        String whisperModelFile,
+        String whisperModelMissing,
+        boolean lyricsSidecarWritten) {
+      this(
+          lyricsRequested,
+          lyricsEmbedded,
+          lyricsTranslationFailed,
+          whisperModelFile,
+          whisperModelMissing,
+          lyricsSidecarWritten,
+          "");
+    }
+  }
+
+  private record LyricsResolveResult(
+      String lyrics,
+      boolean translationFailed,
+      boolean sidecarWritten,
+      String whisperModelFile,
+      String whisperModelMissing) {}
+
+  private static ApplyMetadataResult metadataResult(
+      boolean lyricsRequested,
+      boolean lyricsEmbedded,
+      LyricsResolveResult lyricsResolved,
+      boolean lyricsSidecarWritten) {
+    boolean sidecar = lyricsSidecarWritten || lyricsResolved.sidecarWritten();
+    String lrc =
+        sidecar && lyricsEmbedded && !lyricsResolved.lyrics().isEmpty()
+            ? lyricsResolved.lyrics()
+            : "";
+    return new ApplyMetadataResult(
+        lyricsRequested,
+        lyricsEmbedded,
+        lyricsResolved.translationFailed(),
+        lyricsResolved.whisperModelFile(),
+        lyricsResolved.whisperModelMissing(),
+        sidecar,
+        lrc);
+  }
 
   private enum LyricsWhisperMode {
     CONFIGURED,

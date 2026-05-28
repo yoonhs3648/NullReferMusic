@@ -327,9 +327,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     putTag("track", tags.trackNumber)
     putTag("disc", tags.discNumber)
     putTag("composer", tags.composer)
-    if (!mp4Family) {
-      putTag("lyrics", tags.lyrics)
-    }
     putTag("bpm", tags.bpm)
     putTag("copyright", tags.copyright)
     putTag("website", tags.website)

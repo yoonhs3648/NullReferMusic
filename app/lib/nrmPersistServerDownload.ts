@@ -6,7 +6,7 @@ export const NRM_DOWNLOAD_DIR_NAME = 'NullReferenceMusic';
 export async function persistAudioAfterServerJob(
   apiBase: string,
   jobId: string,
-  options: { fileName: string },
+  options: { fileName: string; lrcText?: string },
 ): Promise<{ savedLabel: string }> {
   if (Platform.OS === 'web') {
     const { persistAudioAfterServerJob: impl } = await import(

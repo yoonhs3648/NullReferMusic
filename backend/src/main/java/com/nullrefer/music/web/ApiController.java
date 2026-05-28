@@ -15,6 +15,7 @@ import com.nullrefer.music.config.NrmPaths;
 import com.nullrefer.music.download.AudioMetadataRequest;
 import com.nullrefer.music.download.AudioMetadataService;
 import com.nullrefer.music.download.WhisperLyricsService;
+import com.nullrefer.music.download.WhisperModelStatusService;
 import com.nullrefer.music.download.YtDlpDownloadService;
 import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
 import com.nullrefer.music.config.NrmSettings;
@@ -30,6 +31,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -44,12 +47,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class ApiController {
 
+  private static final Logger log = LoggerFactory.getLogger(ApiController.class);
   private static final Pattern SAFE_JOB_ID = Pattern.compile("^[a-z0-9]{4,48}$");
   private static final ObjectMapper JSON = new ObjectMapper();
 
   private final YtDlpDownloadService downloadService;
   private final AudioMetadataService audioMetadataService;
   private final WhisperLyricsService whisperLyricsService;
+  private final WhisperModelStatusService whisperModelStatusService;
   private final YoutubeSearchService youtubeSearchService;
   private final SpotifyChartService spotifyChartService;
   private final LastfmChartService lastfmChartService;
@@ -64,6 +69,7 @@ public class ApiController {
       YtDlpDownloadService downloadService,
       AudioMetadataService audioMetadataService,
       WhisperLyricsService whisperLyricsService,
+      WhisperModelStatusService whisperModelStatusService,
       YoutubeSearchService youtubeSearchService,
       SpotifyChartService spotifyChartService,
       LastfmChartService lastfmChartService,
@@ -76,6 +82,7 @@ public class ApiController {
     this.downloadService = downloadService;
     this.audioMetadataService = audioMetadataService;
     this.whisperLyricsService = whisperLyricsService;
+    this.whisperModelStatusService = whisperModelStatusService;
     this.youtubeSearchService = youtubeSearchService;
     this.spotifyChartService = spotifyChartService;
     this.lastfmChartService = lastfmChartService;
@@ -91,7 +98,29 @@ public class ApiController {
   public Map<String, Object> health() {
     java.util.Map<String, Object> body = new java.util.LinkedHashMap<>(downloadService.health());
     body.put("whisper", whisperLyricsService.isAvailable());
+    body.put("whisperModels", whisperModelStatusService.listStatuses());
     return body;
+  }
+
+  /** PC `library/whisper` 설치·다운로드 모델 (웹·5종 카탈로그) */
+  @GetMapping("/api/whisper/models")
+  public List<Map<String, Object>> whisperModelStatuses() {
+    return whisperModelStatusService.listStatuses();
+  }
+
+  @PostMapping("/api/whisper/models/{modelId}/download")
+  public ResponseEntity<Map<String, Object>> startWhisperModelDownload(
+      @org.springframework.web.bind.annotation.PathVariable("modelId") String modelId) {
+    String id = modelId != null ? modelId.trim() : "";
+    if (!id.startsWith("whisper:")) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_model_id"));
+    }
+    try {
+      whisperModelStatusService.startDownload(id);
+      return ResponseEntity.ok(Map.of("started", true, "modelId", id));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    }
   }
 
   @GetMapping("/api/meta")
@@ -774,9 +803,20 @@ public class ApiController {
     boolean noPlaylist = req.noPlaylist == null || req.noPlaylist;
     String format = req.audioFormat != null ? req.audioFormat : "mp3";
     int quality = req.audioQuality != null ? req.audioQuality : 0;
+    log.info(
+        "[api] POST /api/download url={} noPlaylist={} format={} quality={} hasMetadata={}",
+        req.url,
+        noPlaylist,
+        format,
+        quality,
+        req.hasMetadata());
     DownloadOutcome out =
         downloadService.download(
             req.url != null ? req.url : "", noPlaylist, format, quality);
+    log.info(
+        "[api] POST /api/download RESPONSE status={} body={}",
+        out.status().value(),
+        out.body());
     if (out.status().is2xxSuccessful() && req.hasMetadata()) {
       Object jobId = out.body().get("jobId");
       if (jobId instanceof String job && SAFE_JOB_ID.matcher(job).matches()) {
@@ -797,22 +837,93 @@ public class ApiController {
     return ResponseEntity.status(out.status()).body(out.body());
   }
 
+  private static java.util.Map<String, Object> metadataResultBody(
+      AudioMetadataService.ApplyMetadataResult result) {
+    java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+    body.put("ok", true);
+    body.put("lyricsRequested", result.lyricsRequested());
+    body.put("lyricsEmbedded", result.lyricsEmbedded());
+    body.put("lyricsTranslationFailed", result.lyricsTranslationFailed());
+    body.put("lyricsSidecarWritten", result.lyricsSidecarWritten());
+    if (!result.whisperModelFile().isEmpty()) {
+      body.put("whisperModelFile", result.whisperModelFile());
+    }
+    if (!result.whisperModelMissing().isEmpty()) {
+      body.put("whisperModelMissing", result.whisperModelMissing());
+    }
+    if (!result.lrcText().isEmpty()) {
+      body.put("lrcText", result.lrcText());
+    }
+    return body;
+  }
+
   @PostMapping("/api/download/metadata")
   public ResponseEntity<Map<String, Object>> applyDownloadMetadata(
       @RequestBody AudioMetadataRequest req) {
     if (req.jobId == null || !SAFE_JOB_ID.matcher(req.jobId).matches()) {
       return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
     }
+    log.info(
+        "[api] POST /api/download/metadata jobId={} artist={} title={}",
+        req.jobId,
+        req.artist,
+        req.title);
     try {
-      var result = audioMetadataService.applyToJobFile(req.jobId, req);
-      return ResponseEntity.ok(
-          Map.of(
-              "ok", true,
-              "lyricsRequested", result.lyricsRequested(),
-              "lyricsEmbedded", result.lyricsEmbedded(),
-              "lyricsTranslationFailed", result.lyricsTranslationFailed()));
+      var result = audioMetadataService.applyFfmpegMetadataToJobFile(req.jobId, req);
+      java.util.Map<String, Object> body = metadataResultBody(result);
+      log.info("[api] POST /api/download/metadata OK jobId={} body={}", req.jobId, body);
+      return ResponseEntity.ok(body);
     } catch (IllegalStateException e) {
       String code = e.getMessage() != null ? e.getMessage() : "metadata_apply_failed";
+      log.warn("[api] POST /api/download/metadata FAIL jobId={} error={}", req.jobId, code);
+      return ResponseEntity.status(500).body(Map.of("error", code));
+    }
+  }
+
+  /** ffmpeg 메타·커버 + Whisper LRC — 서버에서 병렬 실행 */
+  @PostMapping("/api/download/post-process")
+  public ResponseEntity<Map<String, Object>> postProcessDownloadJob(
+      @RequestBody AudioMetadataRequest req) {
+    if (req.jobId == null || !SAFE_JOB_ID.matcher(req.jobId).matches()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
+    }
+    log.info(
+        "[api] POST /api/download/post-process jobId={} artist={} title={} lyrics={}",
+        req.jobId,
+        req.artist,
+        req.title,
+        req.lyrics);
+    try {
+      var result = audioMetadataService.applyPostProcessToJobFileParallel(req.jobId, req);
+      java.util.Map<String, Object> body = metadataResultBody(result);
+      log.info("[api] POST /api/download/post-process OK jobId={} body={}", req.jobId, body);
+      return ResponseEntity.ok(body);
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "post_process_failed";
+      log.warn("[api] POST /api/download/post-process FAIL jobId={} error={}", req.jobId, code);
+      return ResponseEntity.status(500).body(Map.of("error", code));
+    }
+  }
+
+  @PostMapping("/api/download/whisper-lyrics")
+  public ResponseEntity<Map<String, Object>> applyDownloadWhisperLyrics(
+      @RequestBody AudioMetadataRequest req) {
+    if (req.jobId == null || !SAFE_JOB_ID.matcher(req.jobId).matches()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
+    }
+    log.info(
+        "[api] POST /api/download/whisper-lyrics jobId={} lyrics={} modelPref={}",
+        req.jobId,
+        req.lyrics,
+        req.whisperModelPreference);
+    try {
+      var result = audioMetadataService.applyWhisperLyricsToJobFile(req.jobId, req);
+      java.util.Map<String, Object> body = metadataResultBody(result);
+      log.info("[api] POST /api/download/whisper-lyrics OK jobId={} body={}", req.jobId, body);
+      return ResponseEntity.ok(body);
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "whisper_lyrics_failed";
+      log.warn("[api] POST /api/download/whisper-lyrics FAIL jobId={} error={}", req.jobId, code);
       return ResponseEntity.status(500).body(Map.of("error", code));
     }
   }
@@ -846,6 +957,7 @@ public class ApiController {
   public ResponseEntity<Map<String, Object>> cleanupDownloadArtifacts(
       @RequestBody CleanupRequest req) {
     String jobId = req != null ? req.jobId : null;
+    log.info("[api] POST /api/download/cleanup jobId={}", jobId);
     if (jobId == null || !SAFE_JOB_ID.matcher(jobId).matches()) {
       return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
     }
@@ -864,6 +976,7 @@ public class ApiController {
     } catch (Exception ignored) {
       // best effort
     }
+    log.info("[api] POST /api/download/cleanup OK jobId={} deleted={}", jobId, deleted);
     return ResponseEntity.ok(Map.of("ok", true, "deleted", deleted));
   }
 
@@ -872,9 +985,8 @@ public class ApiController {
     if (jobId == null || !SAFE_JOB_ID.matcher(jobId).matches()) {
       return ResponseEntity.badRequest().build();
     }
-    Path baseDir = paths.getOutputDir().toAbsolutePath().normalize();
-    Path lrc = baseDir.resolve("nrm_" + jobId + ".lrc").normalize();
-    if (!lrc.startsWith(baseDir) || !Files.isRegularFile(lrc)) {
+    Path lrc = audioMetadataService.resolveJobLrcFile(jobId);
+    if (lrc == null) {
       return ResponseEntity.notFound().build();
     }
     Resource resource = new FileSystemResource(lrc);

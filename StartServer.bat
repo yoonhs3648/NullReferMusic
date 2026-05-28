@@ -32,8 +32,10 @@ if not exist "%ROOT%\app\node_modules" (
   )
   popd
 )
-if not exist "%ROOT%\app\node_modules\expo-notifications" (
-  echo [app] expo-notifications missing — syncing npm dependencies ...
+if not exist "%ROOT%\app\node_modules\expo-notifications" set "NRM_NPM_SYNC=1"
+if not exist "%ROOT%\app\node_modules\expo-image-picker" set "NRM_NPM_SYNC=1"
+if defined NRM_NPM_SYNC (
+  echo [app] npm dependencies out of date — running npm install ...
   pushd "%ROOT%\app"
   call npm install
   if errorlevel 1 (
@@ -45,6 +47,11 @@ if not exist "%ROOT%\app\node_modules\expo-notifications" (
   popd
   if not exist "%ROOT%\app\node_modules\expo-notifications" (
     echo ERROR: expo-notifications still missing after npm install
+    timeout /t 8 /nobreak >nul
+    exit /b 1
+  )
+  if not exist "%ROOT%\app\node_modules\expo-image-picker" (
+    echo ERROR: expo-image-picker still missing after npm install
     timeout /t 8 /nobreak >nul
     exit /b 1
   )
@@ -71,6 +78,13 @@ for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr /R /C:":8787 .*LISTENI
   set "LISTEN_PID=%%P"
   goto :BACKEND_UP
 )
+if not exist "%ROOT%\library\whisper\ggml-large-v3-turbo-q5_0.bin" (
+  if not exist "%ROOT%\library\whisper\ggml-large-v3-turbo.bin" (
+    echo [WARN] PC Whisper: large-v3-turbo model not in library\whisper
+    echo        Only tiny/base may be present — lyrics quality will be poor.
+    echo        Run: powershell -File "%ROOT%\scripts\Setup-Whisper.ps1" -WhisperProfile large-v3-turbo-q5_0
+  )
+)
 echo [1/2] Starting Spring Boot on 0.0.0.0:8787 ...
 start "NRM Backend" cmd /k "cd /d "%ROOT%\backend" && mvnw.cmd spring-boot:run"
 timeout /t 6 /nobreak >nul
@@ -82,7 +96,7 @@ echo [1/2] Backend already on :8787 ^(PID !LISTEN_PID!^).
 :START_EXPO
 if defined LAN_IP (
   echo.
-  echo ========== Expo Go (phone) ==========
+  echo ========== Expo Go ^(phone^) ==========
   echo exp://!LAN_IP!:8081
   echo Open Expo Go app - Scan QR code (Metro window)
   echo Do NOT use: http://!LAN_IP!:8081

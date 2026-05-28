@@ -30,7 +30,8 @@ import {
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
 import {
-  finalizeAudioDownload,
+  cleanupAudioExtraction,
+  finalizeAudioDownloadParallel,
   startAudioExtraction,
   type AudioExtractionResult,
 } from '@/lib/nrmDownloadPipeline';
@@ -46,7 +47,10 @@ import { resolveDownloadFileName } from '@/lib/nrmResolveDownloadPayload';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
-import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
+import {
+  openDownloadSettingsPanel,
+  openLyricsEmbedSettingsPanel,
+} from '@/lib/nrmDownloadNavEvents';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
 import { NrmDownloadMetadataUnavailableOverlay } from '@/components/nrm/NrmDownloadMetadataUnavailableOverlay';
@@ -162,7 +166,6 @@ export function NrmYoutubeHome({
     Omit<NrmAudioFileMetadata, 'artist' | 'title'> | undefined
   >(undefined);
   const [dlMetaBusy, setDlMetaBusy] = useState<Record<string, boolean>>({});
-  const [dlConfirmBusy, setDlConfirmBusy] = useState<Record<string, boolean>>({});
   const [metadataUnavailableOpen, setMetadataUnavailableOpen] = useState(false);
   const [lyricsEmbedUnavailableOpen, setLyricsEmbedUnavailableOpen] = useState(false);
   const [lyricsTranslationFailedOpen, setLyricsTranslationFailedOpen] = useState(false);
@@ -258,11 +261,19 @@ export function NrmYoutubeHome({
       delete n[videoId];
       return n;
     });
-    setDlConfirmBusy((m) => {
-      const n = { ...m };
-      delete n[videoId];
-      return n;
-    });
+  }, []);
+
+  const cleanupSessionExtraction = useCallback(async (videoId: string) => {
+    const session = downloadSessionsRef.current.get(videoId);
+    if (!session) return;
+    try {
+      const extraction = await session.extractionPromise;
+      if (session.aborted) {
+        await cleanupAudioExtraction(extraction);
+      }
+    } catch {
+      /* 추출 실패·중단 시 임시 파일 없을 수 있음 */
+    }
   }, []);
 
   const abortMetadataPrefetch = useCallback(
@@ -270,7 +281,7 @@ export function NrmYoutubeHome({
       const session = downloadSessionsRef.current.get(videoId);
       if (session) {
         session.aborted = true;
-        void session.extractionPromise.finally(() => clearDownloadSession(videoId));
+        void cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId));
       } else {
         clearDownloadSession(videoId);
       }
@@ -278,7 +289,7 @@ export function NrmYoutubeHome({
         setMetadataUnavailableOpen(true);
       }
     },
-    [clearDownloadSession],
+    [cleanupSessionExtraction, clearDownloadSession],
   );
 
   const handleMetadataPrefetchError = useCallback(
@@ -379,15 +390,18 @@ export function NrmYoutubeHome({
       try {
         const extraction = await session.extractionPromise;
         if (session.aborted) return;
-        const out = await finalizeAudioDownload(extraction, fileName, metadata);
+        const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata, {
+          onAudioPersisted:
+            Platform.OS !== 'web'
+              ? () => {
+                  nrmNotifyDownloadFinished(videoId, displayLabel, true);
+                }
+              : undefined,
+        });
         if (out.lyricsWarning === 'not_embedded') {
           setLyricsEmbedUnavailableOpen(true);
         } else if (out.lyricsWarning === 'translation_failed') {
           setLyricsTranslationFailedOpen(true);
-        }
-
-        if (Platform.OS !== 'web') {
-          nrmNotifyDownloadFinished(videoId, displayLabel, true);
         }
       } catch (e) {
         if (Platform.OS !== 'web') {
@@ -408,7 +422,7 @@ export function NrmYoutubeHome({
   );
 
   const handleModalConfirm = useCallback(
-    async (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
+    (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
       let session = downloadSessionsRef.current.get(videoId);
       if (!session) {
         session = {
@@ -416,28 +430,24 @@ export function NrmYoutubeHome({
           aborted: false,
           extractionError: null,
         };
+        downloadSessionsRef.current.set(videoId, session);
       }
       if (session.aborted) return;
 
-      setDlConfirmBusy((m) => ({ ...m, [videoId]: true }));
-      try {
-        await completeDownloadAfterExtraction(
-          videoId,
-          fileName,
-          normalizeDownloadMetadata(metadata),
-        );
-        setDownloadModalItem(null);
-        setDownloadModalInitialFields(undefined);
-      } catch {
-        /* notifyUser inside completeDownloadAfterExtraction */
-      } finally {
-        setDlConfirmBusy((m) => {
-          const n = { ...m };
-          delete n[videoId];
-          return n;
-        });
-        clearDownloadSession(videoId);
-      }
+      const normalized = normalizeDownloadMetadata(metadata);
+
+      setDownloadModalItem(null);
+      setDownloadModalInitialFields(undefined);
+
+      void (async () => {
+        try {
+          await completeDownloadAfterExtraction(videoId, fileName, normalized);
+        } catch {
+          /* notifyUser / overlays inside completeDownloadAfterExtraction */
+        } finally {
+          clearDownloadSession(videoId);
+        }
+      })();
     },
     [beginParallelExtraction, clearDownloadSession, completeDownloadAfterExtraction],
   );
@@ -450,13 +460,11 @@ export function NrmYoutubeHome({
     const session = downloadSessionsRef.current.get(videoId);
     if (session) {
       session.aborted = true;
-      void session.extractionPromise.finally(() => {
-        clearDownloadSession(videoId);
-      });
+      void cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId));
       return;
     }
     clearDownloadSession(videoId);
-  }, [clearDownloadSession, downloadModalItem?.videoId]);
+  }, [cleanupSessionExtraction, clearDownloadSession, downloadModalItem?.videoId]);
 
   const startDownloadForItem = useCallback(
     async (item: YoutubeSearchItem) => {
@@ -470,6 +478,8 @@ export function NrmYoutubeHome({
 
       dlInFlight.current.add(videoId);
       setDlBusy((m) => ({ ...m, [videoId]: true }));
+
+      /** yt-dlp 추출과 API 메타데이터 조회를 동시에 시작 */
       beginParallelExtraction(videoId);
 
       if (Platform.OS !== 'web') {
@@ -512,9 +522,13 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
+          const session = downloadSessionsRef.current.get(videoId);
+          if (!session || session.aborted || session.extractionError) return;
           await completeDownloadAfterExtraction(videoId, fileName, metadata);
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
+          const session = downloadSessionsRef.current.get(videoId);
+          if (!session || session.aborted || session.extractionError) return;
           await completeDownloadAfterExtraction(videoId, fileName, undefined);
         }
       } catch (e) {
@@ -576,10 +590,11 @@ export function NrmYoutubeHome({
         initialTitle={chartDownloadTrack?.title}
         initialMetadataFields={downloadModalInitialFields}
         busy={!!(downloadModalItem && dlMetaBusy[downloadModalItem.videoId])}
-        confirmBusy={
-          !!(downloadModalItem && dlConfirmBusy[downloadModalItem.videoId])
-        }
         onClose={handleModalClose}
+        onOpenWhisperModelSettings={() => {
+          handleModalClose();
+          openLyricsEmbedSettingsPanel();
+        }}
         onConfirm={(videoId, fileName, metadata) => {
           void handleModalConfirm(videoId, fileName, metadata);
         }}

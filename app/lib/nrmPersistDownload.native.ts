@@ -19,6 +19,7 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { hasEmbeddableAudioMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
+import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
   loadStoredSafGrant,
@@ -256,6 +257,70 @@ async function androidSaveToNrmFolder(
 
 // ── 공개 API ──────────────────────────────────────────────────────────────────
 
+/** LRC 텍스트만 다운로드 경로에 저장 (오디오와 병렬 가능) */
+export async function persistLrcTextToDestination(
+  safeName: string,
+  lrcText: string,
+): Promise<void> {
+  const trimmed = lrcText.trim();
+  if (!trimmed) return;
+
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
+
+  const tempLrcUri = `${cacheRoot}nrm-lrc-out-${Date.now()}.lrc`;
+  await FileSystem.writeAsStringAsync(tempLrcUri, `${trimmed}\n`);
+  try {
+    if (Platform.OS === 'ios') {
+      const docRoot = FileSystem.documentDirectory;
+      if (!docRoot) return;
+      const folderUri = `${docRoot}${NRM_FOLDER}/`;
+      await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
+      const fileName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
+      const lrcDest = `${folderUri}${fileName}`;
+      await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
+      await FileSystem.copyAsync({ from: tempLrcUri, to: lrcDest });
+      return;
+    }
+
+    if ((Platform.Version as number) < 29) {
+      try {
+        const dirUri = `file:///storage/emulated/0/${NRM_FOLDER}`;
+        await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true });
+        const fileName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
+        const lrcDest = `${dirUri}/${fileName}`;
+        await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
+        await FileSystem.copyAsync({ from: tempLrcUri, to: lrcDest });
+        return;
+      } catch {
+        /* SAF */
+      }
+    }
+
+    let dirUri = await loadStoredSafGrant();
+    if (!dirUri) {
+      await showSafFolderGuide();
+      dirUri = await requestNewSafDirUri(NRM_FOLDER);
+    }
+    if (!dirUri) return;
+
+    const lrcName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
+    const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, 'text/plain');
+    await writeToBinarySafUri(tempLrcUri, lrcDest);
+  } finally {
+    await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});
+  }
+}
+
+/** ffmpeg 적용된 임시 오디오를 다운로드 경로에 저장 (LRC는 별도 선저장 가능) */
+export async function persistAudioToDestination(
+  tempUri: string,
+  safeName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string }> {
+  return persistLocalAudioFile(tempUri, safeName, metadata);
+}
+
 /** 기기에서 생성한 임시 오디오 파일을 저장 위치로 이동합니다. */
 export async function persistLocalAudioFile(
   tempUri: string,
@@ -263,9 +328,13 @@ export async function persistLocalAudioFile(
   metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string }> {
   const storedName = storageFileName(safeName);
-  const sidecarLrcUri = tempUri.replace(/\.[^.]+$/, '.lrc');
-  const sidecarExists = await FileSystem.getInfoAsync(sidecarLrcUri).then((x) => !!x.exists).catch(() => false);
-  const lrcUri = sidecarExists ? sidecarLrcUri : undefined;
+  const tempPath = tempUri.replace(/^file:\/\//, '');
+  const lrcUri = siblingLrcUri(tempUri);
+  const lrcPath = siblingLrcFsPath(tempUri);
+  const sidecarExists =
+    lrcPath !== tempPath &&
+    (await FileSystem.getInfoAsync(lrcUri).then((x) => !!x.exists).catch(() => false));
+  const lrcToPersist = sidecarExists ? lrcUri : undefined;
   try {
     if (Platform.OS === 'ios') {
       const docRoot = FileSystem.documentDirectory;
@@ -276,10 +345,10 @@ export async function persistLocalAudioFile(
       const destUri = `${folderUri}${storedName}`;
       await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
       await FileSystem.copyAsync({ from: tempUri, to: destUri });
-      if (lrcUri) {
+      if (lrcToPersist) {
         const lrcDest = `${folderUri}${storedName.replace(/\.[^.]+$/, '.lrc')}`;
         await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
-        await FileSystem.copyAsync({ from: lrcUri, to: lrcDest });
+        await FileSystem.copyAsync({ from: lrcToPersist, to: lrcDest });
       }
 
       return {
@@ -287,10 +356,10 @@ export async function persistLocalAudioFile(
       };
     }
 
-    return await androidSaveToNrmFolder(tempUri, safeName, lrcUri, metadata);
+    return await androidSaveToNrmFolder(tempUri, safeName, lrcToPersist, metadata);
   } finally {
-    if (lrcUri) {
-      await FileSystem.deleteAsync(lrcUri, { idempotent: true }).catch(() => {});
+    if (lrcToPersist) {
+      await FileSystem.deleteAsync(lrcToPersist, { idempotent: true }).catch(() => {});
     }
     await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
   }
@@ -299,7 +368,7 @@ export async function persistLocalAudioFile(
 export async function persistAudioAfterServerJob(
   apiBase: string,
   jobId: string,
-  options: { fileName: string },
+  options: { fileName: string; lrcText?: string },
 ): Promise<{ savedLabel: string }> {
   const base = normalizedApiBase(apiBase);
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
@@ -319,10 +388,17 @@ export async function persistAudioAfterServerJob(
   if (dl.status < 200 || dl.status >= 300) {
     throw new Error(`파일을 받지 못했습니다 (HTTP ${dl.status})`);
   }
-  const lrc = await FileSystem.downloadAsync(lrcUrl, tempLrcUri).catch(() => null);
-  if (!lrc || lrc.status < 200 || lrc.status >= 300) {
-    await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});
+
+  const lrcFromApi = options.lrcText?.trim();
+  if (lrcFromApi) {
+    await FileSystem.writeAsStringAsync(tempLrcUri, `${lrcFromApi}\n`);
+  } else {
+    const lrc = await FileSystem.downloadAsync(lrcUrl, tempLrcUri).catch(() => null);
+    if (!lrc || lrc.status < 200 || lrc.status >= 300) {
+      await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});
+    }
   }
+
   const out = await persistLocalAudioFile(tempUri, safeName);
   await fetch(`${base}/api/download/cleanup`, {
     method: 'POST',

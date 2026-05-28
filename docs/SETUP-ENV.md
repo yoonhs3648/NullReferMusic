@@ -14,7 +14,8 @@
    ```
 5. **Whisper 바이너리/모델 준비** (형상관리 제외 파일):
    ```powershell
-   pwsh -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -Model tiny-q5_1
+   powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -WhisperProfile tiny-q5_1
+   # 릴리스 APK 가사(Whisper)까지: `-AndroidAssets` (모델 복사; `whisper-cli` arm64는 `library/whisper/README.md` Android 절)
    ```
 6. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
 7. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)

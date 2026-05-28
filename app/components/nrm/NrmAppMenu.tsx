@@ -29,7 +29,10 @@ import { NrmMenuSearchPanels } from '@/components/nrm/search/NrmMenuSearchPanels
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
-import { registerOpenDownloadSettingsListener } from '@/lib/nrmDownloadNavEvents';
+import {
+  registerOpenDownloadSettingsListener,
+  registerOpenLyricsEmbedSettingsListener,
+} from '@/lib/nrmDownloadNavEvents';
 import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagSettingsPanel';
 import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWeeklySnapshotSettingsPanel';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
@@ -257,12 +260,25 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX.setValue(0);
   }, [translateX]);
 
+  const openLyricsEmbedSettingsFromGlobal = useCallback(() => {
+    setOpen(true);
+    setPanel('downloadLyricsEmbedSettings');
+    translateX.setValue(0);
+  }, [translateX]);
+
   useEffect(() => {
     registerOpenDownloadSettingsListener(openDownloadSettingsFromGlobal);
     return () => {
       registerOpenDownloadSettingsListener(null);
     };
   }, [openDownloadSettingsFromGlobal]);
+
+  useEffect(() => {
+    registerOpenLyricsEmbedSettingsListener(openLyricsEmbedSettingsFromGlobal);
+    return () => {
+      registerOpenLyricsEmbedSettingsListener(null);
+    };
+  }, [openLyricsEmbedSettingsFromGlobal]);
 
   const closeMenuAndNavigateSpotifyChartsOfficial = useCallback(async () => {
     const ok = await ensureSpotifyOfficialChartAccess(openSpotifyTokenSettings);

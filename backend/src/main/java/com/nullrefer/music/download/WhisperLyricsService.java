@@ -1,86 +1,116 @@
 package com.nullrefer.music.download;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.config.NrmPaths;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-/** 로컬 whisper.cpp (large-v3)로 오디오 → LRC */
+/** 로컬 whisper.cpp 전사 → LRC */
 @Service
 public class WhisperLyricsService {
 
   private static final Logger log = LoggerFactory.getLogger(WhisperLyricsService.class);
-  private static final ObjectMapper JSON = new ObjectMapper();
-  private static final long PROCESS_TIMEOUT_SEC = 90;
+  /** whisper-cli 전사 대기 (초). 긴 곡·base 모델은 5분을 넘길 수 있음 */
+  private static final long PROCESS_TIMEOUT_SEC = 1800;
 
   private final NrmPaths paths;
+  private final WhisperModelStatusService modelStatusService;
 
-  public WhisperLyricsService(NrmPaths paths) {
+  public WhisperLyricsService(NrmPaths paths, WhisperModelStatusService modelStatusService) {
     this.paths = paths;
+    this.modelStatusService = modelStatusService;
   }
 
   public boolean isAvailable() {
-    return Files.isRegularFile(paths.getWhisperCli()) && Files.isRegularFile(paths.getWhisperModel());
+    return Files.isRegularFile(paths.getWhisperCli()) && modelStatusService.hasAnyModelInstalled();
   }
 
-  /**
-   * 언어 자동 감지 전사. 번역 모드도 현재는 동일 경로(추후 분기 가능).
-   */
-  public String transcribeToLrc(Path audioFile, boolean translationMode, String modelPreference) {
-    if (!isAvailable()) {
-      log.warn("whisper not configured (cli or model missing)");
-      return "";
+  public record TranscribeResult(String lrc, String modelFile, String missingPreference) {
+    public static TranscribeResult empty(String missingPreference) {
+      return new TranscribeResult("", "", missingPreference);
+    }
+  }
+
+  public TranscribeResult transcribeToLrcDetailed(
+      Path audioFile, boolean translationMode, String modelPreference) {
+    String pref = trim(modelPreference);
+    String ctx =
+        "audio="
+            + (audioFile != null ? audioFile.getFileName() : "null")
+            + " translation="
+            + translationMode
+            + " modelPref="
+            + (pref.isEmpty() ? "whisper:large-v3-turbo" : pref);
+
+    log.info("[whisper] API REQUEST {}", ctx);
+
+    if (!Files.isRegularFile(paths.getWhisperCli())) {
+      log.warn("[whisper] REJECT cli_missing path={}", paths.getWhisperCli());
+      return TranscribeResult.empty(pref);
     }
     if (audioFile == null || !Files.isRegularFile(audioFile)) {
-      return "";
+      log.warn("[whisper] REJECT audio_missing {}", ctx);
+      return TranscribeResult.empty(pref);
+    }
+    Path modelPath = modelStatusService.resolveInstalledModel(modelPreference);
+    if (modelPath == null) {
+      log.warn(
+          "[whisper] REJECT model_not_installed pref={} (no fallback)",
+          pref.isEmpty() ? "whisper:large-v3-turbo" : pref);
+      return TranscribeResult.empty(pref.isEmpty() ? "whisper:large-v3-turbo" : pref);
     }
     Path workDir = audioFile.getParent();
     if (workDir == null) {
-      return "";
+      log.warn("[whisper] REJECT no_parent_dir {}", ctx);
+      return TranscribeResult.empty(pref);
     }
     Path wav = null;
     Path outPrefix = null;
     try {
       wav = workDir.resolve("nrm-whisper-" + System.currentTimeMillis() + ".wav");
-      convertTo16kMonoWav(audioFile, wav);
-      outPrefix =
-          workDir.resolve(
-              "nrm-whisper-out-" + System.currentTimeMillis());
-      runWhisper(wav, outPrefix, modelPreference);
-      String fromLrc = readIfExists(Path.of(outPrefix.toString() + ".lrc"));
-      if (!fromLrc.isEmpty()) {
-        return fromLrc;
-      }
-      String fromJson = segmentsJsonToLrc(Path.of(outPrefix.toString() + ".json"));
-      if (!fromJson.isEmpty()) return fromJson;
-      return segmentsJsonToLrc(Path.of(outPrefix.toString() + ".wav.json"));
+      log.info(
+          "[whisper] STEP wav_convert input={} output={} model={}",
+          audioFile.toAbsolutePath(),
+          wav.getFileName(),
+          modelPath.getFileName());
+      convertTo16kMonoWav(audioFile, wav, ctx);
+      outPrefix = workDir.resolve("nrm-whisper-out-" + System.currentTimeMillis());
+      log.info(
+          "[whisper] STEP transcribe wav={} outPrefix={} model={}",
+          wav.getFileName(),
+          outPrefix.getFileName(),
+          modelPath.getFileName());
+      runWhisper(wav, outPrefix, modelPath, ctx);
+      String lrc = normalizeWhisperLrc(readIfExists(Path.of(outPrefix.toString() + ".lrc")));
+      log.info(
+          "[whisper] API OK {} | lrcChars={} modelFile={}",
+          ctx,
+          lrc.length(),
+          modelPath.getFileName());
+      return new TranscribeResult(lrc, modelPath.getFileName().toString(), "");
     } catch (Exception e) {
-      log.warn("whisper transcribe failed for {}: {}", audioFile, e.getMessage());
-      return "";
+      log.warn("[whisper] API FAIL {} | error={}", ctx, e.getMessage(), e);
+      return TranscribeResult.empty(pref);
     } finally {
       deleteQuiet(wav);
       if (outPrefix != null) {
         deleteQuiet(Path.of(outPrefix.toString() + ".lrc"));
-        deleteQuiet(Path.of(outPrefix.toString() + ".json"));
-        deleteQuiet(Path.of(outPrefix.toString() + ".wav.json"));
         deleteQuiet(Path.of(outPrefix.toString() + ".txt"));
       }
     }
   }
 
-  private void convertTo16kMonoWav(Path inFile, Path wavOut) throws Exception {
+  /** @deprecated 호환 — 상세 결과는 {@link #transcribeToLrcDetailed} 사용 */
+  public String transcribeToLrc(Path audioFile, boolean translationMode, String modelPreference) {
+    return transcribeToLrcDetailed(audioFile, translationMode, modelPreference).lrc();
+  }
+
+  private void convertTo16kMonoWav(Path inFile, Path wavOut, String parentCtx) throws Exception {
     if (!Files.isRegularFile(paths.getFfmpegExe())) {
       throw new IllegalStateException("ffmpeg_missing");
     }
@@ -96,116 +126,36 @@ public class WhisperLyricsService {
     cmd.add("-c:a");
     cmd.add("pcm_s16le");
     cmd.add(wavOut.toString());
-    runProcess(cmd);
+    runProcess(NrmProcessLogger.Tool.WHISPER_FFMPEG, parentCtx + " step=wav", cmd);
   }
 
-  private void runWhisper(Path wavFile, Path outPrefix, String modelPreference) throws Exception {
-    Path modelPath = resolveModelPath(modelPreference);
+  private void runWhisper(Path wavFile, Path outPrefix, Path modelPath, String parentCtx)
+      throws Exception {
     List<String> cmd = new ArrayList<>();
+    int threads = Math.max(2, Runtime.getRuntime().availableProcessors());
     cmd.add(paths.getWhisperCli().toString());
     cmd.add("-m");
     cmd.add(modelPath.toString());
+    cmd.add("-l");
+    cmd.add("auto");
+    cmd.add("-t");
+    cmd.add(String.valueOf(threads));
     cmd.add("-f");
     cmd.add(wavFile.toString());
     cmd.add("-of");
     cmd.add(outPrefix.toString());
     cmd.add("--output-lrc");
-    cmd.add("--output-json");
     cmd.add("--no-prints");
-    runProcess(cmd);
+    runProcess(NrmProcessLogger.Tool.WHISPER, parentCtx + " step=transcribe", cmd);
   }
 
-  private Path resolveModelPath(String modelPreference) {
-    List<String> order = modelOrderForPreference(modelPreference);
-    Path dir = paths.getWhisperDir();
-    for (String modelName : order) {
-      Path candidate = dir.resolve(modelName);
-      if (Files.isRegularFile(candidate)) return candidate;
+  static String normalizeWhisperLrc(String lrc) {
+    String t = lrc == null ? "" : lrc.trim();
+    if (t.startsWith("[by:whisper.cpp]")) {
+      int nl = t.indexOf('\n');
+      t = nl >= 0 ? t.substring(nl + 1).trim() : "";
     }
-    return paths.getWhisperModel();
-  }
-
-  private static List<String> modelOrderForPreference(String modelPreference) {
-    String pref = trim(modelPreference);
-    String[] fast = {
-      "ggml-tiny-q5_1.bin",
-      "ggml-tiny.bin",
-      "ggml-base.en-q5_1.bin",
-      "ggml-base.en.bin",
-      "ggml-small-q5_1.bin",
-      "ggml-medium-q5_0.bin",
-      "ggml-large-v3-turbo-q5_0.bin",
-      "ggml-large-v3-turbo.bin",
-      "ggml-large-v3-q5_0.bin",
-      "ggml-large-v3.bin"
-    };
-    if (pref.startsWith("model:")) {
-      String one = pref.substring("model:".length()).trim();
-      if (!one.isEmpty()) {
-        List<String> out = new ArrayList<>();
-        out.add(one);
-        out.addAll(Arrays.asList(fast));
-        return out;
-      }
-    }
-    if ("profile:quality".equals(pref)) {
-      return List.of(
-          "ggml-large-v3.bin",
-          "ggml-large-v3-q5_0.bin",
-          "ggml-large-v3-turbo.bin",
-          "ggml-large-v3-turbo-q5_0.bin",
-          "ggml-medium-q5_0.bin",
-          "ggml-small-q5_1.bin",
-          "ggml-base.en.bin",
-          "ggml-base.en-q5_1.bin",
-          "ggml-tiny.bin",
-          "ggml-tiny-q5_1.bin");
-    }
-    if ("profile:balanced".equals(pref)) {
-      return List.of(
-          "ggml-medium-q5_0.bin",
-          "ggml-small-q5_1.bin",
-          "ggml-base.en.bin",
-          "ggml-base.en-q5_1.bin",
-          "ggml-large-v3-turbo-q5_0.bin",
-          "ggml-large-v3-turbo.bin",
-          "ggml-large-v3-q5_0.bin",
-          "ggml-large-v3.bin",
-          "ggml-tiny.bin",
-          "ggml-tiny-q5_1.bin");
-    }
-    return Arrays.asList(fast);
-  }
-
-  private static String segmentsJsonToLrc(Path jsonPath) throws Exception {
-    if (!Files.isRegularFile(jsonPath)) {
-      return "";
-    }
-    JsonNode root = JSON.readTree(Files.readString(jsonPath, StandardCharsets.UTF_8));
-    JsonNode segments = root.get("segments");
-    if (segments == null || !segments.isArray()) {
-      return "";
-    }
-    StringBuilder out = new StringBuilder();
-    for (JsonNode seg : segments) {
-      double start = seg.path("start").asDouble(-1);
-      String text = seg.path("text").asText("").trim();
-      if (start < 0 || text.isEmpty()) continue;
-      out.append('[').append(formatLrcTimestamp((long) Math.round(start * 1000))).append(']');
-      out.append(text).append('\n');
-    }
-    return out.toString().trim();
-  }
-
-  private static String formatLrcTimestamp(long startMs) {
-    long totalCs = Math.max(0, Math.round(startMs / 10.0));
-    long cs = totalCs % 100;
-    long totalSec = totalCs / 100;
-    long sec = totalSec % 60;
-    long min = (totalSec / 60) % 60;
-    long hour = totalSec / 3600;
-    long mm = min + hour * 60;
-    return String.format("%02d:%02d.%02d", mm, sec, cs);
+    return t;
   }
 
   private static String readIfExists(Path p) {
@@ -219,26 +169,16 @@ public class WhisperLyricsService {
     return "";
   }
 
-  private void runProcess(List<String> cmd) throws Exception {
-    Charset cs = Charset.defaultCharset();
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    pb.redirectErrorStream(true);
-    Process p = pb.start();
-    StringBuilder out = new StringBuilder();
-    try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), cs))) {
-      String line;
-      while ((line = r.readLine()) != null) {
-        out.append(line).append('\n');
+  private void runProcess(NrmProcessLogger.Tool tool, String context, List<String> cmd)
+      throws Exception {
+    NrmProcessLogger.ProcessRunResult run =
+        NrmProcessLogger.run(log, tool, context, cmd, null, true, PROCESS_TIMEOUT_SEC);
+    if (!run.success()) {
+      String detail = NrmProcessLogger.tail(run.stdout(), 1500);
+      if (detail.isEmpty()) {
+        detail = NrmProcessLogger.tail(run.stderr(), 1500);
       }
-    }
-    boolean finished = p.waitFor(PROCESS_TIMEOUT_SEC, TimeUnit.SECONDS);
-    if (!finished) {
-      p.destroyForcibly();
-      throw new IllegalStateException("process_timeout");
-    }
-    int code = p.exitValue();
-    if (code != 0) {
-      throw new IllegalStateException("process_exit_" + code + ": " + tail(out.toString(), 1500));
+      throw new IllegalStateException(tool.tag() + "_exit_" + run.exitCode() + ": " + detail);
     }
   }
 
@@ -249,11 +189,6 @@ public class WhisperLyricsService {
     } catch (Exception ignored) {
       // ignore
     }
-  }
-
-  private static String tail(String s, int max) {
-    if (s == null || s.length() <= max) return s == null ? "" : s;
-    return s.substring(s.length() - max);
   }
 
   private static String trim(String v) {

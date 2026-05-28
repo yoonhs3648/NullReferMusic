@@ -1,3 +1,5 @@
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+
 /** Whisper large-v3 로컬 전사로 생성하는 자동 가사 (yt-dlp 자막 미사용) */
 export const AUTO_WHISPER_LYRICS_PREFIX = '__AUTO_FROM_WHISPER__';
 
@@ -44,6 +46,19 @@ export function buildAutoWhisperLyricsSentinel(mode: NrmWhisperLyricsMode): stri
   return `${AUTO_WHISPER_LYRICS_PREFIX}:${mode}`;
 }
 
+/** ffmpeg 단계용: Whisper sentinel 제거, 모드만 분리 */
+export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
+  ffmpegMetadata: NrmAudioFileMetadata;
+  whisperMode: NrmWhisperLyricsMode | null;
+} {
+  const whisperMode = parseWhisperLyricsMode(meta.lyrics);
+  const ffmpegMetadata = { ...meta };
+  if (whisperMode) {
+    delete ffmpegMetadata.lyrics;
+  }
+  return { ffmpegMetadata, whisperMode };
+}
+
 export type WhisperSegment = {
   startMs: number;
   text: string;
@@ -72,6 +87,16 @@ export function formatLrcTimestamp(startMs: number): string {
   const ss = String(sec).padStart(2, '0');
   const cc = String(cs).padStart(2, '0');
   return `${mm}:${ss}.${cc}`;
+}
+
+/** whisper.cpp LRC 헤더 제거 */
+export function normalizeWhisperLrc(lrc: string): string {
+  let t = lrc.trim();
+  if (t.startsWith('[by:whisper.cpp]')) {
+    const nl = t.indexOf('\n');
+    t = nl >= 0 ? t.slice(nl + 1).trim() : '';
+  }
+  return t;
 }
 
 export function truncateLyricsForId3Embed(lrc: string): { embed: string; truncated: boolean } {

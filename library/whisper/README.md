@@ -7,7 +7,9 @@ yt-dlp 자막 대신 **다운로드된 오디오 파일**을 whisper.cpp로 전�
 저장소를 `pull`한 뒤 아래 명령으로 바이너리/모델을 자동으로 준비합니다.
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -Model tiny-q5_1
+powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -WhisperProfile tiny-q5_1
+# APK용 모델만 assets에 복사: -AndroidAssets 추가 (whisper-cli arm64는 별도 빌드)
+powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -WhisperProfile tiny-q5_1 -AndroidAssets
 ```
 
 - 기본 모델은 `tiny-q5_1` (속도 우선)
@@ -41,14 +43,12 @@ nrm.whisper-model=
 nrm.whisper-dir=
 ```
 
-## Android APK
+## Android APK (용량 최소화)
 
-`app/android/app/src/main/assets/whisper/` 에 동일 파일을 넣고 빌드합니다 (네트워크 다운로드 없음).
-앱은 아래 우선순위로 모델을 자동 선택합니다:
-`tiny-q5_1 -> tiny -> base.en-q5_1 -> base.en -> ... -> large-v3`
-
-- `whisper-cli` (arm64 바이너리, 실행 권한)
-- `ggml-tiny-q5_1.bin` (속도 우선 권장)
+- **APK assets**: `whisper-cli` (arm64) **만** 포함. `ggml-*.bin` 은 APK에 넣지 않습니다.
+- **모델**: 메뉴에서 선택한 5종(`large-v3-turbo` … `base`) 중 하나를 **기기가 Hugging Face에서 직접** 받아 `files/whisper/` 에 저장합니다 (백엔드 통신 없음).
+- assets 준비: `powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -AndroidAssets`
+  (arm64 CLI는 `library/whisper/_bin/android-arm64-v8a` 빌드 결과를 복사)
 
 ## 웹 (브라우저)
 

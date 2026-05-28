@@ -36,9 +36,15 @@ import {
   type NrmDownloadMetadataMode,
   type NrmWhisperModelPreference,
 } from '@/lib/nrmDownloadSettings';
-import { NRM_WHISPER_MODEL_OPTIONS } from '@/lib/nrmWhisperModelOptions';
+import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModelPicker';
 import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
-import { isStandaloneIos, isYtDlpEncodeSettingsEffective } from '@/lib/nrmStandalonePlatform';
+import {
+  isStandaloneAndroid,
+  isStandaloneIos,
+  isYtDlpEncodeSettingsEffective,
+} from '@/lib/nrmStandalonePlatform';
+import { fetchWhisperModelStatuses } from '@/lib/nrmWhisperModelNative';
+import type { NrmWhisperModelId } from '@/lib/nrmWhisperCatalog';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
@@ -81,7 +87,7 @@ export function NrmDownloadSettingsPanel({
     useState<NrmDownloadFileNameFormat>('artist-title');
   const [metadataMode, setMetadataMode] = useState<NrmDownloadMetadataMode>('manual');
   const [whisperModelPreference, setWhisperModelPreference] =
-    useState<NrmWhisperModelPreference>('profile:fast');
+    useState<NrmWhisperModelPreference>('whisper:large-v3-turbo');
 
   useEffect(() => {
     if (section === 'path') {
@@ -125,12 +131,32 @@ export function NrmDownloadSettingsPanel({
       return;
     }
     if (section === 'lyricsEmbed') {
-      void loadWhisperModelPreference()
-        .then((preference) => {
-          setWhisperModelPreference(preference);
+      void (async () => {
+        try {
+          const preference = await loadWhisperModelPreference();
+          const { isWhisperModelNativeAvailable } = await import('@/lib/nrmWhisperModelNative');
+          const rows = isWhisperModelNativeAvailable()
+            ? await fetchWhisperModelStatuses()
+            : [];
+          if (rows.length > 0) {
+            const installed = rows
+              .filter((r) => r.installed)
+              .map((r) => r.modelId as NrmWhisperModelId);
+            if (installed.length > 0 && !installed.includes(preference)) {
+              setWhisperModelPreference(installed[0]);
+              await saveWhisperModelPreference(installed[0]);
+            } else {
+              setWhisperModelPreference(preference);
+            }
+          } else {
+            setWhisperModelPreference(preference);
+          }
+        } catch {
+          /* ignore */
+        } finally {
           setLoaded(true);
-        })
-        .catch(() => setLoaded(true));
+        }
+      })();
       return;
     }
     void loadDownloadAudioQuality()
@@ -354,67 +380,16 @@ export function NrmDownloadSettingsPanel({
 
       {section === 'lyricsEmbed' ? (
         <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
-          <Text style={[styles.platformNote, { color: bodyColor }]}>
-            Whisper 모델 우선순위를 선택합니다. 설치된 모델이 없으면 다음 후보로 자동
-            대체됩니다.
-          </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <View style={styles.formatCol}>
-              {NRM_WHISPER_MODEL_OPTIONS.map((opt) => {
-                const active = whisperModelPreference === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => selectWhisperModelPreference(opt.id)}
-                    style={({ pressed }) => [
-                      styles.whisperRow,
-                      {
-                        borderColor: active
-                          ? nrmTokens.color.primary
-                          : 'rgba(128,128,128,0.35)',
-                        backgroundColor: active
-                          ? 'rgba(0,102,204,0.12)'
-                          : 'transparent',
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}>
-                    <View style={styles.whisperTextCol}>
-                      <Text
-                        style={[
-                          styles.whisperTitle,
-                          { color: active ? nrmTokens.color.primary : titleColor },
-                        ]}>
-                        {opt.title}
-                      </Text>
-                      <Text style={[styles.whisperSubtitle, { color: bodyColor }]}>
-                        {opt.subtitle}
-                      </Text>
-                      <View style={styles.whisperRateRow}>
-                        <Text style={[styles.whisperRateChip, { color: bodyColor }]}>
-                          속도 {opt.speed}
-                        </Text>
-                        <Text style={[styles.whisperRateChip, { color: bodyColor }]}>
-                          품질 {opt.quality}
-                        </Text>
-                      </View>
-                    </View>
-                    {active ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={20}
-                        color={nrmTokens.color.primary}
-                      />
-                    ) : (
-                      <View style={styles.formatRowSpacer} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <NrmWhisperModelPicker
+              value={whisperModelPreference}
+              onChange={selectWhisperModelPreference}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              active
+            />
           )}
         </View>
       ) : null}

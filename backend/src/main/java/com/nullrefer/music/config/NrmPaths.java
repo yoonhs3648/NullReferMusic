@@ -101,16 +101,16 @@ public class NrmPaths {
       return Path.of(configured.trim()).toAbsolutePath().normalize();
     }
     String[] preferredFastToSlow = {
-      "ggml-tiny-q5_1.bin",
-      "ggml-tiny.bin",
-      "ggml-base.en-q5_1.bin",
-      "ggml-base.en.bin",
-      "ggml-small-q5_1.bin",
-      "ggml-medium-q5_0.bin",
       "ggml-large-v3-turbo-q5_0.bin",
       "ggml-large-v3-turbo.bin",
       "ggml-large-v3-q5_0.bin",
-      "ggml-large-v3.bin"
+      "ggml-large-v3.bin",
+      "ggml-medium-q5_0.bin",
+      "ggml-medium.bin",
+      "ggml-small-q5_1.bin",
+      "ggml-small.bin",
+      "ggml-base-q5_1.bin",
+      "ggml-base.bin"
     };
     for (String name : preferredFastToSlow) {
       Path candidate = dir.resolve(name);

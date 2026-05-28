@@ -244,59 +244,17 @@ async function tagThenPersist(
   safeName: string,
   metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
-  let uri = fileUri;
-  let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
-  let metaToApply = metadata;
-  if (metadata) {
-    const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
-    const encode = await loadDownloadEncodeSettings();
-    const { metadataNeedsWhisperTranscription, resolveWhisperLyricsInMetadata } =
-      await import('@/lib/nrmResolveWhisperLyrics');
-    if (metadataNeedsWhisperTranscription(metadata, encode.extension)) {
-      const resolved = await resolveWhisperLyricsInMetadata(
-        fileUri,
-        metadata,
-        encode.extension,
-      );
-      metaToApply = resolved.metadata;
-      if (resolved.lyricsRequested && !resolved.lyricsEmbedded) {
-        lyricsWarning = 'not_embedded';
-      }
-      if (resolved.lyricsTranslationFailed) {
-        lyricsWarning = 'translation_failed';
-      }
-    }
-  }
-  if (metaToApply) {
-    const { hasEmbeddableAudioMetadata, normalizeDownloadMetadata } = await import(
-      '@/lib/nrmDownloadAudioMetadata',
-    );
-    const normalized = normalizeDownloadMetadata(metaToApply);
-    if (hasEmbeddableAudioMetadata(normalized)) {
-      try {
-        const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
-        uri = await applyAudioFileMetadata(fileUri, normalized);
-      } catch (e) {
-        logNrmRunError('download.metadata', e, {
-          artist: normalized.artist,
-          title: normalized.title,
-          coverUrl: normalized.coverUrl.slice(0, 120),
-        });
-        // 1회 재시도 (m4a remux·커버 임베딩 간헐 실패)
-        try {
-          const { applyAudioFileMetadata: retryApply } = await import(
-            '@/lib/nrmApplyAudioMetadata',
-          );
-          uri = await retryApply(uri, normalized);
-        } catch (retryErr) {
-          logNrmRunError('download.metadata.retry', retryErr, {});
-        }
-      }
-    }
-  }
+  const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
+  const encode = await loadDownloadEncodeSettings();
+  const { postProcessDownloadedAudio } = await import('@/lib/nrmDownloadAudioStages');
+  const { fileUri: uri, lyricsWarning } = await postProcessDownloadedAudio(
+    fileUri,
+    metadata,
+    encode.extension,
+  );
   const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
   try {
-    const saved = await persistLocalAudioFile(uri, safeName, metaToApply);
+    const saved = await persistLocalAudioFile(uri, safeName, metadata);
     return { ...saved, lyricsWarning };
   } catch (persistErr) {
     await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});

@@ -32,6 +32,10 @@ import {
   parseWhisperLyricsMode,
   type NrmWhisperLyricsUiMode,
 } from '@/lib/nrmWhisperLyrics';
+import { isWhisperModelInstalled } from '@/lib/nrmWhisperModelNative';
+import { loadWhisperModelPreference } from '@/lib/nrmDownloadSettings';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
 
 export type NrmMetadataEditModalProps = {
   visible: boolean;
@@ -47,8 +51,8 @@ export type NrmMetadataEditModalProps = {
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   /** 메타데이터 API 로딩 중 */
   busy?: boolean;
-  /** 팝업 확인 후 yt-dlp 대기·ffmpeg 적용 중 */
-  confirmBusy?: boolean;
+  /** APK: Whisper 모델 없을 때 가사 설정 대신 안내 → 다운로드 중단·메뉴 이동 */
+  onOpenWhisperModelSettings?: () => void;
   onClose: () => void;
   onConfirm: (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => void;
 };
@@ -56,9 +60,9 @@ export type NrmMetadataEditModalProps = {
 const GENRE_MANUAL_VALUE = '__manual__';
 
 const LYRICS_MODE_OPTIONS: { value: NrmWhisperLyricsUiMode; label: string; disabled?: boolean }[] = [
+  { value: 'unset', label: '설정안함' },
   { value: 'configured', label: '설정' },
   { value: 'translation', label: '번역지원' },
-  { value: 'unset', label: '설정안함' },
 ];
 
 const WEB_SCROLL_CLASS = 'nrm-scroll-web';
@@ -260,7 +264,7 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   busy = false,
-  confirmBusy = false,
+  onOpenWhisperModelSettings,
   onClose,
   onConfirm,
 }: NrmMetadataEditModalProps) {
@@ -280,7 +284,7 @@ export function NrmMetadataEditModal({
   const [trackNumber, setTrackNumber] = useState('');
   const [discNumber, setDiscNumber] = useState('');
   const [composer, setComposer] = useState('');
-  const [lyricsMode, setLyricsMode] = useState<NrmWhisperLyricsUiMode>('configured');
+  const [lyricsMode, setLyricsMode] = useState<NrmWhisperLyricsUiMode>('unset');
   const [translationOptionEnabled, setTranslationOptionEnabled] = useState(true);
   const [translationOptionHint, setTranslationOptionHint] = useState('');
   const [bpm, setBpm] = useState('');
@@ -290,6 +294,8 @@ export function NrmMetadataEditModal({
   const [remixer, setRemixer] = useState('');
   const [coverUrl, setCoverUrl] = useState('');
   const [moreExpanded, setMoreExpanded] = useState(false);
+  const [whisperModelMissing, setWhisperModelMissing] = useState(false);
+  const [whisperGateLoading, setWhisperGateLoading] = useState(false);
 
   const [extension, setExtension] = useState('.mp3');
   const [fileNameFormat, setFileNameFormat] =
@@ -351,7 +357,7 @@ export function NrmMetadataEditModal({
     setComposer(normalizeString(m?.composer));
     const rawLyrics = normalizeString(m?.lyrics);
     const parsed = parseWhisperLyricsMode(rawLyrics);
-    setLyricsMode(parsed ?? 'configured');
+    setLyricsMode(parsed ?? 'unset');
     setBpm(normalizeString(m?.bpm));
     setCopyright(normalizeString(m?.copyright));
     setWebsite(normalizeString(m?.website));
@@ -400,7 +406,7 @@ export function NrmMetadataEditModal({
     return buildAudioFileName(artist, title, extension, fileNameFormat);
   }, [artist, title, extension, fileNameFormat]);
 
-  const blocked = busy || confirmBusy;
+  const blocked = busy;
   const canSubmit =
     !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
 
@@ -443,6 +449,48 @@ export function NrmMetadataEditModal({
   }
 
   const lyricsUnsupported = extension !== '.mp3';
+
+  useEffect(() => {
+    if (!visible || lyricsUnsupported) {
+      setWhisperModelMissing(false);
+      setWhisperGateLoading(false);
+      return;
+    }
+    const checkApk = isStandaloneAndroid();
+    const checkWeb = Platform.OS === 'web' && usesPcBackendInDev();
+    if (!checkApk && !checkWeb) {
+      setWhisperModelMissing(false);
+      setWhisperGateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let first = true;
+
+    const refreshGate = async () => {
+      if (first) {
+        first = false;
+        setWhisperGateLoading(true);
+      }
+      const pref = await loadWhisperModelPreference();
+      const has = await isWhisperModelInstalled(pref);
+      if (cancelled) return;
+      setWhisperModelMissing(!has);
+      if (!has) {
+        setLyricsMode('unset');
+      }
+      setWhisperGateLoading(false);
+    };
+
+    void refreshGate();
+    const poll = setInterval(() => {
+      void refreshGate();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+    };
+  }, [visible, lyricsUnsupported]);
   useEffect(() => {
     if (!visible || lyricsUnsupported) return;
     let cancelled = false;
@@ -477,18 +525,25 @@ export function NrmMetadataEditModal({
 
   useEffect(() => {
     if (!translationOptionEnabled && lyricsMode === 'translation') {
-      setLyricsMode('configured');
+      setLyricsMode('unset');
     }
   }, [lyricsMode, translationOptionEnabled]);
 
   const lyricsOptions = useMemo(
     () =>
-      LYRICS_MODE_OPTIONS.map((opt) =>
-        opt.value === 'translation'
-          ? { ...opt, disabled: !translationOptionEnabled }
-          : { ...opt, disabled: false },
-      ),
-    [translationOptionEnabled],
+      LYRICS_MODE_OPTIONS.map((opt) => {
+        if (opt.value !== 'translation') {
+          return { ...opt, disabled: false as const };
+        }
+        const disabled = !translationOptionEnabled;
+        const hint = disabled && translationOptionHint ? translationOptionHint : undefined;
+        return {
+          ...opt,
+          disabled,
+          label: hint ? `${opt.label} (${hint})` : opt.label,
+        };
+      }),
+    [translationOptionEnabled, translationOptionHint],
   );
 
   function resolveLyricsForSubmit(): string | undefined {
@@ -658,6 +713,44 @@ export function NrmMetadataEditModal({
                       mp3에서만 지원합니다.
                     </Text>
                   </View>
+                ) : whisperGateLoading ? (
+                  <View style={styles.whisperGateBox}>
+                    <ActivityIndicator size="small" color={nrmTokens.color.primary} />
+                    <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
+                      Whisper 모델 확인 중…
+                    </Text>
+                  </View>
+                ) : whisperModelMissing ? (
+                  <View
+                    style={[
+                      styles.whisperGateBox,
+                      styles.whisperGateCard,
+                      {
+                        borderColor: isDark
+                          ? nrmTokens.color.borderOnDark
+                          : 'rgba(128,128,128,0.35)',
+                      },
+                    ]}>
+                    <Text style={[styles.whisperGateTitle, { color: titleColor }]}>
+                      Whisper 모델이 필요합니다
+                    </Text>
+                    <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
+                      {Platform.OS === 'web'
+                        ? '가사 자동 생성에 쓸 Whisper 모델이 PC 서버(library/whisper)에 없습니다. 메뉴 → 가사 임베드 설정에서 설치 안내를 확인하세요.'
+                        : '가사 자동 생성을 쓰려면 먼저 메뉴에서 모델을 기기에 받아 주세요. 받는 동안 다른 화면도 이용할 수 있습니다.'}
+                    </Text>
+                    {onOpenWhisperModelSettings ? (
+                      <Pressable
+                        onPress={onOpenWhisperModelSettings}
+                        style={({ pressed }) => [
+                          styles.whisperGateBtn,
+                          pressed && styles.pressed,
+                        ]}
+                        accessibilityRole="button">
+                        <Text style={styles.whisperGateBtnLabel}>가사 임베드 설정으로 이동</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 ) : (
                   <MetadataInlineSelect
                     label="가사"
@@ -672,11 +765,6 @@ export function NrmMetadataEditModal({
                     scrollStyle={scrollInlineStyle}
                   />
                 )}
-                {!lyricsUnsupported && translationOptionHint ? (
-                  <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
-                    {translationOptionHint}
-                  </Text>
-                ) : null}
               </View>
             </View>
 
@@ -791,21 +879,19 @@ export function NrmMetadataEditModal({
           <View style={styles.actions}>
             <Pressable
               onPress={onClose}
-              disabled={confirmBusy}
               style={({ pressed }) => [
                 styles.btnSecondary,
                 {
                   borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
-                  opacity: confirmBusy ? 0.5 : 1,
                 },
-                pressed && !confirmBusy && styles.pressed,
+                pressed && styles.pressed,
               ]}>
               <Text style={{ color: titleColor }}>취소</Text>
             </Pressable>
 
             <Pressable
               onPress={() => {
-                if (!item || !canSubmit || confirmBusy) return;
+                if (!item || !canSubmit) return;
                 const metadata: NrmAudioFileMetadata = {
                   artist: artist.trim(),
                   title: title.trim(),
@@ -837,14 +923,8 @@ export function NrmMetadataEditModal({
                 styles.btnPrimary,
                 !canSubmit && styles.btnDisabled,
                 pressed && canSubmit && styles.pressed,
-                { flexDirection: 'row', alignItems: 'center', gap: nrmTokens.space.xs },
               ]}>
-              {confirmBusy ? (
-                <ActivityIndicator color={nrmTokens.color.onPrimary} size="small" />
-              ) : null}
-              <Text style={styles.btnPrimaryLabel}>
-                {confirmBusy ? '처리 중…' : '다운로드'}
-              </Text>
+              <Text style={styles.btnPrimaryLabel}>다운로드</Text>
             </Pressable>
           </View>
         </View>
@@ -936,6 +1016,33 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.caption,
     lineHeight: 20,
     opacity: 0.85,
+  },
+  whisperGateBox: {
+    gap: nrmTokens.space.sm,
+    paddingVertical: nrmTokens.space.xs,
+  },
+  whisperGateCard: {
+    padding: nrmTokens.space.md,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: 1,
+    gap: nrmTokens.space.sm,
+  },
+  whisperGateTitle: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '700',
+  },
+  whisperGateBtn: {
+    alignSelf: 'flex-start',
+    marginTop: nrmTokens.space.xs,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: nrmTokens.radius.pill,
+    backgroundColor: nrmTokens.color.primary,
+  },
+  whisperGateBtnLabel: {
+    color: nrmTokens.color.onPrimary,
+    fontSize: nrmTokens.font.buttonUtility,
+    fontWeight: '600',
   },
   inlineInput: {
     flex: 1,

@@ -1,25 +1,29 @@
 import { Platform } from 'react-native';
 
-import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
 import { requestDownload } from '@/lib/downloadClient';
 import {
-  hasEmbeddableAudioMetadata,
   metadataForAudioExtension,
   normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
+import { metadataNeedsPostProcess } from '@/lib/nrmDownloadAudioMetadata';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
-import { persistAudioAfterServerJob } from '@/lib/nrmPersistServerDownload';
 import {
   applyDownloadExtension,
   extensionToYtDlpFormat,
   loadDownloadEncodeSettings,
 } from '@/lib/nrmDownloadSettings';
-import { parseWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export type AudioExtractionResult =
   | { kind: 'server'; fileUri?: string; jobId: string }
   | { kind: 'native'; fileUri: string };
+
+export { cleanupAudioExtraction, cleanupServerExtraction } from '@/lib/nrmDownloadCleanup';
+export {
+  finalizeAudioDownloadParallel,
+  type FinalizeParallelOptions,
+  type FinalizeParallelResult,
+} from '@/lib/nrmDownloadFinalize';
 
 function youtubeWatchUrl(videoId: string): string {
   return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
@@ -51,70 +55,27 @@ export async function startAudioExtraction(
   return { kind: 'server', jobId };
 }
 
-export type FinalizeAudioDownloadOptions = {
-  /** reserved for future options */
-};
+export type FinalizeAudioDownloadOptions = import('@/lib/nrmDownloadFinalize').FinalizeParallelOptions;
 
 /**
- * 추출이 끝난 뒤 사용자가 확정한 메타데이터로 ffmpeg 적용·저장합니다.
+ * 추출 완료 후 ffmpeg·Whisper 병렬 후처리·저장.
+ * @deprecated 이름 호환 — finalizeAudioDownloadParallel 과 동일
  */
 export async function finalizeAudioDownload(
   extraction: AudioExtractionResult,
   fileName: string,
   metadata?: NrmAudioFileMetadata,
   options?: FinalizeAudioDownloadOptions,
-): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
+): Promise<{
+  savedLabel: string;
+  lyricsWarning?: 'not_embedded' | 'translation_failed';
+}> {
   const encode = await loadDownloadEncodeSettings();
-  const safeName = applyDownloadExtension(fileName, encode.extension);
   const normalized = metadata
     ? metadataForAudioExtension(normalizeDownloadMetadata(metadata), encode.extension)
     : undefined;
-  let embedMetadata =
-    normalized && hasEmbeddableAudioMetadata(normalized) ? normalized : undefined;
-  let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
+  const postMeta = metadataNeedsPostProcess(normalized) ? normalized : undefined;
 
-  if (extraction.kind === 'server') {
-    if (embedMetadata) {
-      const { applyServerJobMetadata } = await import('@/lib/nrmApplyAudioMetadata.web');
-      const needsTranslation = parseWhisperLyricsMode(embedMetadata.lyrics) === 'translation';
-      const needsWhisperLyrics = parseWhisperLyricsMode(embedMetadata.lyrics) != null;
-      const deeplApiKey = needsTranslation
-        ? await (await import('@/lib/nrmDeepLApiSettings')).getDeepLApiKey()
-        : '';
-      const whisperModelPreference = needsWhisperLyrics
-        ? await (await import('@/lib/nrmDownloadSettings')).loadWhisperModelPreference()
-        : undefined;
-      try {
-        const applied = await applyServerJobMetadata(extraction.jobId, embedMetadata, {
-          deeplApiKey,
-          whisperModelPreference,
-        });
-        if (applied.lyricsRequested && !applied.lyricsEmbedded) {
-          lyricsWarning = 'not_embedded';
-        }
-        if (applied.lyricsTranslationFailed) {
-          lyricsWarning = 'translation_failed';
-        }
-      } catch (err) {
-        if (needsWhisperLyrics) {
-          // Whisper/translation 실패 시 오디오는 그대로 저장하고 가사만 포기한다.
-          lyricsWarning = 'not_embedded';
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    const apiBase = await getResolvedApiBaseUrl();
-    const out = await persistAudioAfterServerJob(apiBase, extraction.jobId, { fileName: safeName });
-    return { ...out, lyricsWarning };
-  }
-
-  const { finalizeYoutubeAudioOnDevice } = await import('@/lib/nrmInnertubeYoutube');
-  const out = await finalizeYoutubeAudioOnDevice(
-    extraction.fileUri,
-    safeName,
-    embedMetadata,
-  );
-  return { ...out, lyricsWarning: out.lyricsWarning ?? lyricsWarning };
+  const { finalizeAudioDownloadParallel } = await import('@/lib/nrmDownloadFinalize');
+  return finalizeAudioDownloadParallel(extraction, fileName, postMeta, options);
 }

@@ -5,13 +5,23 @@
 
 type Listener = () => void;
 
-let listener: Listener | null = null;
+let pathListener: Listener | null = null;
+let lyricsEmbedListener: Listener | null = null;
 
 export function registerOpenDownloadSettingsListener(fn: Listener | null): void {
-  listener = fn;
+  pathListener = fn;
 }
 
-/** 메뉴를 열고 다운로드 설정 패널로 이동합니다. 리스너 미등록 시 noop. */
+export function registerOpenLyricsEmbedSettingsListener(fn: Listener | null): void {
+  lyricsEmbedListener = fn;
+}
+
+/** 메뉴를 열고 다운로드 경로 설정으로 이동합니다. */
 export function openDownloadSettingsPanel(): void {
-  listener?.();
+  pathListener?.();
+}
+
+/** 메뉴를 열고 가사 임베드(Whisper 모델) 설정으로 이동합니다. */
+export function openLyricsEmbedSettingsPanel(): void {
+  lyricsEmbedListener?.();
 }

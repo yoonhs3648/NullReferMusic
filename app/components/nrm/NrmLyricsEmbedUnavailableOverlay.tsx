@@ -35,9 +35,9 @@ export function NrmLyricsEmbedUnavailableOverlay({
           accessibilityLabel="닫기"
         />
         <View style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <Text style={[styles.title, { color: titleColor }]}>가사 임베드 안내</Text>
+          <Text style={[styles.title, { color: titleColor }]}>LRC 가사 안내</Text>
           <Text style={[styles.message, { color: bodyColor }]}>
-            다운로드는 완료되었지만 가사를 오디오 메타데이터에 임베드하지 못했습니다.
+            다운로드는 완료되었지만 Whisper로 LRC 가사 파일을 만들지 못했습니다.
           </Text>
           <Pressable
             onPress={onClose}

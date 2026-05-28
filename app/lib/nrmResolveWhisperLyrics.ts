@@ -2,10 +2,12 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import {
   buildAutoWhisperLyricsSentinel,
   isAutoWhisperLyricsValue,
   parseWhisperLyricsMode,
+  normalizeWhisperLrc,
   truncateLyricsForId3Embed,
   type NrmWhisperLyricsMode,
 } from '@/lib/nrmWhisperLyrics';
@@ -26,9 +28,7 @@ function toFsPath(fileUri: string): string {
 async function writeLrcSidecar(audioPath: string, lrc: string): Promise<void> {
   const trimmed = lrc.trim();
   if (!trimmed) return;
-  const dot = audioPath.lastIndexOf('.');
-  const stem = dot > 0 ? audioPath.slice(0, dot) : audioPath;
-  await FileSystem.writeAsStringAsync(`${stem}.lrc`, `${trimmed}\n`);
+  await FileSystem.writeAsStringAsync(siblingLrcUri(audioPath), `${trimmed}\n`);
 }
 
 async function transcribeAudioToLrc(
@@ -65,7 +65,7 @@ export async function resolveWhisperLyricsInMetadata(
   let lrc = '';
   let lyricsTranslationFailed = false;
   try {
-    lrc = await transcribeAudioToLrc(fileUri, mode);
+    lrc = normalizeWhisperLrc(await transcribeAudioToLrc(fileUri, mode));
   } catch {
     lrc = '';
   }

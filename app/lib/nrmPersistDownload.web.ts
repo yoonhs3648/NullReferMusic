@@ -122,11 +122,43 @@ export async function cleanupServerJobArtifacts(apiBase: string, jobId: string):
   }).catch(() => null);
 }
 
+async function downloadLrcOnWeb(
+  lrcSuggestedName: string,
+  lrcUrl?: string,
+  lrcText?: string,
+): Promise<void> {
+  if (!lrcSuggestedName) return;
+  try {
+    let lrcBlob: Blob;
+    if (lrcText?.trim()) {
+      lrcBlob = new Blob([`${lrcText.trim()}\n`], { type: 'text/plain;charset=utf-8' });
+    } else if (lrcUrl) {
+      const lrcRes = await fetch(lrcUrl);
+      if (!lrcRes.ok) return;
+      lrcBlob = await lrcRes.blob();
+    } else {
+      return;
+    }
+    const lrcObj = URL.createObjectURL(lrcBlob);
+    const la = document.createElement('a');
+    la.href = lrcObj;
+    la.download = lrcSuggestedName;
+    la.rel = 'noopener';
+    document.body.appendChild(la);
+    la.click();
+    document.body.removeChild(la);
+    URL.revokeObjectURL(lrcObj);
+  } catch {
+    // ignore
+  }
+}
+
 async function persistAudioOnWeb(
   fileUrl: string,
   suggestedName: string,
   lrcUrl?: string,
   lrcSuggestedName?: string,
+  lrcText?: string,
 ): Promise<WebSaveMode> {
   const res = await fetch(fileUrl);
   if (!res.ok) {
@@ -143,24 +175,8 @@ async function persistAudioOnWeb(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(objectUrl);
-  if (lrcUrl && lrcSuggestedName) {
-    try {
-      const lrcRes = await fetch(lrcUrl);
-      if (lrcRes.ok) {
-        const lrcBlob = await lrcRes.blob();
-        const lrcObj = URL.createObjectURL(lrcBlob);
-        const la = document.createElement('a');
-        la.href = lrcObj;
-        la.download = lrcSuggestedName;
-        la.rel = 'noopener';
-        document.body.appendChild(la);
-        la.click();
-        document.body.removeChild(la);
-        URL.revokeObjectURL(lrcObj);
-      }
-    } catch {
-      // ignore
-    }
+  if (lrcSuggestedName && (lrcText?.trim() || lrcUrl)) {
+    await downloadLrcOnWeb(lrcSuggestedName, lrcUrl, lrcText);
   }
   return 'download_fallback';
 }
@@ -168,7 +184,7 @@ async function persistAudioOnWeb(
 export async function persistAudioAfterServerJob(
   apiBase: string,
   jobId: string,
-  options: { fileName: string },
+  options: { fileName: string; lrcText?: string },
 ): Promise<{ savedLabel: string }> {
   const base = normalizedApiBase(apiBase);
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
@@ -177,7 +193,13 @@ export async function persistAudioAfterServerJob(
   const lrcName = suggestedName.replace(/\.[^.]+$/, '.lrc');
   const lrcUrl = `${base}/api/download/lrc?jobId=${encodeURIComponent(jobId)}`;
 
-  const mode = await persistAudioOnWeb(url, suggestedName, lrcUrl, lrcName);
+  const mode = await persistAudioOnWeb(
+    url,
+    suggestedName,
+    lrcUrl,
+    lrcName,
+    options.lrcText,
+  );
   await cleanupServerJobArtifacts(base, jobId);
   return {
     savedLabel:

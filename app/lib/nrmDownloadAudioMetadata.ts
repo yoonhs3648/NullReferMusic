@@ -1,6 +1,7 @@
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import type { NrmAudioExtension } from '@/lib/nrmDownloadSettings';
+import { parseWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 /** 오디오 파일에 쓸 ID3/컨테이너 메타데이터 (빈 문자열 = 태그 미설정) */
 export type NrmAudioFileMetadata = {
@@ -158,6 +159,13 @@ export function buildPlatformTrackAudioMetadata(
   userTitle: string,
 ): NrmAudioFileMetadata {
   return buildLastfmSeedAudioMetadata(fields, userArtist, userTitle);
+}
+
+export function metadataNeedsPostProcess(
+  meta: NrmAudioFileMetadata | undefined,
+): meta is NrmAudioFileMetadata {
+  if (!meta) return false;
+  return hasEmbeddableAudioMetadata(meta) || !!parseWhisperLyricsMode(meta.lyrics);
 }
 
 export function hasEmbeddableAudioMetadata(meta: NrmAudioFileMetadata): boolean {

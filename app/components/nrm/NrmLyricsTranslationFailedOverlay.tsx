@@ -28,7 +28,7 @@ export function NrmLyricsTranslationFailedOverlay({
         <View style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
           <Text style={[styles.title, { color: titleColor }]}>가사 번역 안내</Text>
           <Text style={[styles.message, { color: bodyColor }]}>
-            가사번역에 실패했습니다. 원본 가사로 임베드되었습니다.
+            가사 번역에 실패했습니다. 원본 언어 LRC만 저장되었습니다.
           </Text>
           <Pressable onPress={onClose} style={({ pressed }) => [styles.btnPrimary, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="확인">
             <Text style={styles.btnPrimaryLabel}>알겠어요</Text>

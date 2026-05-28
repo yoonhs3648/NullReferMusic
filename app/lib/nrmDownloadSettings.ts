@@ -1,5 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import {
+  isNrmWhisperModelId,
+  migrateWhisperModelPreference,
+  type NrmWhisperModelId,
+} from '@/lib/nrmWhisperCatalog';
+
 /** 다운로드 파일 확장자 (선택 UI 순서) */
 export const NRM_AUDIO_EXTENSIONS = [
   '.mp3',
@@ -46,7 +52,7 @@ export type NrmDownloadMetadataMode =
   (typeof NRM_DOWNLOAD_METADATA_MODES)[number]['id'];
 
 const DEFAULT_METADATA_MODE: NrmDownloadMetadataMode = 'manual';
-const DEFAULT_WHISPER_MODEL_PREFERENCE = 'profile:fast';
+const DEFAULT_WHISPER_MODEL_PREFERENCE = 'whisper:large-v3-turbo';
 
 export function isNrmDownloadMetadataMode(v: string): v is NrmDownloadMetadataMode {
   return (NRM_DOWNLOAD_METADATA_MODES as readonly { id: string }[]).some(
@@ -68,27 +74,9 @@ export function isEnabledNrmAudioExtension(v: string): v is NrmAudioExtension {
   return (NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(v);
 }
 
-export const NRM_WHISPER_MODEL_PREFERENCES = [
-  'profile:fast',
-  'profile:balanced',
-  'profile:quality',
-  'model:ggml-tiny-q5_1.bin',
-  'model:ggml-tiny.bin',
-  'model:ggml-base.en-q5_1.bin',
-  'model:ggml-base.en.bin',
-  'model:ggml-small-q5_1.bin',
-  'model:ggml-medium-q5_0.bin',
-  'model:ggml-large-v3-turbo-q5_0.bin',
-  'model:ggml-large-v3-turbo.bin',
-  'model:ggml-large-v3-q5_0.bin',
-  'model:ggml-large-v3.bin',
-] as const;
-
-export type NrmWhisperModelPreference = (typeof NRM_WHISPER_MODEL_PREFERENCES)[number];
-
-export function isNrmWhisperModelPreference(v: string): v is NrmWhisperModelPreference {
-  return (NRM_WHISPER_MODEL_PREFERENCES as readonly string[]).includes(v);
-}
+export type NrmWhisperModelPreference = NrmWhisperModelId;
+export { NRM_WHISPER_MODEL_IDS as NRM_WHISPER_MODEL_PREFERENCES } from '@/lib/nrmWhisperCatalog';
+export { isNrmWhisperModelId as isNrmWhisperModelPreference } from '@/lib/nrmWhisperCatalog';
 
 /** yt-dlp --audio-format 값 (.ogg → vorbis) */
 export function extensionToYtDlpFormat(ext: NrmAudioExtension): string {
@@ -164,7 +152,7 @@ export async function saveDownloadMetadataMode(
 export async function loadWhisperModelPreference(): Promise<NrmWhisperModelPreference> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_WHISPER_MODEL_PREFERENCE);
-    if (raw && isNrmWhisperModelPreference(raw)) return raw;
+    if (raw) return migrateWhisperModelPreference(raw);
   } catch {
     /* ignore */
   }
@@ -176,7 +164,7 @@ export async function saveWhisperModelPreference(
 ): Promise<void> {
   await AsyncStorage.setItem(
     STORAGE_WHISPER_MODEL_PREFERENCE,
-    isNrmWhisperModelPreference(preference) ? preference : DEFAULT_WHISPER_MODEL_PREFERENCE,
+    isNrmWhisperModelId(preference) ? preference : DEFAULT_WHISPER_MODEL_PREFERENCE,
   );
 }
 

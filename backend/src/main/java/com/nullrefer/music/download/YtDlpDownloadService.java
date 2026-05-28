@@ -1,10 +1,6 @@
 package com.nullrefer.music.download;
 
 import com.nullrefer.music.config.NrmPaths;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -47,17 +43,20 @@ public class YtDlpDownloadService {
   public DownloadOutcome download(
       String url, boolean noPlaylist, String audioFormat, int audioQuality) {
     if (!YoutubeUrlValidator.isValid(url)) {
+      log.warn("[yt-dlp] REJECT invalid_url url={}", url);
       return DownloadOutcome.error(
           HttpStatus.BAD_REQUEST, Map.of("error", "YouTube URL만 허용됩니다."));
     }
 
     if (!Files.isRegularFile(paths.getYtDlpPath())) {
+      log.error("[yt-dlp] REJECT missing_binary path={}", paths.getYtDlpPath());
       return DownloadOutcome.error(
           HttpStatus.INTERNAL_SERVER_ERROR,
           Map.of("error", "yt-dlp를 찾을 수 없습니다: " + paths.getYtDlpPath()));
     }
 
     if (!Files.isRegularFile(paths.getFfmpegExe())) {
+      log.error("[yt-dlp] REJECT missing_ffmpeg path={}", paths.getFfmpegExe());
       return DownloadOutcome.error(
           HttpStatus.INTERNAL_SERVER_ERROR,
           Map.of("error", "ffmpeg를 찾을 수 없습니다: " + paths.getFfmpegExe()));
@@ -66,26 +65,52 @@ public class YtDlpDownloadService {
     String jobId = Long.toString(System.currentTimeMillis(), 36);
     String outPattern = "nrm_" + jobId + ".%(ext)s";
 
+    log.info(
+        "[yt-dlp] API REQUEST jobId={} url={} noPlaylist={} audioFormat={} audioQuality={} outputDir={} outPattern={}",
+        jobId,
+        url,
+        noPlaylist,
+        audioFormat,
+        audioQuality,
+        paths.getOutputDir(),
+        outPattern);
+
     try {
       int lastCode = -1;
       String lastDetail = "";
       String succeededProfile = "plain";
       boolean okDownload = false;
       for (YtDlpProfile profile : YT_DLP_DOWNLOAD_PROFILES) {
-        List<String> cmd = buildDownloadCommand(
-            url, noPlaylist, audioFormat, audioQuality, outPattern, profile);
-        YtDlpRun run = runYtDlp(cmd);
-        if (run.code == 0) {
+        List<String> cmd =
+            buildDownloadCommand(url, noPlaylist, audioFormat, audioQuality, outPattern, profile);
+        String ctx = "jobId=" + jobId + " profile=" + profile.name;
+        NrmProcessLogger.ProcessRunResult run =
+            NrmProcessLogger.run(
+                log,
+                NrmProcessLogger.Tool.YT_DLP,
+                ctx,
+                cmd,
+                paths.getRepoRoot(),
+                false,
+                0);
+        if (run.success()) {
           okDownload = true;
           succeededProfile = profile.name;
           break;
         }
-        lastCode = run.code;
-        lastDetail = tail(run.stderr, 6000);
-        log.warn("yt-dlp download failed [{}] code={} detail={}", profile.name, run.code, tail(run.stderr, 1200));
+        lastCode = run.exitCode();
+        lastDetail = NrmProcessLogger.tail(run.stderr(), 6000);
+        if (lastDetail.isEmpty()) {
+          lastDetail = NrmProcessLogger.tail(run.stdout(), 6000);
+        }
       }
 
       if (!okDownload) {
+        log.warn(
+            "[yt-dlp] API FAIL jobId={} lastCode={} detail={}",
+            jobId,
+            lastCode,
+            NrmProcessLogger.tail(lastDetail, 1200));
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("error", "yt-dlp 실행이 실패했습니다.");
         err.put("code", lastCode);
@@ -98,34 +123,26 @@ public class YtDlpDownloadService {
       ok.put("outputDir", paths.getOutputDir().toString());
       ok.put("message", "다운로드가 완료되었습니다.");
       ok.put("profile", succeededProfile);
+      log.info(
+          "[yt-dlp] API OK jobId={} profile={} outputDir={}",
+          jobId,
+          succeededProfile,
+          paths.getOutputDir());
       return DownloadOutcome.success(ok);
     } catch (Exception e) {
+      log.error("[yt-dlp] API ERROR jobId={} message={}", jobId, e.getMessage(), e);
       return DownloadOutcome.error(
           HttpStatus.INTERNAL_SERVER_ERROR, Map.of("error", e.getMessage()));
     }
   }
 
-  private static Thread startDrain(InputStream in, StringBuilder sink, Charset cs) {
-    Thread t =
-        new Thread(
-            () -> {
-              try (BufferedReader r =
-                  new BufferedReader(new InputStreamReader(in, cs))) {
-                String line;
-                while ((line = r.readLine()) != null) {
-                  sink.append(line).append('\n');
-                }
-              } catch (Exception ignored) {
-                // stream closed
-              }
-            });
-    t.setDaemon(true);
-    t.start();
-    return t;
-  }
-
   private List<String> buildDownloadCommand(
-      String url, boolean noPlaylist, String audioFormat, int audioQuality, String outPattern, YtDlpProfile profile) {
+      String url,
+      boolean noPlaylist,
+      String audioFormat,
+      int audioQuality,
+      String outPattern,
+      YtDlpProfile profile) {
     List<String> cmd = new ArrayList<>();
     cmd.add(paths.getYtDlpPath().toString());
     cmd.add("--ffmpeg-location");
@@ -162,29 +179,6 @@ public class YtDlpDownloadService {
     }
   }
 
-  private YtDlpRun runYtDlp(List<String> cmd) throws Exception {
-    Charset cs = Charset.defaultCharset();
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    pb.directory(paths.getRepoRoot().toFile());
-    pb.redirectErrorStream(false);
-    Process p = pb.start();
-    StringBuilder stdout = new StringBuilder();
-    StringBuilder stderr = new StringBuilder();
-    Thread tOut = startDrain(p.getInputStream(), stdout, cs);
-    Thread tErr = startDrain(p.getErrorStream(), stderr, cs);
-    int code = p.waitFor();
-    tOut.join();
-    tErr.join();
-    return new YtDlpRun(code, stdout.toString(), stderr.toString());
-  }
-
-  private static String tail(String s, int maxChars) {
-    if (s == null || s.length() <= maxChars) {
-      return s == null ? "" : s;
-    }
-    return s.substring(s.length() - maxChars);
-  }
-
   public record DownloadOutcome(HttpStatus status, Map<String, Object> body) {
 
     static DownloadOutcome success(Map<String, Object> body) {
@@ -197,6 +191,4 @@ public class YtDlpDownloadService {
   }
 
   private record YtDlpProfile(String name, boolean useBrowserCookies, boolean useJsRuntime) {}
-
-  private record YtDlpRun(int code, String stdout, String stderr) {}
 }

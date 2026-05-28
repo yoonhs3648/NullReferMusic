@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{40} - %msg%n</pattern>
+      <charset>UTF-8</charset>
+    </encoder>
+    <immediateFlush>true</immediateFlush>
+  </appender>
+
+  <!-- yt-dlp / ffmpeg / whisper 실시간 라인 로그 -->
+  <logger name="com.nullrefer.music.download" level="INFO"/>
+  <logger name="com.nullrefer.music.download.YtDlpDownloadService" level="INFO"/>
+  <logger name="com.nullrefer.music.download.AudioMetadataService" level="INFO"/>
+  <logger name="com.nullrefer.music.download.WhisperLyricsService" level="INFO"/>
+  <logger name="com.nullrefer.music.web.ApiController" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>
