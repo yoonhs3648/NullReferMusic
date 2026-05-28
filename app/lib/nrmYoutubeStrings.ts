@@ -28,3 +28,7 @@ export const nrmYoutubeSearchBadResponseMessage =
 
 export const nrmYoutubeSearchEndpointMissingMessage =
   '검색 API 경로를 찾을 수 없습니다(404). 백엔드를 최신 코드로 다시 실행하세요.';
+
+/** 서버·Expo Go(PC 백엔드) yt-dlp 추출 실패 */
+export const nrmYoutubeDownloadYtDlpFailedMessage =
+  'YouTube 오디오 추출에 실패했습니다. 네트워크를 확인하고, 웹·Expo Go에서는 백엔드(8787)의 yt-dlp·ffmpeg 설치 여부를 확인하세요.';

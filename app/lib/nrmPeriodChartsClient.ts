@@ -29,6 +29,11 @@ import {
 import type { SpotifyPeriodChartKind } from '@/lib/nrmSpotifyPeriodChartCatalog';
 import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
 import type { PeriodChartPagePayload } from '@/lib/nrmPeriodChartsTypes';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
+import {
+  isLastfmChartAuthErrorCode,
+  runLastfmAuthFlow,
+} from '@/lib/nrmLastfmAuthFlow';
 import {
   isSpotifyChartsFetchAuthError,
   runSpotifyChartsAuthFlow,
@@ -78,7 +83,11 @@ function isSpotifyAuth(code: ChartErrorCode): boolean {
 }
 
 function isLastfmAuth(code: string | undefined, status: number): boolean {
-  return code === 'lastfm_auth_failed' || status === 401;
+  return (
+    code === 'lastfm_auth_failed' ||
+    status === 401 ||
+    status === 403
+  );
 }
 
 async function fetchLastfmPeriodDirect(
@@ -107,7 +116,14 @@ async function fetchLastfmPeriodDirect(
     .join('&');
   try {
     const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${qs}`);
-    if (!res.ok) return { ok: false, errorCode: 'server', authFailed: false };
+    if (!res.ok) {
+      const authFailed = res.status === 401 || res.status === 403;
+      return {
+        ok: false,
+        errorCode: authFailed ? 'auth_failed' : 'server',
+        authFailed,
+      };
+    }
     const root = (await res.json()) as Record<string, unknown>;
     if (typeof root.error === 'number') {
       const code = root.error as number;
@@ -331,6 +347,7 @@ export async function fetchPeriodChartPage(
   query: PeriodChartQuery,
   signal?: AbortSignal,
   chartsAuth?: SpotifyChartsAuthHandlers,
+  lastfmAuth?: LastfmAuthHandlers,
 ): Promise<PeriodChartFetchOutcome> {
   const fetchOnce = () => fetchPeriodChartPageInner(platform, query, signal);
   if (
@@ -344,6 +361,13 @@ export async function fetchPeriodChartPage(
       fetchOnce,
       (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
       chartsAuth,
+    );
+  }
+  if (platform === 'lastfm' && lastfmAuth) {
+    return runLastfmAuthFlow(
+      fetchOnce,
+      (r) => !r.ok && isLastfmChartAuthErrorCode(r.errorCode),
+      lastfmAuth,
     );
   }
   return fetchOnce();

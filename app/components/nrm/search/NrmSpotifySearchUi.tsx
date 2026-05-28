@@ -27,6 +27,7 @@ type SearchBarProps = {
   bodyColor: string;
   isDark: boolean;
   loading?: boolean;
+  compact?: boolean;
 };
 
 export function NrmSpotifySearchBar({
@@ -38,10 +39,11 @@ export function NrmSpotifySearchBar({
   bodyColor,
   isDark,
   loading,
+  compact = false,
 }: SearchBarProps) {
   const border = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)';
   return (
-    <View style={styles.searchRow}>
+    <View style={[styles.searchRow, compact && styles.searchRowCompact]}>
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -106,6 +108,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
+  },
+  searchRowCompact: {
+    width: '100%',
+    maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
+    alignSelf: 'center',
   },
   searchInput: {
     flex: 1,

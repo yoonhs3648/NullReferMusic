@@ -1,5 +1,7 @@
 package com.nullrefer.music.web;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.chart.AppleMusicRssChartService;
 import com.nullrefer.music.chart.LastfmChartService;
 import com.nullrefer.music.search.LastfmSearchService;
@@ -12,6 +14,7 @@ import com.nullrefer.music.chart.SpotifyTokenResponse;
 import com.nullrefer.music.config.NrmPaths;
 import com.nullrefer.music.download.AudioMetadataRequest;
 import com.nullrefer.music.download.AudioMetadataService;
+import com.nullrefer.music.download.WhisperLyricsService;
 import com.nullrefer.music.download.YtDlpDownloadService;
 import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
 import com.nullrefer.music.config.NrmSettings;
@@ -19,6 +22,11 @@ import com.nullrefer.music.youtube.YoutubeSearchHit;
 import com.nullrefer.music.youtube.YoutubeSearchService;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -37,9 +45,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ApiController {
 
   private static final Pattern SAFE_JOB_ID = Pattern.compile("^[a-z0-9]{4,48}$");
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   private final YtDlpDownloadService downloadService;
   private final AudioMetadataService audioMetadataService;
+  private final WhisperLyricsService whisperLyricsService;
   private final YoutubeSearchService youtubeSearchService;
   private final SpotifyChartService spotifyChartService;
   private final LastfmChartService lastfmChartService;
@@ -53,6 +63,7 @@ public class ApiController {
   public ApiController(
       YtDlpDownloadService downloadService,
       AudioMetadataService audioMetadataService,
+      WhisperLyricsService whisperLyricsService,
       YoutubeSearchService youtubeSearchService,
       SpotifyChartService spotifyChartService,
       LastfmChartService lastfmChartService,
@@ -64,6 +75,7 @@ public class ApiController {
       NrmPaths paths) {
     this.downloadService = downloadService;
     this.audioMetadataService = audioMetadataService;
+    this.whisperLyricsService = whisperLyricsService;
     this.youtubeSearchService = youtubeSearchService;
     this.spotifyChartService = spotifyChartService;
     this.lastfmChartService = lastfmChartService;
@@ -77,7 +89,9 @@ public class ApiController {
 
   @GetMapping("/api/health")
   public Map<String, Object> health() {
-    return downloadService.health();
+    java.util.Map<String, Object> body = new java.util.LinkedHashMap<>(downloadService.health());
+    body.put("whisper", whisperLyricsService.isAvailable());
+    return body;
   }
 
   @GetMapping("/api/meta")
@@ -114,6 +128,45 @@ public class ApiController {
                 "/api/search/spotify/track/detail?id=...",
                 "/api/download",
                 "/api/download/file?jobId=..."));
+  }
+
+  @PostMapping("/api/deepl/usage")
+  public ResponseEntity<Map<String, Object>> deepLUsage(@RequestBody DeepLUsageRequest req) {
+    String apiKey = req != null && req.apiKey != null ? req.apiKey.trim() : "";
+    if (apiKey.isEmpty()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "deepl_not_configured"));
+    }
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(12)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(URI.create("https://api-free.deepl.com/v2/usage"))
+              .header("Authorization", "DeepL-Auth-Key " + apiKey)
+              .GET()
+              .build();
+      HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (res.statusCode() == 403 || res.statusCode() == 404) {
+        request =
+            HttpRequest.newBuilder()
+                .uri(URI.create("https://api.deepl.com/v2/usage"))
+                .header("Authorization", "DeepL-Auth-Key " + apiKey)
+                .GET()
+                .build();
+        res = client.send(request, HttpResponse.BodyHandlers.ofString());
+      }
+      if (res.statusCode() == 401 || res.statusCode() == 403) {
+        return ResponseEntity.status(401).body(Map.of("error", "deepl_auth_failed"));
+      }
+      if (res.statusCode() < 200 || res.statusCode() >= 300) {
+        return ResponseEntity.status(502).body(Map.of("error", "deepl_usage_failed"));
+      }
+      JsonNode body = JSON.readTree(res.body());
+      int count = Math.max(0, body.path("character_count").asInt(0));
+      int limit = Math.max(0, body.path("character_limit").asInt(0));
+      return ResponseEntity.ok(Map.of("character_count", count, "character_limit", limit));
+    } catch (Exception e) {
+      return ResponseEntity.status(502).body(Map.of("error", "deepl_network_failed"));
+    }
   }
 
   @GetMapping("/api/charts/spotify/top100")
@@ -728,7 +781,13 @@ public class ApiController {
       Object jobId = out.body().get("jobId");
       if (jobId instanceof String job && SAFE_JOB_ID.matcher(job).matches()) {
         try {
-          audioMetadataService.applyToJobFile(job, req.toMetadataRequest());
+          var result = audioMetadataService.applyToJobFile(job, req.toMetadataRequest());
+          if (result.lyricsRequested() && !result.lyricsEmbedded()) {
+            out.body().put("lyricsEmbedded", false);
+          }
+          if (result.lyricsTranslationFailed()) {
+            out.body().put("lyricsTranslationFailed", true);
+          }
         } catch (Exception e) {
           return ResponseEntity.status(500)
               .body(Map.of("error", "metadata_apply_failed", "jobId", job));
@@ -745,8 +804,13 @@ public class ApiController {
       return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
     }
     try {
-      audioMetadataService.applyToJobFile(req.jobId, req);
-      return ResponseEntity.ok(Map.of("ok", true));
+      var result = audioMetadataService.applyToJobFile(req.jobId, req);
+      return ResponseEntity.ok(
+          Map.of(
+              "ok", true,
+              "lyricsRequested", result.lyricsRequested(),
+              "lyricsEmbedded", result.lyricsEmbedded(),
+              "lyricsTranslationFailed", result.lyricsTranslationFailed()));
     } catch (IllegalStateException e) {
       String code = e.getMessage() != null ? e.getMessage() : "metadata_apply_failed";
       return ResponseEntity.status(500).body(Map.of("error", code));
@@ -778,21 +842,85 @@ public class ApiController {
         .body(resource);
   }
 
-  private static Path resolveDownloadJobFile(Path baseDir, String jobId) {
+  @PostMapping("/api/download/cleanup")
+  public ResponseEntity<Map<String, Object>> cleanupDownloadArtifacts(
+      @RequestBody CleanupRequest req) {
+    String jobId = req != null ? req.jobId : null;
+    if (jobId == null || !SAFE_JOB_ID.matcher(jobId).matches()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
+    }
+    Path baseDir = paths.getOutputDir().toAbsolutePath().normalize();
+    int deleted = 0;
     try (var stream = Files.newDirectoryStream(baseDir, "nrm_" + jobId + ".*")) {
       for (Path candidate : stream) {
-        if (Files.isRegularFile(candidate) && candidate.normalize().startsWith(baseDir)) {
-          return candidate.normalize();
+        Path normalized = candidate.toAbsolutePath().normalize();
+        if (!normalized.startsWith(baseDir) || !Files.isRegularFile(normalized)) continue;
+        try {
+          if (Files.deleteIfExists(normalized)) deleted++;
+        } catch (Exception ignored) {
+          // best effort
         }
+      }
+    } catch (Exception ignored) {
+      // best effort
+    }
+    return ResponseEntity.ok(Map.of("ok", true, "deleted", deleted));
+  }
+
+  @GetMapping("/api/download/lrc")
+  public ResponseEntity<Resource> downloadLrcFile(@RequestParam("jobId") String jobId) {
+    if (jobId == null || !SAFE_JOB_ID.matcher(jobId).matches()) {
+      return ResponseEntity.badRequest().build();
+    }
+    Path baseDir = paths.getOutputDir().toAbsolutePath().normalize();
+    Path lrc = baseDir.resolve("nrm_" + jobId + ".lrc").normalize();
+    if (!lrc.startsWith(baseDir) || !Files.isRegularFile(lrc)) {
+      return ResponseEntity.notFound().build();
+    }
+    Resource resource = new FileSystemResource(lrc);
+    String filename = lrc.getFileName().toString();
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+        .contentType(MediaType.parseMediaType("text/plain; charset=utf-8"))
+        .body(resource);
+  }
+
+  private static Path resolveDownloadJobFile(Path baseDir, String jobId) {
+    Path picked = null;
+    try (var stream = Files.newDirectoryStream(baseDir, "nrm_" + jobId + ".*")) {
+      for (Path candidate : stream) {
+        Path normalized = candidate.normalize();
+        if (!Files.isRegularFile(normalized) || !normalized.startsWith(baseDir)) continue;
+        String ext = extensionOf(normalized.getFileName().toString());
+        if (isAudioExtension(ext)) return normalized;
+        if (picked == null) picked = normalized;
       }
     } catch (Exception ignored) {
       // fall through
     }
+    if (picked != null) return picked;
     Path fallback = baseDir.resolve("nrm_" + jobId + ".mp3").normalize();
     if (Files.isRegularFile(fallback)) {
       return fallback;
     }
     return null;
+  }
+
+  private static String extensionOf(String name) {
+    int dot = name.lastIndexOf('.');
+    if (dot < 0) return "";
+    return name.substring(dot).toLowerCase();
+  }
+
+  private static boolean isAudioExtension(String ext) {
+    return ".mp3".equals(ext)
+        || ".m4a".equals(ext)
+        || ".wav".equals(ext)
+        || ".opus".equals(ext)
+        || ".flac".equals(ext)
+        || ".ogg".equals(ext)
+        || ".aac".equals(ext)
+        || ".mp4".equals(ext);
   }
 
   private static String mimeTypeForExtension(String ext) {
@@ -865,5 +993,13 @@ public class ApiController {
     private static boolean isNonBlank(String s) {
       return s != null && !s.isBlank();
     }
+  }
+
+  public static class DeepLUsageRequest {
+    public String apiKey;
+  }
+
+  public static class CleanupRequest {
+    public String jobId;
   }
 }

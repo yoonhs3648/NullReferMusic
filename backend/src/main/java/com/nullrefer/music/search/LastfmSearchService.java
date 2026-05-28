@@ -3,6 +3,7 @@ package com.nullrefer.music.search;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.chart.LastfmChartService;
+import com.nullrefer.music.lastfm.LastfmApiExceptionMapper;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumDetailResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumSearchHit;
@@ -347,17 +348,11 @@ public class LastfmSearchService {
         throw new IllegalStateException("lastfm_api_error");
       }
       JsonNode root = objectMapper.readTree(body);
-      if (root.has("error")) {
-        int code = root.path("error").asInt(0);
-        log.warn("Last.fm API error {} message={}", code, root.path("message").asText(""));
-        if (code == 10 || code == 4 || code == 26) {
-          throw new IllegalStateException("lastfm_auth_failed");
-        }
-        throw new IllegalStateException("lastfm_api_error");
-      }
+      LastfmApiExceptionMapper.throwIfJsonError(root);
       return root;
     } catch (RestClientResponseException e) {
       log.warn("Last.fm HTTP {} body={}", e.getStatusCode().value(), e.getResponseBodyAsString());
+      LastfmApiExceptionMapper.throwFromHttpException(e, objectMapper);
       throw new IllegalStateException("lastfm_api_error");
     } catch (IllegalStateException e) {
       throw e;

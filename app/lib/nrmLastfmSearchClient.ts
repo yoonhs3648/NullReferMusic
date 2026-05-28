@@ -6,7 +6,15 @@ import {
   getResolvedApiBaseUrl,
 } from '@/lib/apiBaseUrl';
 import { chartUserMessage } from '@/lib/nrmChartErrors';
-import { buildLastfmChartAuthHeaders } from '@/lib/nrmLastfmTokenSync';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
+import {
+  isLastfmSearchAuthErrorCode,
+  runLastfmAuthFlow,
+} from '@/lib/nrmLastfmAuthFlow';
+import {
+  buildLastfmChartAuthHeaders,
+  refreshLastfmChartToken,
+} from '@/lib/nrmLastfmTokenSync';
 import type {
   LastfmAlbumDetail,
   LastfmAlbumSearchHit,
@@ -82,12 +90,14 @@ async function lastfmGet(
     const qs = new URLSearchParams({ ...params, format: 'json' });
     const res = await fetch(`${LASTFM_API}?${qs.toString()}`);
     if (!res.ok) {
-      return { ok: false, errorCode: 'unknown', message: messageForError('unknown') };
+      const errorCode: LastfmSearchErrorCode =
+        res.status === 401 || res.status === 403 ? 'auth_failed' : 'unknown';
+      return { ok: false, errorCode, message: messageForError(errorCode) };
     }
     const root = (await res.json()) as Record<string, unknown>;
     if (typeof root.error === 'number') {
       const code = root.error as number;
-      if (code === 10 || code === 4 || code === 26) {
+      if (code === 10 || code === 4 || code === 9 || code === 26) {
         return { ok: false, errorCode: 'auth_failed', message: messageForError('auth_failed') };
       }
       return { ok: false, errorCode: 'unknown', message: messageForError('unknown') };
@@ -356,13 +366,6 @@ async function fetchLastfmTrackDetailDirect(
   return { ok: true, data: { info, similarTracks, tags } };
 }
 
-async function getLastfmApiKey(): Promise<string | null> {
-  const auth = await buildLastfmChartAuthHeaders();
-  if ('error' in auth) return null;
-  const h = auth.headers as Record<string, string>;
-  return h['X-NRM-Lastfm-Api-Key'] ?? h.Authorization?.replace(/^Bearer\s+/i, '').trim() ?? null;
-}
-
 // ─── Backend proxy (Dev / Expo Go) ───────────────────────────────────────────
 
 async function fetchWithBase<T>(
@@ -393,6 +396,37 @@ async function fetchWithBase<T>(
   }
 }
 
+function apiKeyFromHeaders(headers: HeadersInit): string | null {
+  const h = headers as Record<string, string>;
+  return (
+    h['X-NRM-Lastfm-Api-Key'] ??
+    h.Authorization?.replace(/^Bearer\s+/i, '').trim() ??
+    null
+  );
+}
+
+async function fetchLastfmSearchWithHeaders<T>(
+  path: string,
+  headers: HeadersInit,
+): Promise<LastfmSearchOutcome<T>> {
+  const resolved = await getResolvedApiBaseUrl();
+  const primary =
+    resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
+  if (!primary) {
+    return {
+      ok: false,
+      errorCode: 'network',
+      message: messageForError('network'),
+    };
+  }
+
+  const first = await fetchWithBase<T>(primary, path, headers);
+  if (first.ok || !usesPcBackendInDev()) return first;
+  const fallback = getDefaultApiBaseUrl();
+  if (fallback === primary) return first;
+  return fetchWithBase<T>(fallback, path, headers);
+}
+
 async function fetchLastfmSearch<T>(
   path: string,
 ): Promise<LastfmSearchOutcome<T>> {
@@ -405,22 +439,46 @@ async function fetchLastfmSearch<T>(
     };
   }
 
-  const resolved = await getResolvedApiBaseUrl();
-  const primary =
-    resolved ?? (usesPcBackendInDev() ? getDefaultApiBaseUrl() : null);
-  if (!primary) {
+  let result = await fetchLastfmSearchWithHeaders<T>(path, auth.headers);
+  if (!result.ok && result.errorCode === 'auth_failed') {
+    const refreshed = await refreshLastfmChartToken();
+    if (refreshed.ok) {
+      result = await fetchLastfmSearchWithHeaders<T>(path, refreshed.headers);
+    }
+  }
+  return result;
+}
+
+async function withLastfmDirectAuthRetry<T>(
+  run: (apiKey: string) => Promise<LastfmSearchOutcome<T>>,
+): Promise<LastfmSearchOutcome<T>> {
+  const auth = await buildLastfmChartAuthHeaders();
+  if ('error' in auth) {
     return {
       ok: false,
-      errorCode: 'network',
-      message: messageForError('network'),
+      errorCode: 'not_configured',
+      message: auth.error,
     };
   }
-
-  const first = await fetchWithBase<T>(primary, path, auth.headers);
-  if (first.ok || !usesPcBackendInDev()) return first;
-  const fallback = getDefaultApiBaseUrl();
-  if (fallback === primary) return first;
-  return fetchWithBase<T>(fallback, path, auth.headers);
+  let apiKey = apiKeyFromHeaders(auth.headers);
+  if (!apiKey) {
+    return {
+      ok: false,
+      errorCode: 'not_configured',
+      message: messageForError('not_configured'),
+    };
+  }
+  let result = await run(apiKey);
+  if (!result.ok && result.errorCode === 'auth_failed') {
+    const refreshed = await refreshLastfmChartToken();
+    if (refreshed.ok) {
+      apiKey = apiKeyFromHeaders(refreshed.headers);
+      if (apiKey) {
+        result = await run(apiKey);
+      }
+    }
+  }
+  return result;
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
@@ -429,9 +487,9 @@ export async function searchLastfmArtists(
   query: string,
 ): Promise<LastfmSearchOutcome<{ artists: LastfmArtistSearchHit[] }>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return searchLastfmArtistsDirect(apiKey, query.trim());
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmArtistsDirect(apiKey, query.trim()),
+    );
   }
   const q = encodeURIComponent(query.trim());
   return fetchLastfmSearch(`/api/search/lastfm/artist?q=${q}`);
@@ -442,9 +500,9 @@ export async function fetchLastfmArtistDetail(
   mbid?: string,
 ): Promise<LastfmSearchOutcome<LastfmArtistDetail>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return fetchLastfmArtistDetailDirect(apiKey, artist.trim(), mbid);
+    return withLastfmDirectAuthRetry((apiKey) =>
+      fetchLastfmArtistDetailDirect(apiKey, artist.trim(), mbid),
+    );
   }
   const a = encodeURIComponent(artist.trim());
   const mbidQ = mbid?.trim() ? `&mbid=${encodeURIComponent(mbid.trim())}` : '';
@@ -455,9 +513,9 @@ export async function searchLastfmAlbums(
   query: string,
 ): Promise<LastfmSearchOutcome<{ albums: LastfmAlbumSearchHit[] }>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return searchLastfmAlbumsDirect(apiKey, query.trim());
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmAlbumsDirect(apiKey, query.trim()),
+    );
   }
   const q = encodeURIComponent(query.trim());
   return fetchLastfmSearch(`/api/search/lastfm/album?q=${q}`);
@@ -468,9 +526,9 @@ export async function fetchLastfmAlbumDetail(
   album: string,
 ): Promise<LastfmSearchOutcome<LastfmAlbumDetail>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return fetchLastfmAlbumDetailDirect(apiKey, artist.trim(), album.trim());
+    return withLastfmDirectAuthRetry((apiKey) =>
+      fetchLastfmAlbumDetailDirect(apiKey, artist.trim(), album.trim()),
+    );
   }
   const a = encodeURIComponent(artist.trim());
   const al = encodeURIComponent(album.trim());
@@ -483,9 +541,9 @@ export async function searchLastfmTracks(
   query: string,
 ): Promise<LastfmSearchOutcome<{ tracks: LastfmTrackSearchHit[] }>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return searchLastfmTracksDirect(apiKey, query.trim());
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmTracksDirect(apiKey, query.trim()),
+    );
   }
   const q = encodeURIComponent(query.trim());
   return fetchLastfmSearch(`/api/search/lastfm/track?q=${q}`);
@@ -497,9 +555,9 @@ export async function fetchLastfmTrackDetail(
   trackMbid?: string,
 ): Promise<LastfmSearchOutcome<LastfmTrackDetail>> {
   if (isStandaloneApp()) {
-    const apiKey = await getLastfmApiKey();
-    if (!apiKey) return { ok: false, errorCode: 'not_configured', message: messageForError('not_configured') };
-    return fetchLastfmTrackDetailDirect(apiKey, artist.trim(), track.trim(), trackMbid);
+    return withLastfmDirectAuthRetry((apiKey) =>
+      fetchLastfmTrackDetailDirect(apiKey, artist.trim(), track.trim(), trackMbid),
+    );
   }
   const a = encodeURIComponent(artist.trim());
   const t = encodeURIComponent(track.trim());

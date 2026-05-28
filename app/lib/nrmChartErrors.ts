@@ -92,7 +92,8 @@ const LASTFM_MESSAGES: Record<ChartErrorCode, string> = {
 
     'Last.fm API Key가 없습니다. 메뉴 → 앱 설정 → API 설정에서 등록하세요.',
 
-  auth_failed: 'Last.fm API Key가 잘못되었습니다. API 설정에서 다시 확인하세요.',
+  auth_failed:
+    '잘못된 API 키입니다. 메뉴 → 앱 설정 → API 설정 → Last.fm API 토큰 관리에서 다시 등록하세요.',
 
   premium_required:
 
@@ -291,9 +292,7 @@ export function lastfmErrorFromApi(
   }
 
   if (apiCode === 'lastfm_auth_failed' || httpStatus === 401 || httpStatus === 403) {
-
-    return httpStatus === 403 ? 'forbidden' : 'auth_failed';
-
+    return 'auth_failed';
   }
 
   if (apiCode === 'lastfm_charts_empty' || httpStatus === 404) {
@@ -312,6 +311,13 @@ export function lastfmErrorFromApi(
 
     return 'not_configured';
 
+  }
+
+  if (
+    apiCode === 'lastfm_api_error' &&
+    (httpStatus === 401 || httpStatus === 403)
+  ) {
+    return 'auth_failed';
   }
 
   if (httpStatus >= 500 || apiCode === 'lastfm_api_error') {

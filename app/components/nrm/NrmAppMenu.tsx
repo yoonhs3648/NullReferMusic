@@ -34,6 +34,7 @@ import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagS
 import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWeeklySnapshotSettingsPanel';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
+import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
 import {
   ensureLastfmChartAccess,
   ensureSearchApiAccess,
@@ -89,10 +90,14 @@ type Props = {
   onNavigateLastfmTrackSearch?: () => void;
   /** Android — Bearer 없을 때 charts.spotify.com WebView 로그인 모달 호출 */
   onRequestChartsBearerWebView?: () => Promise<boolean>;
+  /** 앱 — Last.fm API Key 미설정·오류 오버레이 */
+  onShowLastfmAuthInvalid?: (code?: 'auth_failed' | 'not_configured') => void;
 };
 
 export type NrmAppMenuHandle = {
   openChartsSession: () => void;
+  openLastfmTokenSettings: () => void;
+  openSpotifyTokenSettings: () => void;
 };
 
 const EDGE_HIT_WIDTH = 32;
@@ -109,6 +114,7 @@ type Panel =
   | 'screenSettings'
   | 'spotifyApiManage'
   | 'lastfmApiManage'
+  | 'deeplApiManage'
   | 'genreTagSettings'
   | 'weeklySnapshotSettings'
   | 'downloadManage'
@@ -116,6 +122,8 @@ type Panel =
   | 'downloadExtensionSettings'
   | 'downloadQualitySettings'
   | 'downloadFilenameSettings'
+  | 'downloadMetadataSettings'
+  | 'downloadLyricsEmbedSettings'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -138,6 +146,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateLastfmAlbumSearch,
     onNavigateLastfmTrackSearch,
     onRequestChartsBearerWebView,
+    onShowLastfmAuthInvalid,
   },
   ref,
 ) {
@@ -151,6 +160,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const [spotifyFocusChartsSession, setSpotifyFocusChartsSession] = useState(false);
   const lastfmBackHandlerRef = useRef<(() => boolean) | null>(null);
   const lastfmDrawerDismissRef = useRef<(() => void) | null>(null);
+  const deeplBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const deeplDrawerDismissRef = useRef<(() => void) | null>(null);
 
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>('root');
@@ -214,19 +225,31 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX.setValue(0);
   }, [translateX]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      openChartsSession: openSpotifyChartsSessionSettings,
-    }),
-    [openSpotifyChartsSessionSettings],
-  );
-
   const openLastfmTokenSettings = useCallback(() => {
     setOpen(true);
     setPanel('lastfmApiManage');
     translateX.setValue(0);
   }, [translateX]);
+
+  const lastfmGateHandlers = useMemo(
+    () => ({
+      onOpenLastfmTokenSettings: openLastfmTokenSettings,
+      ...(onShowLastfmAuthInvalid
+        ? { onShowAuthInvalid: onShowLastfmAuthInvalid }
+        : {}),
+    }),
+    [onShowLastfmAuthInvalid, openLastfmTokenSettings],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openChartsSession: openSpotifyChartsSessionSettings,
+      openLastfmTokenSettings,
+      openSpotifyTokenSettings,
+    }),
+    [openLastfmTokenSettings, openSpotifyChartsSessionSettings, openSpotifyTokenSettings],
+  );
 
   const openDownloadSettingsFromGlobal = useCallback(() => {
     setOpen(true);
@@ -274,16 +297,16 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   ]);
 
   const closeMenuAndNavigateLastfmCharts = useCallback(async () => {
-    const ok = await ensureLastfmChartAccess(openLastfmTokenSettings);
+    const ok = await ensureLastfmChartAccess(lastfmGateHandlers);
     if (!ok) return;
     onNavigateLastfmCharts?.();
     setOpen(false);
     setPanel('root');
     translateX.setValue(-drawerW);
-  }, [drawerW, onNavigateLastfmCharts, openLastfmTokenSettings, translateX]);
+  }, [drawerW, lastfmGateHandlers, onNavigateLastfmCharts, translateX]);
 
   const closeMenuAndNavigatePeriodLastfmCharts = useCallback(async () => {
-    const ok = await ensureLastfmChartAccess(openLastfmTokenSettings);
+    const ok = await ensureLastfmChartAccess(lastfmGateHandlers);
     if (!ok) return;
     onNavigatePeriodLastfmCharts?.();
     setOpen(false);
@@ -291,8 +314,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX.setValue(-drawerW);
   }, [
     drawerW,
+    lastfmGateHandlers,
     onNavigatePeriodLastfmCharts,
-    openLastfmTokenSettings,
     translateX,
   ]);
 
@@ -355,7 +378,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const closeMenuAndNavigateLastfmSearch = useCallback(
     async (kind: SearchKind) => {
-      const ok = await ensureSearchApiAccess(openLastfmTokenSettings);
+      const ok = await ensureSearchApiAccess(lastfmGateHandlers);
       if (!ok) return;
       if (kind === 'artist') onNavigateLastfmArtistSearch?.();
       else if (kind === 'album') onNavigateLastfmAlbumSearch?.();
@@ -369,7 +392,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       onNavigateLastfmAlbumSearch,
       onNavigateLastfmArtistSearch,
       onNavigateLastfmTrackSearch,
-      openLastfmTokenSettings,
+      lastfmGateHandlers,
       translateX,
     ],
   );
@@ -385,6 +408,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         if (lastfmBackHandlerRef.current?.()) return;
         setPanel('appSettings');
         break;
+      case 'deeplApiManage':
+        if (deeplBackHandlerRef.current?.()) return;
+        setPanel('appSettings');
+        break;
       case 'genreTagSettings':
         setPanel('settings');
         break;
@@ -392,7 +419,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'downloadExtensionSettings':
       case 'downloadQualitySettings':
       case 'downloadFilenameSettings':
+      case 'downloadMetadataSettings':
+      case 'downloadLyricsEmbedSettings':
         setPanel('downloadManage');
+        break;
+      case 'weeklySnapshotSettings':
+        setPanel('settings');
         break;
       case 'downloadManage':
         setPanel('root');
@@ -444,6 +476,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       lastfmBackHandlerRef.current = null;
       lastfmDrawerDismissRef.current = null;
     }
+    if (panel !== 'deeplApiManage') {
+      deeplBackHandlerRef.current = null;
+      deeplDrawerDismissRef.current = null;
+    }
   }, [panel]);
 
   const requestDrawerDismiss = useCallback(() => {
@@ -453,6 +489,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     }
     if (panel === 'lastfmApiManage' && lastfmDrawerDismissRef.current) {
       lastfmDrawerDismissRef.current();
+      return;
+    }
+    if (panel === 'deeplApiManage' && deeplDrawerDismissRef.current) {
+      deeplDrawerDismissRef.current();
       return;
     }
     dismissDrawer();
@@ -904,6 +944,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('deeplApiManage')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    번역기 API Key 관리
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -975,6 +1030,27 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   }}
                   registerDrawerDismiss={(handler) => {
                     lastfmDrawerDismissRef.current = handler;
+                  }}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'deeplApiManage' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={requestDrawerDismiss}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDeepLApiManagePanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={() => setPanel('appSettings')}
+                  onCloseDrawer={dismissDrawer}
+                  registerBackHandler={(handler) => {
+                    deeplBackHandlerRef.current = handler;
+                  }}
+                  registerDrawerDismiss={(handler) => {
+                    deeplDrawerDismissRef.current = handler;
                   }}
                 />
               </DrawerShell>
@@ -1060,6 +1136,36 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadMetadataSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    메타데이터 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadLyricsEmbedSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    가사 임베드 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -1112,6 +1218,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
                   section="filename"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadMetadataSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="metadata"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadLyricsEmbedSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="lyricsEmbed"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={() => setPanel('downloadManage')}

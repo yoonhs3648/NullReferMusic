@@ -15,16 +15,37 @@ export async function applyAudioFileMetadata(
 export async function applyServerJobMetadata(
   jobId: string,
   metadata: NrmAudioFileMetadata,
-): Promise<void> {
+  options?: { deeplApiKey?: string; whisperModelPreference?: string },
+): Promise<{ lyricsRequested: boolean; lyricsEmbedded: boolean; lyricsTranslationFailed?: boolean }> {
   const base = await getResolvedApiBaseUrl();
-  if (!base) return;
+  if (!base) return { lyricsRequested: false, lyricsEmbedded: false };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
   const res = await nrmBackendFetch(`${base}/api/download/metadata`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId, ...metadata }),
+    signal: controller.signal,
+    body: JSON.stringify({
+      jobId,
+      ...metadata,
+      deeplApiKey: options?.deeplApiKey?.trim() || undefined,
+      whisperModelPreference: options?.whisperModelPreference?.trim() || undefined,
+    }),
+  }).finally(() => {
+    clearTimeout(timeout);
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(text || `HTTP ${res.status}`);
   }
+  const body = (await res.json().catch(() => ({}))) as {
+    lyricsRequested?: boolean;
+    lyricsEmbedded?: boolean;
+    lyricsTranslationFailed?: boolean;
+  };
+  return {
+    lyricsRequested: !!body.lyricsRequested,
+    lyricsEmbedded: !!body.lyricsEmbedded,
+    lyricsTranslationFailed: !!body.lyricsTranslationFailed,
+  };
 }

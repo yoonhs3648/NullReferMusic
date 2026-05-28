@@ -20,14 +20,23 @@ import {
   loadDownloadAudioExtension,
   loadDownloadAudioQuality,
   loadDownloadFileNameFormat,
+  loadDownloadMetadataMode,
+  loadWhisperModelPreference,
   NRM_AUDIO_EXTENSIONS,
+  NRM_ENABLED_AUDIO_EXTENSIONS,
   NRM_DOWNLOAD_FILENAME_FORMATS,
+  NRM_DOWNLOAD_METADATA_MODES,
+  saveWhisperModelPreference,
   saveDownloadAudioExtension,
   saveDownloadAudioQuality,
   saveDownloadFileNameFormat,
+  saveDownloadMetadataMode,
   type NrmAudioExtension,
   type NrmDownloadFileNameFormat,
+  type NrmDownloadMetadataMode,
+  type NrmWhisperModelPreference,
 } from '@/lib/nrmDownloadSettings';
+import { NRM_WHISPER_MODEL_OPTIONS } from '@/lib/nrmWhisperModelOptions';
 import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import { isStandaloneIos, isYtDlpEncodeSettingsEffective } from '@/lib/nrmStandalonePlatform';
 
@@ -37,13 +46,17 @@ export type NrmDownloadSettingsSection =
   | 'path'
   | 'extension'
   | 'quality'
-  | 'filename';
+  | 'filename'
+  | 'metadata'
+  | 'lyricsEmbed';
 
 const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   path: '다운로드 경로 설정',
   extension: '확장자 설정',
   quality: '비트레이트 설정',
   filename: '파일명 설정',
+  metadata: '메타데이터 설정',
+  lyricsEmbed: '가사 임베드 설정',
 };
 
 type Props = {
@@ -66,6 +79,9 @@ export function NrmDownloadSettingsPanel({
   const [audioQuality, setAudioQuality] = useState(0);
   const [fileNameFormat, setFileNameFormat] =
     useState<NrmDownloadFileNameFormat>('artist-title');
+  const [metadataMode, setMetadataMode] = useState<NrmDownloadMetadataMode>('manual');
+  const [whisperModelPreference, setWhisperModelPreference] =
+    useState<NrmWhisperModelPreference>('profile:fast');
 
   useEffect(() => {
     if (section === 'path') {
@@ -94,6 +110,24 @@ export function NrmDownloadSettingsPanel({
       void loadDownloadFileNameFormat()
         .then((format) => {
           setFileNameFormat(format);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'metadata') {
+      void loadDownloadMetadataMode()
+        .then((mode) => {
+          setMetadataMode(mode);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'lyricsEmbed') {
+      void loadWhisperModelPreference()
+        .then((preference) => {
+          setWhisperModelPreference(preference);
           setLoaded(true);
         })
         .catch(() => setLoaded(true));
@@ -132,6 +166,16 @@ export function NrmDownloadSettingsPanel({
     void saveDownloadFileNameFormat(format);
   }, []);
 
+  const selectMetadataMode = useCallback((mode: NrmDownloadMetadataMode) => {
+    setMetadataMode(mode);
+    void saveDownloadMetadataMode(mode);
+  }, []);
+
+  const selectWhisperModelPreference = useCallback((preference: NrmWhisperModelPreference) => {
+    setWhisperModelPreference(preference);
+    void saveWhisperModelPreference(preference);
+  }, []);
+
   const displayPath = dirUri ? safUriToDisplayPath(dirUri) : null;
 
   return (
@@ -163,10 +207,12 @@ export function NrmDownloadSettingsPanel({
             <View style={styles.extRow}>
               {NRM_AUDIO_EXTENSIONS.map((ext) => {
                 const active = extension === ext;
+                const enabled = (NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(ext);
                 return (
                   <Pressable
                     key={ext}
                     onPress={() => selectExtension(ext)}
+                    disabled={!enabled}
                     style={({ pressed }) => [
                       styles.extChip,
                       {
@@ -176,15 +222,22 @@ export function NrmDownloadSettingsPanel({
                         backgroundColor: active
                           ? 'rgba(0,102,204,0.12)'
                           : 'transparent',
+                        opacity: enabled ? 1 : 0.4,
                       },
-                      pressed && styles.pressed,
+                      pressed && enabled && styles.pressed,
                     ]}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: active }}>
+                    accessibilityState={{ selected: active, disabled: !enabled }}>
                     <Text
                       style={[
                         styles.extChipLabel,
-                        { color: active ? nrmTokens.color.primary : titleColor },
+                        {
+                          color: active
+                            ? nrmTokens.color.primary
+                            : enabled
+                              ? titleColor
+                              : bodyColor,
+                        },
                       ]}>
                       {ext}
                     </Text>
@@ -229,6 +282,126 @@ export function NrmDownloadSettingsPanel({
                       ]}>
                       {opt.label}
                     </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : (
+                      <View style={styles.formatRowSpacer} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {section === 'metadata' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          <Text style={[styles.platformNote, { color: bodyColor }]}>
+            다운로드 시 트랙 정보(메타데이터)를 어떻게 처리할지 선택합니다.
+          </Text>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <View style={styles.formatCol}>
+              {NRM_DOWNLOAD_METADATA_MODES.map((opt) => {
+                const active = metadataMode === opt.id;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => selectMetadataMode(opt.id)}
+                    style={({ pressed }) => [
+                      styles.formatRow,
+                      {
+                        borderColor: active
+                          ? nrmTokens.color.primary
+                          : 'rgba(128,128,128,0.35)',
+                        backgroundColor: active
+                          ? 'rgba(0,102,204,0.12)'
+                          : 'transparent',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+                    <Text
+                      style={[
+                        styles.formatRowLabel,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                      ]}>
+                      {opt.label}
+                    </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : (
+                      <View style={styles.formatRowSpacer} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {section === 'lyricsEmbed' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          <Text style={[styles.platformNote, { color: bodyColor }]}>
+            Whisper 모델 우선순위를 선택합니다. 설치된 모델이 없으면 다음 후보로 자동
+            대체됩니다.
+          </Text>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <View style={styles.formatCol}>
+              {NRM_WHISPER_MODEL_OPTIONS.map((opt) => {
+                const active = whisperModelPreference === opt.id;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => selectWhisperModelPreference(opt.id)}
+                    style={({ pressed }) => [
+                      styles.whisperRow,
+                      {
+                        borderColor: active
+                          ? nrmTokens.color.primary
+                          : 'rgba(128,128,128,0.35)',
+                        backgroundColor: active
+                          ? 'rgba(0,102,204,0.12)'
+                          : 'transparent',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+                    <View style={styles.whisperTextCol}>
+                      <Text
+                        style={[
+                          styles.whisperTitle,
+                          { color: active ? nrmTokens.color.primary : titleColor },
+                        ]}>
+                        {opt.title}
+                      </Text>
+                      <Text style={[styles.whisperSubtitle, { color: bodyColor }]}>
+                        {opt.subtitle}
+                      </Text>
+                      <View style={styles.whisperRateRow}>
+                        <Text style={[styles.whisperRateChip, { color: bodyColor }]}>
+                          속도 {opt.speed}
+                        </Text>
+                        <Text style={[styles.whisperRateChip, { color: bodyColor }]}>
+                          품질 {opt.quality}
+                        </Text>
+                      </View>
+                    </View>
                     {active ? (
                       <Ionicons
                         name="checkmark-circle"
@@ -488,5 +661,42 @@ const styles = StyleSheet.create({
   },
   formatRowSpacer: {
     width: 20,
+  },
+  whisperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: nrmTokens.space.md,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: PANEL_INPUT_BORDER,
+    minHeight: nrmTokens.layout?.touchMin ?? 44,
+    gap: nrmTokens.space.sm,
+  },
+  whisperTextCol: {
+    flex: 1,
+    gap: 4,
+  },
+  whisperTitle: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+  },
+  whisperSubtitle: {
+    fontSize: nrmTokens.font.caption,
+    opacity: 0.88,
+    lineHeight: 18,
+  },
+  whisperRateRow: {
+    flexDirection: 'row',
+    gap: nrmTokens.space.xs,
+    marginTop: 2,
+  },
+  whisperRateChip: {
+    fontSize: nrmTokens.font.caption,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: nrmTokens.radius.pill,
+    backgroundColor: 'rgba(128,128,128,0.14)',
+    overflow: 'hidden',
   },
 });

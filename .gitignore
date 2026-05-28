@@ -25,3 +25,11 @@ Thumbs.db
 # 루트 임시·테스트 파일
 /*.json
 /*.html
+
+# Whisper 로컬 바이너리/모델 (대용량 산출물)
+library/whisper/*.bin
+library/whisper/*.dll
+library/whisper/*.exe
+library/whisper/*.zip
+library/whisper/_bin/
+library/whisper/_src_whisper_cpp/

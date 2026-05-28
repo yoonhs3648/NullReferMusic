@@ -5,17 +5,25 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 @Service
 public class YtDlpDownloadService {
+  private static final Logger log = LoggerFactory.getLogger(YtDlpDownloadService.class);
+
+  /** 오디오 추출: js(node) → plain (쿠키 없음, 429·잠금 회피) */
+  private static final List<YtDlpProfile> YT_DLP_DOWNLOAD_PROFILES =
+      List.of(
+          new YtDlpProfile("js", false, true),
+          new YtDlpProfile("plain", false, false));
 
   private final NrmPaths paths;
 
@@ -58,43 +66,30 @@ public class YtDlpDownloadService {
     String jobId = Long.toString(System.currentTimeMillis(), 36);
     String outPattern = "nrm_" + jobId + ".%(ext)s";
 
-    List<String> cmd = new ArrayList<>();
-    cmd.add(paths.getYtDlpPath().toString());
-    cmd.add("--ffmpeg-location");
-    cmd.add(paths.getFfmpegDir().toString());
-    if (noPlaylist) {
-      cmd.add("--no-playlist");
-    }
-    cmd.add("-x");
-    cmd.add("--audio-format");
-    cmd.add(audioFormat != null && !audioFormat.isBlank() ? audioFormat.trim() : "mp3");
-    cmd.add("--audio-quality");
-    cmd.add(String.valueOf(Math.min(9, Math.max(0, audioQuality))));
-    cmd.add("-P");
-    cmd.add(paths.getOutputDir().toString());
-    cmd.add("-o");
-    cmd.add(outPattern);
-    cmd.add(url.trim());
-
-    Charset cs = Charset.defaultCharset();
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    pb.directory(paths.getRepoRoot().toFile());
-    pb.redirectErrorStream(false);
-
     try {
-      Process p = pb.start();
-      StringBuilder stdout = new StringBuilder();
-      StringBuilder stderr = new StringBuilder();
-      Thread tOut = startDrain(p.getInputStream(), stdout, cs);
-      Thread tErr = startDrain(p.getErrorStream(), stderr, cs);
-      int code = p.waitFor();
-      tOut.join();
-      tErr.join();
-      if (code != 0) {
+      int lastCode = -1;
+      String lastDetail = "";
+      String succeededProfile = "plain";
+      boolean okDownload = false;
+      for (YtDlpProfile profile : YT_DLP_DOWNLOAD_PROFILES) {
+        List<String> cmd = buildDownloadCommand(
+            url, noPlaylist, audioFormat, audioQuality, outPattern, profile);
+        YtDlpRun run = runYtDlp(cmd);
+        if (run.code == 0) {
+          okDownload = true;
+          succeededProfile = profile.name;
+          break;
+        }
+        lastCode = run.code;
+        lastDetail = tail(run.stderr, 6000);
+        log.warn("yt-dlp download failed [{}] code={} detail={}", profile.name, run.code, tail(run.stderr, 1200));
+      }
+
+      if (!okDownload) {
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("error", "yt-dlp 실행이 실패했습니다.");
-        err.put("code", code);
-        err.put("detail", tail(stderr.toString(), 6000));
+        err.put("code", lastCode);
+        err.put("detail", lastDetail);
         return DownloadOutcome.error(HttpStatus.INTERNAL_SERVER_ERROR, err);
       }
       Map<String, Object> ok = new LinkedHashMap<>();
@@ -102,27 +97,12 @@ public class YtDlpDownloadService {
       ok.put("jobId", jobId);
       ok.put("outputDir", paths.getOutputDir().toString());
       ok.put("message", "다운로드가 완료되었습니다.");
-      ok.put("logTail", tail(stderr.toString(), 2000));
+      ok.put("profile", succeededProfile);
       return DownloadOutcome.success(ok);
     } catch (Exception e) {
       return DownloadOutcome.error(
           HttpStatus.INTERNAL_SERVER_ERROR, Map.of("error", e.getMessage()));
     }
-  }
-
-  private static String normalizeAudioFormat(String raw) {
-    if (raw == null || raw.isBlank()) {
-      return "mp3";
-    }
-    String f = raw.trim().toLowerCase();
-    if (f.startsWith(".")) {
-      f = f.substring(1);
-    }
-    return switch (f) {
-      case "mp3", "m4a", "opus", "wav", "flac", "aac" -> f;
-      case "ogg", "vorbis" -> "vorbis";
-      default -> "mp3";
-    };
   }
 
   private static Thread startDrain(InputStream in, StringBuilder sink, Charset cs) {
@@ -144,6 +124,60 @@ public class YtDlpDownloadService {
     return t;
   }
 
+  private List<String> buildDownloadCommand(
+      String url, boolean noPlaylist, String audioFormat, int audioQuality, String outPattern, YtDlpProfile profile) {
+    List<String> cmd = new ArrayList<>();
+    cmd.add(paths.getYtDlpPath().toString());
+    cmd.add("--ffmpeg-location");
+    cmd.add(paths.getFfmpegDir().toString());
+    appendHardeningArgs(cmd, profile);
+    cmd.add("--retries");
+    cmd.add("10");
+    cmd.add("--sleep-requests");
+    cmd.add("1");
+    if (noPlaylist) {
+      cmd.add("--no-playlist");
+    }
+    cmd.add("-x");
+    cmd.add("--audio-format");
+    cmd.add(audioFormat != null && !audioFormat.isBlank() ? audioFormat.trim() : "mp3");
+    cmd.add("--audio-quality");
+    cmd.add(String.valueOf(Math.min(9, Math.max(0, audioQuality))));
+    cmd.add("-P");
+    cmd.add(paths.getOutputDir().toString());
+    cmd.add("-o");
+    cmd.add(outPattern);
+    cmd.add(url.trim());
+    return cmd;
+  }
+
+  private static void appendHardeningArgs(List<String> cmd, YtDlpProfile profile) {
+    if (profile.useJsRuntime) {
+      cmd.add("--js-runtimes");
+      cmd.add("node");
+    }
+    if (profile.useBrowserCookies) {
+      cmd.add("--cookies-from-browser");
+      cmd.add("chrome");
+    }
+  }
+
+  private YtDlpRun runYtDlp(List<String> cmd) throws Exception {
+    Charset cs = Charset.defaultCharset();
+    ProcessBuilder pb = new ProcessBuilder(cmd);
+    pb.directory(paths.getRepoRoot().toFile());
+    pb.redirectErrorStream(false);
+    Process p = pb.start();
+    StringBuilder stdout = new StringBuilder();
+    StringBuilder stderr = new StringBuilder();
+    Thread tOut = startDrain(p.getInputStream(), stdout, cs);
+    Thread tErr = startDrain(p.getErrorStream(), stderr, cs);
+    int code = p.waitFor();
+    tOut.join();
+    tErr.join();
+    return new YtDlpRun(code, stdout.toString(), stderr.toString());
+  }
+
   private static String tail(String s, int maxChars) {
     if (s == null || s.length() <= maxChars) {
       return s == null ? "" : s;
@@ -161,4 +195,8 @@ public class YtDlpDownloadService {
       return new DownloadOutcome(status, body);
     }
   }
+
+  private record YtDlpProfile(String name, boolean useBrowserCookies, boolean useJsRuntime) {}
+
+  private record YtDlpRun(int code, String stdout, String stderr) {}
 }

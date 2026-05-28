@@ -1,5 +1,6 @@
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import type { NrmAudioExtension } from '@/lib/nrmDownloadSettings';
 
 /** 오디오 파일에 쓸 ID3/컨테이너 메타데이터 (빈 문자열 = 태그 미설정) */
 export type NrmAudioFileMetadata = {
@@ -80,6 +81,17 @@ export function normalizeDownloadMetadata(
     if (!out[k]) delete out[k];
   }
   return out;
+}
+
+/** m4a 등 MP4 계열 컨테이너에는 가사 태그를 넣지 않음 */
+export function metadataForAudioExtension(
+  meta: NrmAudioFileMetadata | undefined,
+  extension: NrmAudioExtension,
+): NrmAudioFileMetadata | undefined {
+  if (!meta) return undefined;
+  if (extension !== '.m4a') return meta;
+  const { lyrics: _lyrics, ...rest } = meta;
+  return normalizeDownloadMetadata(rest);
 }
 
 /** 메인 검색: 가수·곡 제목만 사용자 입력 */

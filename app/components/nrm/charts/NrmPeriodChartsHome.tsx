@@ -21,6 +21,7 @@ import {
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import type { SpotifyChartsAuthHandlers } from '@/lib/nrmSpotifyChartsAuthFlow';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
@@ -47,6 +48,7 @@ type Props = {
   onOpenChartsSession?: () => void;
   onRenewChartsBearer?: () => Promise<boolean>;
   onShowBearerExpired?: () => void;
+  lastfmAuth?: LastfmAuthHandlers;
 };
 
 export function NrmPeriodChartsHome({
@@ -58,6 +60,7 @@ export function NrmPeriodChartsHome({
   onOpenChartsSession,
   onRenewChartsBearer,
   onShowBearerExpired,
+  lastfmAuth,
 }: Props) {
   const pageTitle = platform === 'spotify' ? 'Spotify' : 'Last.fm';
   const iconKey = platform;
@@ -135,7 +138,13 @@ export function NrmPeriodChartsHome({
               onShowBearerExpired,
             }
           : undefined;
-      const out = await fetchPeriodChartPage(platform, query, ac.signal, chartsAuth);
+      const out = await fetchPeriodChartPage(
+        platform,
+        query,
+        ac.signal,
+        chartsAuth,
+        platform === 'lastfm' && !append ? lastfmAuth : undefined,
+      );
       if (ac.signal.aborted || generation !== loadGenRef.current) return;
 
       if (!out.ok) {
@@ -166,6 +175,7 @@ export function NrmPeriodChartsHome({
       onOpenChartsSession,
       onRenewChartsBearer,
       onShowBearerExpired,
+      lastfmAuth,
     ],
   );
 

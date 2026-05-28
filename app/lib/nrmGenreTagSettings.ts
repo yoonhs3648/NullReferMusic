@@ -133,16 +133,6 @@ export function getDefaultNrmGenreTagCatalog(): NrmGenreTagCatalog {
         'orchestral',
         'instrumental',
       ]),
-      category('j-pop', 'J-POP', ['j-pop', 'japanese pop']),
-      category('japanese-hip-hop', '일본 힙합', [
-        'japanese hip hop',
-        'j-hiphop',
-      ]),
-      category('anime', '애니', [
-        'anime',
-        'anisong',
-        'anime soundtrack',
-      ]),
     ],
   };
 }

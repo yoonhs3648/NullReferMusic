@@ -15,6 +15,11 @@ import {
   refreshLastfmChartToken,
 } from '@/lib/nrmLastfmTokenSync';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
+import {
+  isLastfmChartAuthErrorCode,
+  runLastfmAuthFlow,
+} from '@/lib/nrmLastfmAuthFlow';
 
 type LastfmFetchFail = {
   ok: false;
@@ -48,7 +53,15 @@ const LASTFM_CHART_PARAMS: Record<
 };
 
 function isAuthError(code: string | undefined, httpStatus: number): boolean {
-  return code === 'lastfm_auth_failed' || httpStatus === 401;
+  return (
+    code === 'lastfm_auth_failed' ||
+    httpStatus === 401 ||
+    httpStatus === 403
+  );
+}
+
+function lastfmApiErrorToAuthFailed(code: number): boolean {
+  return code === 4 || code === 9 || code === 10 || code === 26;
 }
 
 function pickLastfmImage(images: { '#text'?: string; size?: string }[]): string {
@@ -119,11 +132,18 @@ async function fetchLastfmPage(
     .join('&');
   try {
     const res = await fetch(`${LASTFM_API}?${qs}`);
-    if (!res.ok) return { ok: false, errorCode: 'server', authFailed: false };
+    if (!res.ok) {
+      const authFailed = res.status === 401 || res.status === 403;
+      return {
+        ok: false,
+        errorCode: authFailed ? 'auth_failed' : 'server',
+        authFailed,
+      };
+    }
     const root = (await res.json()) as Record<string, unknown>;
     if (typeof root.error === 'number') {
       const code = root.error as number;
-      if (code === 10 || code === 4 || code === 26) {
+      if (lastfmApiErrorToAuthFailed(code)) {
         return { ok: false, errorCode: 'auth_failed', authFailed: true };
       }
       if (code === 6) {
@@ -256,7 +276,7 @@ async function fetchTracksWithDevFallback(
   return fetchLastfmTracksWithBase(fallback, chart, headers);
 }
 
-export async function fetchLastfmChart(
+async function fetchLastfmChartInner(
   chart: LastfmChartTabId,
 ): Promise<ChartFetchOutcome> {
   const auth = await buildLastfmChartAuthHeaders();
@@ -300,4 +320,19 @@ export async function fetchLastfmChart(
     return { ok: true, data: result.data };
   }
   return { ok: false, errorCode: result.errorCode };
+}
+
+export async function fetchLastfmChart(
+  chart: LastfmChartTabId,
+  handlers?: LastfmAuthHandlers,
+): Promise<ChartFetchOutcome> {
+  const run = () => fetchLastfmChartInner(chart);
+  if (!handlers) {
+    return run();
+  }
+  return runLastfmAuthFlow(
+    run,
+    (r) => !r.ok && isLastfmChartAuthErrorCode(r.errorCode),
+    handlers,
+  );
 }

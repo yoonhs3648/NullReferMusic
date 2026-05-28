@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
-  ActivityIndicator,
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -17,12 +20,18 @@ import {
   loadDownloadFileNameFormat,
   type NrmDownloadFileNameFormat,
 } from '@/lib/nrmDownloadSettings';
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { loadNrmGenreTagCatalog } from '@/lib/nrmGenreTagSettings';
 import {
   buildAudioFileName,
   guessInitialDownloadFields,
 } from '@/lib/nrmYoutubeDownloadMeta';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
-import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import {
+  buildAutoWhisperLyricsSentinel,
+  parseWhisperLyricsMode,
+  type NrmWhisperLyricsUiMode,
+} from '@/lib/nrmWhisperLyrics';
 
 export type NrmMetadataEditModalProps = {
   visible: boolean;
@@ -36,13 +45,210 @@ export type NrmMetadataEditModalProps = {
    * coverUrl은 웹 dataURL 또는 APK file:// / content:// uri 모두 허용합니다.
    */
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
+  /** 메타데이터 API 로딩 중 */
   busy?: boolean;
+  /** 팝업 확인 후 yt-dlp 대기·ffmpeg 적용 중 */
+  confirmBusy?: boolean;
   onClose: () => void;
   onConfirm: (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => void;
 };
 
+const GENRE_MANUAL_VALUE = '__manual__';
+
+const LYRICS_MODE_OPTIONS: { value: NrmWhisperLyricsUiMode; label: string; disabled?: boolean }[] = [
+  { value: 'configured', label: '설정' },
+  { value: 'translation', label: '번역지원' },
+  { value: 'unset', label: '설정안함' },
+];
+
+const WEB_SCROLL_CLASS = 'nrm-scroll-web';
+
+function webScrollClassName(isDark: boolean): string | undefined {
+  if (Platform.OS !== 'web') return undefined;
+  return `${WEB_SCROLL_CLASS} ${isDark ? 'nrm-scroll-web--dark' : 'nrm-scroll-web--light'}`;
+}
+
+function webScrollInlineStyle(isDark: boolean): object | undefined {
+  if (Platform.OS !== 'web') return undefined;
+  return {
+    scrollbarWidth: 'thin',
+    scrollbarColor: isDark
+      ? 'rgba(255, 255, 255, 0.28) transparent'
+      : 'rgba(0, 0, 0, 0.2) transparent',
+  } as const;
+}
+
 function normalizeString(s: string | undefined | null): string {
   return (s ?? '').trim();
+}
+
+function resolveGenreSelection(
+  genreValue: string,
+  categoryNames: string[],
+): { selection: string; custom: string } {
+  const trimmed = genreValue.trim();
+  if (!trimmed) {
+    return { selection: GENRE_MANUAL_VALUE, custom: '' };
+  }
+  const match = categoryNames.find((n) => n === trimmed);
+  if (match) {
+    return { selection: match, custom: '' };
+  }
+  return { selection: GENRE_MANUAL_VALUE, custom: trimmed };
+}
+
+type InlineSelectProps = {
+  label: string;
+  value: string;
+  options: { value: string; label: string; disabled?: boolean }[];
+  onChange: (value: string) => void;
+  isDark: boolean;
+  titleColor: string;
+  bodyColor: string;
+  disabled?: boolean;
+  scrollClassName?: string;
+  scrollStyle?: object;
+};
+
+function MetadataInlineSelect({
+  label,
+  value,
+  options,
+  onChange,
+  isDark,
+  titleColor,
+  bodyColor,
+  disabled = false,
+  scrollClassName,
+  scrollStyle,
+}: InlineSelectProps) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value);
+  const border = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const bg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas;
+
+  const close = useCallback(() => setOpen(false), []);
+  const pick = useCallback(
+    (v: string, disabled?: boolean) => {
+      if (disabled) return;
+      onChange(v);
+      close();
+    },
+    [close, onChange],
+  );
+
+  return (
+    <View style={styles.inlineFieldRow}>
+      <Text style={[styles.inlineFieldLabel, { color: bodyColor }]}>{label}</Text>
+      <Pressable
+        onPress={() => !disabled && setOpen(true)}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.selectTrigger,
+          { borderColor: border, backgroundColor: bg, opacity: disabled ? 0.5 : 1 },
+          pressed && !disabled && styles.pressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} ${selected?.label ?? value}`}>
+        <Text style={[styles.selectTriggerText, { color: titleColor }]} numberOfLines={1}>
+          {selected?.label ?? value}
+        </Text>
+        <Ionicons name="chevron-down" size={16} color={bodyColor} />
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        <Pressable style={styles.selectScrim} onPress={close}>
+          <View
+            style={[
+              styles.selectSheet,
+              {
+                backgroundColor: isDark
+                  ? nrmTokens.color.surfaceTile1
+                  : nrmTokens.color.canvas,
+                borderColor: border,
+              },
+            ]}>
+            <Text style={[styles.selectSheetTitle, { color: titleColor }]}>{label}</Text>
+            <ScrollView
+              style={[styles.selectSheetScroll, scrollStyle]}
+              contentContainerStyle={styles.selectSheetScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              {...(Platform.OS === 'web' && scrollClassName
+                ? { className: scrollClassName }
+                : {})}>
+              {options.map((o) => {
+                const active = o.value === value;
+                const disabledOpt = !!o.disabled;
+                return (
+                  <Pressable
+                    key={o.value}
+                    onPress={() => pick(o.value, disabledOpt)}
+                    disabled={disabledOpt}
+                    style={({ pressed }) => [
+                      styles.selectOptionRow,
+                      {
+                        borderBottomColor: isDark
+                          ? 'rgba(255,255,255,0.08)'
+                          : 'rgba(0,0,0,0.08)',
+                      },
+                      active && styles.selectOptionRowActive,
+                      pressed && !disabledOpt && styles.pressed,
+                      disabledOpt && { opacity: 0.5 },
+                    ]}>
+                    <Text
+                      style={[
+                        styles.selectOptionText,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                        active && { fontWeight: '600' },
+                      ]}>
+                      {o.label}
+                    </Text>
+                    {active ? (
+                      <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+type InlineTextFieldProps = {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder?: string;
+  bodyColor: string;
+  inputColors: { backgroundColor: string; color: string; borderColor: string };
+  editable?: boolean;
+};
+
+function InlineTextField({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  bodyColor,
+  inputColors,
+  editable = true,
+}: InlineTextFieldProps) {
+  return (
+    <View style={styles.inlineFieldRow}>
+      <Text style={[styles.inlineFieldLabel, { color: bodyColor }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={placeholder ? '#6b7288' : undefined}
+        style={[styles.inlineInput, inputColors]}
+        editable={editable}
+      />
+    </View>
+  );
 }
 
 export function NrmMetadataEditModal({
@@ -54,63 +260,113 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   busy = false,
+  confirmBusy = false,
   onClose,
   onConfirm,
 }: NrmMetadataEditModalProps) {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const cardMaxWidth = Math.min(windowWidth - nrmTokens.space.lg * 2, 560);
+  const cardMaxHeight = Math.min(windowHeight * 0.88, 680);
+
   const [artist, setArtist] = useState('');
   const [title, setTitle] = useState('');
 
   const [album, setAlbum] = useState('');
   const [albumArtist, setAlbumArtist] = useState('');
-  const [genre, setGenre] = useState('');
+  const [genreSelection, setGenreSelection] = useState(GENRE_MANUAL_VALUE);
+  const [genreCustom, setGenreCustom] = useState('');
+  const [genreCategoryNames, setGenreCategoryNames] = useState<string[]>([]);
   const [releaseDate, setReleaseDate] = useState('');
   const [trackNumber, setTrackNumber] = useState('');
   const [discNumber, setDiscNumber] = useState('');
   const [composer, setComposer] = useState('');
-  const [lyrics, setLyrics] = useState('');
+  const [lyricsMode, setLyricsMode] = useState<NrmWhisperLyricsUiMode>('configured');
+  const [translationOptionEnabled, setTranslationOptionEnabled] = useState(true);
+  const [translationOptionHint, setTranslationOptionHint] = useState('');
   const [bpm, setBpm] = useState('');
   const [copyright, setCopyright] = useState('');
   const [website, setWebsite] = useState('');
   const [producer, setProducer] = useState('');
   const [remixer, setRemixer] = useState('');
   const [coverUrl, setCoverUrl] = useState('');
+  const [moreExpanded, setMoreExpanded] = useState(false);
 
   const [extension, setExtension] = useState('.mp3');
   const [fileNameFormat, setFileNameFormat] =
     useState<NrmDownloadFileNameFormat>('artist-title');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const albumArtistLinkedRef = useRef(true);
+
+  const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
+  const scrollClassName = webScrollClassName(isDark);
+  const scrollInlineStyle = webScrollInlineStyle(isDark);
+  const bodyColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80;
+
+  const inputColors = {
+    backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
+    color: titleColor,
+    borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
+  };
+
+  useEffect(() => {
+    if (!visible) return;
+    void loadNrmGenreTagCatalog().then((catalog) => {
+      setGenreCategoryNames(catalog.categories.map((c) => c.name));
+    });
+  }, [visible]);
 
   useEffect(() => {
     if (!visible || !item) return;
 
+    let nextArtist = '';
+    let nextTitle = '';
     if (
       (metadataSource === 'chart' || metadataSource === 'lastfm' || metadataSource === 'spotify') &&
       (initialArtist != null || initialTitle != null)
     ) {
-      setArtist((initialArtist ?? '').trim());
-      setTitle((initialTitle ?? '').trim());
+      nextArtist = (initialArtist ?? '').trim();
+      nextTitle = (initialTitle ?? '').trim();
     } else {
       const fields = guessInitialDownloadFields(item);
-      setArtist(fields.artist);
-      setTitle(fields.title);
+      nextArtist = fields.artist;
+      nextTitle = fields.title;
     }
+    setArtist(nextArtist);
+    setTitle(nextTitle);
 
     const m = initialMetadataFields;
     setAlbum(normalizeString(m?.album));
-    setAlbumArtist(normalizeString(m?.albumArtist));
-    setGenre(normalizeString(m?.genre));
+    const metaAlbumArtist = normalizeString(m?.albumArtist);
+    if (metaAlbumArtist) {
+      setAlbumArtist(metaAlbumArtist);
+      albumArtistLinkedRef.current = false;
+    } else {
+      setAlbumArtist(nextArtist);
+      albumArtistLinkedRef.current = true;
+    }
     setReleaseDate(normalizeString(m?.releaseDate));
     setTrackNumber(normalizeString(m?.trackNumber));
     setDiscNumber(normalizeString(m?.discNumber));
     setComposer(normalizeString(m?.composer));
-    setLyrics(normalizeString(m?.lyrics));
+    const rawLyrics = normalizeString(m?.lyrics);
+    const parsed = parseWhisperLyricsMode(rawLyrics);
+    setLyricsMode(parsed ?? 'configured');
     setBpm(normalizeString(m?.bpm));
     setCopyright(normalizeString(m?.copyright));
     setWebsite(normalizeString(m?.website));
     setProducer(normalizeString(m?.producer));
     setRemixer(normalizeString(m?.remixer));
     setCoverUrl(normalizeString(m?.coverUrl));
+    setMoreExpanded(false);
+
+    void loadNrmGenreTagCatalog().then((catalog) => {
+      const names = catalog.categories.map((c) => c.name);
+      setGenreCategoryNames(names);
+      const resolved = resolveGenreSelection(normalizeString(m?.genre), names);
+      setGenreSelection(resolved.selection);
+      setGenreCustom(resolved.custom);
+    });
   }, [visible, item, metadataSource, initialArtist, initialTitle, initialMetadataFields]);
 
   useEffect(() => {
@@ -123,11 +379,32 @@ export function NrmMetadataEditModal({
     );
   }, [item, visible]);
 
+  useEffect(() => {
+    if (!visible || !albumArtistLinkedRef.current) return;
+    setAlbumArtist(artist);
+  }, [artist, visible]);
+
+  const genreOptions = useMemo(() => {
+    const fromSettings = genreCategoryNames.map((name) => ({ value: name, label: name }));
+    return [{ value: GENRE_MANUAL_VALUE, label: '직접입력' }, ...fromSettings];
+  }, [genreCategoryNames]);
+
+  const resolvedGenre = useMemo(() => {
+    if (genreSelection === GENRE_MANUAL_VALUE) {
+      return genreCustom.trim();
+    }
+    return genreSelection.trim();
+  }, [genreSelection, genreCustom]);
+
   const preview = useMemo(() => {
     return buildAudioFileName(artist, title, extension, fileNameFormat);
   }, [artist, title, extension, fileNameFormat]);
 
-  const canSubmit = !!item && artist.trim().length > 0 && title.trim().length > 0 && !busy;
+  const blocked = busy || confirmBusy;
+  const canSubmit =
+    !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
+
+  const stackCoverColumn = cardMaxWidth < 400;
 
   async function pickCoverWeb() {
     fileInputRef.current?.click();
@@ -143,12 +420,10 @@ export function NrmMetadataEditModal({
       reader.readAsDataURL(file);
     });
     setCoverUrl(result);
-    // allow re-picking same file
     e.target.value = '';
   }
 
   async function pickCoverNative() {
-    // expo-image-picker은 native 전용으로 동적 import
     const ImagePicker = await import('expo-image-picker');
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -167,11 +442,62 @@ export function NrmMetadataEditModal({
     await pickCoverNative();
   }
 
-  const inputColors = {
-    backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
-    color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink,
-    borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
-  };
+  const lyricsUnsupported = extension !== '.mp3';
+  useEffect(() => {
+    if (!visible || lyricsUnsupported) return;
+    let cancelled = false;
+    void (async () => {
+      const [{ getDeepLApiKey }, { fetchDeepLUsage, isDeepLExhausted }] = await Promise.all([
+        import('@/lib/nrmDeepLApiSettings'),
+        import('@/lib/nrmDeepLApiClient'),
+      ]);
+      const key = await getDeepLApiKey();
+      if (!key) {
+        if (!cancelled) {
+          setTranslationOptionEnabled(false);
+          setTranslationOptionHint('DeepL API 토큰 등록 시 사용 가능합니다.');
+        }
+        return;
+      }
+      const usage = await fetchDeepLUsage(key);
+      if (!cancelled) {
+        if (usage.ok && isDeepLExhausted(usage.usage)) {
+          setTranslationOptionEnabled(false);
+          setTranslationOptionHint('DeepL 월 사용량이 초과되어 비활성화되었습니다.');
+        } else {
+          setTranslationOptionEnabled(true);
+          setTranslationOptionHint('');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lyricsUnsupported, visible]);
+
+  useEffect(() => {
+    if (!translationOptionEnabled && lyricsMode === 'translation') {
+      setLyricsMode('configured');
+    }
+  }, [lyricsMode, translationOptionEnabled]);
+
+  const lyricsOptions = useMemo(
+    () =>
+      LYRICS_MODE_OPTIONS.map((opt) =>
+        opt.value === 'translation'
+          ? { ...opt, disabled: !translationOptionEnabled }
+          : { ...opt, disabled: false },
+      ),
+    [translationOptionEnabled],
+  );
+
+  function resolveLyricsForSubmit(): string | undefined {
+    if (lyricsUnsupported) return undefined;
+    if (lyricsMode === 'unset') {
+      return undefined;
+    }
+    return buildAutoWhisperLyricsSentinel(lyricsMode);
+  }
 
   return (
     <Modal
@@ -186,88 +512,267 @@ export function NrmMetadataEditModal({
           style={[
             styles.card,
             {
+              width: cardMaxWidth,
+              maxHeight: cardMaxHeight,
               backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas,
               borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
             },
           ]}>
-          <Text
-            style={[
-              styles.heading,
-              { color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink },
-            ]}>
-            메타데이터 편집
-          </Text>
+          <Text style={[styles.heading, { color: titleColor }]}>트랙 정보</Text>
 
           {busy ? (
-            <View style={{ paddingVertical: nrmTokens.space.md }}>
+            <View style={styles.busyRow}>
               <ActivityIndicator color={nrmTokens.color.primary} />
-              <Text style={[styles.hint, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48 }]}>
+              <Text style={[styles.busyHint, { color: bodyColor }]}>
                 Last.fm/Spotify 메타데이터를 불러오는 중입니다...
               </Text>
             </View>
           ) : null}
 
-          <Text
-            style={[
-              styles.hint,
-              {
-                color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48,
-              },
-            ]}>
-            {metadataSource === 'chart'
-              ? '차트 정보를 기본값으로 넣었습니다. 필요하면 수정하세요.'
-              : metadataSource === 'lastfm'
-                ? 'Last.fm 정보를 기본값으로 넣었습니다. 필요하면 수정하세요.'
-                : '유튜브 검색 결과를 바탕으로 채웠습니다. 필요하면 수정하세요.'}
-          </Text>
-
-          <View style={{ flexDirection: 'row', gap: nrmTokens.space.md, marginBottom: nrmTokens.space.md }}>
-            <View style={styles.coverPreviewWrap}>
-              {coverUrl ? (
-                // RN Image는 dataURL/file/content URI도 uri로 처리합니다.
-                <Image source={{ uri: coverUrl }} style={styles.coverPreview} resizeMode="cover" />
-              ) : (
-                <View style={[styles.coverPreview, { justifyContent: 'center', alignItems: 'center' }]}>
-                  <Text style={{ color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48 }}>커버 없음</Text>
+          <ScrollView
+            style={[styles.scroll, scrollInlineStyle]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              Platform.OS === 'web' && styles.scrollContentWeb,
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            {...(scrollClassName ? { className: scrollClassName } : {})}>
+            <View
+              style={[
+                styles.topSection,
+                stackCoverColumn ? styles.topSectionStacked : styles.topSectionRow,
+              ]}>
+              <View style={[styles.coverColumn, stackCoverColumn && styles.coverColumnStacked]}>
+                <View style={styles.coverPreviewWrap}>
+                  {coverUrl ? (
+                    <Image source={{ uri: coverUrl }} style={styles.coverPreview} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.coverPreview, styles.coverEmpty]}>
+                      <Text style={{ color: bodyColor, fontSize: nrmTokens.font.caption }}>
+                        앨범커버
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-            <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-              <Pressable
-                onPress={pickCover}
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.btnSecondary,
-                  {
-                    borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0,0,0,0.12)',
-                    opacity: busy ? 0.5 : 1,
-                    transform: pressed ? [{ scale: 0.98 }] : undefined,
-                  },
-                ]}>
-                <Text style={{ color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink }}>
-                  커버 선택
-                </Text>
-              </Pressable>
-              {coverUrl ? (
-                <Pressable
-                  onPress={() => setCoverUrl('')}
-                  disabled={busy}
-                  style={({ pressed }) => [
-                    styles.btnSecondary,
-                    {
-                      marginTop: nrmTokens.space.sm,
-                      borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0,0,0,0.12)',
-                      opacity: busy ? 0.5 : 1,
-                      transform: pressed ? [{ scale: 0.98 }] : undefined,
-                    },
-                  ]}>
-                  <Text style={{ color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink }}>
-                    커버 제거
+                <View style={styles.coverActions}>
+                  <Pressable
+                    onPress={pickCover}
+                    disabled={busy}
+                    style={({ pressed }) => [
+                      styles.coverActionBtn,
+                      {
+                        backgroundColor: isDark
+                          ? 'rgba(255,255,255,0.08)'
+                          : 'rgba(0,0,0,0.04)',
+                        borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0,0,0,0.1)',
+                        opacity: busy ? 0.5 : 1,
+                      },
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text style={[styles.coverActionLabel, { color: titleColor }]}>편집</Text>
+                  </Pressable>
+                  {coverUrl ? (
+                    <Pressable
+                      onPress={() => setCoverUrl('')}
+                      disabled={busy}
+                      style={({ pressed }) => [
+                        styles.coverActionBtn,
+                        {
+                          backgroundColor: isDark
+                            ? 'rgba(255,255,255,0.08)'
+                            : 'rgba(0,0,0,0.04)',
+                          borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0,0,0,0.1)',
+                          opacity: busy ? 0.5 : 1,
+                        },
+                        pressed && styles.pressed,
+                      ]}>
+                      <Text style={[styles.coverActionLabel, { color: titleColor }]}>제거</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={styles.fieldsColumn}>
+                <InlineTextField
+                  label="가수"
+                  value={artist}
+                  onChangeText={setArtist}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="트랙"
+                  value={title}
+                  onChangeText={setTitle}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="앨범"
+                  value={album}
+                  onChangeText={setAlbum}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="연도"
+                  value={releaseDate}
+                  onChangeText={setReleaseDate}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <MetadataInlineSelect
+                  label="장르"
+                  value={genreSelection}
+                  options={genreOptions}
+                  onChange={setGenreSelection}
+                  isDark={isDark}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  disabled={busy || genreOptions.length === 0}
+                  scrollClassName={scrollClassName}
+                  scrollStyle={scrollInlineStyle}
+                />
+                {genreSelection === GENRE_MANUAL_VALUE ? (
+                  <View style={styles.inlineFieldRow}>
+                    <Text style={[styles.inlineFieldLabel, { color: bodyColor }]} />
+                    <TextInput
+                      value={genreCustom}
+                      onChangeText={setGenreCustom}
+                      placeholder="장르 직접입력"
+                      placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
+                      style={[styles.inlineInput, inputColors]}
+                      editable={!busy}
+                    />
+                  </View>
+                ) : null}
+                {lyricsUnsupported ? (
+                  <View style={styles.inlineFieldRow}>
+                    <Text style={[styles.inlineFieldLabel, { color: bodyColor }]}>가사</Text>
+                    <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
+                      mp3에서만 지원합니다.
+                    </Text>
+                  </View>
+                ) : (
+                  <MetadataInlineSelect
+                    label="가사"
+                    value={lyricsMode}
+                    options={lyricsOptions}
+                    onChange={(v) => setLyricsMode(v as NrmWhisperLyricsUiMode)}
+                    isDark={isDark}
+                    titleColor={titleColor}
+                    bodyColor={bodyColor}
+                    disabled={busy}
+                    scrollClassName={scrollClassName}
+                    scrollStyle={scrollInlineStyle}
+                  />
+                )}
+                {!lyricsUnsupported && translationOptionHint ? (
+                  <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
+                    {translationOptionHint}
                   </Text>
-                </Pressable>
-              ) : null}
+                ) : null}
+              </View>
             </View>
-          </View>
+
+            <Pressable
+              onPress={() => setMoreExpanded((v) => !v)}
+              style={({ pressed }) => [styles.moreToggle, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: moreExpanded }}>
+              <Text style={[styles.moreToggleLabel, { color: titleColor }]}>그 외 정보</Text>
+              <Ionicons
+                name={moreExpanded ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={bodyColor}
+              />
+            </Pressable>
+
+            {moreExpanded ? (
+              <View style={styles.moreFields}>
+                <InlineTextField
+                  label="앨범가수"
+                  value={albumArtist}
+                  onChangeText={(v) => {
+                    albumArtistLinkedRef.current = false;
+                    setAlbumArtist(v);
+                  }}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="트랙번호"
+                  value={trackNumber}
+                  onChangeText={setTrackNumber}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="디스크"
+                  value={discNumber}
+                  onChangeText={setDiscNumber}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="작곡가"
+                  value={composer}
+                  onChangeText={setComposer}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="BPM"
+                  value={bpm}
+                  onChangeText={setBpm}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="저작권"
+                  value={copyright}
+                  onChangeText={setCopyright}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="URL"
+                  value={website}
+                  onChangeText={setWebsite}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="프로듀서"
+                  value={producer}
+                  onChangeText={setProducer}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+                <InlineTextField
+                  label="리믹서"
+                  value={remixer}
+                  onChangeText={setRemixer}
+                  bodyColor={bodyColor}
+                  inputColors={inputColors}
+                  editable={!busy}
+                />
+              </View>
+            ) : null}
+          </ScrollView>
 
           {Platform.OS === 'web' ? (
             <input
@@ -279,227 +784,40 @@ export function NrmMetadataEditModal({
             />
           ) : null}
 
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            가수
-          </Text>
-          <TextInput
-            value={artist}
-            onChangeText={setArtist}
-            placeholder="가수"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            곡 제목
-          </Text>
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            placeholder="곡 제목"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            앨범
-          </Text>
-          <TextInput
-            value={album}
-            onChangeText={setAlbum}
-            placeholder="앨범"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            앨범가수
-          </Text>
-          <TextInput
-            value={albumArtist}
-            onChangeText={setAlbumArtist}
-            placeholder="album_artist"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            장르
-          </Text>
-          <TextInput
-            value={genre}
-            onChangeText={setGenre}
-            placeholder="genre"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            연도
-          </Text>
-          <TextInput
-            value={releaseDate}
-            onChangeText={setReleaseDate}
-            placeholder="date (yyyy)"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            트랙번호
-          </Text>
-          <TextInput
-            value={trackNumber}
-            onChangeText={setTrackNumber}
-            placeholder="track"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            디스크번호
-          </Text>
-          <TextInput
-            value={discNumber}
-            onChangeText={setDiscNumber}
-            placeholder="disc"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            작곡가
-          </Text>
-          <TextInput
-            value={composer}
-            onChangeText={setComposer}
-            placeholder="composer"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            가사
-          </Text>
-          <TextInput
-            value={lyrics}
-            onChangeText={setLyrics}
-            placeholder="lyrics"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            BPM
-          </Text>
-          <TextInput
-            value={bpm}
-            onChangeText={setBpm}
-            placeholder="bpm"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            저작권
-          </Text>
-          <TextInput
-            value={copyright}
-            onChangeText={setCopyright}
-            placeholder="copyright"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            URL
-          </Text>
-          <TextInput
-            value={website}
-            onChangeText={setWebsite}
-            placeholder="website / url"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            프로듀서
-          </Text>
-          <TextInput
-            value={producer}
-            onChangeText={setProducer}
-            placeholder="producer"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text style={[styles.label, { color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80 }]}>
-            리믹서
-          </Text>
-          <TextInput
-            value={remixer}
-            onChangeText={setRemixer}
-            placeholder="remixer"
-            placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-            style={[styles.field, inputColors]}
-            editable={!busy}
-          />
-
-          <Text
-            style={[
-              styles.preview,
-              {
-                color: isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48,
-              },
-            ]}
-            numberOfLines={2}>
+          <Text style={[styles.preview, { color: bodyColor }]} numberOfLines={2}>
             파일명: {preview}
           </Text>
 
           <View style={styles.actions}>
             <Pressable
               onPress={onClose}
+              disabled={confirmBusy}
               style={({ pressed }) => [
                 styles.btnSecondary,
                 {
                   borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
-                  transform: pressed ? [{ scale: 0.98 }] : undefined,
+                  opacity: confirmBusy ? 0.5 : 1,
                 },
+                pressed && !confirmBusy && styles.pressed,
               ]}>
-              <Text style={{ color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink }}>
-                취소
-              </Text>
+              <Text style={{ color: titleColor }}>취소</Text>
             </Pressable>
 
             <Pressable
               onPress={() => {
-                if (!item || !canSubmit) return;
+                if (!item || !canSubmit || confirmBusy) return;
                 const metadata: NrmAudioFileMetadata = {
                   artist: artist.trim(),
                   title: title.trim(),
                   album: album.trim(),
-                  genre: genre.trim(),
+                  genre: resolvedGenre,
                   releaseDate: releaseDate.trim(),
                   coverUrl: coverUrl.trim(),
-                  albumArtist: albumArtist.trim() || undefined,
+                  albumArtist: albumArtist.trim() || artist.trim() || undefined,
                   trackNumber: trackNumber.trim() || undefined,
                   discNumber: discNumber.trim() || undefined,
                   composer: composer.trim() || undefined,
-                  lyrics: lyrics.trim() || undefined,
+                  lyrics: resolveLyricsForSubmit(),
                   bpm: bpm.trim() || undefined,
                   copyright: copyright.trim() || undefined,
                   website: website.trim() || undefined,
@@ -519,9 +837,13 @@ export function NrmMetadataEditModal({
                 styles.btnPrimary,
                 !canSubmit && styles.btnDisabled,
                 pressed && canSubmit && styles.pressed,
+                { flexDirection: 'row', alignItems: 'center', gap: nrmTokens.space.xs },
               ]}>
+              {confirmBusy ? (
+                <ActivityIndicator color={nrmTokens.color.onPrimary} size="small" />
+              ) : null}
               <Text style={styles.btnPrimaryLabel}>
-                {Platform.OS === 'web' ? '저장 확인 후 받기' : '다운로드'}
+                {confirmBusy ? '처리 중…' : '다운로드'}
               </Text>
             </Pressable>
           </View>
@@ -535,6 +857,7 @@ const styles = StyleSheet.create({
   wrap: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: nrmTokens.space.lg,
   },
   dim: { backgroundColor: 'rgba(0,0,0,0.45)' },
@@ -543,38 +866,179 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     padding: nrmTokens.space.lg,
     zIndex: 1,
+    overflow: 'hidden',
   },
-  heading: { fontSize: nrmTokens.font.tagline, fontWeight: '600', marginBottom: nrmTokens.space.xs },
-  hint: { fontSize: nrmTokens.font.caption, marginBottom: nrmTokens.space.md, lineHeight: 20 },
-  label: { fontSize: nrmTokens.font.caption, fontWeight: '600', marginBottom: nrmTokens.space.xs },
-  field: {
-    borderWidth: 1,
-    borderRadius: nrmTokens.radius.md,
-    paddingHorizontal: nrmTokens.space.md,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
-    fontSize: nrmTokens.font.body,
+  heading: {
+    fontSize: nrmTokens.font.tagline,
+    fontWeight: '600',
+    marginBottom: nrmTokens.space.md,
+  },
+  busyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.md,
+  },
+  busyHint: { fontSize: nrmTokens.font.caption, flex: 1 },
+  scroll: { flexGrow: 0, flexShrink: 1, marginRight: -2 },
+  scrollContent: { paddingBottom: nrmTokens.space.sm },
+  scrollContentWeb: { paddingRight: nrmTokens.space.xs },
+  topSection: { gap: nrmTokens.space.lg, marginBottom: nrmTokens.space.md },
+  topSectionRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  topSectionStacked: { flexDirection: 'column' },
+  coverColumn: { width: 128, flexShrink: 0 },
+  coverColumnStacked: { alignSelf: 'center' },
+  coverPreviewWrap: {
+    width: 128,
+    height: 128,
+    borderRadius: nrmTokens.radius.lg,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: nrmTokens.color.hairline,
     marginBottom: nrmTokens.space.sm,
   },
-  preview: { fontSize: nrmTokens.font.caption, marginTop: nrmTokens.space.sm, marginBottom: nrmTokens.space.lg },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: nrmTokens.space.sm, justifyContent: 'flex-end' },
+  coverPreview: { width: '100%', height: '100%' },
+  coverEmpty: { justifyContent: 'center', alignItems: 'center' },
+  coverActions: { flexDirection: 'row', gap: nrmTokens.space.xs, width: 128 },
+  coverActionBtn: {
+    flex: 1,
+    height: 34,
+    borderRadius: nrmTokens.radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  coverActionLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 18,
+    includeFontPadding: false,
+  },
+  fieldsColumn: { flex: 1, minWidth: 0, gap: nrmTokens.space.sm },
+  inlineFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: nrmTokens.space.sm,
+    minHeight: 40,
+  },
+  inlineFieldLabel: {
+    width: 52,
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    flexShrink: 0,
+  },
+  lyricsUnsupportedHint: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 20,
+    opacity: 0.85,
+  },
+  inlineInput: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 280,
+    borderWidth: 1,
+    borderRadius: nrmTokens.radius.md,
+    paddingHorizontal: nrmTokens.space.sm,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    fontSize: nrmTokens.font.body,
+  },
+  selectTrigger: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 280,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 40,
+    paddingHorizontal: nrmTokens.space.sm,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: 1,
+    gap: 4,
+  },
+  selectTriggerText: {
+    flex: 1,
+    fontSize: nrmTokens.font.body,
+  },
+  selectScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: nrmTokens.space.lg,
+  },
+  selectSheet: {
+    maxHeight: '70%',
+    borderRadius: nrmTokens.radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: nrmTokens.space.md,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 360,
+  },
+  selectSheetTitle: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+    paddingHorizontal: nrmTokens.space.lg,
+    marginBottom: nrmTokens.space.sm,
+  },
+  selectSheetScroll: { maxHeight: 320, marginRight: -2 },
+  selectSheetScrollContent: {
+    paddingRight: Platform.OS === 'web' ? nrmTokens.space.xs : 0,
+  },
+  selectOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: nrmTokens.space.md,
+    paddingHorizontal: nrmTokens.space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  selectOptionRowActive: { backgroundColor: 'rgba(0, 102, 204, 0.1)' },
+  selectOptionText: { fontSize: nrmTokens.font.body },
+  moreToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: nrmTokens.space.sm,
+    paddingHorizontal: nrmTokens.space.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: nrmTokens.color.hairline,
+    marginBottom: nrmTokens.space.xs,
+  },
+  moreToggleLabel: { fontSize: nrmTokens.font.body, fontWeight: '600' },
+  moreFields: { gap: nrmTokens.space.sm, paddingBottom: nrmTokens.space.sm },
+  preview: {
+    fontSize: nrmTokens.font.caption,
+    marginTop: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.md,
+  },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: nrmTokens.space.sm,
+    justifyContent: 'flex-end',
+  },
   btnSecondary: {
     paddingVertical: 11,
     paddingHorizontal: 18,
     borderRadius: nrmTokens.radius.pill,
     borderWidth: 1,
   },
-  btnPrimary: { paddingVertical: 11, paddingHorizontal: 22, borderRadius: nrmTokens.radius.pill, backgroundColor: nrmTokens.color.primary },
+  btnPrimary: {
+    paddingVertical: 11,
+    paddingHorizontal: 22,
+    borderRadius: nrmTokens.radius.pill,
+    backgroundColor: nrmTokens.color.primary,
+  },
   btnDisabled: { opacity: 0.45 },
   pressed: { opacity: 0.92, transform: [{ scale: 0.98 }] },
-  btnPrimaryLabel: { color: nrmTokens.color.onPrimary, fontSize: nrmTokens.font.body, fontWeight: '400' },
-  coverPreviewWrap: {
-    width: 92,
-    height: 92,
-    borderRadius: nrmTokens.radius.lg,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: nrmTokens.color.hairline,
+  btnPrimaryLabel: {
+    color: nrmTokens.color.onPrimary,
+    fontSize: nrmTokens.font.body,
+    fontWeight: '400',
   },
-  coverPreview: { width: '100%', height: '100%' },
 });
-

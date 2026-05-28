@@ -10,6 +10,7 @@ class OnDeviceDownloadPackage : ReactPackage {
     return listOf(
         OnDeviceDownloadModule(reactContext),
         NrmAudioMetadataModule(reactContext),
+        NrmWhisperModule(reactContext),
         NrmSpotifyCookieModule(reactContext),
     )
   }

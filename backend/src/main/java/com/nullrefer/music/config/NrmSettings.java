@@ -11,6 +11,9 @@ public class NrmSettings {
   private String ytDlpPath = "";
   private String ffmpegDir = "";
   private String outputDir = "";
+  private String whisperDir = "";
+  private String whisperCli = "";
+  private String whisperModel = "";
 
   private String youtubeApiKey = "";
 
@@ -52,6 +55,30 @@ public class NrmSettings {
 
   public void setOutputDir(String outputDir) {
     this.outputDir = outputDir;
+  }
+
+  public String getWhisperDir() {
+    return whisperDir;
+  }
+
+  public void setWhisperDir(String whisperDir) {
+    this.whisperDir = whisperDir;
+  }
+
+  public String getWhisperCli() {
+    return whisperCli;
+  }
+
+  public void setWhisperCli(String whisperCli) {
+    this.whisperCli = whisperCli;
+  }
+
+  public String getWhisperModel() {
+    return whisperModel;
+  }
+
+  public void setWhisperModel(String whisperModel) {
+    this.whisperModel = whisperModel;
   }
 
   public String getYoutubeApiKey() {

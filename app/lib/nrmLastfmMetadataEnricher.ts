@@ -17,8 +17,27 @@ import {
   searchLastfmAlbums,
   searchLastfmArtists,
 } from '@/lib/nrmLastfmSearchClient';
-import type { LastfmTag } from '@/lib/nrmLastfmSearchTypes';
+import type { LastfmSearchErrorCode, LastfmTag } from '@/lib/nrmLastfmSearchTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+
+/** Last.fm 메타 API 인증·설정 오류 (다운로드 흐름에서 처리) */
+export class LastfmMetadataApiError extends Error {
+  readonly errorCode: LastfmSearchErrorCode;
+
+  constructor(errorCode: LastfmSearchErrorCode) {
+    super('lastfm_metadata_api_error');
+    this.name = 'LastfmMetadataApiError';
+    this.errorCode = errorCode;
+  }
+}
+
+function throwIfLastfmAuthFailure(
+  errorCode: LastfmSearchErrorCode,
+): void {
+  if (errorCode === 'auth_failed' || errorCode === 'not_configured') {
+    throw new LastfmMetadataApiError(errorCode);
+  }
+}
 
 /** Last.fm → YouTube 유입 시 다운로드 직전에 전달하는 시드 */
 export type LastfmDownloadSeed = {
@@ -99,6 +118,7 @@ export async function enrichLastfmDownloadMetadata(
     trackMbid,
   );
   if (!trackR.ok) {
+    throwIfLastfmAuthFailure(trackR.errorCode);
     return base;
   }
 

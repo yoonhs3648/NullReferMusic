@@ -77,6 +77,7 @@ export async function pickWebSaveFileHandle(
 export async function writeJobMp3BlobToHandle(
   handle: FileSystemFileHandle,
   fileUrl: string,
+  options?: { lrcUrl?: string; lrcSuggestedName?: string },
 ): Promise<void> {
   const res = await fetch(fileUrl);
   if (!res.ok) {
@@ -89,46 +90,49 @@ export async function writeJobMp3BlobToHandle(
   } finally {
     await writable.close();
   }
+  if (options?.lrcUrl && options.lrcSuggestedName) {
+    try {
+      const picker = getShowSaveFilePicker();
+      if (!picker) return;
+      const lrcRes = await fetch(options.lrcUrl);
+      if (!lrcRes.ok) return;
+      const lrcBlob = await lrcRes.blob();
+      const lrcHandle = await picker({
+        suggestedName: options.lrcSuggestedName,
+        types: [{ description: 'LRC 가사', accept: { 'text/plain': ['.lrc'] } }],
+      });
+      const lrcWritable = await lrcHandle.createWritable();
+      try {
+        await lrcWritable.write(lrcBlob);
+      } finally {
+        await lrcWritable.close();
+      }
+    } catch {
+      // LRC 저장 실패는 무시
+    }
+  }
+}
+
+export async function cleanupServerJobArtifacts(apiBase: string, jobId: string): Promise<void> {
+  const base = normalizedApiBase(apiBase);
+  await fetch(`${base}/api/download/cleanup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId }),
+  }).catch(() => null);
 }
 
 async function persistAudioOnWeb(
   fileUrl: string,
   suggestedName: string,
+  lrcUrl?: string,
+  lrcSuggestedName?: string,
 ): Promise<WebSaveMode> {
   const res = await fetch(fileUrl);
   if (!res.ok) {
     throw new Error(`파일을 받지 못했습니다 (HTTP ${res.status})`);
   }
   const blob = await res.blob();
-
-  const picker = getShowSaveFilePicker();
-  if (picker) {
-    try {
-      const ext = await loadDownloadAudioExtension();
-      const name = applyDownloadExtension(suggestedName, ext);
-      const handle = await picker({
-        suggestedName: name,
-        types: pickerTypesForExtension(ext),
-      });
-      const writable = await handle.createWritable();
-      try {
-        await writable.write(blob);
-      } finally {
-        await writable.close();
-      }
-      return 'save_as';
-    } catch (e) {
-      if (
-        e instanceof Error &&
-        (e.name === 'AbortError' ||
-          (typeof DOMException !== 'undefined' &&
-            e instanceof DOMException &&
-            e.name === 'AbortError'))
-      ) {
-        throw new Error('저장이 취소되었습니다.');
-      }
-    }
-  }
 
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -139,6 +143,25 @@ async function persistAudioOnWeb(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(objectUrl);
+  if (lrcUrl && lrcSuggestedName) {
+    try {
+      const lrcRes = await fetch(lrcUrl);
+      if (lrcRes.ok) {
+        const lrcBlob = await lrcRes.blob();
+        const lrcObj = URL.createObjectURL(lrcBlob);
+        const la = document.createElement('a');
+        la.href = lrcObj;
+        la.download = lrcSuggestedName;
+        la.rel = 'noopener';
+        document.body.appendChild(la);
+        la.click();
+        document.body.removeChild(la);
+        URL.revokeObjectURL(lrcObj);
+      }
+    } catch {
+      // ignore
+    }
+  }
   return 'download_fallback';
 }
 
@@ -151,12 +174,15 @@ export async function persistAudioAfterServerJob(
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
   const ext = await loadDownloadAudioExtension();
   const suggestedName = applyDownloadExtension(options.fileName, ext);
+  const lrcName = suggestedName.replace(/\.[^.]+$/, '.lrc');
+  const lrcUrl = `${base}/api/download/lrc?jobId=${encodeURIComponent(jobId)}`;
 
-  const mode = await persistAudioOnWeb(url, suggestedName);
+  const mode = await persistAudioOnWeb(url, suggestedName, lrcUrl, lrcName);
+  await cleanupServerJobArtifacts(base, jobId);
   return {
     savedLabel:
-      mode === 'save_as'
-        ? '파일 이름 및 저장 위치를 선택해 저장했습니다.'
+      mode === 'download_fallback'
+        ? '브라우저 기본 다운로드로 저장했습니다. (보통 다운로드 폴더)'
         : '브라우저 기본 다운로드로 저장했습니다. (보통 다운로드 폴더)',
   };
 }

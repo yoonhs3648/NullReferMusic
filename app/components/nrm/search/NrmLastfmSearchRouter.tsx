@@ -24,7 +24,6 @@ import {
   NrmLastfmSearchBar,
   NrmLastfmSectionTitle,
   NrmLastfmTagList,
-  NrmSearchPageTitle,
   type NrmLastfmMetaField,
 } from '@/components/nrm/search/NrmLastfmSearchUi';
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -36,11 +35,19 @@ import {
   searchLastfmArtists,
   searchLastfmTracks,
 } from '@/lib/nrmLastfmSearchClient';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
+import {
+  isLastfmSearchAuthErrorCode,
+  runLastfmAuthFlow,
+} from '@/lib/nrmLastfmAuthFlow';
+import { NrmLastfmSearchErrorView } from '@/components/nrm/search/NrmLastfmSearchErrorView';
+import { splitLastfmSearchFailure } from '@/lib/nrmLastfmSearchUi';
 import type {
   LastfmAlbumDetail,
   LastfmAlbumSearchHit,
   LastfmArtistDetail,
   LastfmArtistSearchHit,
+  LastfmSearchErrorCode,
   LastfmTrackDetail,
   LastfmTrackSearchHit,
 } from '@/lib/nrmLastfmSearchTypes';
@@ -59,6 +66,7 @@ type ListFrame = {
   searched: boolean;
   loading: boolean;
   error: string | null;
+  errorCode?: LastfmSearchErrorCode | null;
 };
 
 type ArtistDetailFrame = {
@@ -68,6 +76,7 @@ type ArtistDetailFrame = {
   detail: LastfmArtistDetail | null;
   loading: boolean;
   error: string | null;
+  errorCode?: LastfmSearchErrorCode | null;
 };
 
 type AlbumDetailFrame = {
@@ -78,6 +87,7 @@ type AlbumDetailFrame = {
   detail: LastfmAlbumDetail | null;
   loading: boolean;
   error: string | null;
+  errorCode?: LastfmSearchErrorCode | null;
 };
 
 type TrackDetailFrame = {
@@ -89,6 +99,7 @@ type TrackDetailFrame = {
   detail: LastfmTrackDetail | null;
   loading: boolean;
   error: string | null;
+  errorCode?: LastfmSearchErrorCode | null;
 };
 
 type Frame = ListFrame | ArtistDetailFrame | AlbumDetailFrame | TrackDetailFrame;
@@ -121,6 +132,7 @@ type Props = {
   onBackToHome: () => void;
   onNavigateYoutube: (params: LastfmYoutubeNavigateParams) => void;
   restoredState?: LastfmSearchRouterState | null;
+  lastfmAuth: LastfmAuthHandlers;
 };
 
 let frameSeq = 0;
@@ -147,12 +159,6 @@ function emptyListFrame(kind: LastfmSearchKind): ListFrame {
   };
 }
 
-const KIND_PAGE_TITLE: Record<LastfmSearchKind, string> = {
-  artist: '아티스트 검색',
-  album: '앨범 검색',
-  track: '트랙 검색',
-};
-
 function listKindFromFrame(frame: ListFrame): LastfmSearchKind {
   if (frame.type === 'artist-list') return 'artist';
   if (frame.type === 'album-list') return 'album';
@@ -168,6 +174,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       onBackToHome,
       onNavigateYoutube,
       restoredState,
+      lastfmAuth,
     },
     ref,
   ) {
@@ -190,6 +197,17 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     }, [restoredState]);
 
     const top = stack[stack.length - 1];
+    const isTopList =
+      top.type === 'artist-list' ||
+      top.type === 'album-list' ||
+      top.type === 'track-list';
+    const initialListCentered =
+      isTopList &&
+      !top.searched &&
+      !top.loading &&
+      top.hits.length === 0 &&
+      !top.error &&
+      !top.errorCode;
 
     useImperativeHandle(
       ref,
@@ -222,6 +240,18 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       });
     }, []);
 
+    const withAuth = useCallback(
+      <T extends { ok: boolean; errorCode?: LastfmSearchErrorCode }>(
+        run: () => Promise<T>,
+      ): Promise<T> =>
+        runLastfmAuthFlow(
+          run,
+          (r) => !r.ok && isLastfmSearchAuthErrorCode(r.errorCode!),
+          lastfmAuth,
+        ),
+      [lastfmAuth],
+    );
+
     const runListSearch = useCallback(
       async (frame: ListFrame, queryOverride?: string) => {
         const q = (queryOverride ?? frame.query).trim();
@@ -239,19 +269,21 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
 
         let out;
         if (frame.type === 'artist-list') {
-          out = await searchLastfmArtists(q);
+          out = await withAuth(() => searchLastfmArtists(q));
         } else if (frame.type === 'album-list') {
-          out = await searchLastfmAlbums(q);
+          out = await withAuth(() => searchLastfmAlbums(q));
         } else {
-          out = await searchLastfmTracks(q);
+          out = await withAuth(() => searchLastfmTracks(q));
         }
         if (req !== reqRef.current) return;
 
         if (!out.ok) {
+          const err = splitLastfmSearchFailure(out);
           updateTop({
             loading: false,
             hits: [],
-            error: out.message,
+            error: err.inlineError,
+            errorCode: err.heroError,
           } as Partial<ListFrame>);
           return;
         }
@@ -269,9 +301,10 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           loading: false,
           hits,
           error: hits.length === 0 ? nrmSearchNoResults : null,
+          errorCode: null,
         } as Partial<ListFrame>);
       },
-      [updateTop],
+      [updateTop, withAuth],
     );
 
     const openArtistDetail = useCallback(
@@ -286,14 +319,22 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         };
         pushFrame(frame);
         const req = ++reqRef.current;
-        const out = await fetchLastfmArtistDetail(hit.name, hit.mbid || undefined);
+        const out = await withAuth(() =>
+          fetchLastfmArtistDetail(hit.name, hit.mbid || undefined),
+        );
         if (req !== reqRef.current) return;
         setStack((s) => {
           const next = [...s];
           const cur = next[next.length - 1];
           if (cur.type !== 'artist-detail') return s;
           if (!out.ok) {
-            next[next.length - 1] = { ...cur, loading: false, error: out.message };
+            const err = splitLastfmSearchFailure(out);
+            next[next.length - 1] = {
+              ...cur,
+              loading: false,
+              error: err.inlineError,
+              errorCode: err.heroError,
+            };
           } else {
             next[next.length - 1] = {
               ...cur,
@@ -304,7 +345,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           return next;
         });
       },
-      [pushFrame],
+      [pushFrame, withAuth],
     );
 
     const openAlbumDetail = useCallback(
@@ -320,14 +361,20 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         };
         pushFrame(frame);
         const req = ++reqRef.current;
-        const out = await fetchLastfmAlbumDetail(artist, album);
+        const out = await withAuth(() => fetchLastfmAlbumDetail(artist, album));
         if (req !== reqRef.current) return;
         setStack((s) => {
           const next = [...s];
           const cur = next[next.length - 1];
           if (cur.type !== 'album-detail') return s;
           if (!out.ok) {
-            next[next.length - 1] = { ...cur, loading: false, error: out.message };
+            const err = splitLastfmSearchFailure(out);
+            next[next.length - 1] = {
+              ...cur,
+              loading: false,
+              error: err.inlineError,
+              errorCode: err.heroError,
+            };
           } else {
             next[next.length - 1] = {
               ...cur,
@@ -338,7 +385,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           return next;
         });
       },
-      [pushFrame],
+      [pushFrame, withAuth],
     );
 
     const openTrackDetail = useCallback(
@@ -355,14 +402,20 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         };
         pushFrame(frame);
         const req = ++reqRef.current;
-        const out = await fetchLastfmTrackDetail(artist, track);
+        const out = await withAuth(() => fetchLastfmTrackDetail(artist, track));
         if (req !== reqRef.current) return;
         setStack((s) => {
           const next = [...s];
           const cur = next[next.length - 1];
           if (cur.type !== 'track-detail') return s;
           if (!out.ok) {
-            next[next.length - 1] = { ...cur, loading: false, error: out.message };
+            const err = splitLastfmSearchFailure(out);
+            next[next.length - 1] = {
+              ...cur,
+              loading: false,
+              error: err.inlineError,
+              errorCode: err.heroError,
+            };
           } else {
             next[next.length - 1] = {
               ...cur,
@@ -373,7 +426,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           return next;
         });
       },
-      [pushFrame],
+      [pushFrame, withAuth],
     );
 
     const goYoutubeFromTrack = useCallback(
@@ -396,17 +449,6 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       [onNavigateYoutube],
     );
 
-    const pageTitle =
-      top.type === 'artist-list' ||
-      top.type === 'album-list' ||
-      top.type === 'track-list'
-        ? KIND_PAGE_TITLE[listKindFromFrame(top)]
-        : top.type === 'artist-detail'
-          ? '아티스트 상세'
-          : top.type === 'album-detail'
-            ? '앨범 상세'
-            : '트랙 상세';
-
     const renderList = (frame: ListFrame) => {
       const kind = listKindFromFrame(frame);
       const placeholder =
@@ -427,14 +469,20 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
             bodyColor={bodyColor}
             isDark={isDark}
             loading={frame.loading}
+            compact={initialListCentered}
           />
           {frame.loading ? (
             <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
           ) : null}
+          <NrmLastfmSearchErrorView
+            errorCode={frame.errorCode ?? null}
+            isDark={isDark}
+            paddingHorizontal={0}
+          />
           {frame.error ? (
             <Text style={[styles.error, { color: bodyColor }]}>{frame.error}</Text>
           ) : null}
-          {frame.hits.length > 0 ? (
+          {frame.hits.length > 0 && !frame.errorCode ? (
             <>
               <NrmLastfmSectionTitle title="검색 결과" color={titleColor} />
               {frame.type === 'artist-list'
@@ -522,6 +570,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       if (frame.loading) {
         return (
           <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+        );
+      }
+      if (frame.errorCode) {
+        return (
+          <NrmLastfmSearchErrorView
+            errorCode={frame.errorCode}
+            isDark={isDark}
+            paddingHorizontal={0}
+          />
         );
       }
       if (frame.error) {
@@ -647,6 +704,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
         );
       }
+      if (frame.errorCode) {
+        return (
+          <NrmLastfmSearchErrorView
+            errorCode={frame.errorCode}
+            isDark={isDark}
+            paddingHorizontal={0}
+          />
+        );
+      }
       if (frame.error) {
         return <Text style={[styles.error, { color: bodyColor }]}>{frame.error}</Text>;
       }
@@ -730,6 +796,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
           <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
         );
       }
+      if (frame.errorCode) {
+        return (
+          <NrmLastfmSearchErrorView
+            errorCode={frame.errorCode}
+            isDark={isDark}
+            paddingHorizontal={0}
+          />
+        );
+      }
       if (frame.error) {
         return <Text style={[styles.error, { color: bodyColor }]}>{frame.error}</Text>;
       }
@@ -803,10 +878,17 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     return (
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollInner, { paddingHorizontal }]}
+        contentContainerStyle={[
+          styles.scrollInner,
+          { paddingHorizontal },
+          initialListCentered && styles.scrollInnerInitialCentered,
+        ]}
         keyboardShouldPersistTaps="handled">
-        <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
-        <NrmSearchPageTitle title={pageTitle} color={titleColor} />
+        <NrmFeatureScreenLogoHeader
+          isDark={isDark}
+          onPressHome={onBackToHome}
+          compact={!initialListCentered}
+        />
 
         {top.type === 'artist-list' ||
         top.type === 'album-list' ||
@@ -828,6 +910,10 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: nrmTokens.layout.maxContentWidth,
     alignSelf: 'center',
+  },
+  scrollInnerInitialCentered: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   loader: { marginVertical: nrmTokens.space.md },
   error: { marginBottom: nrmTokens.space.md, fontSize: nrmTokens.font.caption, lineHeight: 20 },

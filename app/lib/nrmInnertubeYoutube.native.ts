@@ -243,13 +243,35 @@ async function tagThenPersist(
   fileUri: string,
   safeName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
   let uri = fileUri;
+  let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
+  let metaToApply = metadata;
   if (metadata) {
+    const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
+    const encode = await loadDownloadEncodeSettings();
+    const { metadataNeedsWhisperTranscription, resolveWhisperLyricsInMetadata } =
+      await import('@/lib/nrmResolveWhisperLyrics');
+    if (metadataNeedsWhisperTranscription(metadata, encode.extension)) {
+      const resolved = await resolveWhisperLyricsInMetadata(
+        fileUri,
+        metadata,
+        encode.extension,
+      );
+      metaToApply = resolved.metadata;
+      if (resolved.lyricsRequested && !resolved.lyricsEmbedded) {
+        lyricsWarning = 'not_embedded';
+      }
+      if (resolved.lyricsTranslationFailed) {
+        lyricsWarning = 'translation_failed';
+      }
+    }
+  }
+  if (metaToApply) {
     const { hasEmbeddableAudioMetadata, normalizeDownloadMetadata } = await import(
       '@/lib/nrmDownloadAudioMetadata',
     );
-    const normalized = normalizeDownloadMetadata(metadata);
+    const normalized = normalizeDownloadMetadata(metaToApply);
     if (hasEmbeddableAudioMetadata(normalized)) {
       try {
         const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
@@ -274,18 +296,15 @@ async function tagThenPersist(
   }
   const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
   try {
-    return await persistLocalAudioFile(uri, safeName, metadata);
+    const saved = await persistLocalAudioFile(uri, safeName, metaToApply);
+    return { ...saved, lyricsWarning };
   } catch (persistErr) {
     await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
     throw stageWrapError('persist_media', persistErr);
   }
 }
 
-async function downloadWithYtDlp(
-  videoId: string,
-  userSuggestedFileName: string,
-  metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+async function extractWithYtDlp(videoId: string): Promise<string> {
   const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
     await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
@@ -304,7 +323,15 @@ async function downloadWithYtDlp(
   const rawPath: string = result.path;
   let fileUri = rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
   fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
+  return fileUri;
+}
 
+async function downloadWithYtDlp(
+  videoId: string,
+  userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string }> {
+  const fileUri = await extractWithYtDlp(videoId);
   return tagThenPersist(fileUri, userSuggestedFileName, metadata);
 }
 
@@ -313,11 +340,7 @@ async function downloadWithYtDlp(
  * iOS와 Android yt-dlp 실패 시 사용하는 youtubei.js 기반 다운로드.
  * Android → iOS → Web 클라이언트 타입 순으로 재시도합니다.
  */
-async function downloadWithInnertube(
-  videoId: string,
-  userSuggestedFileName: string,
-  metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+async function extractWithInnertube(videoId: string): Promise<string> {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
     throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
@@ -367,7 +390,7 @@ async function downloadWithInnertube(
         format = chooseInnertubeAudioFormat(filtered, encode.extension);
       }
       const mime = format.mime_type ?? 'audio/mp4';
-      const tempStemName = finalAudioFileName(userSuggestedFileName, mime);
+      const tempStemName = finalAudioFileName('track', mime);
 
       const tempBase =
         cacheRoot.endsWith('/') || cacheRoot.endsWith('\\')
@@ -389,7 +412,7 @@ async function downloadWithInnertube(
 
       let fileUri = tempUri;
       fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
-      return tagThenPersist(fileUri, userSuggestedFileName, metadata);
+      return fileUri;
     } catch (e) {
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {
@@ -414,6 +437,48 @@ async function downloadWithInnertube(
   throw lastError instanceof Error
     ? lastError
     : new Error(String(lastError));
+}
+
+async function downloadWithInnertube(
+  videoId: string,
+  userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string }> {
+  const fileUri = await extractWithInnertube(videoId);
+  return tagThenPersist(fileUri, userSuggestedFileName, metadata);
+}
+
+/** yt-dlp/innertube로 오디오만 추출 (ffmpeg·저장 전) */
+export async function extractYoutubeAudioOnDevice(videoId: string): Promise<{ fileUri: string }> {
+  const ytDlpAvailable =
+    Platform.OS === 'android' && isOnDeviceDownloadAvailable();
+
+  if (Platform.OS === 'android') {
+    if (!ytDlpAvailable) {
+      return { fileUri: await extractWithInnertube(videoId) };
+    }
+    try {
+      return { fileUri: await extractWithYtDlp(videoId) };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logNrmRunError('download.ytdlp.extract_failed', e, { videoId });
+      if (shouldFallbackFromYtDlp(msg)) {
+        return { fileUri: await extractWithInnertube(videoId) };
+      }
+      throw e;
+    }
+  }
+
+  return { fileUri: await extractWithInnertube(videoId) };
+}
+
+/** 추출된 파일에 메타데이터(ffmpeg) 적용 후 저장 */
+export async function finalizeYoutubeAudioOnDevice(
+  fileUri: string,
+  userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
+  return tagThenPersist(fileUri, userSuggestedFileName, metadata);
 }
 
 export async function getAudioStreamUrlWithInnertube(

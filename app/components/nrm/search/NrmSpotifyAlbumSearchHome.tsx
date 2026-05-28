@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
-import { NrmSearchPageTitle } from '@/components/nrm/search/NrmLastfmSearchUi';
 import {
   formatSpotifyDuration,
   NrmSpotifyCoverImage,
@@ -47,6 +46,7 @@ export function NrmSpotifyAlbumSearchHome({
   const rowHover = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
 
   const [query, setQuery] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [heroError, setHeroError] = useState<ChartErrorCode | null>(null);
@@ -62,6 +62,7 @@ export function NrmSpotifyAlbumSearchHome({
       setHeroError(null);
       return;
     }
+    setHasSearched(true);
     const req = ++reqRef.current;
     setLoading(true);
     setHeroError(null);
@@ -83,6 +84,15 @@ export function NrmSpotifyAlbumSearchHome({
     }
   }, [query]);
 
+  const initialCentered =
+    !hasSearched &&
+    !loading &&
+    !detailLoading &&
+    hits.length === 0 &&
+    !detail &&
+    !heroError &&
+    !inlineError;
+
   const openDetail = useCallback(async (hit: SpotifyAlbumSearchHit) => {
     const req = ++reqRef.current;
     setDetailLoading(true);
@@ -103,10 +113,17 @@ export function NrmSpotifyAlbumSearchHome({
   return (
     <ScrollView
       style={styles.scroll}
-      contentContainerStyle={[styles.scrollInner, { paddingHorizontal }]}
+      contentContainerStyle={[
+        styles.scrollInner,
+        { paddingHorizontal },
+        initialCentered && styles.scrollInnerInitialCentered,
+      ]}
       keyboardShouldPersistTaps="handled">
-      <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
-      <NrmSearchPageTitle title="Spotify · 앨범" color={titleColor} />
+      <NrmFeatureScreenLogoHeader
+        isDark={isDark}
+        onPressHome={onBackToHome}
+        compact={!initialCentered}
+      />
       <NrmSpotifySearchBar
         value={query}
         onChangeText={setQuery}
@@ -116,6 +133,7 @@ export function NrmSpotifyAlbumSearchHome({
         bodyColor={bodyColor}
         isDark={isDark}
         loading={loading}
+        compact={initialCentered}
       />
       {loading ? <ActivityIndicator color={nrmTokens.color.primary} /> : null}
       <NrmSpotifySearchErrorView
@@ -176,6 +194,10 @@ export function NrmSpotifyAlbumSearchHome({
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollInner: { paddingBottom: nrmTokens.space.xxl },
+  scrollInnerInitialCentered: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
   logoWrap: { marginBottom: nrmTokens.space.md },
   error: { marginBottom: nrmTokens.space.md },
   row: {

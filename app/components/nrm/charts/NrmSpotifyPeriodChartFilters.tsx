@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   NrmPeriodChartDropdown,
@@ -63,6 +63,7 @@ export function NrmSpotifyPeriodChartFilters({
   onWeekOfMonthChange,
   onRegionChange,
 }: Props) {
+  const isWeb = Platform.OS === 'web';
   const tabBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
   const tabActiveBg = isDark
     ? 'rgba(0, 102, 204, 0.28)'
@@ -195,7 +196,8 @@ export function NrmSpotifyPeriodChartFilters({
 
       <View style={styles.dateRow}>
         <NrmPeriodChartDropdown
-          flex
+          flex={!isWeb}
+          boxWidth={isWeb ? 148 : undefined}
           label="연"
           value={year}
           options={yearOptions}
@@ -206,7 +208,8 @@ export function NrmSpotifyPeriodChartFilters({
         />
         {showMonth ? (
           <NrmPeriodChartDropdown
-            flex
+            flex={!isWeb}
+            boxWidth={isWeb ? 118 : undefined}
             label="월"
             value={month}
             options={
@@ -220,7 +223,8 @@ export function NrmSpotifyPeriodChartFilters({
         ) : null}
         {showWeek ? (
           <NrmPeriodChartDropdown
-            flex
+            flex={!isWeb}
+            boxWidth={isWeb ? 118 : undefined}
             label="주"
             value={weekOfMonth}
             options={
@@ -234,7 +238,8 @@ export function NrmSpotifyPeriodChartFilters({
         ) : null}
         {showDay ? (
           <NrmPeriodChartDropdown
-            flex
+            flex={!isWeb}
+            boxWidth={isWeb ? 118 : undefined}
             label="일"
             value={day}
             options={

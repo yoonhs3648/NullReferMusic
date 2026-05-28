@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,44 +15,54 @@ import {
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmRunError } from '@/lib/nrmDevLog';
-import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
+  nrmYoutubeDownloadYtDlpFailedMessage,
   nrmYoutubeSearchBackendConnectionMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
   nrmYoutubeSearchPlaceholder,
 } from '@/lib/nrmYoutubeStrings';
-import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
-import { requestDownload } from '@/lib/downloadClient';
 import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadStarted,
 } from '@/lib/nrmMobileDownloadNotifications';
-import { persistAudioAfterServerJob } from '@/lib/nrmPersistServerDownload';
 import {
-  buildChartAudioMetadata,
   normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
-import { enrichLastfmDownloadMetadata } from '@/lib/nrmLastfmMetadataEnricher';
-import { normalizeLastfmMbid } from '@/lib/nrmLastfmMbid';
+import {
+  finalizeAudioDownload,
+  startAudioExtraction,
+  type AudioExtractionResult,
+} from '@/lib/nrmDownloadPipeline';
+import { loadDownloadMetadataMode } from '@/lib/nrmDownloadSettings';
+import {
+  DownloadMetadataAuthInterruptedError,
+  DownloadMetadataUnavailableError,
+  resolveAutoDownloadMetadataWithAuth,
+  resolveModalInitialMetadataFieldsWithAuth,
+  type DownloadMetadataAuthHandlers,
+} from '@/lib/nrmDownloadMetadataAuth';
+import { resolveDownloadFileName } from '@/lib/nrmResolveDownloadPayload';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
+import { NrmDownloadMetadataUnavailableOverlay } from '@/components/nrm/NrmDownloadMetadataUnavailableOverlay';
+import { NrmLyricsEmbedUnavailableOverlay } from '@/components/nrm/NrmLyricsEmbedUnavailableOverlay';
+import { NrmLyricsTranslationFailedOverlay } from '@/components/nrm/NrmLyricsTranslationFailedOverlay';
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { YoutubeEmbed } from '@/components/nrm/YoutubeEmbed';
-
-function youtubeWatchUrl(videoId: string): string {
-  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-}
 
 const DOWNLOAD_CONSENT_KEY = 'nrm_download_user_consent_v1';
 
 function mapDownloadUserMessage(err: unknown): string {
   const full = err instanceof Error ? err.message : String(err);
   const raw = full.toLowerCase();
+  if (full.includes('yt-dlp 실행이 실패') || raw.includes('yt-dlp를 찾을 수 없')) {
+    return nrmYoutubeDownloadYtDlpFailedMessage;
+  }
   if (
     raw.includes('permission denied') ||
     raw.includes('error-13') ||
@@ -127,6 +137,7 @@ type Props = {
   /** 차트·Last.fm에서 넘어온 트랙 — 다운로드 메타데이터·모달 기본값 */
   chartDownloadTrack?: ChartTrackItem | null;
   chartDownloadSource?: 'chart' | 'lastfm' | null;
+  downloadMetadataAuth: DownloadMetadataAuthHandlers;
 };
 
 export function NrmYoutubeHome({
@@ -136,6 +147,7 @@ export function NrmYoutubeHome({
   initialQuery,
   chartDownloadTrack = null,
   chartDownloadSource = null,
+  downloadMetadataAuth,
 }: Props) {
   const [query, setQuery] = useState(initialQuery ?? '');
   const [loading, setLoading] = useState(false);
@@ -150,7 +162,18 @@ export function NrmYoutubeHome({
     Omit<NrmAudioFileMetadata, 'artist' | 'title'> | undefined
   >(undefined);
   const [dlMetaBusy, setDlMetaBusy] = useState<Record<string, boolean>>({});
+  const [dlConfirmBusy, setDlConfirmBusy] = useState<Record<string, boolean>>({});
+  const [metadataUnavailableOpen, setMetadataUnavailableOpen] = useState(false);
+  const [lyricsEmbedUnavailableOpen, setLyricsEmbedUnavailableOpen] = useState(false);
+  const [lyricsTranslationFailedOpen, setLyricsTranslationFailedOpen] = useState(false);
   const latestSearchTokenRef = useRef(0);
+
+  type DownloadSession = {
+    extractionPromise: Promise<AudioExtractionResult>;
+    aborted: boolean;
+    extractionError: unknown | null;
+  };
+  const downloadSessionsRef = useRef<Map<string, DownloadSession>>(new Map());
 
   const inputColors = {
     backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
@@ -214,210 +237,308 @@ export function NrmYoutubeHome({
     }
   }, [query, onSearchCommitted]);
 
-  const runDownloadWithFileName = useCallback(
-    async (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
-      if (dlInFlight.current.has(videoId)) return;
-      const consent = await ensureDownloadConsent();
-      if (!consent) return;
+  const metadataContext = useMemo(
+    () => ({
+      chartTrack: chartDownloadTrack,
+      chartSource: chartDownloadSource,
+    }),
+    [chartDownloadSource, chartDownloadTrack],
+  );
 
-      // Android: 다운로드 경로 사전 체크
-      if (Platform.OS === 'android') {
-        const { checkSafDownloadPath } = await import('@/lib/nrmDownloadSafGrant');
-        const pathStatus = await checkSafDownloadPath();
-        if (pathStatus === 'no_path') {
-          const ok = await confirmUser(
-            '다운로드 경로가 없습니다.\n다운로드 설정에서 경로를 지정할까요?',
-            { confirmLabel: '설정하기', cancelLabel: '취소' },
-          );
-          if (ok) openDownloadSettingsPanel();
-          return;
-        }
-        if (pathStatus === 'path_invalid') {
-          const ok = await confirmUser(
-            '설정된 다운로드 경로가 존재하지 않습니다.\n경로를 다시 설정하시겠습니까?',
-            { confirmLabel: '설정하기', cancelLabel: '취소' },
-          );
-          if (ok) openDownloadSettingsPanel();
-          return;
-        }
+  const clearDownloadSession = useCallback((videoId: string) => {
+    downloadSessionsRef.current.delete(videoId);
+    dlInFlight.current.delete(videoId);
+    setDlBusy((m) => {
+      const n = { ...m };
+      delete n[videoId];
+      return n;
+    });
+    setDlMetaBusy((m) => {
+      const n = { ...m };
+      delete n[videoId];
+      return n;
+    });
+    setDlConfirmBusy((m) => {
+      const n = { ...m };
+      delete n[videoId];
+      return n;
+    });
+  }, []);
+
+  const abortMetadataPrefetch = useCallback(
+    (videoId: string, options?: { showUnavailableOverlay?: boolean }) => {
+      const session = downloadSessionsRef.current.get(videoId);
+      if (session) {
+        session.aborted = true;
+        void session.extractionPromise.finally(() => clearDownloadSession(videoId));
+      } else {
+        clearDownloadSession(videoId);
+      }
+      if (options?.showUnavailableOverlay && Platform.OS !== 'web') {
+        setMetadataUnavailableOpen(true);
+      }
+    },
+    [clearDownloadSession],
+  );
+
+  const handleMetadataPrefetchError = useCallback(
+    (videoId: string, e: unknown) => {
+      if (e instanceof DownloadMetadataAuthInterruptedError) {
+        abortMetadataPrefetch(videoId);
+        return;
+      }
+      if (e instanceof DownloadMetadataUnavailableError) {
+        abortMetadataPrefetch(videoId, { showUnavailableOverlay: true });
+        return;
+      }
+      logNrmRunError('download.metadata_prefetch', e, { videoId });
+      notifyUser('메타데이터를 불러오지 못했습니다.');
+      abortMetadataPrefetch(videoId);
+    },
+    [abortMetadataPrefetch],
+  );
+
+  const ensureDownloadReady = useCallback(async (): Promise<boolean> => {
+    const consent = await ensureDownloadConsent();
+    if (!consent) return false;
+
+    if (Platform.OS === 'android') {
+      const { checkSafDownloadPath } = await import('@/lib/nrmDownloadSafGrant');
+      const pathStatus = await checkSafDownloadPath();
+      if (pathStatus === 'no_path') {
+        const ok = await confirmUser(
+          '다운로드 경로가 없습니다.\n다운로드 설정에서 경로를 지정할까요?',
+          { confirmLabel: '설정하기', cancelLabel: '취소' },
+        );
+        if (ok) openDownloadSettingsPanel();
+        return false;
+      }
+      if (pathStatus === 'path_invalid') {
+        const ok = await confirmUser(
+          '설정된 다운로드 경로가 존재하지 않습니다.\n경로를 다시 설정하시겠습니까?',
+          { confirmLabel: '설정하기', cancelLabel: '취소' },
+        );
+        if (ok) openDownloadSettingsPanel();
+        return false;
+      }
+    }
+    return true;
+  }, []);
+
+  const handleExtractionFailure = useCallback(
+    (videoId: string, e: unknown) => {
+      logNrmRunError('download.extract', e, { videoId });
+      notifyUser(mapDownloadUserMessage(e));
+      setDownloadModalItem((cur) => (cur?.videoId === videoId ? null : cur));
+      setDownloadModalInitialFields(undefined);
+      clearDownloadSession(videoId);
+    },
+    [clearDownloadSession],
+  );
+
+  const beginParallelExtraction = useCallback(
+    (videoId: string) => {
+      const session: DownloadSession = {
+        extractionPromise: startAudioExtraction(videoId),
+        aborted: false,
+        extractionError: null,
+      };
+      downloadSessionsRef.current.set(videoId, session);
+      void session.extractionPromise.catch((e) => {
+        const current = downloadSessionsRef.current.get(videoId);
+        if (!current || current.aborted || current !== session) return;
+        session.extractionError = e;
+        handleExtractionFailure(videoId, e);
+      });
+      return session.extractionPromise;
+    },
+    [handleExtractionFailure],
+  );
+
+  const completeDownloadAfterExtraction = useCallback(
+    async (
+      videoId: string,
+      fileName: string,
+      metadata: NrmAudioFileMetadata | undefined,
+      _options?: {},
+    ) => {
+      const session = downloadSessionsRef.current.get(videoId);
+      if (!session || session.aborted) {
+        return;
+      }
+      if (session.extractionError) {
+        throw session.extractionError;
       }
 
-      dlInFlight.current.add(videoId);
-      setDlBusy((m) => ({ ...m, [videoId]: true }));
-      const { loadDownloadEncodeSettings, applyDownloadExtension, extensionToYtDlpFormat } =
+      const { applyDownloadExtension, loadDownloadEncodeSettings } =
         await import('@/lib/nrmDownloadSettings');
       const encode = await loadDownloadEncodeSettings();
       const safeName = applyDownloadExtension(fileName, encode.extension);
       const displayLabel = displayLabelFromAudioFileName(safeName);
 
-      if (Platform.OS !== 'web') {
-        nrmNotifyDownloadStarted(videoId, displayLabel);
-      }
-
       try {
-        if (Platform.OS !== 'web' && usesPcBackendInDev()) {
-          const res = await requestDownload(youtubeWatchUrl(videoId), {
-            noPlaylist: true,
-            audioFormat: extensionToYtDlpFormat(encode.extension),
-            audioQuality: encode.audioQuality,
-            metadata,
-          });
-          const jobId = res.jobId;
-          if (!jobId || typeof jobId !== 'string') {
-            throw new Error(
-              '서버 응답에 jobId가 없어 파일을 받을 수 없습니다.',
-            );
-          }
-          const apiBase = await getResolvedApiBaseUrl();
-          await persistAudioAfterServerJob(apiBase, jobId, { fileName: safeName });
-          nrmNotifyDownloadFinished(videoId, displayLabel, true);
-          return;
+        const extraction = await session.extractionPromise;
+        if (session.aborted) return;
+        const out = await finalizeAudioDownload(extraction, fileName, metadata);
+        if (out.lyricsWarning === 'not_embedded') {
+          setLyricsEmbedUnavailableOpen(true);
+        } else if (out.lyricsWarning === 'translation_failed') {
+          setLyricsTranslationFailedOpen(true);
         }
 
         if (Platform.OS !== 'web') {
-          const { downloadYoutubeAudioOnDevice } = await import(
-            '@/lib/nrmInnertubeYoutube'
-          );
-          try {
-            const { savedLabel } = await downloadYoutubeAudioOnDevice(
-              videoId,
-              safeName,
-              metadata,
-            );
-            void savedLabel; // 인앱 오버레이 없이 시스템 알림으로만 표시
-            nrmNotifyDownloadFinished(videoId, displayLabel, true);
-            return;
-          } catch (nativeErr) {
-            logNrmRunError('download.native.ondevice_failed', nativeErr, {
-              videoId,
-            });
-            throw nativeErr;
-          }
+          nrmNotifyDownloadFinished(videoId, displayLabel, true);
         }
-
-        const web = await import('@/lib/nrmPersistDownload.web');
-        if (web.isWebSaveFilePickerSupported()) {
-          const handle = await web.pickWebSaveFileHandle(safeName);
-          if (!handle) {
-            return;
-          }
-          const res = await requestDownload(youtubeWatchUrl(videoId), {
-            noPlaylist: true,
-            audioFormat: extensionToYtDlpFormat(encode.extension),
-            audioQuality: encode.audioQuality,
-            metadata,
-          });
-          const jobId = res.jobId;
-          if (!jobId || typeof jobId !== 'string') {
-            throw new Error(
-              '서버 응답에 jobId가 없어 파일을 받을 수 없습니다.',
-            );
-          }
-          const apiBase = await getResolvedApiBaseUrl();
-          const base = String(apiBase).trim().replace(/\/+$/, '');
-          const fileUrl = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
-          await web.writeJobMp3BlobToHandle(handle, fileUrl);
-          return;
-        }
-
-        const res = await requestDownload(youtubeWatchUrl(videoId), {
-          noPlaylist: true,
-          audioFormat: extensionToYtDlpFormat(encode.extension),
-          audioQuality: encode.audioQuality,
-          metadata,
-        });
-        const jobId = res.jobId;
-        if (!jobId || typeof jobId !== 'string') {
-          throw new Error(
-            '서버 응답에 jobId가 없어 파일을 받을 수 없습니다.',
-          );
-        }
-        const apiBase = await getResolvedApiBaseUrl();
-        await persistAudioAfterServerJob(apiBase, jobId, { fileName: safeName });
-        return;
       } catch (e) {
         if (Platform.OS !== 'web') {
           nrmNotifyDownloadFinished(videoId, displayLabel, false);
           logNrmRunError('download.native', e, {
             videoId,
-            safeName,
             stage: parseDownloadStage(e),
           });
           notifyUser(mapDownloadUserMessage(e));
         } else {
           logNrmRunError('download.web', e, { videoId });
-          notifyUser('알 수 없는 오류가 발생했습니다.');
+          notifyUser(mapDownloadUserMessage(e));
         }
-      } finally {
-        dlInFlight.current.delete(videoId);
-        setDlBusy((m) => {
-          const n = { ...m };
-          delete n[videoId];
-          return n;
-        });
+        throw e;
       }
     },
     [],
   );
 
-  const openDownloadModalForItem = useCallback(
-    async (item: YoutubeSearchItem) => {
-      const videoId = item.videoId;
-      if (dlInFlight.current.has(videoId)) return;
-      setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
-      setDownloadModalItem(null);
-      setDownloadModalInitialFields(undefined);
+  const handleModalConfirm = useCallback(
+    async (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
+      let session = downloadSessionsRef.current.get(videoId);
+      if (!session) {
+        session = {
+          extractionPromise: beginParallelExtraction(videoId),
+          aborted: false,
+          extractionError: null,
+        };
+      }
+      if (session.aborted) return;
+
+      setDlConfirmBusy((m) => ({ ...m, [videoId]: true }));
       try {
-        // metadataSource 분류는 모달에서 UI 힌트용으로 사용합니다.
-        const source: 'chart' | 'lastfm' | 'main' =
-          chartDownloadTrack && chartDownloadSource === 'lastfm'
-            ? 'lastfm'
-            : chartDownloadTrack
-              ? 'chart'
-              : 'main';
-
-        if (source === 'lastfm' && chartDownloadTrack) {
-          const t = chartDownloadTrack;
-          const meta = await enrichLastfmDownloadMetadata(
-            {
-              mbid:
-                normalizeLastfmMbid(t.mbid) ||
-                normalizeLastfmMbid(t.trackId) ||
-                undefined,
-              artist: t.artists,
-              title: t.title,
-              album: t.album,
-              genre: t.genre,
-              releaseDate: t.releaseDate,
-              imageUrl: t.imageUrl,
-            },
-            t.artists,
-            t.title,
-          );
-          const { artist: _a, title: _t, ...fields } = meta;
-          setDownloadModalInitialFields(fields);
-        } else if (source === 'chart' && chartDownloadTrack) {
-          const t = chartDownloadTrack;
-          const meta = buildChartAudioMetadata(t, t.artists, t.title);
-          const { artist: _a, title: _t, ...fields } = meta;
-          setDownloadModalInitialFields(fields);
-        } else {
-          setDownloadModalInitialFields(undefined);
-        }
-
-        setDownloadModalItem(item);
+        await completeDownloadAfterExtraction(
+          videoId,
+          fileName,
+          normalizeDownloadMetadata(metadata),
+        );
+        setDownloadModalItem(null);
+        setDownloadModalInitialFields(undefined);
+      } catch {
+        /* notifyUser inside completeDownloadAfterExtraction */
       } finally {
-        setDlMetaBusy((m) => {
+        setDlConfirmBusy((m) => {
           const n = { ...m };
           delete n[videoId];
           return n;
         });
+        clearDownloadSession(videoId);
       }
     },
-    [chartDownloadSource, chartDownloadTrack],
+    [beginParallelExtraction, clearDownloadSession, completeDownloadAfterExtraction],
+  );
+
+  const handleModalClose = useCallback(() => {
+    const videoId = downloadModalItem?.videoId;
+    setDownloadModalItem(null);
+    setDownloadModalInitialFields(undefined);
+    if (!videoId) return;
+    const session = downloadSessionsRef.current.get(videoId);
+    if (session) {
+      session.aborted = true;
+      void session.extractionPromise.finally(() => {
+        clearDownloadSession(videoId);
+      });
+      return;
+    }
+    clearDownloadSession(videoId);
+  }, [clearDownloadSession, downloadModalItem?.videoId]);
+
+  const startDownloadForItem = useCallback(
+    async (item: YoutubeSearchItem) => {
+      const videoId = item.videoId;
+      if (dlInFlight.current.has(videoId)) return;
+
+      const ready = await ensureDownloadReady();
+      if (!ready) return;
+
+      const mode = await loadDownloadMetadataMode();
+
+      dlInFlight.current.add(videoId);
+      setDlBusy((m) => ({ ...m, [videoId]: true }));
+      beginParallelExtraction(videoId);
+
+      if (Platform.OS !== 'web') {
+        void resolveDownloadFileName(item, metadataContext).then((name) => {
+          nrmNotifyDownloadStarted(videoId, displayLabelFromAudioFileName(name));
+        });
+      }
+
+      if (mode === 'manual') {
+        setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
+        try {
+          const fields = await resolveModalInitialMetadataFieldsWithAuth(
+            item,
+            metadataContext,
+            downloadMetadataAuth,
+          );
+          const session = downloadSessionsRef.current.get(videoId);
+          if (!session || session.aborted || session.extractionError) return;
+          setDownloadModalInitialFields(fields);
+          setDownloadModalItem(item);
+        } catch (e) {
+          handleMetadataPrefetchError(videoId, e);
+        } finally {
+          setDlMetaBusy((m) => {
+            const n = { ...m };
+            delete n[videoId];
+            return n;
+          });
+        }
+        return;
+      }
+
+      try {
+        if (mode === 'auto') {
+          const [metadata, fileName] = await Promise.all([
+            resolveAutoDownloadMetadataWithAuth(
+              item,
+              metadataContext,
+              downloadMetadataAuth,
+            ),
+            resolveDownloadFileName(item, metadataContext),
+          ]);
+          await completeDownloadAfterExtraction(videoId, fileName, metadata);
+        } else {
+          const fileName = await resolveDownloadFileName(item, metadataContext);
+          await completeDownloadAfterExtraction(videoId, fileName, undefined);
+        }
+      } catch (e) {
+        if (mode === 'auto') {
+          handleMetadataPrefetchError(videoId, e);
+        }
+      } finally {
+        clearDownloadSession(videoId);
+      }
+    },
+    [
+      beginParallelExtraction,
+      clearDownloadSession,
+      completeDownloadAfterExtraction,
+      downloadMetadataAuth,
+      ensureDownloadReady,
+      handleMetadataPrefetchError,
+      metadataContext,
+    ],
   );
 
   const isWelcome = phase === 'welcome';
+  const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
+  const bodyColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80;
 
   return (
     <View
@@ -426,6 +547,20 @@ export function NrmYoutubeHome({
         !isWelcome && styles.block,
         !isWelcome && (isDark ? styles.blockDark : styles.blockLight),
       ]}>
+      <NrmDownloadMetadataUnavailableOverlay
+        visible={metadataUnavailableOpen}
+        isDark={isDark}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        onClose={() => setMetadataUnavailableOpen(false)}
+      />
+      <NrmLyricsEmbedUnavailableOverlay
+        visible={lyricsEmbedUnavailableOpen}
+        isDark={isDark}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        onClose={() => setLyricsEmbedUnavailableOpen(false)}
+      />
       <NrmMetadataEditModal
         visible={downloadModalItem !== null}
         item={downloadModalItem}
@@ -440,20 +575,21 @@ export function NrmYoutubeHome({
         initialArtist={chartDownloadTrack?.artists}
         initialTitle={chartDownloadTrack?.title}
         initialMetadataFields={downloadModalInitialFields}
-        busy={false}
-        onClose={() => {
-          setDownloadModalItem(null);
-          setDownloadModalInitialFields(undefined);
-        }}
+        busy={!!(downloadModalItem && dlMetaBusy[downloadModalItem.videoId])}
+        confirmBusy={
+          !!(downloadModalItem && dlConfirmBusy[downloadModalItem.videoId])
+        }
+        onClose={handleModalClose}
         onConfirm={(videoId, fileName, metadata) => {
-          setDownloadModalItem(null);
-          setDownloadModalInitialFields(undefined);
-          void runDownloadWithFileName(
-            videoId,
-            fileName,
-            normalizeDownloadMetadata(metadata),
-          );
+          void handleModalConfirm(videoId, fileName, metadata);
         }}
+      />
+      <NrmLyricsTranslationFailedOverlay
+        visible={lyricsTranslationFailedOpen}
+        isDark={isDark}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        onClose={() => setLyricsTranslationFailedOpen(false)}
       />
       <View style={styles.searchRowWrap}>
         <View style={styles.searchRow}>
@@ -549,7 +685,7 @@ export function NrmYoutubeHome({
                   </View>
                 </Pressable>
                 <Pressable
-                  onPress={() => void openDownloadModalForItem(item)}
+                  onPress={() => void startDownloadForItem(item)}
                   disabled={busy}
                   style={({ pressed }) => [
                     styles.rowDownloadBtn,
@@ -589,7 +725,7 @@ export function NrmYoutubeHome({
                 <View style={styles.embedBelow}>
                   <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
                   <Pressable
-                    onPress={() => void openDownloadModalForItem(item)}
+                    onPress={() => void startDownloadForItem(item)}
                     disabled={busy}
                     style={({ pressed }) => [
                       styles.embedDownloadBtn,

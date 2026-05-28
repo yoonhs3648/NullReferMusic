@@ -40,6 +40,28 @@ export async function downloadYoutubeAudioOnDevice(
   return m.downloadYoutubeAudioOnDevice(videoId, userSuggestedFileName, metadata);
 }
 
+export async function extractYoutubeAudioOnDevice(
+  videoId: string,
+): Promise<{ fileUri: string }> {
+  if (Platform.OS === 'web') {
+    throw new Error('extractYoutubeAudioOnDevice is native-only');
+  }
+  const m = await import('./nrmInnertubeYoutube.native');
+  return m.extractYoutubeAudioOnDevice(videoId);
+}
+
+export async function finalizeYoutubeAudioOnDevice(
+  fileUri: string,
+  userSuggestedFileName: string,
+  metadata?: NrmAudioFileMetadata,
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
+  if (Platform.OS === 'web') {
+    throw new Error('finalizeYoutubeAudioOnDevice is native-only');
+  }
+  const m = await import('./nrmInnertubeYoutube.native');
+  return m.finalizeYoutubeAudioOnDevice(fileUri, userSuggestedFileName, metadata);
+}
+
 export async function getAudioStreamUrlWithInnertube(
   videoId: string,
 ): Promise<string> {

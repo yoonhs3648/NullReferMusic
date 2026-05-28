@@ -125,6 +125,42 @@ export async function promptSpotifyChartsBearerInvalid(handlers?: {
   }
 }
 
+type LastfmGateHandlers = {
+  onOpenLastfmTokenSettings: () => void;
+  onShowAuthInvalid?: (code?: 'auth_failed' | 'not_configured') => void;
+};
+
+function promptLastfmAuthOnNative(
+  handlers: LastfmGateHandlers,
+  code: 'auth_failed' | 'not_configured',
+): boolean {
+  if (Platform.OS !== 'web' && handlers.onShowAuthInvalid) {
+    handlers.onShowAuthInvalid(code);
+    return true;
+  }
+  return false;
+}
+
+/** Last.fm API Key 만료·오류 — Web: confirm 후 API 설정, 앱: 오버레이 */
+export async function promptLastfmChartAuthInvalid(
+  handlers: LastfmGateHandlers,
+  code: 'auth_failed' | 'not_configured' = 'auth_failed',
+): Promise<void> {
+  if (promptLastfmAuthOnNative(handlers, code)) {
+    return;
+  }
+
+  const message = chartUserMessage('lastfm', code);
+
+  const go = await confirmUser(
+    `${message}\n\n메뉴 → 앱 설정 → API 설정 → Last.fm API 토큰 관리로 이동할까요?`,
+    { cancelLabel: '닫기', confirmLabel: 'API 설정 열기' },
+  );
+  if (go) {
+    handlers.onOpenLastfmTokenSettings();
+  }
+}
+
 /**
  * @deprecated renewSpotifyChartsBearerSilently + promptSpotifyChartsBearerInvalid 사용
  */
@@ -150,33 +186,26 @@ export async function ensureSpotifySearchApiAccess(
 }
 
 export async function ensureSearchApiAccess(
-  onOpenTokenSettings: () => void,
+  handlers: LastfmGateHandlers,
 ): Promise<boolean> {
-  if (await hasLastfmChartAccess()) {
-    return true;
-  }
-  const go = await confirmUser(
-    `${nrmChartsLastfmNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
-    { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
-  );
-  if (go) {
-    onOpenTokenSettings();
-  }
-  return false;
+  return ensureLastfmChartAccess(handlers);
 }
 
 export async function ensureLastfmChartAccess(
-  onOpenTokenSettings: () => void,
+  handlers: LastfmGateHandlers,
 ): Promise<boolean> {
   if (await hasLastfmChartAccess()) {
     return true;
+  }
+  if (promptLastfmAuthOnNative(handlers, 'not_configured')) {
+    return false;
   }
   const go = await confirmUser(
     `${nrmChartsLastfmNotConfiguredMessage}\n\n지금 토큰 설정 화면을 열까요?`,
     { cancelLabel: '취소', confirmLabel: 'API 설정 열기' },
   );
   if (go) {
-    onOpenTokenSettings();
+    handlers.onOpenLastfmTokenSettings();
   }
   return false;
 }

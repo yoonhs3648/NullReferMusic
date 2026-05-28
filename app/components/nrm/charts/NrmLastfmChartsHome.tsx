@@ -15,6 +15,7 @@ import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { fetchLastfmChart } from '@/lib/nrmLastfmChartsClient';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
   NRM_LASTFM_CHART_DEFAULT_TAB,
@@ -28,6 +29,7 @@ type Props = {
   paddingHorizontal: number;
   onBackToHome: () => void;
   onTrackPress?: (item: ChartTrackItem) => void;
+  lastfmAuth: LastfmAuthHandlers;
 };
 
 export function NrmLastfmChartsHome({
@@ -35,6 +37,7 @@ export function NrmLastfmChartsHome({
   paddingHorizontal,
   onBackToHome,
   onTrackPress,
+  lastfmAuth,
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -59,7 +62,7 @@ export function NrmLastfmChartsHome({
     setErrorCode(null);
     setItems([]);
     setPlaylistTitle(null);
-    const out = await fetchLastfmChart(tab);
+    const out = await fetchLastfmChart(tab, lastfmAuth);
     if (!out.ok) {
       setErrorCode(out.errorCode);
       setLoading(false);
@@ -68,7 +71,7 @@ export function NrmLastfmChartsHome({
     setPlaylistTitle(out.data.playlistName);
     setItems(out.data.items);
     setLoading(false);
-  }, []);
+  }, [lastfmAuth]);
 
   useEffect(() => {
     void loadChart(activeTab);

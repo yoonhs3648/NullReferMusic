@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
 
@@ -31,6 +31,7 @@ import { NrmGenreChartsPlaceholder } from '@/components/nrm/charts/NrmGenreChart
 import { NrmLastfmChartsHome } from '@/components/nrm/charts/NrmLastfmChartsHome';
 import { NrmPeriodChartsHome } from '@/components/nrm/charts/NrmPeriodChartsHome';
 import { NrmSpotifyChartsHome } from '@/components/nrm/charts/NrmSpotifyChartsHome';
+import { NrmLastfmApiAuthModal } from '@/components/nrm/NrmLastfmApiAuthModal';
 import { NrmSpotifyChartsLoginModal } from '@/components/nrm/settings/NrmSpotifyChartsLoginModal';
 import { NrmSpotifyChartsSilentCapture } from '@/components/nrm/settings/NrmSpotifyChartsSilentCapture';
 import {
@@ -58,7 +59,10 @@ import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { saveSpotifyChartsSession } from '@/lib/nrmSpotifyChartsSession';
+import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
+import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
+import type { LastfmSearchErrorCode } from '@/lib/nrmLastfmSearchTypes';
 
 
 
@@ -141,6 +145,10 @@ export default function HomeScreen() {
   const [chartsBearerModalOpen, setChartsBearerModalOpen] = useState(false);
   const [chartsBearerModalExpired, setChartsBearerModalExpired] = useState(false);
   const [silentCaptureActive, setSilentCaptureActive] = useState(false);
+  const [lastfmAuthModalOpen, setLastfmAuthModalOpen] = useState(false);
+  const [lastfmAuthModalErrorCode, setLastfmAuthModalErrorCode] = useState<
+    ChartErrorCode | LastfmSearchErrorCode
+  >('auth_failed');
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
   const menuRef = useRef<NrmAppMenuHandle>(null);
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -391,6 +399,39 @@ export default function HomeScreen() {
     setChartsBearerModalOpen(true);
   }, []);
 
+  const openLastfmTokenSettings = useCallback(() => {
+    menuRef.current?.openLastfmTokenSettings();
+  }, []);
+
+  const showLastfmAuthInvalidOverlay = useCallback(
+    (code: ChartErrorCode | LastfmSearchErrorCode = 'auth_failed') => {
+      const modalCode =
+        code === 'not_configured' ? 'not_configured' : 'auth_failed';
+      setLastfmAuthModalErrorCode(modalCode);
+      setLastfmAuthModalOpen(true);
+    },
+    [],
+  );
+
+  const lastfmAuthHandlers = useMemo<LastfmAuthHandlers>(
+    () => ({
+      onOpenLastfmTokenSettings: openLastfmTokenSettings,
+      ...(Platform.OS !== 'web'
+        ? { onShowAuthInvalid: showLastfmAuthInvalidOverlay }
+        : {}),
+    }),
+    [openLastfmTokenSettings, showLastfmAuthInvalidOverlay],
+  );
+
+  const closeLastfmAuthModal = useCallback(() => {
+    setLastfmAuthModalOpen(false);
+  }, []);
+
+  const onLastfmAuthModalOpenSettings = useCallback(() => {
+    setLastfmAuthModalOpen(false);
+    openLastfmTokenSettings();
+  }, [openLastfmTokenSettings]);
+
   const onSilentCaptured = useCallback(
     async (bearerToken: string) => {
       setSilentCaptureActive(false);
@@ -561,6 +602,7 @@ export default function HomeScreen() {
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
             onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
+            lastfmAuth={lastfmAuthHandlers}
           />
         ) : isPeriodLastfmCharts ? (
           <NrmPeriodChartsHome
@@ -569,6 +611,7 @@ export default function HomeScreen() {
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
             onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
+            lastfmAuth={lastfmAuthHandlers}
           />
         ) : isPeriodSpotifyCharts ? (
           <NrmPeriodChartsHome
@@ -627,6 +670,7 @@ export default function HomeScreen() {
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
             onNavigateYoutube={navigateToYoutubeFromLastfm}
+            lastfmAuth={lastfmAuthHandlers}
           />
         ) : (
 
@@ -719,6 +763,11 @@ export default function HomeScreen() {
                   initialQuery={chartSearchQuery}
                   chartDownloadTrack={chartDownloadTrack}
                   chartDownloadSource={chartDownloadSource}
+                  downloadMetadataAuth={{
+                    ...lastfmAuthHandlers,
+                    onOpenSpotifyTokenSettings: () =>
+                      menuRef.current?.openSpotifyTokenSettings(),
+                  }}
 
                 />
 
@@ -750,6 +799,7 @@ export default function HomeScreen() {
           onNavigateLastfmAlbumSearch={openLastfmAlbumSearch}
           onNavigateLastfmTrackSearch={openLastfmTrackSearch}
           onRequestChartsBearerWebView={renewChartsBearerViaWebView}
+          onShowLastfmAuthInvalid={showLastfmAuthInvalidOverlay}
         />
 
         {easterVisible ? (
@@ -790,6 +840,15 @@ export default function HomeScreen() {
               bodyColor={bodyColor}
               onClose={() => closeChartsBearerModal(false)}
               onSessionCaptured={(payload) => void onChartsBearerCapturedFromRenew(payload)}
+            />
+            <NrmLastfmApiAuthModal
+              visible={lastfmAuthModalOpen}
+              isDark={isDark}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              errorCode={lastfmAuthModalErrorCode}
+              onClose={closeLastfmAuthModal}
+              onOpenSettings={onLastfmAuthModalOpenSettings}
             />
           </>
         ) : null}

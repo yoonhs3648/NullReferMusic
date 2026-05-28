@@ -68,6 +68,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         val strategies =
           if (mp4Family) {
             listOf(
+              FfmpegStrategy(withCover = true, audioCopy = true),
               FfmpegStrategy(withCover = true, audioCopy = false),
               FfmpegStrategy(withCover = false, audioCopy = true),
             )
@@ -242,10 +243,10 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
    *     -map 0:a:0  [-map 1:v:0  -disposition:v:0 attached_pic  -metadata:s:v ..]
    *     -c:a <codec>
    *     [-c:v <codec>]
-   *     -movflags +use_metadata_tags+faststart  ← 출력 파일 직전 (m4a)
+   *     -movflags +faststart  ← m4a (use_metadata_tags 는 Windows에서 태그 미표시)
    *     [-id3v2_version 3]                       ← 출력 파일 직전 (mp3)
    *     -metadata key=val ...
-   *     [-metadata:s:a:0 key=val ...]            ← m4a 전용 스트림 태그
+   *     -metadata key=val (m4a: iTunes ilst ©nam·©ART — 스트림 중복 태그 없음)
    *     <output>
    */
   private fun runFfmpegMetadata(
@@ -288,21 +289,37 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
 
     if (mp4Family) {
-      cmd.add("-movflags"); cmd.add("+use_metadata_tags+faststart")
+      cmd.add("-movflags"); cmd.add("+faststart")
     }
     if (ext == "mp3") {
       cmd.add("-id3v2_version"); cmd.add("3")
     }
 
-    fun putTag(key: String, value: String) {
+    fun putTag(logicalKey: String, value: String) {
       if (value.isEmpty()) return
-      cmd.add("-metadata"); cmd.add("$key=$value")
+      val ffmpegKey =
+        if (mp4Family) {
+          when (logicalKey) {
+            "artist" -> "author"
+            "date" -> "year"
+            "disc" -> "disk"
+            else -> logicalKey
+          }
+        } else {
+          logicalKey
+        }
+      cmd.add("-metadata"); cmd.add("$ffmpegKey=$value")
+    }
+    fun putArtistTag(value: String) {
+      if (value.isEmpty()) return
+      putTag("artist", value)
       if (mp4Family) {
-        cmd.add("-metadata:s:a:0"); cmd.add("$key=$value")
+        // Windows "참여 아티스트" 호환을 위해 artist 키도 병행 기록
+        cmd.add("-metadata"); cmd.add("artist=$value")
       }
     }
     putTag("title", tags.title)
-    putTag("artist", tags.artist)
+    putArtistTag(tags.artist)
     putTag("album_artist", tags.albumArtist)
     putTag("album", tags.album)
     putTag("genre", tags.genre)
@@ -310,7 +327,9 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     putTag("track", tags.trackNumber)
     putTag("disc", tags.discNumber)
     putTag("composer", tags.composer)
-    putTag("lyrics", tags.lyrics)
+    if (!mp4Family) {
+      putTag("lyrics", tags.lyrics)
+    }
     putTag("bpm", tags.bpm)
     putTag("copyright", tags.copyright)
     putTag("website", tags.website)

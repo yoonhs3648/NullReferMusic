@@ -73,6 +73,26 @@ body {
   }
 }
 
+/* 모달 등 — isDark prop과 맞춘 강제 테마 (시스템 설정과 무관) */
+.nrm-scroll-web--dark {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+.nrm-scroll-web--dark::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+.nrm-scroll-web--dark::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.34);
+}
+.nrm-scroll-web--light {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+.nrm-scroll-web--light::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.16);
+}
+.nrm-scroll-web--light::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.26);
+}
+
 /* 기간별 차트 — 네이티브 select 펼침 목록 (인라인 option 스타일만으로는 브라우저마다 안 먹는 경우 있음) */
 .nrm-period-select option {
   background-color: #1c1c1e;
