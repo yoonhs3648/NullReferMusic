@@ -12,6 +12,7 @@ class OnDeviceDownloadPackage : ReactPackage {
         NrmAudioMetadataModule(reactContext),
         NrmWhisperModule(reactContext),
         NrmSpotifyCookieModule(reactContext),
+        NrmFileLoggerModule(reactContext),
     )
   }
 

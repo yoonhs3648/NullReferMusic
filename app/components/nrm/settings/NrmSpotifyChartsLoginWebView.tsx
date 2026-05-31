@@ -2,6 +2,7 @@ import { StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
 
 import { NRM_CHARTS_SPOTIFY_URL } from '@/lib/nrmSpotifyChartsPlatform';
+import { NRM_SPOTIFY_WEBVIEW_USER_AGENT } from '@/lib/nrmSpotifyChartsWebViewConfig';
 import {
   NRM_SPOTIFY_CHARTS_HARVEST_BEFORE_JS,
   NRM_SPOTIFY_CHARTS_HARVEST_JS,
@@ -14,7 +15,8 @@ type Props = {
 };
 
 export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
-  const { webRef, onNavigation, onLoadEnd, onMessage } = useSpotifyChartsTokenHarvest({
+  const { webRef, onNavigation, onLoadEnd, onMessage, onHttpError } =
+    useSpotifyChartsTokenHarvest({
     onCaptured: (bearerToken) => onLoginComplete({ bearerToken }),
     // onNeedsLogin 미제공 → 로그인 페이지를 사용자에게 그대로 보여줌
   });
@@ -25,6 +27,7 @@ export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
         ref={webRef}
         style={styles.webview}
         source={{ uri: NRM_CHARTS_SPOTIFY_URL }}
+        userAgent={NRM_SPOTIFY_WEBVIEW_USER_AGENT}
         originWhitelist={['https://*', 'http://*']}
         javaScriptEnabled
         domStorageEnabled
@@ -35,6 +38,7 @@ export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
         onNavigationStateChange={onNavigation}
         onLoadEnd={onLoadEnd}
         onMessage={onMessage}
+        onHttpError={onHttpError}
         injectedJavaScriptBeforeContentLoaded={NRM_SPOTIFY_CHARTS_HARVEST_BEFORE_JS}
         injectedJavaScript={NRM_SPOTIFY_CHARTS_HARVEST_JS}
         onShouldStartLoadWithRequest={(req) => {

@@ -9,20 +9,47 @@ object WhisperBootstrap {
   private const val MIN_CLI_BYTES = 500_000L
 
   fun ensure(context: Context, preferredModel: String?): WhisperPaths {
-    val baseDir = WhisperModelDownloader.whisperDir(context)
-    val cli = File(baseDir, "whisper-cli")
+    NrmFileLogger.log("whisper", "ensure modelPref=${preferredModel ?: "(default)"}")
+    val cliDir = NrmExecutableFile.execBaseDir(context, "whisper")
+    val cli = File(cliDir, "whisper-cli")
 
     if (!cli.isFile || cli.length() < MIN_CLI_BYTES) {
+      NrmFileLogger.log("whisper", "CLI asset 복사 시도")
+      NrmExecutableFile.prepareWritable(cli)
       copyAssetIfPresent(context, "whisper/whisper-cli", cli)
-      copyAssetIfPresent(context, "whisper/main", cli)
+      if (!cli.isFile || cli.length() < MIN_CLI_BYTES) {
+        NrmExecutableFile.prepareWritable(cli)
+        copyAssetIfPresent(context, "whisper/main", cli)
+      }
     }
 
     val model = WhisperModelDownloader.resolveInstalledFile(context, preferredModel ?: "")
-    makeExecutable(cli)
-    return WhisperPaths(
-        cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",
-        modelPath = model?.absolutePath ?: "",
+    NrmExecutableFile.prepareForExecution(cli)
+    if (!NrmExecutableFile.isExecReady(cli)) {
+      NrmExecutableFile.mirrorToExecCache(context, cli, "whisper-exec")?.let { mirrored ->
+        NrmFileLogger.log("whisper", "codeCache CLI 사용: ${mirrored.absolutePath}")
+        val paths =
+          WhisperPaths(
+            cliPath = mirrored.absolutePath,
+            modelPath = model?.absolutePath ?: "",
+          )
+        NrmFileLogger.log(
+          "whisper",
+          "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} model=${paths.modelPath.ifBlank { "(없음)" }}",
+        )
+        return paths
+      }
+    }
+    val paths =
+      WhisperPaths(
+          cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",
+          modelPath = model?.absolutePath ?: "",
+      )
+    NrmFileLogger.log(
+      "whisper",
+      "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} size=${cli.length()} model=${paths.modelPath.ifBlank { "(없음)" }}",
     )
+    return paths
   }
 
   data class WhisperPaths(val cliPath: String, val modelPath: String) {
@@ -40,16 +67,4 @@ object WhisperBootstrap {
     }
   }
 
-  private fun makeExecutable(file: File) {
-    if (!file.isFile) return
-    file.setReadable(true, false)
-    file.setExecutable(true, false)
-    try {
-      ProcessBuilder(listOf("chmod", "755", file.absolutePath))
-          .redirectErrorStream(true)
-          .start()
-          .waitFor()
-    } catch (_: Exception) {
-    }
-  }
 }

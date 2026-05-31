@@ -5,6 +5,7 @@ import type WebView from 'react-native-webview';
 import {
   NRM_SPOTIFY_TOKEN_ENDPOINT,
 } from '@/lib/nrmSpotifyChartsPlatform';
+import { isSpotifyWebViewHttpAuthError } from '@/lib/nrmSpotifyChartsWebViewConfig';
 import {
   NRM_SPOTIFY_CHARTS_HARVEST_BURST_JS,
   NRM_SPOTIFY_CHARTS_HARVEST_JS,
@@ -68,6 +69,7 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
   const tokenUrlFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silentTimeoutTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigatedToTokenUrl = useRef(false);
+  const httpRetried = useRef(false);
 
   const clearTimers = useCallback(() => {
     if (burstTimer.current) { clearInterval(burstTimer.current); burstTimer.current = null; }
@@ -108,9 +110,15 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
       tokenUrlFallbackTimer.current = null;
       if (finished.current || navigatedToTokenUrl.current) return;
       navigatedToTokenUrl.current = true;
-      webRef.current?.injectJavaScript(
-        `window.location.href = '${NRM_SPOTIFY_TOKEN_ENDPOINT}'; true;`,
-      );
+      webRef.current?.injectJavaScript(`
+        (function() {
+          try {
+            if ((location.hostname || '').indexOf('accounts.spotify.com') >= 0) return;
+          } catch (e) {}
+          window.location.href = '${NRM_SPOTIFY_TOKEN_ENDPOINT}';
+        })();
+        true;
+      `);
     }, 3500);
   }, []);
 
@@ -177,10 +185,26 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
     [finishWithToken],
   );
 
+  const onHttpError = useCallback(
+    (e: { nativeEvent: { statusCode: number; url: string } }) => {
+      if (finished.current) return;
+      const { statusCode, url } = e.nativeEvent;
+      if (!isSpotifyWebViewHttpAuthError(statusCode, url)) return;
+      if (!httpRetried.current) {
+        httpRetried.current = true;
+        webRef.current?.reload();
+        return;
+      }
+      if (onNeedsLogin) finishWithNeedsLogin();
+    },
+    [finishWithNeedsLogin, onNeedsLogin],
+  );
+
   /** silent 모드: active 상태 전환 시 타이머 초기화 */
   const resetForNewCapture = useCallback(() => {
     finished.current = false;
     navigatedToTokenUrl.current = false;
+    httpRetried.current = false;
     clearTimers();
     if (silentTimeoutMs && onNeedsLogin) {
       silentTimeoutTimer.current = setTimeout(() => {
@@ -197,6 +221,7 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
     onNavigation,
     onLoadEnd,
     onMessage,
+    onHttpError,
     resetForNewCapture,
     pauseHarvestTimers,
   };

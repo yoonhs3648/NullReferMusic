@@ -279,9 +279,7 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
   }
 
   const rawPath: string = result.path;
-  let fileUri = rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
-  fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
-  return fileUri;
+  return rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 }
 
 async function downloadWithYtDlp(
@@ -368,9 +366,7 @@ async function extractWithInnertube(videoId: string): Promise<string> {
         format,
       );
 
-      let fileUri = tempUri;
-      fileUri = await ensureAudioMatchesUserExtension(fileUri, encode);
-      return fileUri;
+      return tempUri;
     } catch (e) {
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {

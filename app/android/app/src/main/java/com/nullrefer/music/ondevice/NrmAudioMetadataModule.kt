@@ -186,7 +186,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     val trackNumber: String,
     val discNumber: String,
     val composer: String,
-    val lyrics: String,
     val bpm: String,
     val copyright: String,
     val website: String,
@@ -221,7 +220,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       trackNumber = s("trackNumber"),
       discNumber = s("discNumber"),
       composer = s("composer"),
-      lyrics = s("lyrics"),
       bpm = s("bpm"),
       copyright = s("copyright"),
       website = s("website"),
@@ -359,6 +357,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   }
 
   private fun execFfmpeg(cmd: List<String>) {
+    NrmExecutableFile.prepareForExecution(File(cmd.first()))
     val proc =
       ProcessBuilder(cmd)
         .redirectErrorStream(true)

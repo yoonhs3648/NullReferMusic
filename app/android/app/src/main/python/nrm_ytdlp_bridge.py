@@ -3,6 +3,16 @@ import os
 import yt_dlp
 
 
+def _nrm_log(tag, message):
+    """Chaquopy → Download/NullReferenceMusic/logs/nrm-debug.log"""
+    try:
+        from java import jclass
+
+        jclass("com.nullrefer.music.ondevice.NrmFileLogger").log(str(tag), str(message))
+    except Exception:
+        pass
+
+
 _CLIENT_PROFILES = [
     ["android", "web"],
     ["ios", "web"],
@@ -62,16 +72,21 @@ def _pick_best_audio_url(info):
 
 def get_audio_stream_url(video_id, cookie_file=""):
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    _nrm_log("yt-dlp-py", f"get_audio_stream_url video_id={video_id} cookie={bool(cookie_file)}")
     last_error = None
     for clients in _CLIENT_PROFILES:
         opts = _common_opts(cookie_file)
         opts["extractor_args"] = _extractor_args(clients)
         try:
+            _nrm_log("yt-dlp-py", f"extract_info clients={clients}")
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(watch_url, download=False)
-            return _pick_best_audio_url(info)
+            url = _pick_best_audio_url(info)
+            _nrm_log("yt-dlp-py", f"get_audio_stream_url OK clients={clients} url_len={len(url)}")
+            return url
         except Exception as exc:
             last_error = exc
+            _nrm_log("yt-dlp-py", f"get_audio_stream_url fail clients={clients} err={exc}")
     raise RuntimeError(f"STREAM_URL_FAILED: {last_error}")
 
 
@@ -130,6 +145,10 @@ def _audio_codec_args(fmt, quality):
 
 def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location=""):
     """다운로드 결과를 사용자가 고른 확장자로 ffmpeg 변환."""
+    _nrm_log(
+        "yt-dlp-py",
+        f"transcode_audio in={input_path} fmt={audio_format} q={audio_quality} ffmpeg={ffmpeg_location}",
+    )
     inp = (input_path or "").strip()
     if not inp or not os.path.isfile(inp):
         raise RuntimeError("TRANSCODE_INPUT_MISSING")
@@ -157,9 +176,12 @@ def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-2000:]
+        _nrm_log("yt-dlp-py", f"transcode_audio FAIL code={proc.returncode} tail={tail}")
         raise RuntimeError(f"TRANSCODE_FAILED: {tail}")
     if not os.path.isfile(out_path) or os.path.getsize(out_path) <= 0:
+        _nrm_log("yt-dlp-py", "transcode_audio output empty")
         raise RuntimeError("TRANSCODE_OUTPUT_EMPTY")
+    _nrm_log("yt-dlp-py", f"transcode_audio OK out={out_path} size={os.path.getsize(out_path)}")
     try:
         os.remove(inp)
     except OSError:
@@ -211,11 +233,16 @@ def download_audio(
     1) yt-dlp로 bestaudio만 받기 (예전 안정 경로)
     2) 확장자 변환은 JS/Kotlin 단계의 transcodeAudio에서 처리
     """
+    _nrm_log(
+        "yt-dlp-py",
+        f"download_audio url={url} out={out_dir} fmt={audio_format} ffmpeg={ffmpeg_location}",
+    )
     os.makedirs(out_dir, exist_ok=True)
     last_error = None
     for clients in _CLIENT_PROFILES:
         try:
-            return _attempt_download(
+            _nrm_log("yt-dlp-py", f"download attempt clients={clients}")
+            path = _attempt_download(
                 url,
                 out_dir,
                 cookie_file,
@@ -225,7 +252,10 @@ def download_audio(
                 "0",
                 clients,
             )
+            _nrm_log("yt-dlp-py", f"download_audio OK path={path} size={os.path.getsize(path)}")
+            return path
         except Exception as exc:
             last_error = exc
+            _nrm_log("yt-dlp-py", f"download fail clients={clients} err={exc}")
 
     raise RuntimeError(f"DOWNLOAD_FAILED: {last_error}")

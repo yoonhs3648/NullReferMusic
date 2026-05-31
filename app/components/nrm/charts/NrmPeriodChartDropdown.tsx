@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -27,6 +27,8 @@ type Props = {
   isDark: boolean;
   titleColor: string;
   bodyColor: string;
+  /** 연·월·주·일 탭/리전 전환 시 열린 모달을 닫기 위한 토큰 */
+  dismissToken?: string;
   /** 고정 너비 (flex 미사용 시) */
   boxWidth?: number;
   /** true면 한 줄 dateRow 안에서 균등 분할 (모바일 전체 너비) */
@@ -41,11 +43,18 @@ export function NrmPeriodChartDropdown({
   isDark,
   titleColor,
   bodyColor,
+  dismissToken,
   boxWidth = 104,
   flex = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [dismissToken]);
+
+  useEffect(() => () => setOpen(false), []);
 
   const border = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const bg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
@@ -96,7 +105,12 @@ export function NrmPeriodChartDropdown({
     <View style={[styles.inlineRow, flex && styles.inlineRowFlex]}>
       <Text style={[styles.inlineLabel, { color: bodyColor }]}>{label}</Text>
       {control}
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={close}
+        onDismiss={close}>
         <Pressable style={styles.modalScrim} onPress={close}>
           <View
             style={[

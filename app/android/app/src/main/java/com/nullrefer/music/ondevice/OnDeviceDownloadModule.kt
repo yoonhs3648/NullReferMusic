@@ -23,8 +23,15 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
 
   private fun ensurePython() {
     val ctx = reactApplicationContext.applicationContext
+    NrmFileLogger.log("yt-dlp", "ensurePython 시작 started=${Python.isStarted()}")
     if (!Python.isStarted()) {
-      Python.start(AndroidPlatform(ctx))
+      try {
+        Python.start(AndroidPlatform(ctx))
+        NrmFileLogger.log("yt-dlp", "Chaquopy Python 시작 완료")
+      } catch (e: Exception) {
+        NrmFileLogger.error("yt-dlp", "Chaquopy Python 시작 실패", e)
+        throw e
+      }
     }
   }
 
@@ -56,6 +63,8 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     val ctx = reactApplicationContext.applicationContext
     val tmpFile = File(ctx.cacheDir, "nrm_yt_cookies_${System.currentTimeMillis()}.txt")
     tmpFile.writeText(sb.toString())
+    val lineCount = sb.lines().count { it.isNotBlank() && !it.startsWith("#") }
+    NrmFileLogger.log("yt-dlp", "쿠키 파일 생성 path=${tmpFile.absolutePath} entries=$lineCount")
     return tmpFile.absolutePath
   }
 
@@ -81,6 +90,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
   fun getAudioStreamUrl(videoId: String, promise: Promise) {
     Thread {
       var cookieFilePath = ""
+      NrmFileLogger.log("yt-dlp", "getAudioStreamUrl videoId=$videoId")
       try {
         ensurePython()
         cookieFilePath = getCookieFilePathSync()
@@ -89,8 +99,10 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         if (streamUrl.isBlank()) {
           throw Exception("스트림 URL이 비어 있습니다.")
         }
+        NrmFileLogger.log("yt-dlp", "getAudioStreamUrl OK len=${streamUrl.length}")
         promise.resolve(streamUrl)
       } catch (e: Exception) {
+        NrmFileLogger.error("yt-dlp", "getAudioStreamUrl 실패 videoId=$videoId", e)
         promise.reject("E_STREAM_URL", e.message ?: e.toString(), e)
       } finally {
         if (cookieFilePath.isNotBlank()) {
@@ -112,6 +124,10 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
   ) {
     Thread {
       var cookieFilePath = ""
+      NrmFileLogger.log(
+        "yt-dlp",
+        "downloadAudio url=$url format=$audioFormat quality=$audioQuality",
+      )
       try {
         if (url.isBlank()) {
           promise.reject("E_ARG", "URL이 비어 있습니다.")
@@ -122,6 +138,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         ensurePython()
         cookieFilePath = getCookieFilePathSync()
         val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
+        NrmFileLogger.log("yt-dlp", "downloadAudio ffmpegPath=${ffmpegPath.ifBlank { "(없음)" }}")
         val outDir = File(ctx.cacheDir, "nrm-ytdlp-tmp").apply { mkdirs() }
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
         val fmt = audioFormat.trim().ifBlank { "mp3" }
@@ -140,11 +157,16 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         if (!outFile.exists()) {
           throw Exception("다운로드 결과 파일을 찾지 못했습니다.")
         }
+        NrmFileLogger.log(
+          "yt-dlp",
+          "downloadAudio OK path=${outFile.absolutePath} size=${outFile.length()}",
+        )
         val map = Arguments.createMap()
         map.putString("path", outFile.absolutePath)
         map.putString("message", "기기에 저장되었습니다.")
         promise.resolve(map)
       } catch (e: Exception) {
+        NrmFileLogger.error("yt-dlp", "downloadAudio 실패 url=$url", e)
         promise.reject("E_ONDEVICE", e.message ?: e.toString(), e)
       } finally {
         if (cookieFilePath.isNotBlank()) {
@@ -163,6 +185,10 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) {
     Thread {
+      NrmFileLogger.log(
+        "yt-dlp",
+        "transcodeAudio input=$inputPath format=$audioFormat quality=$audioQuality",
+      )
       try {
         val srcPath = inputPath.removePrefix("file://")
         val src = File(srcPath)
@@ -173,10 +199,12 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         val ctx = reactApplicationContext.applicationContext
         ensurePython()
         val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
+        NrmFileLogger.log("yt-dlp", "transcodeAudio ffmpegPath=${ffmpegPath.ifBlank { "(없음)" }}")
         if (ffmpegPath.isBlank()) {
           promise.reject("E_FFMPEG", "ffmpeg를 사용할 수 없습니다.")
           return@Thread
         }
+        NrmExecutableFile.prepareForExecution(File(ffmpegPath))
         val fmt = audioFormat.trim().ifBlank { "mp3" }
         val quality = audioQuality.coerceIn(0, 9)
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
@@ -192,10 +220,15 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         if (!outFile.isFile) {
           throw Exception("변환 결과 파일을 찾지 못했습니다.")
         }
+        NrmFileLogger.log(
+          "yt-dlp",
+          "transcodeAudio OK path=${outFile.absolutePath} size=${outFile.length()}",
+        )
         val map = Arguments.createMap()
         map.putString("path", outFile.absolutePath)
         promise.resolve(map)
       } catch (e: Exception) {
+        NrmFileLogger.error("yt-dlp", "transcodeAudio 실패 input=$inputPath", e)
         promise.reject("E_TRANSCODE", e.message ?: e.toString(), e)
       }
     }.start()

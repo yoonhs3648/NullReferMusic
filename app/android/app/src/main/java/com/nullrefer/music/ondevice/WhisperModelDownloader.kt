@@ -90,7 +90,9 @@ object WhisperModelDownloader {
   }
 
   fun startDownload(context: Context, modelId: String) {
+    NrmFileLogger.log("whisper", "startDownload modelId=$modelId")
     if (isModelInstalled(context, modelId)) {
+      NrmFileLogger.log("whisper", "startDownload 이미 설치됨 modelId=$modelId")
       emitComplete(modelId, true)
       return
     }
@@ -119,6 +121,7 @@ object WhisperModelDownloader {
         }
       } catch (e: Exception) {
         Log.w(TAG, "startDownload failed $modelId: ${e.message}")
+        NrmFileLogger.error("whisper", "startDownload 실패 modelId=$modelId", e)
       } finally {
         flag.set(false)
         activeDownloads.remove(modelId)
@@ -144,6 +147,7 @@ object WhisperModelDownloader {
       if (tmp.isFile) tmp.delete()
       val url = URL(HF_BASE + fileName + "?download=true")
       Log.i(TAG, "download start: $fileName ($modelId)")
+      NrmFileLogger.log("whisper", "모델 다운로드 시작 file=$fileName modelId=$modelId")
       val conn = url.openConnection() as HttpURLConnection
       conn.connectTimeout = 30_000
       conn.readTimeout = 600_000
@@ -152,6 +156,7 @@ object WhisperModelDownloader {
       conn.connect()
       if (conn.responseCode !in 200..299) {
         Log.w(TAG, "download http ${conn.responseCode} for $fileName")
+        NrmFileLogger.warn("whisper", "모델 HTTP ${conn.responseCode} file=$fileName")
         return false
       }
       val total = conn.contentLengthLong.coerceAtLeast(0L)
@@ -180,6 +185,7 @@ object WhisperModelDownloader {
       if (!tmp.isFile || tmp.length() < minBytes) {
         tmp.delete()
         Log.w(TAG, "download too small: $fileName")
+        NrmFileLogger.warn("whisper", "모델 파일 너무 작음 file=$fileName size=${tmp.length()}")
         return false
       }
       if (dest.isFile) dest.delete()
@@ -189,9 +195,11 @@ object WhisperModelDownloader {
       }
       emitProgress(modelId, 100)
       Log.i(TAG, "download ok: $fileName (${dest.length()} bytes)")
+      NrmFileLogger.log("whisper", "모델 다운로드 완료 file=$fileName bytes=${dest.length()}")
       true
     } catch (e: Exception) {
       Log.w(TAG, "download failed $fileName: ${e.message}")
+      NrmFileLogger.error("whisper", "모델 다운로드 실패 file=$fileName", e)
       tmp.delete()
       false
     }

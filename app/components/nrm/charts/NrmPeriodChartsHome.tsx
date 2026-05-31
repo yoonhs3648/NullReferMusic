@@ -287,6 +287,7 @@ export function NrmPeriodChartsHome({
   return (
     <FlatList
       style={styles.list}
+      nestedScrollEnabled
       data={loading || errorCode ? [] : items}
       keyExtractor={(item, index) =>
         `${queryKey}-${item.trackId}-${item.rank}-${index}`

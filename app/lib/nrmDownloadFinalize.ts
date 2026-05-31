@@ -1,8 +1,8 @@
 /**
  * yt-dlp 추출 완료 후 ffmpeg·Whisper 병렬 후처리.
- * - Whisper 먼저 끝나면 → 다운로드 경로에 `.lrc` 선저장
- * - ffmpeg 먼저 끝나면 → 다운로드 경로에 오디오 저장 (+ APK 완료 알림)
- * - 각 단계 종료 시 관련 임시 파일 삭제
+ * - ffmpeg(변환·메타) 완료 → 오디오 저장 + APK 완료 알림
+ * - Whisper → LRC 사이드카 (백그라운드 병렬, 완료 알림 없음)
+ * - ffmpeg 실패 시 전체 실패, Whisper LRC는 삭제
  */
 import { Platform } from 'react-native';
 
@@ -14,7 +14,7 @@ import {
   normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
-import { applyFfmpegMetadataStage } from '@/lib/nrmDownloadAudioStages';
+import { applyFfmpegConversionAndMetadataStage } from '@/lib/nrmDownloadAudioStages';
 import { deleteLocalAudioTemps } from '@/lib/nrmDownloadCleanup';
 import type { AudioExtractionResult } from '@/lib/nrmDownloadPipeline';
 import {
@@ -129,7 +129,10 @@ async function finalizeNativeParallel(
     : { whisperMode: null };
 
   const temps = new Set<string>([extractionUri]);
-  const whisperRef: { result: WhisperLrcStageResult | null } = { result: null };
+  const whisperRef: { result: WhisperLrcStageResult | null; lrcUri: string | null } = {
+    result: null,
+    lrcUri: null,
+  };
 
   const whisperTask = whisperMode
     ? transcribeWhisperLrc(extractionUri, whisperMode, extension)
@@ -140,8 +143,11 @@ async function finalizeNativeParallel(
               const { persistLrcTextToDestination } = await import(
                 '@/lib/nrmPersistDownload.native'
               );
-              await persistLrcTextToDestination(safeName, result.lrcFull);
-              lrcWritten = true;
+              const lrcUri = await persistLrcTextToDestination(safeName, result.lrcFull);
+              if (lrcUri) {
+                whisperRef.lrcUri = lrcUri;
+                lrcWritten = true;
+              }
             } catch {
               lrcWritten = false;
             }
@@ -158,8 +164,8 @@ async function finalizeNativeParallel(
         })
     : Promise.resolve(null);
 
-  const audioTask = applyFfmpegMetadataStage(extractionUri, embedMetadata)
-    .then(async (processedUri) => {
+  const audioTask = applyFfmpegConversionAndMetadataStage(extractionUri, embedMetadata).then(
+    async (processedUri) => {
       if (processedUri !== extractionUri) {
         temps.add(processedUri);
       }
@@ -167,18 +173,23 @@ async function finalizeNativeParallel(
       const saved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
       options?.onAudioPersisted?.(saved.savedLabel);
       return saved;
-    })
-    .catch(async () => {
-      const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
-      const saved = await persistAudioToDestination(extractionUri, safeName, embedMetadata);
-      options?.onAudioPersisted?.(saved.savedLabel);
-      return saved;
-    });
+    },
+  );
 
-  const [whisperResult, audioSaved] = await Promise.all([whisperTask, audioTask]);
+  let audioSaved: { savedLabel: string };
+  const [whisperSettled, audioSettled] = await Promise.allSettled([whisperTask, audioTask]);
 
-  if (!whisperRef.result && whisperResult) {
-    whisperRef.result = whisperResult;
+  if (audioSettled.status === 'rejected') {
+    if (whisperRef.lrcUri) {
+      const { deletePersistedLrc } = await import('@/lib/nrmPersistDownload.native');
+      await deletePersistedLrc(whisperRef.lrcUri).catch(() => {});
+    }
+    throw audioSettled.reason;
+  }
+
+  audioSaved = audioSettled.value;
+  if (whisperSettled.status === 'fulfilled' && !whisperRef.result && whisperSettled.value) {
+    whisperRef.result = whisperSettled.value;
   }
 
   await deleteLocalAudioTemps(temps);

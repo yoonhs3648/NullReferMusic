@@ -1,5 +1,6 @@
 import '@/lib/nrmDomMinimalPolyfills';
 import '@/lib/nrmMetroLogBootstrap';
+import '@/lib/nrmFileLogBootstrap';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import 'react-native-reanimated';

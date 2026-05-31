@@ -423,23 +423,26 @@ export function NrmYoutubeHome({
 
   const handleModalConfirm = useCallback(
     (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
-      let session = downloadSessionsRef.current.get(videoId);
-      if (!session) {
-        session = {
-          extractionPromise: beginParallelExtraction(videoId),
-          aborted: false,
-          extractionError: null,
-        };
-        downloadSessionsRef.current.set(videoId, session);
-      }
-      if (session.aborted) return;
-
       const normalized = normalizeDownloadMetadata(metadata);
 
       setDownloadModalItem(null);
       setDownloadModalInitialFields(undefined);
 
+      const session: DownloadSession = {
+        extractionPromise: beginParallelExtraction(videoId),
+        aborted: false,
+        extractionError: null,
+      };
+      downloadSessionsRef.current.set(videoId, session);
+
       void (async () => {
+        if (Platform.OS !== 'web') {
+          const { applyDownloadExtension, loadDownloadEncodeSettings } =
+            await import('@/lib/nrmDownloadSettings');
+          const encode = await loadDownloadEncodeSettings();
+          const safeName = applyDownloadExtension(fileName, encode.extension);
+          nrmNotifyDownloadStarted(videoId, displayLabelFromAudioFileName(safeName));
+        }
         try {
           await completeDownloadAfterExtraction(videoId, fileName, normalized);
         } catch {
@@ -479,15 +482,6 @@ export function NrmYoutubeHome({
       dlInFlight.current.add(videoId);
       setDlBusy((m) => ({ ...m, [videoId]: true }));
 
-      /** yt-dlp 추출과 API 메타데이터 조회를 동시에 시작 */
-      beginParallelExtraction(videoId);
-
-      if (Platform.OS !== 'web') {
-        void resolveDownloadFileName(item, metadataContext).then((name) => {
-          nrmNotifyDownloadStarted(videoId, displayLabelFromAudioFileName(name));
-        });
-      }
-
       if (mode === 'manual') {
         setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
         try {
@@ -496,8 +490,6 @@ export function NrmYoutubeHome({
             metadataContext,
             downloadMetadataAuth,
           );
-          const session = downloadSessionsRef.current.get(videoId);
-          if (!session || session.aborted || session.extractionError) return;
           setDownloadModalInitialFields(fields);
           setDownloadModalItem(item);
         } catch (e) {
@@ -522,13 +514,29 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
-          const session = downloadSessionsRef.current.get(videoId);
-          if (!session || session.aborted || session.extractionError) return;
+          beginParallelExtraction(videoId);
+          if (Platform.OS !== 'web') {
+            const { applyDownloadExtension, loadDownloadEncodeSettings } =
+              await import('@/lib/nrmDownloadSettings');
+            const encode = await loadDownloadEncodeSettings();
+            nrmNotifyDownloadStarted(
+              videoId,
+              displayLabelFromAudioFileName(applyDownloadExtension(fileName, encode.extension)),
+            );
+          }
           await completeDownloadAfterExtraction(videoId, fileName, metadata);
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
-          const session = downloadSessionsRef.current.get(videoId);
-          if (!session || session.aborted || session.extractionError) return;
+          beginParallelExtraction(videoId);
+          if (Platform.OS !== 'web') {
+            const { applyDownloadExtension, loadDownloadEncodeSettings } =
+              await import('@/lib/nrmDownloadSettings');
+            const encode = await loadDownloadEncodeSettings();
+            nrmNotifyDownloadStarted(
+              videoId,
+              displayLabelFromAudioFileName(applyDownloadExtension(fileName, encode.extension)),
+            );
+          }
           await completeDownloadAfterExtraction(videoId, fileName, undefined);
         }
       } catch (e) {

@@ -98,6 +98,7 @@ export function NrmSpotifyPeriodChartFilters({
   const showMonth = true;
   const showWeek = kind === 'weekly';
   const showDay = kind === 'daily';
+  const dismissToken = `${kind}-${region}`;
 
   const handleYearChange = (y: number) => {
     onYearChange(y);
@@ -114,6 +115,7 @@ export function NrmSpotifyPeriodChartFilters({
   };
 
   const handleKindChange = (next: SpotifyPeriodChartKind) => {
+    if (next === kind) return;
     onKindChange(next);
     const m = clampSpotifyPeriodChartMonth(year, month, next, snapshotDow, now);
     if (m !== month) onMonthChange(m);
@@ -131,7 +133,9 @@ export function NrmSpotifyPeriodChartFilters({
     return (
       <Pressable
         key={id}
-        onPress={() => onRegionChange(id)}
+        onPress={() => {
+          if (id !== region) onRegionChange(id);
+        }}
         style={({ pressed }) => [
           styles.regionChip,
           {
@@ -202,6 +206,7 @@ export function NrmSpotifyPeriodChartFilters({
           value={year}
           options={yearOptions}
           onChange={handleYearChange}
+          dismissToken={dismissToken}
           isDark={isDark}
           titleColor={titleColor}
           bodyColor={bodyColor}
@@ -216,6 +221,7 @@ export function NrmSpotifyPeriodChartFilters({
               monthOptions.length > 0 ? monthOptions : [{ value: 1, label: '1월' }]
             }
             onChange={handleMonthChange}
+            dismissToken={dismissToken}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
@@ -231,6 +237,7 @@ export function NrmSpotifyPeriodChartFilters({
               weekOptions.length > 0 ? weekOptions : [{ value: 1, label: '1주' }]
             }
             onChange={onWeekOfMonthChange}
+            dismissToken={dismissToken}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
@@ -246,6 +253,7 @@ export function NrmSpotifyPeriodChartFilters({
               dayOptions.length > 0 ? dayOptions : [{ value: 1, label: '1일' }]
             }
             onChange={onDayChange}
+            dismissToken={dismissToken}
             isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}

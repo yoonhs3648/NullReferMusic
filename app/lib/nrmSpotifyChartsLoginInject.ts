@@ -12,6 +12,15 @@ const NRM_CHARTS_BEARER_HOOK_BODY = `
   if (window.__nrmChartsBearerHook) return;
   window.__nrmChartsBearerHook = true;
 
+  function isLoginHost() {
+    try {
+      var h = (location.hostname || '').toLowerCase();
+      return h === 'accounts.spotify.com' || h.slice(-20) === '.accounts.spotify.com';
+    } catch (e) {
+      return false;
+    }
+  }
+
   function sendBearer(rawToken) {
     if (!rawToken) return;
     var t = String(rawToken).replace(/^Bearer\\s+/i, '').trim();
@@ -58,6 +67,9 @@ const NRM_CHARTS_BEARER_HOOK_BODY = `
     window.__nrmFetchHooked = true;
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
+      if (isLoginHost()) {
+        return origFetch.apply(this, arguments);
+      }
       var url = '';
       try {
         if (typeof input === 'string') url = input;
@@ -108,6 +120,9 @@ const NRM_CHARTS_BEARER_HOOK_BODY = `
       return xhrSet.apply(this, arguments);
     };
     XMLHttpRequest.prototype.send = function() {
+      if (isLoginHost()) {
+        return xhrSend.apply(this, arguments);
+      }
       var url = this.__nrmUrl || '';
       try {
         if (isSpotifyApiUrl(url) && this.__nrmHeaders) {
@@ -150,6 +165,7 @@ export const NRM_SPOTIFY_CHARTS_HARVEST_JS = `
 (function() {
   ${NRM_CHARTS_BEARER_HOOK_BODY}
   function pokeTokenEndpoint() {
+    if (isLoginHost()) return;
     try {
       fetch('https://open.spotify.com/get_access_token?reason=transport&productType=web_player', {
         credentials: 'include',
@@ -168,7 +184,9 @@ export const NRM_SPOTIFY_CHARTS_HARVEST_JS = `
   }
   pokeTokenEndpoint();
   if (window.__nrmTokenPokeInterval) clearInterval(window.__nrmTokenPokeInterval);
-  window.__nrmTokenPokeInterval = setInterval(pokeTokenEndpoint, 1500);
+  if (!isLoginHost()) {
+    window.__nrmTokenPokeInterval = setInterval(pokeTokenEndpoint, 1500);
+  }
 })();
 true;
 `;
@@ -195,6 +213,7 @@ true;
 export const NRM_SPOTIFY_CHARTS_HARVEST_BURST_JS = `
 (function() {
   ${NRM_CHARTS_BEARER_HOOK_BODY}
+  if (isLoginHost()) return;
   try {
     fetch('https://open.spotify.com/get_access_token?reason=transport&productType=web_player', {
       credentials: 'include',

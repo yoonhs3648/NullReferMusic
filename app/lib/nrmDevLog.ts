@@ -1,8 +1,23 @@
+import { Platform } from 'react-native';
+
+import { appendNrmFileLog } from '@/lib/nrmFileLog';
+
+function toFilePayload(payload: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
 export function logNrmDev(
   tag: string,
   payload: Record<string, unknown>,
 ): void {
   console.warn(`[NRM:dev][${tag}]`, payload);
+  if (Platform.OS === 'android') {
+    appendNrmFileLog(tag, 'info', toFilePayload(payload));
+  }
 }
 
 /**
@@ -20,7 +35,15 @@ export function logNrmRunError(
     if (err.stack) {
       console.error(err.stack);
     }
+    if (Platform.OS === 'android') {
+      const ctx = extra ? ` ${toFilePayload(extra)}` : '';
+      appendNrmFileLog(tag, 'error', `${err.message}${ctx}\n${err.stack ?? ''}`);
+    }
     return;
   }
   console.error(`[NRM:err][${tag}]`, err, extra ?? '');
+  if (Platform.OS === 'android') {
+    const ctx = extra ? ` ${toFilePayload(extra)}` : '';
+    appendNrmFileLog(tag, 'error', `${String(err)}${ctx}`);
+  }
 }

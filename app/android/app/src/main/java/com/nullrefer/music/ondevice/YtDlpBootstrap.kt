@@ -37,7 +37,7 @@ object YtDlpBootstrap {
         val bin = File(binDir, "yt-dlp")
 
         if (bin.exists() && bin.length() > MIN_BYTES) {
-            makeExecutable(bin)
+            NrmExecutableFile.prepareForExecution(bin)
             return bin.absolutePath
         }
 
@@ -66,23 +66,7 @@ object YtDlpBootstrap {
         if (!bin.exists() || bin.length() < MIN_BYTES) {
             throw Exception("yt-dlp 바이너리를 다운로드하지 못했습니다.")
         }
-        makeExecutable(bin)
+        NrmExecutableFile.prepareForExecution(bin)
         return bin.absolutePath
-    }
-
-    /**
-     * 바이너리 실행 권한을 설정합니다.
-     * setExecutable 외에 chmod 명령으로 한 번 더 설정해
-     * 일부 Android 기기의 SELinux/W^X 정책을 우회합니다.
-     */
-    private fun makeExecutable(file: File) {
-        file.setReadable(true, false)
-        file.setExecutable(true, false)
-        try {
-            ProcessBuilder(listOf("chmod", "755", file.absolutePath))
-                .redirectErrorStream(true)
-                .start()
-                .waitFor()
-        } catch (_: Exception) {}
     }
 }

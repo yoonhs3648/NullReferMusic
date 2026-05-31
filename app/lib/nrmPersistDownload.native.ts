@@ -257,13 +257,13 @@ async function androidSaveToNrmFolder(
 
 // ── 공개 API ──────────────────────────────────────────────────────────────────
 
-/** LRC 텍스트만 다운로드 경로에 저장 (오디오와 병렬 가능) */
+/** LRC 텍스트만 다운로드 경로에 저장 (오디오와 병렬 가능). 저장 URI 반환 */
 export async function persistLrcTextToDestination(
   safeName: string,
   lrcText: string,
-): Promise<void> {
+): Promise<string | null> {
   const trimmed = lrcText.trim();
-  if (!trimmed) return;
+  if (!trimmed) return null;
 
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
@@ -273,14 +273,14 @@ export async function persistLrcTextToDestination(
   try {
     if (Platform.OS === 'ios') {
       const docRoot = FileSystem.documentDirectory;
-      if (!docRoot) return;
+      if (!docRoot) return null;
       const folderUri = `${docRoot}${NRM_FOLDER}/`;
       await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
       const fileName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
       const lrcDest = `${folderUri}${fileName}`;
       await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
       await FileSystem.copyAsync({ from: tempLrcUri, to: lrcDest });
-      return;
+      return lrcDest;
     }
 
     if ((Platform.Version as number) < 29) {
@@ -291,7 +291,7 @@ export async function persistLrcTextToDestination(
         const lrcDest = `${dirUri}/${fileName}`;
         await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
         await FileSystem.copyAsync({ from: tempLrcUri, to: lrcDest });
-        return;
+        return lrcDest;
       } catch {
         /* SAF */
       }
@@ -302,14 +302,22 @@ export async function persistLrcTextToDestination(
       await showSafFolderGuide();
       dirUri = await requestNewSafDirUri(NRM_FOLDER);
     }
-    if (!dirUri) return;
+    if (!dirUri) return null;
 
     const lrcName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
     const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, 'text/plain');
     await writeToBinarySafUri(tempLrcUri, lrcDest);
+    return lrcDest;
   } finally {
     await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});
   }
+}
+
+/** ffmpeg 실패 등으로 LRC만 롤백할 때 */
+export async function deletePersistedLrc(lrcUri: string): Promise<void> {
+  const uri = lrcUri.trim();
+  if (!uri) return;
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
 }
 
 /** ffmpeg 적용된 임시 오디오를 다운로드 경로에 저장 (LRC는 별도 선저장 가능) */

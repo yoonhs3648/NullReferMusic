@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
 
 import { NRM_CHARTS_SPOTIFY_URL } from '@/lib/nrmSpotifyChartsPlatform';
+import { NRM_SPOTIFY_WEBVIEW_USER_AGENT } from '@/lib/nrmSpotifyChartsWebViewConfig';
 import {
   NRM_SPOTIFY_CHARTS_HARVEST_BEFORE_JS,
   NRM_SPOTIFY_CHARTS_HARVEST_JS,
@@ -24,7 +25,7 @@ type Props = {
  * - accounts.spotify.com 리디렉션 또는 타임아웃: onNeedsLogin()
  */
 export function NrmSpotifyChartsSilentCapture({ active, onCaptured, onNeedsLogin }: Props) {
-  const { webRef, onNavigation, onLoadEnd, onMessage, resetForNewCapture } =
+  const { webRef, onNavigation, onLoadEnd, onMessage, onHttpError, resetForNewCapture } =
     useSpotifyChartsTokenHarvest({
       onCaptured,
       onNeedsLogin,
@@ -44,6 +45,7 @@ export function NrmSpotifyChartsSilentCapture({ active, onCaptured, onNeedsLogin
         ref={webRef}
         style={styles.webview}
         source={{ uri: NRM_CHARTS_SPOTIFY_URL }}
+        userAgent={NRM_SPOTIFY_WEBVIEW_USER_AGENT}
         originWhitelist={['https://*']}
         javaScriptEnabled
         domStorageEnabled
@@ -53,6 +55,7 @@ export function NrmSpotifyChartsSilentCapture({ active, onCaptured, onNeedsLogin
         onNavigationStateChange={onNavigation}
         onLoadEnd={onLoadEnd}
         onMessage={onMessage}
+        onHttpError={onHttpError}
         injectedJavaScriptBeforeContentLoaded={NRM_SPOTIFY_CHARTS_HARVEST_BEFORE_JS}
         injectedJavaScript={NRM_SPOTIFY_CHARTS_HARVEST_JS}
       />
