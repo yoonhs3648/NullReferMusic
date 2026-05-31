@@ -46,7 +46,7 @@ object FfmpegBootstrap {
 
   private const val MAX_BYTES = 120_000_000L
 
-  private const val BOOTSTRAP_ID = "ffmpegbin-8.1-android"
+  private const val BOOTSTRAP_ID = "ffmpegbin-8.1-android-rx16d"
 
   private const val FFMPEG_RELEASE = "8.1"
 
@@ -82,15 +82,17 @@ object FfmpegBootstrap {
     synchronized(ensureLock) {
       NrmFileLogger.log("ffmpeg", "ensure 시작")
 
-      val baseDir = NrmExecutableFile.execBaseDir(context, "ffmpeg")
-      val bin = File(baseDir, "ffmpeg")
-      val marker = File(baseDir, ".bootstrap-id")
+      val execDir = NrmExecutableFile.execBaseDir(context, "ffmpeg")
+      val bin = File(execDir, "ffmpeg")
+      val marker = File(execDir, ".bootstrap-id")
+      val stagingDir = NrmExecutableFile.stagingBaseDir(context, "ffmpeg-staging")
 
       if (isValidCachedBin(bin, marker)) {
-        return finalizeBin(context, baseDir, bin)
+        return finalizeBin(context, execDir, bin)
       }
 
-      clearInstall(baseDir, bin, marker)
+      clearInstall(execDir, bin, marker)
+      stagingDir.listFiles()?.forEach { it.delete() }
 
       return try {
         val zipUrl = ffmpegZipUrlForAbi()
@@ -98,18 +100,26 @@ object FfmpegBootstrap {
           "ffmpeg",
           "다운로드 시작 url=$zipUrl abi=${Build.SUPPORTED_ABIS.joinToString()}",
         )
-        val zipFile = File(baseDir, "ffmpeg.zip")
+        val zipFile = File(stagingDir, "ffmpeg.zip")
+        val stagingBin = File(stagingDir, "ffmpeg")
         downloadFile(zipUrl, zipFile)
         NrmFileLogger.log("ffmpeg", "zip 다운로드 완료 size=${zipFile.length()}")
 
-        extractFfmpegFromZip(zipFile, bin)
+        extractFfmpegFromZip(zipFile, stagingBin)
         zipFile.delete()
 
-        if (!isValidBinFile(bin)) {
+        if (!isValidBinFile(stagingBin)) {
           throw Exception("ffmpeg 바이너리 추출 또는 검증 실패")
         }
+
+        installFromStaging(stagingBin, bin)
+        stagingBin.delete()
+
+        if (!isValidBinFile(bin)) {
+          throw Exception("ffmpeg 설치 검증 실패")
+        }
         marker.writeText(BOOTSTRAP_ID)
-        finalizeBin(context, baseDir, bin)
+        finalizeBin(context, execDir, bin)
       } catch (e: Exception) {
         NrmFileLogger.error("ffmpeg", "설정 실패: ${e.message}", e)
         android.util.Log.w("FfmpegBootstrap", "ffmpeg 설정 실패: ${e.message}")
@@ -132,12 +142,29 @@ object FfmpegBootstrap {
     if (!NrmExecutableFile.isExecReady(bin)) {
       NrmExecutableFile.mirrorToExecCache(context, bin, "ffmpeg-exec")?.let { mirrored ->
         NrmFileLogger.log("ffmpeg", "codeCache 실행본 사용: ${mirrored.absolutePath}")
+        NrmExecutableFile.ensureExecMode(mirrored)
         return mirrored.parentFile?.absolutePath ?: baseDir.absolutePath
       }
       NrmFileLogger.warn("ffmpeg", "실행 권한 확보 실패 path=${bin.absolutePath}")
     }
-    NrmFileLogger.log("ffmpeg", "준비 완료 path=${bin.absolutePath} size=${bin.length()}")
+    NrmExecutableFile.ensureExecMode(bin)
+    NrmFileLogger.log(
+      "ffmpeg",
+      "준비 완료 path=${bin.absolutePath} size=${bin.length()} exec=${bin.canExecute()} write=${bin.canWrite()}",
+    )
     return baseDir.absolutePath
+  }
+
+  private fun installFromStaging(stagingBin: File, destBin: File) {
+    destBin.parentFile?.mkdirs()
+    NrmExecutableFile.prepareWritable(destBin)
+    stagingBin.inputStream().use { input ->
+      FileOutputStream(destBin).use { output ->
+        input.copyTo(output)
+        output.fd.sync()
+      }
+    }
+    NrmExecutableFile.prepareForExecution(destBin)
   }
 
 

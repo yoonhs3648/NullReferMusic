@@ -1,13 +1,37 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 
 /**
  * Spotify는 Android WebView 기본 UA(`; wv)`)를 차단해 charts·로그인에서 403이 날 수 있습니다.
- * Chrome Mobile UA로 맞춥니다.
+ * 기기 WebView UA에서 `; wv)`만 제거한 값을 사용합니다 (가짜 Pixel UA 사용 금지).
  */
-export const NRM_SPOTIFY_WEBVIEW_USER_AGENT =
-  Platform.OS === 'android'
-    ? 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
-    : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+export const NRM_SPOTIFY_WEBVIEW_USER_AGENT_IOS =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+type NrmSpotifyCookieNative = {
+  getWebViewUserAgent?: () => Promise<string>;
+};
+
+function fallbackAndroidUserAgent(): string {
+  const api = Platform.Version;
+  return `Mozilla/5.0 (Linux; Android ${api}; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36`;
+}
+
+export async function resolveSpotifyWebViewUserAgent(): Promise<string> {
+  if (Platform.OS !== 'android') {
+    return NRM_SPOTIFY_WEBVIEW_USER_AGENT_IOS;
+  }
+  try {
+    const mod = NativeModules.NrmSpotifyCookie as NrmSpotifyCookieNative | undefined;
+    const ua = (await mod?.getWebViewUserAgent?.())?.trim();
+    if (ua) return ua;
+  } catch {
+    /* native unavailable */
+  }
+  return fallbackAndroidUserAgent();
+}
+
+/** @deprecated resolveSpotifyWebViewUserAgent() 사용 */
+export const NRM_SPOTIFY_WEBVIEW_USER_AGENT = fallbackAndroidUserAgent();
 
 export function isSpotifyLoginUrl(url: string): boolean {
   try {

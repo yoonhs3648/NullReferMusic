@@ -28,6 +28,7 @@ object WhisperBootstrap {
     if (!NrmExecutableFile.isExecReady(cli)) {
       NrmExecutableFile.mirrorToExecCache(context, cli, "whisper-exec")?.let { mirrored ->
         NrmFileLogger.log("whisper", "codeCache CLI 사용: ${mirrored.absolutePath}")
+        NrmExecutableFile.ensureExecMode(mirrored)
         val paths =
           WhisperPaths(
             cliPath = mirrored.absolutePath,
@@ -40,6 +41,7 @@ object WhisperBootstrap {
         return paths
       }
     }
+    NrmExecutableFile.ensureExecMode(cli)
     val paths =
       WhisperPaths(
           cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",

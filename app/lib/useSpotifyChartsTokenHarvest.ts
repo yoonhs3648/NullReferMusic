@@ -3,6 +3,7 @@ import type { WebViewMessageEvent, WebViewNavigation } from 'react-native-webvie
 import type WebView from 'react-native-webview';
 
 import {
+  NRM_SPOTIFY_CHARTS_LOGIN_URL,
   NRM_SPOTIFY_TOKEN_ENDPOINT,
 } from '@/lib/nrmSpotifyChartsPlatform';
 import { isSpotifyWebViewHttpAuthError } from '@/lib/nrmSpotifyChartsWebViewConfig';
@@ -192,6 +193,13 @@ export function useSpotifyChartsTokenHarvest(opts: TokenHarvestOpts) {
       if (!isSpotifyWebViewHttpAuthError(statusCode, url)) return;
       if (!httpRetried.current) {
         httpRetried.current = true;
+        if (!onNeedsLogin) {
+          webRef.current?.injectJavaScript(`
+            window.location.replace('${NRM_SPOTIFY_CHARTS_LOGIN_URL}');
+            true;
+          `);
+          return;
+        }
         webRef.current?.reload();
         return;
       }

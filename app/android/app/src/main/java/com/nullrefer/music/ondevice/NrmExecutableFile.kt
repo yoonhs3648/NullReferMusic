@@ -11,7 +11,8 @@ import java.io.FileOutputStream
  * 실행 직전 읽기·실행만 허용하고 쓰기 비트를 제거한다.
  */
 object NrmExecutableFile {
-  private const val MODE_RX = 0x155 // 0555 — r-xr-xr-x
+  /** octal 0555 — r-xr-xr-x (쓰기 비트 없음, API 29+ W^X 필수). 0x155(525)는 그룹 쓰기가 켜져 exec EACCES 원인 */
+  private const val MODE_RX = 0x16D
 
   /** 실행 가능한 바이너리를 codeCacheDir 등에 둘 때 사용 */
   fun execBaseDir(context: android.content.Context, subdir: String): File {
@@ -20,14 +21,115 @@ object NrmExecutableFile {
     return dir
   }
 
+  /** 다운로드·압축 해제 등 쓰기가 필요한 단계용 (실행 전 staging) */
+  fun stagingBaseDir(context: android.content.Context, subdir: String): File {
+    val dir = File(context.filesDir, subdir)
+    dir.mkdirs()
+    return dir
+  }
+
   fun prepareForExecution(file: File) {
     if (!file.isFile) return
     applyExecMode(file)
+    logExecState(file, "prepareForExecution")
     if (!isExecReady(file)) {
       NrmFileLogger.warn(
         "exec",
         "chmod 후에도 실행 불가 path=${file.absolutePath} canExec=${file.canExecute()} canWrite=${file.canWrite()}",
       )
+    }
+  }
+
+  /**
+   * bootstrap 직후 1회 — 직접 exec vs linker 경유를 결정하고 .use-linker 마커를 기록.
+   */
+  fun ensureExecMode(binary: File) {
+    prepareForExecution(binary)
+    val marker = linkerMarkerFile(binary)
+    if (marker.isFile && marker.readText().trim().isNotEmpty()) return
+    if (probeDirectExec(binary)) {
+      clearLinkerMarker(binary)
+      NrmFileLogger.log("exec", "직접 실행 OK path=${binary.absolutePath}")
+      return
+    }
+    val linker = defaultLinkerPath()
+    if (linker.isNotEmpty() && probeExec(linker, binary.absolutePath, "-version")) {
+      marker.writeText(linker)
+      NrmFileLogger.log("exec", "linker 경유 실행 path=${binary.absolutePath} linker=$linker")
+      return
+    }
+    NrmFileLogger.warn("exec", "exec 프로브 실패 path=${binary.absolutePath}")
+  }
+
+  /**
+   * ProcessBuilder/subprocess 인자 목록.
+   * ensureExecMode() 이후 .use-linker 마커가 있으면 linker 경유.
+   */
+  fun buildExecArgv(binary: File, args: List<String>): List<String> {
+    prepareForExecution(binary)
+    val marker = linkerMarkerFile(binary)
+    if (marker.isFile) {
+      val linker = marker.readText().trim()
+      if (linker.isNotEmpty()) {
+        return listOf(linker, binary.absolutePath) + args
+      }
+    }
+    return listOf(binary.absolutePath) + args
+  }
+
+  private fun copyLinkerMarker(source: File, dest: File) {
+    val srcMarker = linkerMarkerFile(source)
+    if (!srcMarker.isFile) return
+    try {
+      linkerMarkerFile(dest).writeText(srcMarker.readText())
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun linkerMarkerFile(binary: File): File = File(binary.parentFile, "${binary.name}.use-linker")
+
+  private fun clearLinkerMarker(binary: File) {
+    try {
+      linkerMarkerFile(binary).delete()
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun logExecState(file: File, tag: String) {
+    NrmFileLogger.log(
+      "exec",
+      "$tag path=${file.absolutePath} exists=${file.exists()} exec=${file.canExecute()} " +
+        "read=${file.canRead()} write=${file.canWrite()}",
+    )
+  }
+
+  private fun probeDirectExec(binary: File): Boolean =
+    probeExec(binary.absolutePath, "-version")
+
+  private fun probeExec(vararg cmd: String): Boolean {
+    return try {
+      val p =
+        ProcessBuilder(cmd.toList())
+          .redirectErrorStream(true)
+          .start()
+      val done = p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)
+      if (!done) {
+        p.destroyForcibly()
+        false
+      } else {
+        p.exitValue() == 0
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun defaultLinkerPath(): String {
+    val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull().orEmpty()
+    return if (abi.startsWith("arm64") || abi == "x86_64") {
+      "/system/bin/linker64"
+    } else {
+      "/system/bin/linker"
     }
   }
 
@@ -61,6 +163,7 @@ object NrmExecutableFile {
         }
       }
       applyExecMode(dest)
+      copyLinkerMarker(source, dest)
       if (isExecReady(dest)) {
         NrmFileLogger.log("exec", "codeCache 미러 OK path=${dest.absolutePath}")
         return dest

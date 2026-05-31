@@ -126,6 +126,20 @@ def _resolve_ffmpeg_bin(ffmpeg_location):
     return loc
 
 
+def _ffmpeg_exec_argv(ffmpeg_bin, args):
+    """Kotlin NrmExecutableFile.buildExecArgv 와 동일 — .use-linker 마커 시 linker 경유."""
+    marker = ffmpeg_bin + ".use-linker"
+    if os.path.isfile(marker):
+        try:
+            with open(marker, encoding="utf-8") as f:
+                linker = f.read().strip()
+            if linker:
+                return [linker, ffmpeg_bin, *args]
+        except OSError:
+            pass
+    return [ffmpeg_bin, *args]
+
+
 def _audio_codec_args(fmt, quality):
     q = str(quality if quality is not None else "0").strip() or "0"
     if fmt == "mp3":
@@ -164,15 +178,17 @@ def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location
 
     import subprocess
 
-    cmd = [
+    cmd = _ffmpeg_exec_argv(
         ffmpeg_bin,
-        "-y",
-        "-i",
-        inp,
-        "-vn",
-        *_audio_codec_args(fmt, audio_quality),
-        out_path,
-    ]
+        [
+            "-y",
+            "-i",
+            inp,
+            "-vn",
+            *_audio_codec_args(fmt, audio_quality),
+            out_path,
+        ],
+    )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-2000:]

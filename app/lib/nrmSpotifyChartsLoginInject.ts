@@ -10,7 +10,6 @@
 
 const NRM_CHARTS_BEARER_HOOK_BODY = `
   if (window.__nrmChartsBearerHook) return;
-  window.__nrmChartsBearerHook = true;
 
   function isLoginHost() {
     try {
@@ -20,6 +19,9 @@ const NRM_CHARTS_BEARER_HOOK_BODY = `
       return false;
     }
   }
+
+  if (isLoginHost()) return;
+  window.__nrmChartsBearerHook = true;
 
   function sendBearer(rawToken) {
     if (!rawToken) return;

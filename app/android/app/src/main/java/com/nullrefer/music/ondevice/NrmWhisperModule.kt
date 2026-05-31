@@ -217,9 +217,10 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   }
 
   private fun runProcess(cmd: List<String>, tag: String = "whisper") {
-    NrmExecutableFile.prepareForExecution(File(cmd.first()))
-    NrmFileLogger.log(tag, "프로세스 시작: ${cmd.joinToString(" ")}")
-    val pb = ProcessBuilder(cmd)
+    val bin = File(cmd.first())
+    val argv = NrmExecutableFile.buildExecArgv(bin, cmd.drop(1))
+    NrmFileLogger.log(tag, "프로세스 시작: ${argv.joinToString(" ")}")
+    val pb = ProcessBuilder(argv)
     pb.redirectErrorStream(true)
     val p = pb.start()
     val out = StringBuilder()
@@ -236,7 +237,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       throw Exception("whisper_timeout")
     }
     val code = p.exitValue()
-    NrmFileLogger.logProcess(tag, cmd, code, out.toString())
+    NrmFileLogger.logProcess(tag, argv, code, out.toString())
     if (code != 0) {
       throw Exception("${tag}_exit_$code")
     }

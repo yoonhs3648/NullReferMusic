@@ -357,9 +357,10 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   }
 
   private fun execFfmpeg(cmd: List<String>) {
-    NrmExecutableFile.prepareForExecution(File(cmd.first()))
+    val bin = File(cmd.first())
+    val argv = NrmExecutableFile.buildExecArgv(bin, cmd.drop(1))
     val proc =
-      ProcessBuilder(cmd)
+      ProcessBuilder(argv)
         .redirectErrorStream(true)
         .start()
     val finished = proc.waitFor(180, TimeUnit.SECONDS)

@@ -3,6 +3,7 @@ package com.nullrefer.music.ondevice
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -42,6 +43,16 @@ class NrmSpotifyCookieModule(reactContext: ReactApplicationContext) :
       if (found != null) return found
     }
     return null
+  }
+
+  @ReactMethod
+  fun getWebViewUserAgent(promise: Promise) {
+    try {
+      val raw = WebSettings.getDefaultUserAgent(reactApplicationContext)
+      promise.resolve(raw.replace("; wv)", ")"))
+    } catch (e: Exception) {
+      promise.reject("spotify_ua_error", e.message, e)
+    }
   }
 
   @ReactMethod
