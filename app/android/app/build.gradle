@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 23
-        versionName "1.4.8"
+        versionCode 31
+        versionName "1.5.6"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -152,6 +152,37 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    // whisper-cli OpenMP — NDK libomp.so → APK assets (기기에서 LD_LIBRARY_PATH)
+    def copyWhisperNativeLibs = tasks.register("copyWhisperNativeLibs") {
+        doLast {
+            def assetsDir = file("src/main/assets/whisper")
+            assetsDir.mkdirs()
+            def ndkDir = android.ndkDirectory
+            def hostOs = org.gradle.internal.os.OperatingSystem.current()
+            def prebuilt = hostOs.isWindows() ? "windows-x86_64" : (hostOs.isMacOsX() ? "darwin-x86_64" : "linux-x86_64")
+            def clangRoot = file("${ndkDir}/toolchains/llvm/prebuilt/${prebuilt}/lib/clang")
+            if (!clangRoot.exists()) {
+                logger.warn("copyWhisperNativeLibs: clang lib dir missing at ${clangRoot}")
+                return
+            }
+            def ompCandidates = []
+            clangRoot.eachDir { verDir ->
+                def ompArm = new File(verDir, "lib/linux/aarch64/libomp.so")
+                if (ompArm.isFile()) ompCandidates << ompArm
+            }
+            if (ompCandidates.isEmpty()) {
+                logger.warn("copyWhisperNativeLibs: libomp.so not found under NDK")
+                return
+            }
+            def omp = ompCandidates.max { it.lastModified() }
+            copy {
+                from omp
+                into assetsDir
+            }
+            logger.lifecycle("copyWhisperNativeLibs: ${omp} -> ${assetsDir}/libomp.so")
+        }
+    }
+    tasks.named("preBuild").configure { dependsOn(copyWhisperNativeLibs) }
     // APK 파일명을 "NullReferenceMusic-v{versionName}.apk" 형식으로 지정
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
@@ -186,8 +217,6 @@ android {
 }
 
 dependencies {
-    implementation("org.tukaani:xz:1.9")
-
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 

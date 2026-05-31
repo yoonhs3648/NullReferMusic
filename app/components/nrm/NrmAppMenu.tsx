@@ -35,7 +35,6 @@ import {
 } from '@/lib/nrmDownloadNavEvents';
 import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagSettingsPanel';
 import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWeeklySnapshotSettingsPanel';
-import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
@@ -121,7 +120,6 @@ type Panel =
   | 'deeplApiManage'
   | 'genreTagSettings'
   | 'weeklySnapshotSettings'
-  | 'loggingSettings'
   | 'downloadManage'
   | 'downloadPathSettings'
   | 'downloadExtensionSettings'
@@ -450,7 +448,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'appSettings':
       case 'searchSettings':
       case 'screenSettings':
-      case 'loggingSettings':
         setPanel('settings');
         break;
       case 'chartAppleMusic':
@@ -910,34 +907,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-                <Pressable
-                  onPress={() => setPanel('loggingSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    로깅
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-              </DrawerShell>
-            ) : null}
-
-            {panel === 'loggingSettings' ? (
-              <DrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <NrmFileLoggingSettingsPanel
-                  titleColor={titleColor}
-                  bodyColor={bodyColor}
-                  onBack={() => setPanel('settings')}
-                />
               </DrawerShell>
             ) : null}
 

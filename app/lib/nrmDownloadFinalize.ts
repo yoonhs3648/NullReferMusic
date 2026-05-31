@@ -4,6 +4,7 @@
  * - Whisper → LRC 사이드카 (백그라운드 병렬, 완료 알림 없음)
  * - ffmpeg 실패 시 전체 실패, Whisper LRC는 삭제
  */
+import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
 import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
@@ -14,12 +15,14 @@ import {
   normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
-import { applyFfmpegConversionAndMetadataStage } from '@/lib/nrmDownloadAudioStages';
+import { applyFfmpegConversionAndMetadataStage, applyFfmpegMetadataStage, applyFfmpegTranscodeStage } from '@/lib/nrmDownloadAudioStages';
 import { deleteLocalAudioTemps } from '@/lib/nrmDownloadCleanup';
 import type { AudioExtractionResult } from '@/lib/nrmDownloadPipeline';
 import {
   applyDownloadExtension,
+  isNrmAudioExtension,
   loadDownloadEncodeSettings,
+  type NrmAudioExtension,
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import {
@@ -44,6 +47,16 @@ function whisperWarningFromResult(
   if (result.lyricsTranslationFailed) return 'translation_failed';
   if (result.lyricsRequested && !result.lyricsEmbedded) return 'not_embedded';
   return undefined;
+}
+
+/** 웹 백엔드와 동일 — ffmpeg in-place 변환과 Whisper 전사가 같은 파일을 두지 않음 */
+async function copyAudioForWhisperParallel(sourceUri: string): Promise<string> {
+  const src = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
+  const extMatch = src.match(/\.([a-z0-9]+)(?:\?|$)/i);
+  const ext = extMatch ? `.${extMatch[1]}` : '.audio';
+  const dest = `${FileSystem.cacheDirectory}nrm-whisper-src-${Date.now()}${ext}`;
+  await FileSystem.copyAsync({ from: src, to: dest });
+  return dest;
 }
 
 async function finalizeServerJobParallel(
@@ -115,6 +128,11 @@ async function finalizeServerJobParallel(
   return { ...out, lyricsWarning };
 }
 
+function extensionFromUri(uri: string): string | null {
+  const path = uri.replace(/^file:\/\//, '');
+  return path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? null;
+}
+
 async function finalizeNativeParallel(
   extractionUri: string,
   fileName: string,
@@ -122,20 +140,41 @@ async function finalizeNativeParallel(
   options?: FinalizeParallelOptions,
 ): Promise<FinalizeParallelResult> {
   const encode = await loadDownloadEncodeSettings();
-  const safeName = applyDownloadExtension(fileName, encode.extension);
-  const extension = encode.extension;
+
+  // Android: mp3→m4a remux 등 실제 확장자를 Whisper·저장 전에 확정
+  const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
+  const extFromFile = extensionFromUri(transcodedUri);
+  const effectiveExtension: NrmAudioExtension =
+    extFromFile && isNrmAudioExtension(`.${extFromFile}`)
+      ? (`.${extFromFile}` as NrmAudioExtension)
+      : encode.extension;
+  const safeName = applyDownloadExtension(fileName, effectiveExtension);
+  const extension = effectiveExtension;
   const { whisperMode } = embedMetadata
     ? splitMetadataForDownloadStages(embedMetadata)
     : { whisperMode: null };
 
   const temps = new Set<string>([extractionUri]);
+  if (transcodedUri !== extractionUri) {
+    temps.add(transcodedUri);
+  }
   const whisperRef: { result: WhisperLrcStageResult | null; lrcUri: string | null } = {
     result: null,
     lrcUri: null,
   };
 
+  let whisperSourceUri = transcodedUri;
+  if (whisperMode) {
+    try {
+      whisperSourceUri = await copyAudioForWhisperParallel(transcodedUri);
+      temps.add(whisperSourceUri);
+    } catch {
+      whisperSourceUri = transcodedUri;
+    }
+  }
+
   const whisperTask = whisperMode
-    ? transcribeWhisperLrc(extractionUri, whisperMode, extension)
+    ? transcribeWhisperLrc(whisperSourceUri, whisperMode, extension)
         .then(async (result) => {
           let lrcWritten = false;
           if (result.lrcFull?.trim()) {
@@ -155,7 +194,9 @@ async function finalizeNativeParallel(
           whisperRef.result = { ...result, lyricsEmbedded: lrcWritten };
           return whisperRef.result;
         })
-        .catch(() => {
+        .catch(async (e) => {
+          const { logNrmRunError } = await import('@/lib/nrmDevLog');
+          logNrmRunError('download.whisper', e, { extension });
           whisperRef.result = {
             lyricsRequested: true,
             lyricsEmbedded: false,
@@ -164,9 +205,9 @@ async function finalizeNativeParallel(
         })
     : Promise.resolve(null);
 
-  const audioTask = applyFfmpegConversionAndMetadataStage(extractionUri, embedMetadata).then(
+  const audioTask = applyFfmpegMetadataStage(transcodedUri, embedMetadata).then(
     async (processedUri) => {
-      if (processedUri !== extractionUri) {
+      if (processedUri !== transcodedUri) {
         temps.add(processedUri);
       }
       const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');

@@ -104,12 +104,13 @@ function resolveGenreSelection(
 type InlineSelectProps = {
   label: string;
   value: string;
-  options: { value: string; label: string; disabled?: boolean }[];
+  options: { value: string; label: string; disabled?: boolean; hint?: string }[];
   onChange: (value: string) => void;
   isDark: boolean;
   titleColor: string;
   bodyColor: string;
   disabled?: boolean;
+  hideSheetTitle?: boolean;
   scrollClassName?: string;
   scrollStyle?: object;
 };
@@ -123,6 +124,7 @@ function MetadataInlineSelect({
   titleColor,
   bodyColor,
   disabled = false,
+  hideSheetTitle = false,
   scrollClassName,
   scrollStyle,
 }: InlineSelectProps) {
@@ -171,7 +173,9 @@ function MetadataInlineSelect({
                 borderColor: border,
               },
             ]}>
-            <Text style={[styles.selectSheetTitle, { color: titleColor }]}>{label}</Text>
+            {hideSheetTitle ? null : (
+              <Text style={[styles.selectSheetTitle, { color: titleColor }]}>{label}</Text>
+            )}
             <ScrollView
               style={[styles.selectSheetScroll, scrollStyle]}
               contentContainerStyle={styles.selectSheetScrollContent}
@@ -199,14 +203,21 @@ function MetadataInlineSelect({
                       pressed && !disabledOpt && styles.pressed,
                       disabledOpt && { opacity: 0.5 },
                     ]}>
-                    <Text
-                      style={[
-                        styles.selectOptionText,
-                        { color: active ? nrmTokens.color.primary : titleColor },
-                        active && { fontWeight: '600' },
-                      ]}>
-                      {o.label}
-                    </Text>
+                    <View style={styles.selectOptionTextCol}>
+                      <Text
+                        style={[
+                          styles.selectOptionText,
+                          { color: active ? nrmTokens.color.primary : titleColor },
+                          active && { fontWeight: '600' },
+                        ]}>
+                        {o.label}
+                      </Text>
+                      {o.hint ? (
+                        <Text style={[styles.selectOptionHint, { color: bodyColor }]}>
+                          ({o.hint})
+                        </Text>
+                      ) : null}
+                    </View>
                     {active ? (
                       <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
                     ) : null}
@@ -536,11 +547,12 @@ export function NrmMetadataEditModal({
           return { ...opt, disabled: false as const };
         }
         const disabled = !translationOptionEnabled;
-        const hint = disabled && translationOptionHint ? translationOptionHint : undefined;
+        const hint =
+          disabled && translationOptionHint ? translationOptionHint : undefined;
         return {
           ...opt,
           disabled,
-          label: hint ? `${opt.label} (${hint})` : opt.label,
+          hint,
         };
       }),
     [translationOptionEnabled, translationOptionHint],
@@ -761,6 +773,7 @@ export function NrmMetadataEditModal({
                     titleColor={titleColor}
                     bodyColor={bodyColor}
                     disabled={busy}
+                    hideSheetTitle
                     scrollClassName={scrollClassName}
                     scrollStyle={scrollInlineStyle}
                   />
@@ -1105,7 +1118,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   selectOptionRowActive: { backgroundColor: 'rgba(0, 102, 204, 0.1)' },
+  selectOptionTextCol: { flex: 1, paddingRight: nrmTokens.space.sm },
   selectOptionText: { fontSize: nrmTokens.font.body },
+  selectOptionHint: { fontSize: nrmTokens.font.caption, marginTop: 2, lineHeight: 18 },
   moreToggle: {
     flexDirection: 'row',
     alignItems: 'center',

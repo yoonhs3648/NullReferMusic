@@ -126,24 +126,11 @@ def _resolve_ffmpeg_bin(ffmpeg_location):
     return loc
 
 
-def _ffmpeg_exec_argv(ffmpeg_bin, args):
-    """Kotlin NrmExecutableFile.buildExecArgv 와 동일 — .use-linker 마커 시 linker 경유."""
-    marker = ffmpeg_bin + ".use-linker"
-    if os.path.isfile(marker):
-        try:
-            with open(marker, encoding="utf-8") as f:
-                linker = f.read().strip()
-            if linker:
-                return [linker, ffmpeg_bin, *args]
-        except OSError:
-            pass
-    return [ffmpeg_bin, *args]
-
-
 def _audio_codec_args(fmt, quality):
     q = str(quality if quality is not None else "0").strip() or "0"
     if fmt == "mp3":
-        return ["-codec:a", "libmp3lame", "-q:a", q]
+        # Android LGPL ffmpeg: libmp3lame(GPL) 없음 → libshine 또는 m4a remux
+        return ["-codec:a", "libshine", "-b:a", "128k"]
     if fmt in ("m4a", "aac"):
         return ["-codec:a", "aac", "-b:a", "192k"]
     if fmt == "opus":
@@ -157,7 +144,39 @@ def _audio_codec_args(fmt, quality):
     return ["-codec:a", "copy"]
 
 
-def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location=""):
+def _ffmpeg_env(ffmpeg_location):
+    bin_path = _resolve_ffmpeg_bin(ffmpeg_location)
+    if not bin_path:
+        return None
+    lib_dir = os.path.dirname(bin_path)
+    env = os.environ.copy()
+    if lib_dir:
+        prev = env.get("LD_LIBRARY_PATH", "").strip()
+        env["LD_LIBRARY_PATH"] = lib_dir if not prev else f"{lib_dir}:{prev}"
+    return env
+
+
+def _read_linker_marker(ffmpeg_bin):
+    """Kotlin NrmExecutableFile.ensureExecMode() 가 기록한 .use-linker 마커."""
+    marker = ffmpeg_bin + ".use-linker"
+    if not os.path.isfile(marker):
+        return ""
+    try:
+        with open(marker, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _build_ffmpeg_cmd(ffmpeg_bin, *args):
+    """API 29+ W^X: linker64 경유가 필요하면 [linker, bin, ...args] 로 구성."""
+    linker = _read_linker_marker(ffmpeg_bin)
+    if linker:
+        return [linker, ffmpeg_bin, *args]
+    return [ffmpeg_bin, *args]
+
+
+def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location="", ffmpeg_lib_dir=""):
     """다운로드 결과를 사용자가 고른 확장자로 ffmpeg 변환."""
     _nrm_log(
         "yt-dlp-py",
@@ -178,18 +197,18 @@ def transcode_audio(input_path, audio_format, audio_quality="0", ffmpeg_location
 
     import subprocess
 
-    cmd = _ffmpeg_exec_argv(
+    cmd = _build_ffmpeg_cmd(
         ffmpeg_bin,
-        [
-            "-y",
-            "-i",
-            inp,
-            "-vn",
-            *_audio_codec_args(fmt, audio_quality),
-            out_path,
-        ],
+        "-y",
+        "-i",
+        inp,
+        "-vn",
+        *_audio_codec_args(fmt, audio_quality),
+        out_path,
     )
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    env = _ffmpeg_env(ffmpeg_bin) or os.environ.copy()
+    _nrm_log("yt-dlp-py", f"transcode_audio cmd0={cmd[0]} argc={len(cmd)}")
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "")[-2000:]
         _nrm_log("yt-dlp-py", f"transcode_audio FAIL code={proc.returncode} tail={tail}")
@@ -244,6 +263,7 @@ def download_audio(
     audio_format="mp3",
     audio_quality="0",
     ffmpeg_location="",
+    ffmpeg_lib_dir="",
 ):
     """
     1) yt-dlp로 bestaudio만 받기 (예전 안정 경로)

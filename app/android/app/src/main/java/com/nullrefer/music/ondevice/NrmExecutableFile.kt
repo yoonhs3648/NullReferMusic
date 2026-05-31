@@ -5,6 +5,7 @@ import android.system.Os
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * API 29+ W^X: 쓰기 가능한 파일은 exec 시 EACCES(13)가 난다.
@@ -40,23 +41,50 @@ object NrmExecutableFile {
     }
   }
 
+  /** whisper-cli 등 -version 미지원 바이너리용 probe 후보 */
+  val PROBE_HELP: List<List<String>> =
+    listOf(listOf("--help"), listOf("-h"), listOf("-version"))
+
   /**
    * bootstrap 직후 1회 — 직접 exec vs linker 경유를 결정하고 .use-linker 마커를 기록.
+   * @param probeVariants 각 후보마다 [binary, *args] 또는 [linker, binary, *args] 로 probe
    */
-  fun ensureExecMode(binary: File) {
+  fun ensureExecMode(
+    binary: File,
+    probeVariants: List<List<String>> = listOf(listOf("-version")),
+  ) {
     prepareForExecution(binary)
     val marker = linkerMarkerFile(binary)
     if (marker.isFile && marker.readText().trim().isNotEmpty()) return
-    if (probeDirectExec(binary)) {
-      clearLinkerMarker(binary)
-      NrmFileLogger.log("exec", "직접 실행 OK path=${binary.absolutePath}")
-      return
+
+    for (probeArgs in probeVariants) {
+      if (probeDirectExec(binary, probeArgs)) {
+        clearLinkerMarker(binary)
+        NrmFileLogger.log("exec", "직접 실행 OK path=${binary.absolutePath} probe=$probeArgs")
+        return
+      }
     }
+
     val linker = defaultLinkerPath()
-    if (linker.isNotEmpty() && probeExec(linker, binary.absolutePath, "-version")) {
-      marker.writeText(linker)
-      NrmFileLogger.log("exec", "linker 경유 실행 path=${binary.absolutePath} linker=$linker")
-      return
+    if (linker.isNotEmpty()) {
+      for (probeArgs in probeVariants) {
+        if (probeExec(linker, binary.absolutePath, *probeArgs.toTypedArray())) {
+          marker.writeText(linker)
+          NrmFileLogger.log(
+            "exec",
+            "linker 경유 실행 path=${binary.absolutePath} linker=$linker probe=$probeArgs",
+          )
+          return
+        }
+      }
+      if (isWxorDirectExecBlocked(binary)) {
+        marker.writeText(linker)
+        NrmFileLogger.log(
+          "exec",
+          "linker 경유 (W^X fallback) path=${binary.absolutePath} linker=$linker",
+        )
+        return
+      }
     }
     NrmFileLogger.warn("exec", "exec 프로브 실패 path=${binary.absolutePath}")
   }
@@ -103,8 +131,25 @@ object NrmExecutableFile {
     )
   }
 
-  private fun probeDirectExec(binary: File): Boolean =
-    probeExec(binary.absolutePath, "-version")
+  private fun probeDirectExec(binary: File, probeArgs: List<String>): Boolean =
+    probeExec(binary.absolutePath, *probeArgs.toTypedArray())
+
+  /** API 29+ W^X: chmod 후에도 직접 exec 시 error=13만 나는 경우 */
+  private fun isWxorDirectExecBlocked(binary: File): Boolean {
+    if (!isExecReady(binary)) return false
+    if (defaultLinkerPath().isEmpty()) return false
+    return try {
+      ProcessBuilder(listOf(binary.absolutePath, "-version"))
+        .redirectErrorStream(true)
+        .start()
+      false
+    } catch (e: IOException) {
+      val msg = e.message.orEmpty()
+      msg.contains("error=13", ignoreCase = true) ||
+        msg.contains("Permission denied", ignoreCase = true) ||
+        msg.contains("EACCES", ignoreCase = true)
+    }
+  }
 
   private fun probeExec(vararg cmd: String): Boolean {
     return try {

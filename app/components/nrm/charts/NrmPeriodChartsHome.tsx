@@ -209,46 +209,35 @@ export function NrmPeriodChartsHome({
     });
   }, [loading, loadingMore, hasMore, errorCode, loadPage, maxRank]);
 
+  const renderListEmpty = useCallback(() => {
+    if (loading || items.length > 0) return null;
+    if (errorCode) {
+      return (
+        <NrmChartErrorHero
+          isDark={isDark}
+          platform={platform}
+          errorCode={errorCode}
+          paddingHorizontal={paddingHorizontal}
+        />
+      );
+    }
+    return (
+      <Text style={[styles.empty, { color: bodyColor, paddingHorizontal }]}>
+        이 기간에 표시할 차트가 없습니다.
+      </Text>
+    );
+  }, [loading, items.length, errorCode, isDark, platform, paddingHorizontal, bodyColor]);
+
+  const listFooter =
+    loadingMore && !errorCode ? (
+      <ActivityIndicator
+        style={styles.footerLoader}
+        color={nrmTokens.color.primary}
+      />
+    ) : null;
+
   const listHeader = (
-    <View style={{ paddingHorizontal }}>
-      <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
-      <NrmChartPageHeading iconKey={iconKey} title={`${pageTitle} 기간별 차트`} titleColor={titleColor} />
-
-      {platform === 'spotify' ? (
-        <NrmSpotifyPeriodChartFilters
-          isDark={isDark}
-          titleColor={titleColor}
-          bodyColor={bodyColor}
-          kind={spotifyKind}
-          year={year}
-          month={month}
-          day={day}
-          weekOfMonth={weekOfMonth}
-          snapshotDow={snapshotDow}
-          region={region}
-          onKindChange={setSpotifyKind}
-          onYearChange={setYear}
-          onMonthChange={setMonth}
-          onDayChange={setDay}
-          onWeekOfMonthChange={setWeekOfMonth}
-          onRegionChange={setRegion}
-        />
-      ) : (
-        <NrmPeriodChartFilters
-          isDark={isDark}
-          titleColor={titleColor}
-          bodyColor={bodyColor}
-          granularity={granularity}
-          year={year}
-          month={month}
-          region={region}
-          onGranularityChange={setGranularity}
-          onYearChange={setYear}
-          onMonthChange={setMonth}
-          onRegionChange={setRegion}
-        />
-      )}
-
+    <View style={{ paddingHorizontal }} collapsable={false}>
       {platform !== 'spotify' && playlistTitle && !errorCode ? (
         <Text style={[styles.hint, { color: bodyColor }]}>
           {playlistTitle} · {periodChartGranularityLabel(granularity)}{' '}
@@ -262,69 +251,95 @@ export function NrmPeriodChartsHome({
     </View>
   );
 
-  const listFooter =
-    loadingMore && !errorCode ? (
-      <ActivityIndicator
-        style={styles.footerLoader}
-        color={nrmTokens.color.primary}
-      />
-    ) : null;
-
-  const listEmpty =
-    loading || items.length > 0 ? null : errorCode ? (
-      <NrmChartErrorHero
-        isDark={isDark}
-        platform={platform}
-        errorCode={errorCode}
-        paddingHorizontal={paddingHorizontal}
-      />
-    ) : (
-      <Text style={[styles.empty, { color: bodyColor, paddingHorizontal }]}>
-        이 기간에 표시할 차트가 없습니다.
-      </Text>
-    );
-
   return (
-    <FlatList
-      style={styles.list}
-      nestedScrollEnabled
-      data={loading || errorCode ? [] : items}
-      keyExtractor={(item, index) =>
-        `${queryKey}-${item.trackId}-${item.rank}-${index}`
-      }
-      renderItem={({ item }) => (
-        <View style={{ paddingHorizontal }}>
-          <NrmChartTrackRow
-            item={item}
+    <View style={styles.screen} collapsable={false}>
+      <View style={[styles.filtersHost, { paddingHorizontal }]} collapsable={false}>
+        <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
+        <NrmChartPageHeading iconKey={iconKey} title={`${pageTitle} 기간별 차트`} titleColor={titleColor} />
+
+        {platform === 'spotify' ? (
+          <NrmSpotifyPeriodChartFilters
+            isDark={isDark}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            countLabel={
-              platform === 'spotify'
-                ? spotifyKind === 'monthly'
-                  ? '평균 순위'
-                  : '스트림'
-                : undefined
-            }
-            onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+            kind={spotifyKind}
+            year={year}
+            month={month}
+            day={day}
+            weekOfMonth={weekOfMonth}
+            snapshotDow={snapshotDow}
+            region={region}
+            onKindChange={setSpotifyKind}
+            onYearChange={setYear}
+            onMonthChange={setMonth}
+            onDayChange={setDay}
+            onWeekOfMonthChange={setWeekOfMonth}
+            onRegionChange={setRegion}
           />
-        </View>
-      )}
-      ListHeaderComponent={listHeader}
-      ListEmptyComponent={() => listEmpty}
-      ListFooterComponent={listFooter}
-      onEndReached={() => loadMore()}
-      onEndReachedThreshold={0.35}
-      contentContainerStyle={[
-        styles.listContent,
-        (loading || (errorCode && items.length === 0)) && styles.listContentEmpty,
-      ]}
-      keyboardShouldPersistTaps="handled"
-    />
+        ) : (
+          <NrmPeriodChartFilters
+            isDark={isDark}
+            titleColor={titleColor}
+            bodyColor={bodyColor}
+            granularity={granularity}
+            year={year}
+            month={month}
+            region={region}
+            onGranularityChange={setGranularity}
+            onYearChange={setYear}
+            onMonthChange={setMonth}
+            onRegionChange={setRegion}
+          />
+        )}
+      </View>
+
+      <FlatList
+        style={styles.list}
+        nestedScrollEnabled
+        data={loading || errorCode ? [] : items}
+        keyExtractor={(item, index) =>
+          `${queryKey}-${item.trackId}-${item.rank}-${index}`
+        }
+        renderItem={({ item }) => (
+          <View style={{ paddingHorizontal }}>
+            <NrmChartTrackRow
+              item={item}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              countLabel={
+                platform === 'spotify'
+                  ? spotifyKind === 'monthly'
+                    ? '평균 순위'
+                    : '스트림'
+                  : undefined
+              }
+              onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+            />
+          </View>
+        )}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={renderListEmpty}
+        ListFooterComponent={listFooter}
+        onEndReached={() => loadMore()}
+        onEndReachedThreshold={0.35}
+        contentContainerStyle={[
+          styles.listContent,
+          (loading || (errorCode && items.length === 0)) && styles.listContentEmpty,
+        ]}
+        keyboardShouldPersistTaps="always"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { flex: 1 },
+  screen: { flex: 1 },
+  filtersHost: {
+    zIndex: 10,
+    elevation: 10,
+    position: 'relative',
+  },
+  list: { flex: 1, zIndex: 0 },
   listContent: { paddingBottom: nrmTokens.space.xxl },
   listContentEmpty: { flexGrow: 1 },
   hint: {

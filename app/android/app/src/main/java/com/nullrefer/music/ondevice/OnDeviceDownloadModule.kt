@@ -21,6 +21,26 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = "NrmOnDeviceDownload"
 
+  /** 앱 시작·다운로드 전 ffmpeg+libffmpeg.so 예열 (백그라운드) */
+  @ReactMethod
+  fun prefetchFfmpeg(promise: Promise) {
+    Thread {
+      try {
+        val ctx = reactApplicationContext.applicationContext
+        val paths = FfmpegBootstrap.ensure(ctx)
+        val map = Arguments.createMap()
+        map.putBoolean("ready", paths?.isReady() == true)
+        if (paths != null) {
+          map.putString("path", paths.binaryPath())
+        }
+        promise.resolve(map)
+      } catch (e: Exception) {
+        NrmFileLogger.error("ffmpeg", "prefetchFfmpeg 실패", e)
+        promise.reject("E_FFMPEG_PREFETCH", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
   private fun ensurePython() {
     val ctx = reactApplicationContext.applicationContext
     NrmFileLogger.log("yt-dlp", "ensurePython 시작 started=${Python.isStarted()}")
@@ -138,7 +158,11 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         ensurePython()
         cookieFilePath = getCookieFilePathSync()
         val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
-        NrmFileLogger.log("yt-dlp", "downloadAudio ffmpegPath=${ffmpegPath.ifBlank { "(없음)" }}")
+        val ffmpegLibDir = FfmpegBootstrap.libDirPath(ctx)
+        NrmFileLogger.log(
+          "yt-dlp",
+          "downloadAudio ffmpegPath=${ffmpegPath.ifBlank { "(없음)" }} libDir=${ffmpegLibDir.ifBlank { "(없음)" }}",
+        )
         val outDir = File(ctx.cacheDir, "nrm-ytdlp-tmp").apply { mkdirs() }
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
         val fmt = audioFormat.trim().ifBlank { "mp3" }
@@ -152,6 +176,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
             fmt,
             quality.toString(),
             ffmpegPath,
+            ffmpegLibDir,
           ).toString()
         val outFile = File(outPath)
         if (!outFile.exists()) {
@@ -197,28 +222,21 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
           return@Thread
         }
         val ctx = reactApplicationContext.applicationContext
-        ensurePython()
-        val ffmpegPath = FfmpegBootstrap.binaryPath(ctx)
-        NrmFileLogger.log("yt-dlp", "transcodeAudio ffmpegPath=${ffmpegPath.ifBlank { "(없음)" }}")
-        if (ffmpegPath.isBlank()) {
-          promise.reject("E_FFMPEG", "ffmpeg를 사용할 수 없습니다.")
-          return@Thread
-        }
-        NrmExecutableFile.prepareForExecution(File(ffmpegPath))
         val fmt = audioFormat.trim().ifBlank { "mp3" }
         val quality = audioQuality.coerceIn(0, 9)
-        val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
-        val outPath =
-          py.callAttr(
-            "transcode_audio",
-            src.absolutePath,
+        val result =
+          FfmpegTranscode.transcode(
+            ctx,
+            src,
             fmt,
-            quality.toString(),
-            ffmpegPath,
-          ).toString()
-        val outFile = File(outPath)
-        if (!outFile.isFile) {
-          throw Exception("변환 결과 파일을 찾지 못했습니다.")
+            quality,
+          )
+        val outFile = result.file
+        if (result.fallbackReason != null) {
+          NrmFileLogger.log(
+            "yt-dlp",
+            "transcodeAudio fallback reason=${result.fallbackReason} effective=${result.effectiveFormat}",
+          )
         }
         NrmFileLogger.log(
           "yt-dlp",
@@ -226,6 +244,10 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         )
         val map = Arguments.createMap()
         map.putString("path", outFile.absolutePath)
+        map.putString("format", result.effectiveFormat)
+        if (result.fallbackReason != null) {
+          map.putString("fallbackReason", result.fallbackReason)
+        }
         promise.resolve(map)
       } catch (e: Exception) {
         NrmFileLogger.error("yt-dlp", "transcodeAudio 실패 input=$inputPath", e)

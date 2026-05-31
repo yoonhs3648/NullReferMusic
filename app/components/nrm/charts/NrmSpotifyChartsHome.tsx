@@ -3,12 +3,12 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { NrmChartFilterScrollRow } from '@/components/nrm/charts/NrmChartFilterScrollRow';
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
@@ -94,6 +94,8 @@ export function NrmSpotifyChartsHome({
   const tabCacheRef = useRef<Map<SpotifyChartTabId, TabSnapshot>>(new Map());
   const loadGenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
 
   const applySnapshot = useCallback((snap: TabSnapshot) => {
     setItems(snap.items);
@@ -104,13 +106,13 @@ export function NrmSpotifyChartsHome({
 
   const selectTab = useCallback(
     (tab: SpotifyChartTabId) => {
-      if (tab === activeTab) return;
+      if (tab === activeTabRef.current) return;
       abortRef.current?.abort();
       setActiveTab(tab);
       const cached = tabCacheRef.current.get(tab);
       applySnapshot(cached ?? { ...EMPTY_SNAPSHOT, loading: !cached });
     },
-    [activeTab, applySnapshot],
+    [applySnapshot],
   );
 
   const loadChart = useCallback(
@@ -204,11 +206,7 @@ export function NrmSpotifyChartsHome({
         title={pageTitle}
         titleColor={titleColor}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabRow}
-        style={styles.tabScroll}>
+      <NrmChartFilterScrollRow>
         {NRM_SPOTIFY_CHART_TABS.map((tab) => {
           const selected = tab.id === activeTab;
           const cached = tabCacheRef.current.get(tab.id);
@@ -250,7 +248,7 @@ export function NrmSpotifyChartsHome({
             </Pressable>
           );
         })}
-      </ScrollView>
+      </NrmChartFilterScrollRow>
       {playlistTitle && !errorCode ? (
         <Text style={[styles.playlistHint, { color: bodyColor }]}>
           {playlistTitle} · {items.length}곡
@@ -278,6 +276,7 @@ export function NrmSpotifyChartsHome({
   return (
     <FlatList
       style={styles.list}
+      nestedScrollEnabled
       data={tabLoading && !items.length ? [] : items}
       keyExtractor={(item) =>
         `${chartSource}-${activeTab}-${item.trackId}-${item.rank}`
@@ -321,14 +320,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: nrmTokens.space.md,
     marginTop: nrmTokens.space.sm,
-  },
-  tabScroll: {
-    marginBottom: nrmTokens.space.sm,
-    flexGrow: 0,
-  },
-  tabRow: {
-    gap: nrmTokens.space.xs,
-    paddingBottom: nrmTokens.space.xs,
   },
   tabChip: {
     flexDirection: 'row',

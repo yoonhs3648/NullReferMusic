@@ -47,14 +47,16 @@ export async function transcribeWhisperLrc(
   mode: NrmWhisperLyricsMode,
   extension: string,
 ): Promise<WhisperLrcStageResult> {
-  if (extension !== '.mp3') {
+  if (Platform.OS === 'web') {
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
 
   let lrc = '';
   try {
     lrc = normalizeWhisperLrc(await transcribeAudioToLrc(fileUri));
-  } catch {
+  } catch (e) {
+    const { logNrmRunError } = await import('@/lib/nrmDevLog');
+    logNrmRunError('whisper.lrc', e, { extension, mode });
     lrc = '';
   }
 

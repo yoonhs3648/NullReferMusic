@@ -14,6 +14,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactNativeHost
 
 import com.nullrefer.music.ondevice.NrmFileLogger
+import com.nullrefer.music.ondevice.FfmpegBootstrap
 import com.nullrefer.music.ondevice.OnDeviceDownloadPackage
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
@@ -43,6 +44,7 @@ class MainApplication : Application(), ReactApplication {
     super.onCreate()
     NrmFileLogger.init(this)
     NrmFileLogger.log("MainApplication", "onCreate — React Native 로드 시작")
+    FfmpegBootstrap.prefetch(this)
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {

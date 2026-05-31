@@ -52,8 +52,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           return@Thread
         }
 
-        val ffmpegBin = File(FfmpegBootstrap.binaryPath(reactApplicationContext))
-        if (!ffmpegBin.isFile) {
+        if (FfmpegExec.resolve(reactApplicationContext) == null) {
           resolvePath(promise, inFile.absolutePath)
           return@Thread
         }
@@ -84,7 +83,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           if (strategy.withCover && coverFile == null) continue
           try {
             runFfmpegMetadata(
-              ffmpegBin = ffmpegBin,
               inFile = inFile,
               outFile = outFile,
               coverFile = if (strategy.withCover) coverFile else null,
@@ -248,7 +246,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
    *     <output>
    */
   private fun runFfmpegMetadata(
-    ffmpegBin: File,
     inFile: File,
     outFile: File,
     coverFile: File?,
@@ -257,7 +254,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     tags: MetadataTagBundle,
   ) {
     val mp4Family = ext in setOf("m4a", "mp4", "aac", "mov")
-    val cmd = mutableListOf(ffmpegBin.absolutePath, "-y", "-i", inFile.absolutePath)
+    val cmd = mutableListOf("-y", "-i", inFile.absolutePath)
 
     if (coverFile != null) {
       cmd.add("-i"); cmd.add(coverFile.absolutePath)
@@ -276,8 +273,17 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     if (audioCopy) {
       cmd.add("-c:a"); cmd.add("copy")
     } else if (ext == "mp3") {
-      cmd.add("-c:a"); cmd.add("libmp3lame")
-      cmd.add("-b:a"); cmd.add("192k")
+      if (FfmpegEncoderSupport.canReencodeMp3(reactApplicationContext)) {
+        if (FfmpegEncoderSupport.encoders(reactApplicationContext).contains("libshine")) {
+          cmd.add("-c:a"); cmd.add("libshine")
+          cmd.add("-b:a"); cmd.add("128k")
+        } else {
+          cmd.add("-c:a"); cmd.add("libmp3lame")
+          cmd.add("-b:a"); cmd.add("192k")
+        }
+      } else {
+        cmd.add("-c:a"); cmd.add("copy")
+      }
     } else {
       cmd.add("-c:a"); cmd.add("copy")
     }
@@ -357,17 +363,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   }
 
   private fun execFfmpeg(cmd: List<String>) {
-    val bin = File(cmd.first())
-    val argv = NrmExecutableFile.buildExecArgv(bin, cmd.drop(1))
-    val proc =
-      ProcessBuilder(argv)
-        .redirectErrorStream(true)
-        .start()
-    val finished = proc.waitFor(180, TimeUnit.SECONDS)
-    if (!finished || proc.exitValue() != 0) {
-      val err = proc.inputStream.bufferedReader().readText()
-      throw Exception("ffmpeg metadata failed: $err")
-    }
+    FfmpegExec.run(reactApplicationContext, cmd, tag = "ffmpeg-meta", timeoutSec = 180)
   }
 
   /** Android albumart content provider (삼성 뮤직 등 로컬 라이브러리) */

@@ -98,67 +98,73 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun transcribeToLrc(audioPath: String, modelPreference: String?, promise: Promise) {
-    Thread {
-          NrmFileLogger.log(
-            "whisper",
-            "transcribeToLrc audio=$audioPath model=${modelPreference ?: "(default)"}",
-          )
-          try {
-            val inFile = File(audioPath.trim())
-            if (!inFile.isFile) {
-              NrmFileLogger.warn("whisper", "오디오 파일 없음: $audioPath")
-              promise.reject("E_ARG", "오디오 파일이 없습니다.")
-              return@Thread
-            }
-            val paths = WhisperBootstrap.ensure(reactApplicationContext, modelPreference)
-            NrmFileLogger.log(
-              "whisper",
-              "bootstrap cli=${paths.cliPath.ifBlank { "(없음)" }} model=${paths.modelPath.ifBlank { "(없음)" }} ready=${paths.isReady()}",
+    WhisperTranscribeQueue.submit {
+      transcribeToLrcBlocking(audioPath, modelPreference, promise)
+    }
+  }
+
+  private fun transcribeToLrcBlocking(
+      audioPath: String,
+      modelPreference: String?,
+      promise: Promise,
+  ) {
+    NrmFileLogger.log(
+        "whisper",
+        "transcribeToLrc audio=$audioPath model=${modelPreference ?: "(default)"}",
+    )
+    try {
+      val inFile = File(audioPath.trim())
+      if (!inFile.isFile) {
+        NrmFileLogger.warn("whisper", "오디오 파일 없음: $audioPath")
+        promise.reject("E_ARG", "오디오 파일이 없습니다.")
+        return
+      }
+      val paths = WhisperBootstrap.ensure(reactApplicationContext, modelPreference)
+      NrmFileLogger.log(
+          "whisper",
+          "bootstrap cli=${paths.cliPath.ifBlank { "(없음)" }} model=${paths.modelPath.ifBlank { "(없음)" }} ready=${paths.isReady()}",
+      )
+      if (!paths.isReady()) {
+        NrmFileLogger.warn("whisper", "CLI/모델 미준비 — LRC 스킵")
+        val ok = Arguments.createMap()
+        ok.putString("lrc", "")
+        promise.resolve(ok)
+        return
+      }
+
+      if (FfmpegExec.resolve(reactApplicationContext) == null) {
+        NrmFileLogger.warn("whisper", "ffmpeg 없음 — LRC 스킵")
+        val ok = Arguments.createMap()
+        ok.putString("lrc", "")
+        promise.resolve(ok)
+        return
+      }
+
+      val parent = inFile.parentFile ?: reactApplicationContext.cacheDir
+      val wav = File(parent, "nrm-whisper-${System.currentTimeMillis()}.wav")
+      val outPrefix = File(parent, "nrm-whisper-out-${System.currentTimeMillis()}")
+
+      try {
+        convertTo16kMonoWav(inFile, wav)
+        runWhisper(paths, wav, outPrefix)
+        val lrcFile = File(outPrefix.absolutePath + ".lrc")
+        val lrc =
+            normalizeWhisperLrc(
+                if (lrcFile.isFile) lrcFile.readText(Charsets.UTF_8).trim() else "",
             )
-            if (!paths.isReady()) {
-              NrmFileLogger.warn("whisper", "CLI/모델 미준비 — LRC 스킵")
-              val ok = Arguments.createMap()
-              ok.putString("lrc", "")
-              promise.resolve(ok)
-              return@Thread
-            }
-
-            val ffmpegBin = File(FfmpegBootstrap.binaryPath(reactApplicationContext))
-            if (!ffmpegBin.isFile) {
-              NrmFileLogger.warn("whisper", "ffmpeg 없음 — LRC 스킵")
-              val ok = Arguments.createMap()
-              ok.putString("lrc", "")
-              promise.resolve(ok)
-              return@Thread
-            }
-
-            val parent = inFile.parentFile ?: reactApplicationContext.cacheDir
-            val wav = File(parent, "nrm-whisper-${System.currentTimeMillis()}.wav")
-            val outPrefix = File(parent, "nrm-whisper-out-${System.currentTimeMillis()}")
-
-            try {
-              convertTo16kMonoWav(ffmpegBin, inFile, wav)
-              runWhisper(paths, wav, outPrefix)
-              val lrcFile = File(outPrefix.absolutePath + ".lrc")
-              val lrc =
-                  normalizeWhisperLrc(
-                      if (lrcFile.isFile) lrcFile.readText(Charsets.UTF_8).trim() else "",
-                  )
-              NrmFileLogger.log("whisper", "transcribeToLrc OK lrcLen=${lrc.length}")
-              val ok = Arguments.createMap()
-              ok.putString("lrc", lrc)
-              promise.resolve(ok)
-            } finally {
-              wav.delete()
-              File(outPrefix.absolutePath + ".lrc").delete()
-              File(outPrefix.absolutePath + ".txt").delete()
-            }
-          } catch (e: Exception) {
-            NrmFileLogger.error("whisper", "transcribeToLrc 실패 audio=$audioPath", e)
-            promise.reject("E_WHISPER", e.message ?: e.toString(), e)
-          }
-        }
-        .start()
+        NrmFileLogger.log("whisper", "transcribeToLrc OK lrcLen=${lrc.length}")
+        val ok = Arguments.createMap()
+        ok.putString("lrc", lrc)
+        promise.resolve(ok)
+      } finally {
+        wav.delete()
+        File(outPrefix.absolutePath + ".lrc").delete()
+        File(outPrefix.absolutePath + ".txt").delete()
+      }
+    } catch (e: Exception) {
+      NrmFileLogger.error("whisper", "transcribeToLrc 실패 audio=$audioPath", e)
+      promise.reject("E_WHISPER", e.message ?: e.toString(), e)
+    }
   }
 
   private fun sendEvent(event: String, body: WritableMap) {
@@ -168,10 +174,10 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         .emit(event, body)
   }
 
-  private fun convertTo16kMonoWav(ffmpeg: File, inFile: File, wavOut: File) {
-    val cmd =
+  private fun convertTo16kMonoWav(inFile: File, wavOut: File) {
+    FfmpegExec.run(
+        reactApplicationContext,
         listOf(
-            ffmpeg.absolutePath,
             "-y",
             "-i",
             inFile.absolutePath,
@@ -182,12 +188,15 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             "-c:a",
             "pcm_s16le",
             wavOut.absolutePath,
-        )
-    runProcess(cmd, "ffmpeg-whisper")
+        ),
+        tag = "ffmpeg-whisper",
+    )
   }
 
   private fun runWhisper(paths: WhisperBootstrap.WhisperPaths, wav: File, outPrefix: File) {
-    val threadCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
+    val threadCount =
+        Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+    NrmFileLogger.log("whisper", "runWhisper threads=$threadCount wavBytes=${wav.length()}")
     val cmd =
         listOf(
             paths.cliPath,
@@ -204,7 +213,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             "--output-lrc",
             "--no-prints",
         )
-    runProcess(cmd, "whisper")
+    runProcess(cmd, "whisper", paths.libDir)
   }
 
   private fun normalizeWhisperLrc(lrc: String): String {
@@ -216,11 +225,13 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     return t
   }
 
-  private fun runProcess(cmd: List<String>, tag: String = "whisper") {
+  private fun runProcess(cmd: List<String>, tag: String = "whisper", libDir: String = "") {
     val bin = File(cmd.first())
     val argv = NrmExecutableFile.buildExecArgv(bin, cmd.drop(1))
     NrmFileLogger.log(tag, "프로세스 시작: ${argv.joinToString(" ")}")
     val pb = ProcessBuilder(argv)
+    val nativeLibDir = libDir.ifBlank { bin.parentFile?.absolutePath.orEmpty() }
+    FfmpegExec.applyLibEnv(pb, nativeLibDir)
     pb.redirectErrorStream(true)
     val p = pb.start()
     val out = StringBuilder()

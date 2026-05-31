@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+
+import {
+  PERIOD_CHART_DROPDOWN_MIN_VISIBLE_OPTIONS,
+  PERIOD_CHART_DROPDOWN_OPTION_ROW_HEIGHT,
+  PERIOD_CHART_DROPDOWN_SHEET_SCROLL_HEIGHT,
+} from './nrmPeriodChartDropdownLayout';
+
+assert.equal(PERIOD_CHART_DROPDOWN_MIN_VISIBLE_OPTIONS, 5);
+assert.equal(
+  PERIOD_CHART_DROPDOWN_SHEET_SCROLL_HEIGHT,
+  PERIOD_CHART_DROPDOWN_OPTION_ROW_HEIGHT * 5,
+);
+assert.ok(PERIOD_CHART_DROPDOWN_SHEET_SCROLL_HEIGHT >= 250);
+
+console.log('nrmPeriodChartDropdownLayout.test.ts OK');

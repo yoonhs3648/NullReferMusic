@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { NrmChartFilterScrollRow } from '@/components/nrm/charts/NrmChartFilterScrollRow';
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
@@ -57,28 +57,42 @@ export function NrmLastfmChartsHome({
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [items, setItems] = useState<ChartTrackItem[]>([]);
 
-  const loadChart = useCallback(async (tab: LastfmChartTabId) => {
-    setLoading(true);
-    setErrorCode(null);
-    setItems([]);
-    setPlaylistTitle(null);
-    const out = await fetchLastfmChart(tab, lastfmAuth);
-    if (!out.ok) {
-      setErrorCode(out.errorCode);
+  const loadGenRef = useRef(0);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const loadChart = useCallback(
+    async (tab: LastfmChartTabId, generation: number) => {
+      setLoading(true);
+      setErrorCode(null);
+      setItems([]);
+      setPlaylistTitle(null);
+      const out = await fetchLastfmChart(tab, lastfmAuth);
+      if (generation !== loadGenRef.current) return;
+      if (!out.ok) {
+        setErrorCode(out.errorCode);
+        setLoading(false);
+        return;
+      }
+      setPlaylistTitle(out.data.playlistName);
+      setItems(out.data.items);
       setLoading(false);
-      return;
-    }
-    setPlaylistTitle(out.data.playlistName);
-    setItems(out.data.items);
-    setLoading(false);
-  }, [lastfmAuth]);
+    },
+    [lastfmAuth],
+  );
+
+  const selectTab = useCallback((tab: LastfmChartTabId) => {
+    if (tab === activeTabRef.current) return;
+    setActiveTab(tab);
+  }, []);
 
   useEffect(() => {
-    void loadChart(activeTab);
+    const generation = ++loadGenRef.current;
+    void loadChart(activeTab, generation);
   }, [activeTab, loadChart]);
 
   const listHeader = (
-    <View style={{ paddingHorizontal: paddingHorizontal }}>
+    <View style={{ paddingHorizontal: paddingHorizontal }} collapsable={false}>
       <View style={styles.headerRow}>
         <NrmLogo compact tone={isDark ? 'dark' : 'light'} onPress={onBackToHome} />
       </View>
@@ -87,17 +101,13 @@ export function NrmLastfmChartsHome({
         title="Last.fm 차트"
         titleColor={titleColor}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabRow}
-        style={styles.tabScroll}>
+      <NrmChartFilterScrollRow>
         {NRM_LASTFM_CHART_TABS.map((tab) => {
           const selected = tab.id === activeTab;
           return (
             <Pressable
               key={tab.id}
-              onPress={() => setActiveTab(tab.id)}
+              onPress={() => selectTab(tab.id)}
               style={({ pressed }) => [
                 styles.tabChip,
                 {
@@ -124,7 +134,7 @@ export function NrmLastfmChartsHome({
             </Pressable>
           );
         })}
-      </ScrollView>
+      </NrmChartFilterScrollRow>
       {playlistTitle && !errorCode ? (
         <Text style={[styles.playlistHint, { color: bodyColor }]}>
           {playlistTitle} · {items.length}곡
@@ -151,6 +161,7 @@ export function NrmLastfmChartsHome({
   return (
     <FlatList
       style={styles.list}
+      nestedScrollEnabled
       data={loading || errorCode ? [] : items}
       keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
       renderItem={({ item }) => (
@@ -187,8 +198,6 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.md,
     marginTop: nrmTokens.space.sm,
   },
-  tabScroll: { marginBottom: nrmTokens.space.sm, flexGrow: 0 },
-  tabRow: { gap: nrmTokens.space.xs, paddingBottom: nrmTokens.space.xs },
   tabChip: {
     paddingHorizontal: nrmTokens.space.md,
     paddingVertical: nrmTokens.space.sm,

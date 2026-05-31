@@ -25,6 +25,10 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun getLogFilePath(promise: Promise) {
     try {
+      if (!NrmFileLogger.isEnabled()) {
+        promise.resolve(null)
+        return
+      }
       NrmFileLogger.init(reactApplicationContext.applicationContext)
       promise.resolve(NrmFileLogger.getDisplayPath())
     } catch (e: Exception) {

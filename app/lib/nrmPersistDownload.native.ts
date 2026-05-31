@@ -28,6 +28,24 @@ import {
 
 const NRM_FOLDER = 'NullReferenceMusic';
 
+/** SAF createDocument(text/plain) 시 `.lrc` → `.lrc.txt` / `.lrc.text` 로 바뀌는 문제 방지 */
+const LRC_SAF_MIME = 'application/octet-stream';
+
+async function copyLrcSidecarToSaf(
+  dirUri: string,
+  fileName: string,
+  sidecarLrcUri: string,
+): Promise<void> {
+  const lrcName = fileName.replace(/\.[^.]+$/, '.lrc');
+  const lrcSrc = sidecarLrcUri.startsWith('file://') ? sidecarLrcUri : `file://${sidecarLrcUri}`;
+  try {
+    await copyLocalFileToSaf(lrcSrc, dirUri, lrcName, LRC_SAF_MIME);
+  } catch {
+    const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, LRC_SAF_MIME);
+    await writeToBinarySafUri(sidecarLrcUri, lrcDest);
+  }
+}
+
 export const NRM_DOWNLOAD_PUBLIC_FOLDER_NAME = NRM_FOLDER;
 /** @deprecated NRM_DOWNLOAD_PUBLIC_FOLDER_NAME 사용 */
 export const NRM_DOWNLOAD_DIR_NAME = NRM_FOLDER;
@@ -167,9 +185,7 @@ async function saveViaSaf(
   await triggerMediaStoreScan(destUri, metadata);
 
   if (sidecarLrcUri) {
-    const lrcName = fileName.replace(/\.[^.]+$/, '.lrc');
-    const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, 'text/plain');
-    await writeToBinarySafUri(sidecarLrcUri, lrcDest);
+    await copyLrcSidecarToSaf(dirUri, fileName, sidecarLrcUri);
   }
 
   return {
@@ -305,8 +321,7 @@ export async function persistLrcTextToDestination(
     if (!dirUri) return null;
 
     const lrcName = storageFileName(safeName).replace(/\.[^.]+$/, '.lrc');
-    const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, 'text/plain');
-    await writeToBinarySafUri(tempLrcUri, lrcDest);
+    const lrcDest = await copyLocalFileToSaf(tempLrcUri, dirUri, lrcName, LRC_SAF_MIME);
     return lrcDest;
   } finally {
     await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});

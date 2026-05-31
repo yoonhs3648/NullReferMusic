@@ -37,7 +37,7 @@ object YtDlpBootstrap {
         val bin = File(binDir, "yt-dlp")
 
         if (bin.exists() && bin.length() > MIN_BYTES) {
-            NrmExecutableFile.prepareForExecution(bin)
+            makeExecutable(bin)
             return bin.absolutePath
         }
 
@@ -66,7 +66,19 @@ object YtDlpBootstrap {
         if (!bin.exists() || bin.length() < MIN_BYTES) {
             throw Exception("yt-dlp 바이너리를 다운로드하지 못했습니다.")
         }
-        NrmExecutableFile.prepareForExecution(bin)
+        makeExecutable(bin)
         return bin.absolutePath
+    }
+
+    private fun makeExecutable(file: File) {
+        file.setReadable(true, false)
+        file.setExecutable(true, false)
+        try {
+            ProcessBuilder(listOf("chmod", "755", file.absolutePath))
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (_: Exception) {
+        }
     }
 }

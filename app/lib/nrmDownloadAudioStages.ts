@@ -21,32 +21,46 @@ export type PostProcessAudioResult = {
   lyricsWarning?: 'not_embedded' | 'translation_failed';
 };
 
+/** Android: 확장자 변환만 (메타·Whisper 전에 호출해 실제 확장자 확정) */
+export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string> {
+  let uri = fileUri;
+  if (Platform.OS !== 'android') return uri;
+
+  const { isOnDeviceDownloadAvailable, transcodeAudioOnDevice } =
+    await import('@/lib/onDeviceDownload');
+  if (!isOnDeviceDownloadAvailable()) return uri;
+
+  const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
+    await import('@/lib/nrmDownloadSettings');
+  const encode = await loadDownloadEncodeSettings();
+  const path = uri.startsWith('file://') ? uri.slice(7) : uri;
+  const wantExt = encode.extension.slice(1).toLowerCase();
+  const haveExt = path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (haveExt === wantExt) return uri;
+
+  const { path: outPath, format, fallbackReason } = await transcodeAudioOnDevice(
+    path,
+    extensionToYtDlpFormat(encode.extension),
+    encode.audioQuality,
+  );
+  if (fallbackReason) {
+    const { logNrmDev } = await import('@/lib/nrmDevLog');
+    logNrmDev('download.transcode.fallback', {
+      reason: fallbackReason,
+      requested: wantExt,
+      effective: format ?? 'unknown',
+    });
+  }
+  uri = outPath.startsWith('file://') ? outPath : `file://${outPath}`;
+  return uri;
+}
+
 /** 2단계: 사용자 설정 확장자로 ffmpeg 변환 후 메타·커버 적용 */
 export async function applyFfmpegConversionAndMetadataStage(
   fileUri: string,
   metadata?: NrmAudioFileMetadata,
 ): Promise<string> {
-  let uri = fileUri;
-  if (Platform.OS === 'android') {
-    const { isOnDeviceDownloadAvailable, transcodeAudioOnDevice } =
-      await import('@/lib/onDeviceDownload');
-    if (isOnDeviceDownloadAvailable()) {
-      const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
-        await import('@/lib/nrmDownloadSettings');
-      const encode = await loadDownloadEncodeSettings();
-      const path = uri.startsWith('file://') ? uri.slice(7) : uri;
-      const wantExt = encode.extension.slice(1).toLowerCase();
-      const haveExt = path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
-      if (haveExt !== wantExt) {
-        const { path: outPath } = await transcodeAudioOnDevice(
-          path,
-          extensionToYtDlpFormat(encode.extension),
-          encode.audioQuality,
-        );
-        uri = outPath.startsWith('file://') ? outPath : `file://${outPath}`;
-      }
-    }
-  }
+  const uri = await applyFfmpegTranscodeStage(fileUri);
   return applyFfmpegMetadataStage(uri, metadata);
 }
 

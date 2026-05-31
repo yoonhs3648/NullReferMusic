@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { NrmChartFilterScrollRow } from '@/components/nrm/charts/NrmChartFilterScrollRow';
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
@@ -54,12 +54,17 @@ export function NrmAppleMusicChartsHome({
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [items, setItems] = useState<ChartTrackItem[]>([]);
 
-  const loadChart = useCallback(async (tab: AppleMusicChartTabId) => {
+  const loadGenRef = useRef(0);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const loadChart = useCallback(async (tab: AppleMusicChartTabId, generation: number) => {
     setLoading(true);
     setErrorCode(null);
     setItems([]);
     setPlaylistTitle(null);
     const out = await fetchAppleMusicChart(tab);
+    if (generation !== loadGenRef.current) return;
     if (!out.ok) {
       setErrorCode(out.errorCode);
       setLoading(false);
@@ -70,12 +75,18 @@ export function NrmAppleMusicChartsHome({
     setLoading(false);
   }, []);
 
+  const selectTab = useCallback((tab: AppleMusicChartTabId) => {
+    if (tab === activeTabRef.current) return;
+    setActiveTab(tab);
+  }, []);
+
   useEffect(() => {
-    void loadChart(activeTab);
+    const generation = ++loadGenRef.current;
+    void loadChart(activeTab, generation);
   }, [activeTab, loadChart]);
 
   const listHeader = (
-    <View style={{ paddingHorizontal: paddingHorizontal }}>
+    <View style={{ paddingHorizontal: paddingHorizontal }} collapsable={false}>
       <View style={styles.headerRow}>
         <NrmLogo compact tone={isDark ? 'dark' : 'light'} onPress={onBackToHome} />
       </View>
@@ -84,17 +95,13 @@ export function NrmAppleMusicChartsHome({
         title="Apple Music 차트"
         titleColor={titleColor}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabRow}
-        style={styles.tabScroll}>
+      <NrmChartFilterScrollRow>
         {NRM_APPLE_MUSIC_CHART_TABS.map((tab) => {
           const selected = tab.id === activeTab;
           return (
             <Pressable
               key={tab.id}
-              onPress={() => setActiveTab(tab.id)}
+              onPress={() => selectTab(tab.id)}
               style={({ pressed }) => [
                 styles.tabChip,
                 {
@@ -121,7 +128,7 @@ export function NrmAppleMusicChartsHome({
             </Pressable>
           );
         })}
-      </ScrollView>
+      </NrmChartFilterScrollRow>
       {playlistTitle && !errorCode ? (
         <Text style={[styles.playlistHint, { color: bodyColor }]}>
           {playlistTitle} · {items.length}곡
@@ -148,6 +155,7 @@ export function NrmAppleMusicChartsHome({
   return (
     <FlatList
       style={styles.list}
+      nestedScrollEnabled
       data={loading || errorCode ? [] : items}
       keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
       renderItem={({ item }) => (
@@ -177,7 +185,6 @@ export function NrmAppleMusicChartsHome({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingBottom: nrmTokens.space.xxl },
   listContentEmpty: { flexGrow: 1 },
@@ -186,8 +193,6 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.md,
     marginTop: nrmTokens.space.sm,
   },
-  tabScroll: { marginBottom: nrmTokens.space.sm, flexGrow: 0 },
-  tabRow: { gap: nrmTokens.space.xs, paddingBottom: nrmTokens.space.xs },
   tabChip: {
     paddingHorizontal: nrmTokens.space.md,
     paddingVertical: nrmTokens.space.sm,

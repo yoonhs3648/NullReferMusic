@@ -23,6 +23,9 @@ import java.util.TimeZone
  * (Android/data 아래가 아님)
  */
 object NrmFileLogger {
+  /** false — 물리 로그 파일 미생성 (레거시 구현은 유지) */
+  private const val FILE_LOGGING_ENABLED = false
+
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_NAME = "nrm-debug.log"
   private const val FOLDER = "NullReferenceMusic/logs"
@@ -36,6 +39,7 @@ object NrmFileLogger {
     "${Environment.DIRECTORY_DOWNLOADS}/NullReferenceMusic/logs/$LOG_FILE_NAME"
 
   fun init(context: Context) {
+    if (!FILE_LOGGING_ENABLED) return
     if (appContext != null) return
     synchronized(lock) {
       if (appContext != null) return
@@ -45,21 +49,29 @@ object NrmFileLogger {
     }
   }
 
-  fun getDisplayPath(): String = displayPath
+  fun getDisplayPath(): String =
+    if (FILE_LOGGING_ENABLED) displayPath else ""
+
+  /** JS/레거시 — 파일 로깅 활성 여부 */
+  fun isEnabled(): Boolean = FILE_LOGGING_ENABLED
 
   fun log(tag: String, message: String) {
+    if (!FILE_LOGGING_ENABLED) return
     write("I", tag, message, null)
   }
 
   fun warn(tag: String, message: String) {
+    if (!FILE_LOGGING_ENABLED) return
     write("W", tag, message, null)
   }
 
   fun error(tag: String, message: String, throwable: Throwable? = null) {
+    if (!FILE_LOGGING_ENABLED) return
     write("E", tag, message, throwable)
   }
 
   fun logProcess(tag: String, cmd: List<String>, exitCode: Int, output: String) {
+    if (!FILE_LOGGING_ENABLED) return
     val cmdLine = cmd.joinToString(" ")
     val tail = output.trim().takeLast(8000)
     val level = if (exitCode == 0) "I" else "E"

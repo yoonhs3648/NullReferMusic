@@ -61,11 +61,30 @@ import { YoutubeEmbed } from '@/components/nrm/YoutubeEmbed';
 
 const DOWNLOAD_CONSENT_KEY = 'nrm_download_user_consent_v1';
 
+/** Android W^X exec 거부(code_cache 바이너리) — 저장 권한과 구분 */
+function isBinaryExecPermissionError(raw: string, full: string): boolean {
+  const execPathHint =
+    raw.includes('code_cache') ||
+    raw.includes('whisper-cli') ||
+    raw.includes('/ffmpeg/ffmpeg') ||
+    raw.includes('cannot run program') ||
+    raw.includes('operation not permitted');
+  const permHint =
+    raw.includes('permission denied') ||
+    raw.includes('error=13') ||
+    raw.includes('eacces') ||
+    raw.includes('errno 13');
+  return execPathHint && permHint;
+}
+
 function mapDownloadUserMessage(err: unknown): string {
   const full = err instanceof Error ? err.message : String(err);
   const raw = full.toLowerCase();
   if (full.includes('yt-dlp 실행이 실패') || raw.includes('yt-dlp를 찾을 수 없')) {
     return nrmYoutubeDownloadYtDlpFailedMessage;
+  }
+  if (isBinaryExecPermissionError(raw, full)) {
+    return '오디오 변환(ffmpeg)에 실패했습니다. 앱을 완전히 종료한 뒤 다시 시도하거나, 확장자를 m4a로 바꿔 보세요.';
   }
   if (
     raw.includes('permission denied') ||
@@ -86,7 +105,7 @@ function mapDownloadUserMessage(err: unknown): string {
   ) {
     return '저장 폴더 문제로 다운로드하지 못했습니다. 메뉴 → 다운로드 설정에서 경로를 확인하세요.';
   }
-  if (raw.includes('ffmpeg_required') || raw.includes('transcode_failed')) {
+  if (raw.includes('ffmpeg_required') || raw.includes('transcode_failed') || raw.includes('ffmpeg_exit_') || raw.includes('shineenc_exit_') || raw.includes('e_type')) {
     return '오디오 변환(ffmpeg)에 실패했습니다. 앱을 완전히 종료한 뒤 다시 시도하거나, 확장자를 m4a로 바꿔 보세요.';
   }
   if (

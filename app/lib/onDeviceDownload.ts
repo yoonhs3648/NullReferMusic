@@ -16,7 +16,7 @@ type NativeOnDevice = {
     inputPath: string,
     audioFormat: string,
     audioQuality: number,
-  ) => Promise<{ path: string }>;
+  ) => Promise<{ path: string; format?: string; fallbackReason?: string }>;
   getAudioStreamUrl: (videoId: string) => Promise<string>;
   copyFileToSaf: (
     sourcePath: string,
@@ -72,7 +72,7 @@ export async function transcodeAudioOnDevice(
   inputPath: string,
   audioFormat: string,
   audioQuality: number,
-): Promise<{ path: string }> {
+): Promise<{ path: string; format?: string; fallbackReason?: string }> {
   const mod = NativeModules.NrmOnDeviceDownload as NativeOnDevice | undefined;
   if (!mod?.transcodeAudio) {
     throw new Error('NrmOnDeviceDownload.transcodeAudio unavailable');

@@ -114,19 +114,43 @@ function Ensure-AndroidAssets {
     $cliDest = Join-Path $assetsDir "whisper-cli"
     if ((Test-Path $cliDest) -and -not $ForceCopy) {
         Write-Host "[whisper-setup] Android whisper-cli asset already present."
-        return
+    } else {
+        $armBuild = Join-Path $repoRoot "library/whisper/_bin/android-arm64-v8a/bin/whisper-cli"
+        if (Test-Path $armBuild) {
+            Copy-Item -Path $armBuild -Destination $cliDest -Force
+            Write-Host "[whisper-setup] copied arm64 whisper-cli -> $cliDest"
+        } else {
+            Write-Host "[whisper-setup] Android whisper-cli missing in assets."
+            Write-Host "[whisper-setup] Build arm64 (NDK) into library/whisper/_bin/android-arm64-v8a/bin/whisper-cli or copy to:"
+            Write-Host "              $cliDest"
+        }
     }
 
-    $armBuild = Join-Path $repoRoot "library/whisper/_bin/android-arm64-v8a/bin/whisper-cli"
-    if (Test-Path $armBuild) {
-        Copy-Item -Path $armBuild -Destination $cliDest -Force
-        Write-Host "[whisper-setup] copied arm64 whisper-cli -> $cliDest"
+    # OpenMP runtime for dynamically linked whisper-cli
+    $libOmpDest = Join-Path $assetsDir "libomp.so"
+    if ((Test-Path $libOmpDest) -and -not $ForceCopy) {
+        Write-Host "[whisper-setup] libomp.so asset already present."
         return
     }
-
-    Write-Host "[whisper-setup] Android whisper-cli missing in assets."
-    Write-Host "[whisper-setup] Build arm64 (NDK) into library/whisper/_bin/android-arm64-v8a/bin/whisper-cli or copy to:"
-    Write-Host "              $cliDest"
+    $ndkRoot = $env:ANDROID_NDK_HOME
+    if (-not $ndkRoot -and $env:ANDROID_HOME) {
+        $ndkRoot = Join-Path $env:ANDROID_HOME "ndk"
+    }
+    if (-not $ndkRoot -and (Test-Path "$env:LOCALAPPDATA\Android\Sdk\ndk")) {
+        $ndkRoot = "$env:LOCALAPPDATA\Android\Sdk\ndk"
+    }
+    if ($ndkRoot -and (Test-Path $ndkRoot)) {
+        $omp = Get-ChildItem -Path $ndkRoot -Recurse -Filter "libomp.so" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "aarch64\\libomp\.so$" } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+        if ($omp) {
+            Copy-Item -Path $omp.FullName -Destination $libOmpDest -Force
+            Write-Host "[whisper-setup] copied libomp.so -> $libOmpDest"
+            return
+        }
+    }
+    Write-Host "[whisper-setup] libomp.so not found — Gradle preBuild or NDK required for Whisper OpenMP."
 }
 
 $CatalogModelNames = @(

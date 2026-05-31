@@ -22,17 +22,19 @@ object WhisperBootstrap {
         copyAssetIfPresent(context, "whisper/main", cli)
       }
     }
+    ensureWhisperNativeLibs(context, cliDir)
 
     val model = WhisperModelDownloader.resolveInstalledFile(context, preferredModel ?: "")
     NrmExecutableFile.prepareForExecution(cli)
     if (!NrmExecutableFile.isExecReady(cli)) {
       NrmExecutableFile.mirrorToExecCache(context, cli, "whisper-exec")?.let { mirrored ->
         NrmFileLogger.log("whisper", "codeCache CLI 사용: ${mirrored.absolutePath}")
-        NrmExecutableFile.ensureExecMode(mirrored)
+        NrmExecutableFile.ensureExecMode(mirrored, NrmExecutableFile.PROBE_HELP)
         val paths =
           WhisperPaths(
             cliPath = mirrored.absolutePath,
             modelPath = model?.absolutePath ?: "",
+            libDir = mirrored.parentFile?.absolutePath ?: cliDir.absolutePath,
           )
         NrmFileLogger.log(
           "whisper",
@@ -41,11 +43,12 @@ object WhisperBootstrap {
         return paths
       }
     }
-    NrmExecutableFile.ensureExecMode(cli)
+    NrmExecutableFile.ensureExecMode(cli, NrmExecutableFile.PROBE_HELP)
     val paths =
       WhisperPaths(
           cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",
           modelPath = model?.absolutePath ?: "",
+          libDir = cliDir.absolutePath,
       )
     NrmFileLogger.log(
       "whisper",
@@ -54,8 +57,25 @@ object WhisperBootstrap {
     return paths
   }
 
-  data class WhisperPaths(val cliPath: String, val modelPath: String) {
+  data class WhisperPaths(val cliPath: String, val modelPath: String, val libDir: String = "") {
     fun isReady(): Boolean = cliPath.isNotBlank() && modelPath.isNotBlank()
+  }
+
+  /** whisper.cpp OpenMP 등 동적 링크 .so 전부 복사 */
+  private fun ensureWhisperNativeLibs(context: Context, cliDir: File) {
+    try {
+      val names = context.assets.list("whisper") ?: emptyArray()
+      for (name in names) {
+        if (!name.endsWith(".so")) continue
+        val dest = File(cliDir, name)
+        copyAssetIfPresent(context, "whisper/$name", dest)
+        if (dest.isFile) {
+          NrmFileLogger.log("whisper", "native lib OK name=$name bytes=${dest.length()}")
+        }
+      }
+    } catch (e: Exception) {
+      NrmFileLogger.warn("whisper", "native lib 복사 실패: ${e.message}")
+    }
   }
 
   private fun copyAssetIfPresent(context: Context, assetName: String, dest: File) {
