@@ -31,33 +31,37 @@ object WhisperBootstrap {
         NrmFileLogger.log("whisper", "codeCache CLI 사용: ${mirrored.absolutePath}")
         NrmExecutableFile.ensureExecMode(mirrored, NrmExecutableFile.PROBE_HELP)
         val paths =
-          WhisperPaths(
-            cliPath = mirrored.absolutePath,
-            modelPath = model?.absolutePath ?: "",
-            libDir = mirrored.parentFile?.absolutePath ?: cliDir.absolutePath,
-          )
+            WhisperPaths(
+                cliPath = mirrored.absolutePath,
+                modelPath = model?.absolutePath ?: "",
+                libDir = mirrored.parentFile?.absolutePath ?: cliDir.absolutePath,
+            )
         NrmFileLogger.log(
-          "whisper",
-          "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} model=${paths.modelPath.ifBlank { "(없음)" }}",
+            "whisper",
+            "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} model=${paths.modelPath.ifBlank { "(없음)" }}",
         )
         return paths
       }
     }
     NrmExecutableFile.ensureExecMode(cli, NrmExecutableFile.PROBE_HELP)
     val paths =
-      WhisperPaths(
-          cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",
-          modelPath = model?.absolutePath ?: "",
-          libDir = cliDir.absolutePath,
-      )
+        WhisperPaths(
+            cliPath = if (cli.isFile && cli.length() >= MIN_CLI_BYTES) cli.absolutePath else "",
+            modelPath = model?.absolutePath ?: "",
+            libDir = cliDir.absolutePath,
+        )
     NrmFileLogger.log(
-      "whisper",
-      "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} size=${cli.length()} model=${paths.modelPath.ifBlank { "(없음)" }}",
+        "whisper",
+        "ensure 결과 cli=${paths.cliPath.ifBlank { "(없음)" }} size=${cli.length()} model=${paths.modelPath.ifBlank { "(없음)" }}",
     )
     return paths
   }
 
-  data class WhisperPaths(val cliPath: String, val modelPath: String, val libDir: String = "") {
+  data class WhisperPaths(
+      val cliPath: String,
+      val modelPath: String,
+      val libDir: String = "",
+  ) {
     fun isReady(): Boolean = cliPath.isNotBlank() && modelPath.isNotBlank()
   }
 
@@ -88,5 +92,4 @@ object WhisperBootstrap {
       // asset missing
     }
   }
-
 }

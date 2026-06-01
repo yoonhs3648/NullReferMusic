@@ -23,7 +23,7 @@ import java.util.TimeZone
  * (Android/data 아래가 아님)
  */
 object NrmFileLogger {
-  private const val FILE_LOGGING_ENABLED = true
+  private const val FILE_LOGGING_ENABLED = false
 
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_NAME = "nrm-debug.log"
@@ -72,7 +72,12 @@ object NrmFileLogger {
   fun logProcess(tag: String, cmd: List<String>, exitCode: Int, output: String) {
     if (!FILE_LOGGING_ENABLED) return
     val cmdLine = cmd.joinToString(" ")
-    val tail = output.trim().takeLast(8000)
+    val tailLimit =
+        when {
+          tag == "whisper" || tag == NrmWhisperPerfLog.TAG -> 32_000
+          else -> 8_000
+        }
+    val tail = output.trim().takeLast(tailLimit)
     val level = if (exitCode == 0) "I" else "E"
     write(
       level,

@@ -24,6 +24,7 @@ object NrmBackgroundWorkCoordinator {
     tokens.add(trimmed)
     ensureService(context.applicationContext)
     acquireWakeLock(context.applicationContext)
+    NrmFileLogger.log("bg-work", "acquire token=$trimmed active=${tokens.size}")
     NrmBackgroundWorkService.refreshNotification(context.applicationContext)
   }
 
@@ -31,6 +32,7 @@ object NrmBackgroundWorkCoordinator {
     val trimmed = token.trim()
     if (trimmed.isEmpty()) return
     tokens.remove(trimmed)
+    NrmFileLogger.log("bg-work", "release token=$trimmed active=${tokens.size}")
     if (tokens.isEmpty()) {
       releaseWakeLock()
       stopService(context.applicationContext)
@@ -50,12 +52,58 @@ object NrmBackgroundWorkCoordinator {
   }
 
   fun notificationBody(): String {
-    val count = tokens.size
-    return if (count <= 1) {
-      "다운로드·가사 생성 작업을 계속 진행합니다."
-    } else {
-      "다운로드·가사 생성 작업 $count 건을 계속 진행합니다."
+    if (tokens.isEmpty()) {
+      return "작업을 마무리하는 중입니다."
     }
+
+    val lines = mutableListOf<String>()
+
+    val modelTokens = tokens.filter { it.startsWith("whisper-model:") }.sorted()
+    for (token in modelTokens) {
+      val modelId = token.removePrefix("whisper-model:").trim()
+      val label = WhisperModelCatalog.displayLabel(modelId)
+      val pct = WhisperModelDownloader.progressFor(modelId)
+      lines.add(
+          if (pct in 0..99) {
+            "Whisper 모델 «$label» 다운로드 중 ($pct%)"
+          } else {
+            "Whisper 모델 «$label» 다운로드 중"
+          },
+      )
+    }
+
+    val dlCount = tokens.count { it.startsWith("dl:") }
+    if (dlCount > 0) {
+      lines.add(
+          if (dlCount == 1) {
+            "음원 다운로드·가사 생성 중"
+          } else {
+            "음원 다운로드·가사 생성 중 (${dlCount}곡)"
+          },
+      )
+    }
+
+    val whisperLrc = tokens.count { it.startsWith("whisper-lrc:") }
+    if (whisperLrc > 0 && dlCount == 0 && modelTokens.isEmpty()) {
+      lines.add(
+          if (whisperLrc == 1) {
+            "가사(LRC) 생성 중"
+          } else {
+            "가사(LRC) 생성 중 (${whisperLrc}곡 대기)"
+          },
+      )
+    }
+
+    if (lines.isEmpty()) {
+      val count = tokens.size
+      return if (count <= 1) {
+        "백그라운드 작업을 계속 진행합니다."
+      } else {
+        "백그라운드 작업 $count 건을 계속 진행합니다."
+      }
+    }
+
+    return lines.joinToString("\n")
   }
 
   private fun ensureService(context: Context) {

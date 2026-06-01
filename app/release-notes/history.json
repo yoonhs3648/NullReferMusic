@@ -1,6 +1,45 @@
 {
   "entries": [
     {
+      "version": "1.6.1",
+      "lines": [
+        "Spotify 기간별 차트 필터 UI 재구성·메뉴 스와이프 레이어 터치 간섭 수정",
+        "차트 필터 클릭 로그 제거, Download 폴더 디스크 로그 비활성화"
+      ]
+    },
+    {
+      "version": "1.5.17",
+      "lines": [
+        "Whisper VAD 제거 — 전체 오디오 전사 + -nth 0.45 (no-speech threshold 완화)",
+        "기간별 차트 필터 UI·터치 개선"
+      ]
+    },
+    {
+      "version": "1.5.16",
+      "lines": [
+        "Whisper Silero VAD 포함 APK — 인트로·무가사 구간 건너뛰고 보컬부터 LRC 전사"
+      ]
+    },
+    {
+      "version": "1.5.15",
+      "lines": [
+        "Whisper Silero VAD — 인트로·무가사 구간 건너뛰고 보컬 구간부터 LRC 전사 (30초 고정 완화)",
+        "Whisper 직렬 게이트·큐 쿨다운·SAF MP3 저장 수정"
+      ]
+    },
+    {
+      "version": "1.5.14",
+      "lines": [
+        "Whisper LRC 속도 모드(-bs 1 -bo 1), 큐 대기 로그, 모델 다운로드 알림 문구 개선, ffmpeg 후 순차 전사"
+      ]
+    },
+    {
+      "version": "1.5.13",
+      "lines": [
+        "Whisper 성능 진단 빌드 — Download/NullReferenceMusic/logs/nrm-debug.log 에 whisper-perf 태그로 상세 기록"
+      ]
+    },
+    {
       "version": "1.2.1",
       "lines": [
         "백그라운드 재생 기능 추가 — 앱을 홈 화면으로 내보내도 음악이 계속 재생됩니다.",

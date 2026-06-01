@@ -118,8 +118,22 @@ export async function postProcessDownloadedAudio(
 
   let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
   if (whisperMode) {
+    const { logNrmDev } = await import('@/lib/nrmDevLog');
+    logNrmDev('download.whisper', {
+      event: 'post_process_start',
+      mode: whisperMode,
+      extension,
+    });
     const whisperResult = await runWhisperLrcStage(uri, whisperMode, extension);
     lyricsWarning = whisperWarningFromResult(whisperResult);
+    logNrmDev('download.whisper', {
+      event: 'post_process_done',
+      mode: whisperMode,
+      extension,
+      lyricsEmbedded: whisperResult.lyricsEmbedded,
+      lyricsTranslationFailed: whisperResult.lyricsTranslationFailed ?? false,
+      lyricsWarning: lyricsWarning ?? null,
+    });
   }
 
   return { fileUri: uri, lyricsWarning };

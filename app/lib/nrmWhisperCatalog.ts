@@ -16,7 +16,6 @@ export type NrmWhisperModelCatalogEntry = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
-  stars: 2 | 3 | 4 | 5;
   /** whisper.cpp ggml 파일 (용량 작은 양자화 우선) */
   ggmlFiles: readonly string[];
   /** Hugging Face `ggerganov/whisper.cpp` 파일명 */
@@ -28,8 +27,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     id: 'whisper:large-v3-turbo',
     label: 'large-v3-turbo',
     speedLabel: '빠름',
-    qualityLabel: '높음',
-    stars: 5,
+    qualityLabel: '매우 높음',
     ggmlFiles: ['ggml-large-v3-turbo-q5_0.bin', 'ggml-large-v3-turbo.bin'],
     minBytes: 300_000_000,
   },
@@ -38,7 +36,6 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'large-v3',
     speedLabel: '매우 느림',
     qualityLabel: '매우 높음',
-    stars: 5,
     ggmlFiles: ['ggml-large-v3-q5_0.bin', 'ggml-large-v3.bin'],
     minBytes: 700_000_000,
   },
@@ -47,7 +44,6 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'medium',
     speedLabel: '보통',
     qualityLabel: '높음',
-    stars: 4,
     ggmlFiles: ['ggml-medium-q5_0.bin', 'ggml-medium.bin'],
     minBytes: 300_000_000,
   },
@@ -56,7 +52,6 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'small',
     speedLabel: '빠름',
     qualityLabel: '중간',
-    stars: 3,
     ggmlFiles: ['ggml-small-q5_1.bin', 'ggml-small.bin'],
     minBytes: 100_000_000,
   },
@@ -65,7 +60,6 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'base',
     speedLabel: '매우 빠름',
     qualityLabel: '낮음',
-    stars: 2,
     ggmlFiles: ['ggml-base-q5_1.bin', 'ggml-base.bin'],
     minBytes: 50_000_000,
   },

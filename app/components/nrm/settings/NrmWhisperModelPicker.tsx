@@ -36,21 +36,6 @@ type Props = {
   active?: boolean;
 };
 
-function StarRating({ count, active }: { count: number; active: boolean }) {
-  return (
-    <View style={styles.starsRow} accessibilityLabel={`추천 ${count}점`}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <Ionicons
-          key={i}
-          name={i < count ? 'star' : 'star-outline'}
-          size={13}
-          color={active ? '#f5a623' : 'rgba(128,128,128,0.45)'}
-        />
-      ))}
-    </View>
-  );
-}
-
 export function NrmWhisperModelPicker({
   value,
   onChange,
@@ -157,7 +142,6 @@ export function NrmWhisperModelPicker({
                   </Text>
                 </View>
               </View>
-              <StarRating count={opt.stars} active={selected} />
             </Pressable>
 
             {showWhisperInstallUi && !installed ? (
@@ -273,10 +257,6 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
     backgroundColor: 'rgba(128,128,128,0.35)',
-  },
-  starsRow: {
-    flexDirection: 'row',
-    gap: 2,
   },
   downloadBlock: {
     paddingHorizontal: nrmTokens.space.md,

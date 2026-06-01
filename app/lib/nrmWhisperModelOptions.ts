@@ -6,7 +6,6 @@ export type NrmWhisperModelOption = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
-  stars: 2 | 3 | 4 | 5;
 };
 
 export const NRM_WHISPER_MODEL_OPTIONS: readonly NrmWhisperModelOption[] =
@@ -15,5 +14,4 @@ export const NRM_WHISPER_MODEL_OPTIONS: readonly NrmWhisperModelOption[] =
     label: e.label,
     speedLabel: e.speedLabel,
     qualityLabel: e.qualityLabel,
-    stars: e.stars,
   }));

@@ -283,12 +283,24 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
           promise.reject("E_ARG", "소스 파일이 없습니다.")
           return@Thread
         }
-        val tree = Uri.parse(treeUri)
+        val tree = Uri.parse(treeUri.trim())
         val resolver = reactApplicationContext.contentResolver
+        val parentDoc =
+            when {
+              DocumentsContract.isTreeUri(tree) -> {
+                val treeDocId = DocumentsContract.getTreeDocumentId(tree)
+                DocumentsContract.buildDocumentUriUsingTree(tree, treeDocId)
+              }
+              DocumentsContract.isDocumentUri(reactApplicationContext, tree) -> tree
+              else ->
+                  throw IllegalArgumentException(
+                      "SAF tree/document URI가 아닙니다: ${treeUri.take(96)}",
+                  )
+            }
         val destUri =
           DocumentsContract.createDocument(
             resolver,
-            tree,
+            parentDoc,
             mimeType.trim().ifBlank { "audio/mpeg" },
             displayName.trim().ifBlank { src.name },
           ) ?: throw Exception("SAF 파일을 만들지 못했습니다.")

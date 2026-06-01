@@ -35,6 +35,15 @@ object WhisperModelCatalog {
 
   private val BY_ID = ENTRIES.associateBy { it.id }
 
+  /** 알림·로그용 짧은 이름 (예: whisper:medium → medium) */
+  fun displayLabel(modelId: String): String {
+    val id = modelId.trim()
+    if (id.startsWith("whisper:")) {
+      return id.removePrefix("whisper:")
+    }
+    return entryForPreference(id)?.id?.removePrefix("whisper:") ?: id
+  }
+
   fun entryForPreference(preference: String?): Entry? {
     val pref = (preference ?: "").trim()
     if (pref.startsWith("whisper:")) {

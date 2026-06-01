@@ -32,6 +32,9 @@ object WhisperModelDownloader {
   private val progressByModel = ConcurrentHashMap<String, Int>()
 
   @Volatile private var eventEmitter: ((String, WritableMap) -> Unit)? = null
+  @Volatile private var notifContext: Context? = null
+
+  fun progressFor(modelId: String): Int = progressByModel[modelId] ?: -1
 
   fun setEventEmitter(emit: ((String, WritableMap) -> Unit)?) {
     eventEmitter = emit
@@ -103,6 +106,7 @@ object WhisperModelDownloader {
     progressByModel[modelId] = 0
     emitProgress(modelId, 0)
     val appContext = context.applicationContext
+    notifContext = appContext
     NrmBackgroundWorkCoordinator.acquire(appContext, "whisper-model:$modelId")
     executor.execute {
       var ok = false
@@ -128,6 +132,9 @@ object WhisperModelDownloader {
         activeDownloads.remove(modelId)
         progressByModel.remove(modelId)
         NrmBackgroundWorkCoordinator.release(appContext, "whisper-model:$modelId")
+        if (activeDownloads.isEmpty()) {
+          notifContext = null
+        }
         emitComplete(modelId, ok)
       }
     }
@@ -215,6 +222,7 @@ object WhisperModelDownloader {
           putInt("progress", progress)
         }
     eventEmitter?.invoke("WhisperModelDownload", body)
+    notifContext?.let { NrmBackgroundWorkService.refreshNotification(it) }
   }
 
   private fun emitComplete(modelId: String, ok: Boolean) {

@@ -72,6 +72,8 @@ type Props = {
 
   onRegionChange: (region: PeriodChartRegion) => void;
 
+  onReselect?: () => void;
+
 };
 
 
@@ -101,6 +103,8 @@ export function NrmPeriodChartFilters({
   onMonthChange,
 
   onRegionChange,
+
+  onReselect,
 
 }: Props) {
 
@@ -187,6 +191,7 @@ export function NrmPeriodChartFilters({
           closePicker();
 
           if (id !== region) onRegionChange(id);
+          else onReselect?.();
 
         }}
 
@@ -256,7 +261,8 @@ export function NrmPeriodChartFilters({
 
                 closePicker();
 
-                onGranularityChange(tab.id);
+                if (tab.id === granularity) onReselect?.();
+                else onGranularityChange(tab.id);
 
               }}
 

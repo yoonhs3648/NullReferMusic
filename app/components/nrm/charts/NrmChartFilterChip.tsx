@@ -31,6 +31,7 @@ export function NrmChartFilterChip({
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.85}
+        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
         style={style}
         accessibilityRole={accessibilityRole}
         accessibilityState={{ selected }}

@@ -5,6 +5,7 @@
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { normalizeWhisperLrc, type NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
@@ -51,11 +52,17 @@ export async function transcribeWhisperLrc(
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
 
+  logNrmDev('download.whisper', {
+    event: 'transcribe_start',
+    mode,
+    extension,
+    audioUri: fileUri.slice(0, 120),
+  });
+
   let lrc = '';
   try {
     lrc = normalizeWhisperLrc(await transcribeAudioToLrc(fileUri));
   } catch (e) {
-    const { logNrmRunError } = await import('@/lib/nrmDevLog');
     logNrmRunError('whisper.lrc', e, { extension, mode });
     lrc = '';
   }
@@ -80,12 +87,26 @@ export async function transcribeWhisperLrc(
   }
 
   if (!lrc.trim()) {
+    logNrmDev('download.whisper', {
+      event: 'transcribe_empty',
+      mode,
+      extension,
+      lyricsTranslationFailed,
+    });
     return {
       lyricsRequested: true,
       lyricsEmbedded: false,
       lyricsTranslationFailed,
     };
   }
+
+  logNrmDev('download.whisper', {
+    event: 'transcribe_ok',
+    mode,
+    extension,
+    lrcChars: lrc.trim().length,
+    lyricsTranslationFailed,
+  });
 
   return {
     lyricsRequested: true,

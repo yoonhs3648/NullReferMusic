@@ -104,8 +104,8 @@ export type NrmAppMenuHandle = {
 };
 
 const EDGE_HIT_WIDTH = 32;
-/** 터치가 이 X(px) 안에서 시작하면 메뉴 스와이프로 인식 */
-const MOBILE_SWIPE_START_MAX_X = 80;
+/** 좌측 가장자리 스와이프 인식 폭 — 넓으면 차트 필터(일간·Korea) 탭이 막힘 */
+const MOBILE_SWIPE_EDGE_WIDTH = 24;
 const EDGE_SWIPE_OPEN_PX = 44;
 const IS_NATIVE_MOBILE = Platform.OS === 'ios' || Platform.OS === 'android';
 
@@ -551,17 +551,15 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     }),
   ).current;
 
-  const mobileSwipeStartMaxX =
-    MOBILE_SWIPE_START_MAX_X + insets.left;
+  const mobileSwipeEdgeWidth = MOBILE_SWIPE_EDGE_WIDTH + insets.left;
 
   const mobileEdgePanHandlers = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_, gesture) =>
-          gesture.dx > 4 &&
-          Math.abs(gesture.dy) < Math.abs(gesture.dx) * 2,
-        onPanResponderTerminationRequest: () => false,
+          gesture.dx > 8 && Math.abs(gesture.dy) < Math.abs(gesture.dx) * 1.5,
+        onPanResponderTerminationRequest: () => true,
         onPanResponderRelease: (_, gesture) => {
           if (gesture.dx >= EDGE_SWIPE_OPEN_PX) {
             openMenuRef.current();
@@ -1527,9 +1525,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
           <View
             style={[
               styles.mobileSwipeEdge,
-              { width: mobileSwipeStartMaxX },
+              { width: mobileSwipeEdgeWidth },
             ]}
             collapsable={false}
+            pointerEvents="auto"
             {...mobileEdgePanHandlers.panHandlers}
           />
         </View>

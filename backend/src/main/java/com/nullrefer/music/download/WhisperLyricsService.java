@@ -18,6 +18,9 @@ public class WhisperLyricsService {
   /** whisper-cli 전사 대기 (초). 긴 곡·base 모델은 5분을 넘길 수 있음 */
   private static final long PROCESS_TIMEOUT_SEC = 1800;
 
+  /** no-speech threshold 완화 */
+  private static final String NO_SPEECH_THRESHOLD = "0.45";
+
   private final NrmPaths paths;
   private final WhisperModelStatusService modelStatusService;
 
@@ -145,7 +148,14 @@ public class WhisperLyricsService {
     cmd.add("-of");
     cmd.add(outPrefix.toString());
     cmd.add("--output-lrc");
+    cmd.add("-bs");
+    cmd.add("1");
+    cmd.add("-bo");
+    cmd.add("1");
+    cmd.add("-nth");
+    cmd.add(NO_SPEECH_THRESHOLD);
     cmd.add("--no-prints");
+    log.info("[whisper] nth={}", NO_SPEECH_THRESHOLD);
     runProcess(NrmProcessLogger.Tool.WHISPER, parentCtx + " step=transcribe", cmd);
   }
 

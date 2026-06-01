@@ -43,9 +43,13 @@ nrm.whisper-model=
 nrm.whisper-dir=
 ```
 
+## LRC no-speech threshold
+
+APK·PC 백엔드 whisper 인자: `-nth 0.45` (no-speech threshold 완화, 인트로·보컬 구간).
+
 ## Android APK (용량 최소화)
 
-- **APK assets (Git 형상관리)**: `app/android/app/src/main/assets/whisper/whisper-cli` (arm64). `ggml-*.bin` 은 APK·Git 모두에 넣지 않습니다.
+- **APK assets (Git 형상관리)**: `app/android/app/src/main/assets/whisper/whisper-cli` (arm64). `ggml-*.bin` Whisper 본체 모델은 APK·Git 모두에 넣지 않습니다.
 - **모델**: 메뉴에서 선택한 5종(`large-v3-turbo` … `base`) 중 하나를 **기기가 Hugging Face에서 직접** 받아 `files/whisper/` 에 저장합니다 (백엔드 통신 없음).
 - CLI 빌드·assets 복사: `powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1`
 - 릴리스 APK 전 검증: `scripts/Verify-AndroidReleaseAssets.ps1` (또는 Gradle `verifyReleaseNativeAssets`)

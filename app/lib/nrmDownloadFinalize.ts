@@ -25,6 +25,7 @@ import {
   type NrmAudioExtension,
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import {
   transcribeWhisperLrc,
   type WhisperLrcStageResult,
@@ -172,23 +173,6 @@ async function finalizeNativeParallel(
     }
   }
 
-  const whisperTask = whisperMode
-    ? transcribeWhisperLrc(whisperSourceUri, whisperMode, extension)
-        .then(async (result) => {
-          whisperRef.result = { ...result, lyricsEmbedded: false };
-          return whisperRef.result;
-        })
-        .catch(async (e) => {
-          const { logNrmRunError } = await import('@/lib/nrmDevLog');
-          logNrmRunError('download.whisper', e, { extension });
-          whisperRef.result = {
-            lyricsRequested: true,
-            lyricsEmbedded: false,
-          };
-          return whisperRef.result;
-        })
-    : Promise.resolve(null);
-
   const audioTask = applyFfmpegMetadataStage(transcodedUri, embedMetadata).then(
     async (processedUri) => {
       if (processedUri !== transcodedUri) {
@@ -202,15 +186,33 @@ async function finalizeNativeParallel(
   );
 
   let audioSaved: { savedLabel: string; location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation };
-  const [whisperSettled, audioSettled] = await Promise.allSettled([whisperTask, audioTask]);
-
-  if (audioSettled.status === 'rejected') {
-    throw audioSettled.reason;
+  try {
+    audioSaved = await audioTask;
+  } catch (e) {
+    throw e;
   }
 
-  audioSaved = audioSettled.value;
-  if (whisperSettled.status === 'fulfilled' && !whisperRef.result && whisperSettled.value) {
-    whisperRef.result = whisperSettled.value;
+  if (whisperMode) {
+    logNrmDev('download.whisper', {
+      event: 'finalize_whisper_scheduled',
+      fileName: safeName,
+      mode: whisperMode,
+      extension,
+    });
+    const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+    logNrmDev('download.whisper', { event: 'sequential_after_audio', fileName: safeName, mode: whisperMode });
+    try {
+      const result = await runWhisperTranscribeSerial(safeName, () =>
+        transcribeWhisperLrc(whisperSourceUri, whisperMode, extension),
+      );
+      whisperRef.result = { ...result, lyricsEmbedded: false };
+    } catch (e) {
+      logNrmRunError('download.whisper', e, { extension, mode: whisperMode });
+      whisperRef.result = {
+        lyricsRequested: true,
+        lyricsEmbedded: false,
+      };
+    }
   }
 
   if (whisperRef.result?.lrcFull?.trim()) {
@@ -222,14 +224,12 @@ async function finalizeNativeParallel(
         lyricsEmbedded: !!lrcUri,
       };
       if (!lrcUri) {
-        const { logNrmDev } = await import('@/lib/nrmDevLog');
         logNrmDev('download.lrc', {
           event: 'finalize_no_uri',
           audioFileName: audioSaved.location.fileName,
         });
       }
     } catch (e) {
-      const { logNrmRunError } = await import('@/lib/nrmDevLog');
       logNrmRunError('download.lrc', e, {
         event: 'finalize_persist_failed',
         audioFileName: audioSaved.location.fileName,
@@ -240,7 +240,6 @@ async function finalizeNativeParallel(
       };
     }
   } else if (whisperRef.result?.lyricsRequested) {
-    const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.lrc', {
       event: 'finalize_skip_no_text',
       audioFileName: audioSaved.location.fileName,
@@ -268,6 +267,18 @@ export async function finalizeAudioDownloadParallel(
     ? metadataForAudioExtension(normalizeDownloadMetadata(metadata), encode.extension)
     : undefined;
   const postMeta = metadataNeedsPostProcess(normalized) ? normalized : undefined;
+  const whisperMode = postMeta
+    ? splitMetadataForDownloadStages(postMeta).whisperMode
+    : null;
+  if (whisperMode) {
+    logNrmDev('download.whisper', {
+      event: 'finalize_parallel_start',
+      fileName,
+      mode: whisperMode,
+      platform: Platform.OS,
+      extractionKind: extraction.kind,
+    });
+  }
 
   if (extraction.kind === 'server') {
     return finalizeServerJobParallel(extraction.jobId, fileName, postMeta);

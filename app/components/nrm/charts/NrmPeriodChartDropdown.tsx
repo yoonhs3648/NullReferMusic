@@ -12,6 +12,8 @@ import {
 
   ScrollView,
 
+  TouchableOpacity,
+
   StyleSheet,
 
   Text,
@@ -151,35 +153,40 @@ export function NrmPeriodChartDropdownTrigger({
 
       <Text style={[styles.inlineLabel, { color: bodyColor }]}>{label}</Text>
 
-      <Pressable
-
-        onPress={() => onOpen({ id, label, value, options })}
-
-        style={({ pressed }) => [
-
-          styles.trigger,
-
-          flex ? styles.triggerFlex : { width: boxWidth },
-
-          { borderColor: border, backgroundColor: bg },
-
-          pressed && styles.triggerPressed,
-
-        ]}
-
-        accessibilityRole="button"
-
-        accessibilityLabel={`${label} ${selected?.label ?? value}`}>
-
-        <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
-
-          {selected?.label ?? String(value)}
-
-        </Text>
-
-        <Ionicons name="chevron-down" size={16} color={bodyColor} />
-
-      </Pressable>
+      {Platform.OS === 'android' ? (
+        <TouchableOpacity
+          onPress={() => onOpen({ id, label, value, options })}
+          activeOpacity={0.85}
+          hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+          style={[
+            styles.trigger,
+            flex ? styles.triggerFlex : { width: boxWidth },
+            { borderColor: border, backgroundColor: bg },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} ${selected?.label ?? value}`}>
+          <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
+            {selected?.label ?? String(value)}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={bodyColor} />
+        </TouchableOpacity>
+      ) : (
+        <Pressable
+          onPress={() => onOpen({ id, label, value, options })}
+          style={({ pressed }) => [
+            styles.trigger,
+            flex ? styles.triggerFlex : { width: boxWidth },
+            { borderColor: border, backgroundColor: bg },
+            pressed && styles.triggerPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} ${selected?.label ?? value}`}>
+          <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
+            {selected?.label ?? String(value)}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={bodyColor} />
+        </Pressable>
+      )}
 
     </View>
 
@@ -306,9 +313,13 @@ export function NrmPeriodChartSharedPickerModal({
   // Android: visible={false} Modal이 화면 전체 터치를 막는 RN 버그 → 닫히면 언마운트
   if (!picker) return null;
 
+  const modalKey = `${picker.id}-${picker.value}-${picker.options.length}`;
+
   return (
 
     <Modal
+
+      key={modalKey}
 
       visible
 
@@ -318,7 +329,9 @@ export function NrmPeriodChartSharedPickerModal({
 
       statusBarTranslucent
 
-      onRequestClose={onClose}>
+      onRequestClose={onClose}
+
+      onDismiss={onClose}>
 
       <Pressable style={styles.modalScrim} onPress={onClose}>
 
