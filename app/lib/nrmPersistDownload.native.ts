@@ -13,6 +13,7 @@
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
+import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
 import { Alert, Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
@@ -32,18 +33,61 @@ const NRM_FOLDER = 'NullReferenceMusic';
 /** SAF createDocument(text/plain) 시 `.lrc` → `.lrc.txt` / `.lrc.text` 로 바뀌는 문제 방지 */
 const LRC_SAF_MIME = 'application/octet-stream';
 
+function toNativeLocalFileUri(uriOrPath: string): string {
+  const trimmed = uriOrPath.trim();
+  if (trimmed.startsWith('content://')) {
+    throw new Error(`로컬 파일이 아닙니다: ${trimmed.slice(0, 96)}`);
+  }
+  if (trimmed.startsWith('file://')) return trimmed;
+  if (trimmed.startsWith('/')) return `file://${trimmed}`;
+  return `file://${trimmed}`;
+}
+
+/** SAF tree에 LRC 텍스트 저장 (MP3 저장과 동일한 createFileAsync 경로 우선) */
+async function writeLrcTextToSafTree(
+  dirUri: string,
+  lrcName: string,
+  text: string,
+): Promise<string> {
+  const body = `${text.trim()}\n`;
+  const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, LRC_SAF_MIME);
+  try {
+    await FileSystem.writeAsStringAsync(lrcDest, body, {
+      encoding: EncodingType.UTF8,
+    });
+    const info = await FileSystem.getInfoAsync(lrcDest);
+    if (info.exists && 'size' in info && (info.size ?? 0) > 0) {
+      return lrcDest;
+    }
+  } catch {
+    /* UTF-8 직접 쓰기 실패 → base64 경로 */
+  }
+  await writeToBinarySafUri(
+    await (async () => {
+      const cacheRoot = FileSystem.cacheDirectory;
+      if (!cacheRoot) throw new Error('캐시 없음');
+      const temp = `${cacheRoot}nrm-lrc-saf-${Date.now()}.lrc`;
+      await FileSystem.writeAsStringAsync(temp, body);
+      return temp;
+    })(),
+    lrcDest,
+  );
+  return lrcDest;
+}
+
 async function copyLrcSidecarToSaf(
   dirUri: string,
   fileName: string,
   sidecarLrcUri: string,
-): Promise<void> {
+): Promise<string> {
   const lrcName = fileName.replace(/\.[^.]+$/, '.lrc');
-  const lrcSrc = sidecarLrcUri.startsWith('file://') ? sidecarLrcUri : `file://${sidecarLrcUri}`;
+  const lrcSrc = toNativeLocalFileUri(sidecarLrcUri);
   try {
-    await copyLocalFileToSaf(lrcSrc, dirUri, lrcName, LRC_SAF_MIME);
+    return await copyLocalFileToSaf(lrcSrc, dirUri, lrcName, LRC_SAF_MIME);
   } catch {
     const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, LRC_SAF_MIME);
-    await writeToBinarySafUri(sidecarLrcUri, lrcDest);
+    await writeToBinarySafUri(lrcSrc, lrcDest);
+    return lrcDest;
   }
 }
 
@@ -419,16 +463,50 @@ export async function persistLrcForSavedAudio(
 
   const tempLrcUri = `${cacheRoot}nrm-lrc-out-${Date.now()}.lrc`;
   await FileSystem.writeAsStringAsync(tempLrcUri, `${trimmed}\n`);
+  const tempInfo = await FileSystem.getInfoAsync(tempLrcUri);
+  if (!tempInfo.exists) {
+    const err = new Error('임시 LRC 파일을 만들지 못했습니다.');
+    logLrcPersist('fail_no_temp', { audioFileName: location.fileName, lrcName }, err);
+    throw err;
+  }
 
   try {
     let lrcDest: string;
     if (location.kind === 'saf') {
-      lrcDest = await copyLocalFileToSaf(
-        tempLrcUri,
-        location.dirUri,
-        lrcName,
-        LRC_SAF_MIME,
-      );
+      try {
+        lrcDest = await writeLrcTextToSafTree(location.dirUri, lrcName, trimmed);
+        logLrcPersist('persist_via', {
+          audioFileName: location.fileName,
+          method: 'saf_create_write',
+        });
+      } catch (e1) {
+        logLrcPersist(
+          'persist_retry',
+          { audioFileName: location.fileName, method: 'native_copy' },
+          e1,
+        );
+        const lrcSrc = toNativeLocalFileUri(tempLrcUri);
+        try {
+          lrcDest = await copyLocalFileToSaf(
+            lrcSrc,
+            location.dirUri,
+            lrcName,
+            LRC_SAF_MIME,
+          );
+        } catch (e2) {
+          logLrcPersist(
+            'persist_retry',
+            { audioFileName: location.fileName, method: 'expo_saf_binary' },
+            e2,
+          );
+          lrcDest = await StorageAccessFramework.createFileAsync(
+            location.dirUri,
+            lrcName,
+            LRC_SAF_MIME,
+          );
+          await writeToBinarySafUri(tempLrcUri, lrcDest);
+        }
+      }
     } else {
       lrcDest = joinFolderFile(location.folderUri, lrcName);
       await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});

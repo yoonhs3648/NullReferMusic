@@ -60,8 +60,16 @@ export async function copyLocalFileToSaf(
   if (!mod?.copyFileToSaf) {
     throw new Error('NrmOnDeviceDownload.copyFileToSaf unavailable');
   }
-  const src = sourcePath.startsWith('file://') ? sourcePath.slice(7) : sourcePath;
-  const out = await mod.copyFileToSaf(src, treeUri, displayName, mimeType);
+  const trimmed = sourcePath.trim();
+  if (trimmed.startsWith('content://')) {
+    throw new Error(`SAF 소스 경로 오류(로컬 파일 필요): ${trimmed.slice(0, 96)}`);
+  }
+  const src = trimmed.startsWith('file://') ? trimmed.slice(7) : trimmed;
+  const tree = treeUri.trim();
+  if (!tree.startsWith('content://')) {
+    throw new Error(`SAF 폴더 URI 오류: ${tree.slice(0, 96)}`);
+  }
+  const out = await mod.copyFileToSaf(src, tree, displayName, mimeType);
   const uri = out?.uri?.trim();
   if (!uri) throw new Error('SAF 저장 URI가 비어 있습니다.');
   return uri;

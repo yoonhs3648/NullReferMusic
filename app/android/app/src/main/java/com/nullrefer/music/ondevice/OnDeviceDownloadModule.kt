@@ -256,6 +256,8 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
+  private val safCopyLock = Any()
+
   /** SAF tree URI 아래에 로컬 파일을 스트리밍 복사 (JS base64 로드 없음). */
   @ReactMethod
   fun copyFileToSaf(
@@ -268,6 +270,14 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     Thread {
       try {
         val srcPath = sourcePath.removePrefix("file://")
+        if (srcPath.startsWith("content:")) {
+          promise.reject(
+              "E_ARG",
+              "소스는 로컬 파일 경로여야 합니다 (content URI 불가): ${srcPath.take(96)}",
+          )
+          return@Thread
+        }
+        synchronized(safCopyLock) {
         val src = File(srcPath)
         if (!src.isFile) {
           promise.reject("E_ARG", "소스 파일이 없습니다.")
@@ -288,7 +298,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         val map = Arguments.createMap()
         map.putString("uri", destUri.toString())
         promise.resolve(map)
+        }
       } catch (e: Exception) {
+        NrmFileLogger.error(
+            "saf",
+            "copyFileToSaf 실패 src=${sourcePath.take(80)} tree=${treeUri.take(80)} name=$displayName",
+            e,
+        )
         promise.reject("E_SAF_COPY", e.message ?: e.toString(), e)
       }
     }.start()
