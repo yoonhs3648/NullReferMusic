@@ -45,10 +45,10 @@ nrm.whisper-dir=
 
 ## Android APK (용량 최소화)
 
-- **APK assets**: `whisper-cli` (arm64) **만** 포함. `ggml-*.bin` 은 APK에 넣지 않습니다.
+- **APK assets (Git 형상관리)**: `app/android/app/src/main/assets/whisper/whisper-cli` (arm64). `ggml-*.bin` 은 APK·Git 모두에 넣지 않습니다.
 - **모델**: 메뉴에서 선택한 5종(`large-v3-turbo` … `base`) 중 하나를 **기기가 Hugging Face에서 직접** 받아 `files/whisper/` 에 저장합니다 (백엔드 통신 없음).
-- assets 준비: `powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -AndroidAssets`
-  (arm64 CLI는 `library/whisper/_bin/android-arm64-v8a` 빌드 결과를 복사)
+- CLI 빌드·assets 복사: `powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1`
+- 릴리스 APK 전 검증: `scripts/Verify-AndroidReleaseAssets.ps1` (또는 Gradle `verifyReleaseNativeAssets`)
 
 ## 웹 (브라우저)
 

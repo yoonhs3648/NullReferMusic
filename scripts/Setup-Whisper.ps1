@@ -120,9 +120,13 @@ function Ensure-AndroidAssets {
             Copy-Item -Path $armBuild -Destination $cliDest -Force
             Write-Host "[whisper-setup] copied arm64 whisper-cli -> $cliDest"
         } else {
-            Write-Host "[whisper-setup] Android whisper-cli missing in assets."
-            Write-Host "[whisper-setup] Build arm64 (NDK) into library/whisper/_bin/android-arm64-v8a/bin/whisper-cli or copy to:"
-            Write-Host "              $cliDest"
+            Write-Host "[whisper-setup] Android whisper-cli missing — running Build-Whisper-AndroidCli.ps1 ..."
+            $buildScript = Join-Path $repoRoot "scripts/Build-Whisper-AndroidCli.ps1"
+            if (Test-Path $buildScript) {
+                & $buildScript
+            } else {
+                Write-Host "[whisper-setup] Build script not found: $buildScript"
+            }
         }
     }
 

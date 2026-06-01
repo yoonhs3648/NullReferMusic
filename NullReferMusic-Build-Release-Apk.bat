@@ -24,8 +24,19 @@ echo - On-device download on Android ^(yt-dlp in APK^)
 echo ======================================================
 echo.
 
+echo [0/3] Release native assets (whisper-cli, shineenc)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Verify-AndroidReleaseAssets.ps1"
+if errorlevel 1 (
+  echo.
+  echo Missing assets. Run from repo root:
+  echo   powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1
+  echo   powershell -ExecutionPolicy Bypass -File .\scripts\Setup-AndroidShine.ps1
+  pause
+  exit /b 1
+)
+
 cd /d "%APP%"
-echo [1/2] Typecheck...
+echo [1/3] Typecheck...
 call npx tsc --noEmit
 if errorlevel 1 (
   echo Typecheck failed.
@@ -33,7 +44,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/2] Gradle assembleRelease...
+echo [3/3] Gradle assembleRelease...
 cd /d "%ANDROID%"
 call gradlew.bat assembleRelease --no-daemon
 if errorlevel 1 (

@@ -101,6 +101,31 @@ cd C:\NullReferMusic\app
 npx tsc --noEmit        # 타입 오류 없어야 함
 ```
 
+### 6-1-a. APK 네이티브 바이너리 assets (필수 · Git 형상관리)
+
+릴리스 APK는 **아래 파일이 저장소에 있고 APK에 번들된 상태**여야 한다. `.gitignore`로 전체 `assets/whisper/*`를 빼지 않는다. **모델(`ggml-*.bin`)만** APK assets에서 제외한다.
+
+| 경로 (저장소) | 용도 | 최소 크기 |
+|---------------|------|-----------|
+| `app/android/app/src/main/assets/whisper/whisper-cli` | 기기 내 LRC(Whisper 전사) | 500 KB |
+| `app/android/app/src/main/assets/shine/shineenc` | MP3 요청 시 인코딩 (FFmpeg에 libmp3lame/libshine 없음) | 40 KB |
+
+**준비 명령 (다른 PC에서 clone 후 1회, 결과물은 commit):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Setup-AndroidShine.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Verify-AndroidReleaseAssets.ps1
+```
+
+**FFmpeg (다운로드·m4a/opus 등):** `ffmpeg` + `libffmpeg.so`는 용량 때문에 Git에 넣지 않는다. 첫 실행 시 [Android-FFmpeg-Prebuilt](https://github.com/hzw1199/Android-FFmpeg-Prebuilt)에서 기기 ABI로 다운로드한다 (`FfmpegBootstrap.kt`). LGPL 빌드라 **MP3 인코더는 APK에 shineenc로 보완**한다.
+
+**Whisper 모델:** APK에 넣지 않는다. 사용자가 메뉴에서 선택한 모델을 기기가 Hugging Face에서 `files/whisper/`로 받는다.
+
+**Gradle:** `assembleRelease` 전에 `verifyReleaseNativeAssets` 태스크가 위 두 파일 존재·크기를 검사한다. 없으면 빌드가 실패한다.
+
+**AI 에이전트:** APK 빌드 요청 시 `Verify-AndroidReleaseAssets.ps1`를 통과시키지 못하면, 사용자에게 묻지 말고 위 스크립트로 바이너리를 생성한 뒤 **Git에 추가 가능한 상태**로 만든 다음 빌드한다.
+
 ### 6-2. 앱 메타데이터 확인
 | 항목 | 기준값 | 위치 |
 |------|--------|------|

@@ -34,8 +34,6 @@ library/whisper/*.zip
 library/whisper/_bin/
 library/whisper/_src_whisper_cpp/
 
-# Whisper APK 번들 (모델·CLI — Setup-Whisper.ps1 -AndroidAssets 로 로컬 준비)
-app/android/app/src/main/assets/whisper/*
-
-# shineenc APK 번들 (Setup-AndroidShine.ps1 로 로컬 준비)
-app/android/app/src/main/assets/shine/*
+# Whisper APK assets — ggml 모델만 제외 (CLI·libomp.so는 형상관리)
+app/android/app/src/main/assets/whisper/ggml-*.bin
+app/android/.gradle-home/

@@ -12,23 +12,34 @@
    cd backend; .\mvnw.cmd -q -DskipTests package
    cd ..\app; npm install
    ```
-5. **Whisper 바이너리/모델 준비** (형상관리 제외 파일):
+5. **Whisper (PC 백엔드)** — 모델·exe는 `library/whisper/` (Git 제외, 스크립트로 준비):
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\Setup-Whisper.ps1 -WhisperProfile tiny-q5_1
-   # 릴리스 APK 가사(Whisper)까지: `-AndroidAssets` (모델 복사; `whisper-cli` arm64는 `library/whisper/README.md` Android 절)
    ```
-6. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
-7. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)
-8. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트)
-9. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
+6. **릴리스 APK 네이티브 assets (Git 포함)** — LRC·MP3용:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\Setup-AndroidShine.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\Verify-AndroidReleaseAssets.ps1
+   ```
+   상세: `docs/RELEASE-APK-IPA-RULE.md` §6-1-a
+7. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
+8. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)
+9. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트, §6-1-a assets 필수)
+10. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
 
-### 왜 Whisper 설치 단계를 따로 두나?
+### Whisper / APK 바이너리와 Git
 
-- `whisper-cli.exe`, `ggml-*.bin`은 수백 MB~수 GB라 Git 원격 푸시 실패/지연을 유발한다.
-- 따라서 저장소는 **소스만 관리**하고, 바이너리는 `scripts/Setup-Whisper.ps1`로 각 PC에서 준비한다.
-- 새 PC에서 pull 후 가사(Whisper) 기능이 안 되면 먼저 위 스크립트를 실행한다.
+| 대상 | Git | 비고 |
+|------|-----|------|
+| `library/whisper/*.exe`, `ggml-*.bin` | 제외 | PC 백엔드용, `Setup-Whisper.ps1` |
+| `assets/whisper/whisper-cli` | **포함** | APK LRC, `Build-Whisper-AndroidCli.ps1` |
+| `assets/shine/shineenc` | **포함** | APK MP3, `Setup-AndroidShine.ps1` |
+| FFmpeg android 바이너리 | 제외 | 첫 실행 시 CDN 다운로드 |
+
+새 PC에서 pull 후 **릴리스 APK**를 빌드하면 assets는 이미 포함되어 있다. PC 백엔드 가사만 필요하면 `Setup-Whisper.ps1`을 추가로 실행한다.
 
 ## 개발 스택 버전 (`dev-stack-versions.json`)
 
