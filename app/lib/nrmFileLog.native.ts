@@ -9,7 +9,7 @@ type NrmFileLoggerNative = {
 
 const mod = NativeModules.NrmFileLogger as NrmFileLoggerNative | undefined;
 
-/** @deprecated NRM_FILE_LOGGING_ENABLED=false — no-op. 레거시 native 모듈 호출만 유지. */
+/** Android 네이티브 NrmFileLogger 모듈로 파일 로그 기록 */
 export function appendNrmFileLog(
   tag: string,
   level: 'info' | 'warn' | 'error',

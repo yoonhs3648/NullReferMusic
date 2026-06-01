@@ -13,6 +13,7 @@ class OnDeviceDownloadPackage : ReactPackage {
         NrmWhisperModule(reactContext),
         NrmSpotifyCookieModule(reactContext),
         NrmFileLoggerModule(reactContext),
+        NrmBackgroundWorkModule(reactContext),
     )
   }
 

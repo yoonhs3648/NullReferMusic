@@ -103,6 +103,7 @@ object WhisperModelDownloader {
     progressByModel[modelId] = 0
     emitProgress(modelId, 0)
     val appContext = context.applicationContext
+    NrmBackgroundWorkCoordinator.acquire(appContext, "whisper-model:$modelId")
     executor.execute {
       var ok = false
       try {
@@ -126,6 +127,7 @@ object WhisperModelDownloader {
         flag.set(false)
         activeDownloads.remove(modelId)
         progressByModel.remove(modelId)
+        NrmBackgroundWorkCoordinator.release(appContext, "whisper-model:$modelId")
         emitComplete(modelId, ok)
       }
     }

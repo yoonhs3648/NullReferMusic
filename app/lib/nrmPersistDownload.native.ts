@@ -19,6 +19,7 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { hasEmbeddableAudioMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
@@ -154,7 +155,7 @@ async function saveViaSaf(
   safeName: string,
   sidecarLrcUri?: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   // 유효한(NullReferenceMusic 폴더) grant가 있는지 먼저 확인
   let dirUri = await loadStoredSafGrant();
 
@@ -190,6 +191,12 @@ async function saveViaSaf(
 
   return {
     savedLabel: `저장했습니다.`,
+    location: {
+      kind: 'saf',
+      audioUri: destUri,
+      dirUri,
+      fileName,
+    },
   };
 }
 
@@ -202,7 +209,7 @@ async function saveToExternalDirect(
   safeName: string,
   sidecarLrcUri?: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   const dirUri = `file:///storage/emulated/0/${NRM_FOLDER}`;
   await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true });
 
@@ -216,7 +223,15 @@ async function saveToExternalDirect(
     await FileSystem.copyAsync({ from: sidecarLrcUri, to: lrcDest });
   }
 
-  return { savedLabel: `저장했습니다. 내 파일 > ${NRM_FOLDER} 폴더에서 확인하세요.` };
+  return {
+    savedLabel: `저장했습니다. 내 파일 > ${NRM_FOLDER} 폴더에서 확인하세요.`,
+    location: {
+      kind: 'file',
+      audioUri: destUri,
+      folderUri: dirUri,
+      fileName,
+    },
+  };
 }
 
 /** fallback: 앱 전용 Documents 폴더 저장 (Expo Go 등) */
@@ -224,7 +239,7 @@ async function saveToAppDocumentsFallback(
   sourceUri: string,
   safeName: string,
   sidecarLrcUri?: string,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   const docRoot = FileSystem.documentDirectory;
   if (!docRoot) throw new Error('이 기기에서 저장 공간을 사용할 수 없습니다.');
 
@@ -243,6 +258,12 @@ async function saveToAppDocumentsFallback(
 
   return {
     savedLabel: `저장했습니다. (앱 내부 폴더 — Expo Go 개발 환경)\n앱 폴더 > ${NRM_FOLDER}에서 확인하세요.`,
+    location: {
+      kind: 'file',
+      audioUri: destUri,
+      folderUri,
+      fileName,
+    },
   };
 }
 
@@ -251,7 +272,7 @@ async function androidSaveToNrmFolder(
   safeName: string,
   sidecarLrcUri?: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   // Android 9(API 28) 이하: 직접 쓰기 시도
   if ((Platform.Version as number) < 29) {
     try {
@@ -328,6 +349,120 @@ export async function persistLrcTextToDestination(
   }
 }
 
+export type PersistedAudioLocation =
+  | {
+      kind: 'saf';
+      audioUri: string;
+      dirUri: string;
+      fileName: string;
+    }
+  | {
+      kind: 'file';
+      audioUri: string;
+      folderUri: string;
+      fileName: string;
+    };
+
+function lrcNameFromFileName(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, '.lrc');
+}
+
+function joinFolderFile(folderUri: string, fileName: string): string {
+  const sep = folderUri.endsWith('/') ? '' : '/';
+  return `${folderUri}${sep}${fileName}`;
+}
+
+function logLrcPersist(
+  event: string,
+  payload: Record<string, unknown>,
+  err?: unknown,
+): void {
+  if (err !== undefined) {
+    logNrmRunError('download.lrc', err, { event, ...payload });
+    return;
+  }
+  logNrmDev('download.lrc', { event, ...payload });
+}
+
+/** Whisper 완료 후 — 이미 저장된 MP3와 동일 폴더·동일 stem의 `.lrc` 로 저장 */
+export async function persistLrcForSavedAudio(
+  location: PersistedAudioLocation,
+  lrcText: string,
+): Promise<string | null> {
+  const trimmed = lrcText.trim();
+  const lrcName = lrcNameFromFileName(location.fileName);
+  if (!trimmed) {
+    logLrcPersist('skip_empty', {
+      audioFileName: location.fileName,
+      lrcName,
+      storageKind: location.kind,
+    });
+    return null;
+  }
+
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) {
+    const err = new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
+    logLrcPersist('fail_no_cache', { audioFileName: location.fileName, lrcName }, err);
+    throw err;
+  }
+
+  logLrcPersist('persist_start', {
+    audioFileName: location.fileName,
+    lrcName,
+    lrcBytes: trimmed.length,
+    storageKind: location.kind,
+    audioUri: location.audioUri,
+    targetDir:
+      location.kind === 'saf' ? location.dirUri : location.folderUri,
+  });
+
+  const tempLrcUri = `${cacheRoot}nrm-lrc-out-${Date.now()}.lrc`;
+  await FileSystem.writeAsStringAsync(tempLrcUri, `${trimmed}\n`);
+
+  try {
+    let lrcDest: string;
+    if (location.kind === 'saf') {
+      lrcDest = await copyLocalFileToSaf(
+        tempLrcUri,
+        location.dirUri,
+        lrcName,
+        LRC_SAF_MIME,
+      );
+    } else {
+      lrcDest = joinFolderFile(location.folderUri, lrcName);
+      await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
+      await FileSystem.copyAsync({ from: tempLrcUri, to: lrcDest });
+    }
+
+    logLrcPersist('persist_ok', {
+      audioFileName: location.fileName,
+      lrcName,
+      lrcBytes: trimmed.length,
+      storageKind: location.kind,
+      lrcUri: lrcDest,
+      targetDir:
+        location.kind === 'saf' ? location.dirUri : location.folderUri,
+    });
+    return lrcDest;
+  } catch (e) {
+    logLrcPersist(
+      'persist_fail',
+      {
+        audioFileName: location.fileName,
+        lrcName,
+        storageKind: location.kind,
+        targetDir:
+          location.kind === 'saf' ? location.dirUri : location.folderUri,
+      },
+      e,
+    );
+    throw e;
+  } finally {
+    await FileSystem.deleteAsync(tempLrcUri, { idempotent: true }).catch(() => {});
+  }
+}
+
 /** ffmpeg 실패 등으로 LRC만 롤백할 때 */
 export async function deletePersistedLrc(lrcUri: string): Promise<void> {
   const uri = lrcUri.trim();
@@ -340,7 +475,7 @@ export async function persistAudioToDestination(
   tempUri: string,
   safeName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   return persistLocalAudioFile(tempUri, safeName, metadata);
 }
 
@@ -349,7 +484,7 @@ export async function persistLocalAudioFile(
   tempUri: string,
   safeName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
+): Promise<{ savedLabel: string; location: PersistedAudioLocation }> {
   const storedName = storageFileName(safeName);
   const tempPath = tempUri.replace(/^file:\/\//, '');
   const lrcUri = siblingLrcUri(tempUri);
@@ -376,10 +511,23 @@ export async function persistLocalAudioFile(
 
       return {
         savedLabel: `저장했습니다. iOS «파일» 앱 → 내 iPhone → 이 앱 → «${NRM_FOLDER}» 폴더에서 확인하세요.`,
+        location: {
+          kind: 'file',
+          audioUri: destUri,
+          folderUri,
+          fileName: storedName,
+        },
       };
     }
 
-    return await androidSaveToNrmFolder(tempUri, safeName, lrcToPersist, metadata);
+    const out = await androidSaveToNrmFolder(tempUri, safeName, lrcToPersist, metadata);
+    logLrcPersist('audio_saved', {
+      audioFileName: out.location.fileName,
+      storageKind: out.location.kind,
+      audioUri: out.location.audioUri,
+      hadSidecarAtSave: !!lrcToPersist,
+    });
+    return out;
   } finally {
     if (lrcToPersist) {
       await FileSystem.deleteAsync(lrcToPersist, { idempotent: true }).catch(() => {});

@@ -23,8 +23,7 @@ import java.util.TimeZone
  * (Android/data 아래가 아님)
  */
 object NrmFileLogger {
-  /** false — 물리 로그 파일 미생성 (레거시 구현은 유지) */
-  private const val FILE_LOGGING_ENABLED = false
+  private const val FILE_LOGGING_ENABLED = true
 
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_NAME = "nrm-debug.log"

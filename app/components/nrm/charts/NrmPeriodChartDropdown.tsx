@@ -261,8 +261,6 @@ export function NrmPeriodChartSharedPickerModal({
 
 
 
-  const visible = picker !== null;
-
   const value = picker?.value ?? 0;
 
   const options = picker?.options ?? [];
@@ -273,7 +271,7 @@ export function NrmPeriodChartSharedPickerModal({
 
   useEffect(() => {
 
-    if (!visible || options.length === 0) return;
+    if (!picker || options.length === 0) return;
 
     const idx = Math.max(0, options.findIndex((o) => o.value === value));
 
@@ -285,7 +283,7 @@ export function NrmPeriodChartSharedPickerModal({
 
     });
 
-  }, [visible, value, options]);
+  }, [picker, value, options]);
 
 
 
@@ -305,11 +303,14 @@ export function NrmPeriodChartSharedPickerModal({
 
 
 
+  // Android: visible={false} Modal이 화면 전체 터치를 막는 RN 버그 → 닫히면 언마운트
+  if (!picker) return null;
+
   return (
 
     <Modal
 
-      visible={visible}
+      visible
 
       transparent
 
@@ -317,9 +318,7 @@ export function NrmPeriodChartSharedPickerModal({
 
       statusBarTranslucent
 
-      onRequestClose={onClose}
-
-      onDismiss={onClose}>
+      onRequestClose={onClose}>
 
       <Pressable style={styles.modalScrim} onPress={onClose}>
 

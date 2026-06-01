@@ -1,21 +1,19 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 
 
+import { NrmChartFilterChip } from '@/components/nrm/charts/NrmChartFilterChip';
 import { NrmChartFilterScrollRow } from '@/components/nrm/charts/NrmChartFilterScrollRow';
 
 import {
 
   NrmPeriodChartDropdownTrigger,
 
-  NrmPeriodChartSharedPickerModal,
-
   PERIOD_FILTER_CONTROL_HEIGHT,
 
   type PeriodChartPickerOpenRequest,
-  type PeriodChartPickerState,
 
 } from '@/components/nrm/charts/NrmPeriodChartDropdown';
 
@@ -50,6 +48,8 @@ import {
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
 
 import { DEFAULT_WEEKLY_SNAPSHOT_DAY } from '@/lib/nrmWeeklySnapshotSettings';
+import { logNrmDev } from '@/lib/nrmDevLog';
+import type { NrmPeriodChartPickerControl } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 
 
 
@@ -74,6 +74,8 @@ type Props = {
   snapshotDow: number;
 
   region: PeriodChartRegion;
+
+  pickerControl: NrmPeriodChartPickerControl;
 
   onKindChange: (kind: SpotifyPeriodChartKind) => void;
 
@@ -121,6 +123,8 @@ export function NrmSpotifyPeriodChartFilters({
 
   region,
 
+  pickerControl,
+
   onKindChange,
 
   onYearChange,
@@ -135,9 +139,7 @@ export function NrmSpotifyPeriodChartFilters({
 
 }: Props) {
 
-  const [picker, setPicker] = useState<PeriodChartPickerState | null>(null);
-
-  const closePicker = useCallback(() => setPicker(null), []);
+  const { openPicker, closePicker } = pickerControl;
 
 
 
@@ -247,6 +249,8 @@ export function NrmSpotifyPeriodChartFilters({
 
     if (next === kind) return;
 
+    logNrmDev('chart.spotify.filter', { event: 'kind', from: kind, to: next });
+
     onKindChange(next);
 
     const m = clampSpotifyPeriodChartMonth(year, month, next, snapshotDow, now);
@@ -271,39 +275,33 @@ export function NrmSpotifyPeriodChartFilters({
 
 
 
-  const openPicker = useCallback(
-
-    (draft: PeriodChartPickerOpenRequest, onChange: (v: number) => void) => {
-
-      setPicker({ ...draft, onChange });
-
-    },
-
-    [],
-
-  );
-
-
-
   const renderRegionChip = (id: PeriodChartRegion, label: string) => {
 
     const selected = region === id;
 
     return (
 
-      <Pressable
+      <NrmChartFilterChip
 
         key={id}
+
+        selected={selected}
 
         onPress={() => {
 
           closePicker();
 
-          if (id !== region) onRegionChange(id);
+          if (id !== region) {
+
+            logNrmDev('chart.spotify.filter', { event: 'region', from: region, to: id });
+
+            onRegionChange(id);
+
+          }
 
         }}
 
-        style={({ pressed }) => [
+        style={[
 
           styles.regionChip,
 
@@ -315,13 +313,9 @@ export function NrmSpotifyPeriodChartFilters({
 
           },
 
-          pressed && styles.regionChipPressed,
-
         ]}
 
-        accessibilityRole="button"
-
-        accessibilityState={{ selected }}>
+        accessibilityRole="button">
 
         <Text
 
@@ -343,7 +337,7 @@ export function NrmSpotifyPeriodChartFilters({
 
         </Text>
 
-      </Pressable>
+      </NrmChartFilterChip>
 
     );
 
@@ -353,7 +347,7 @@ export function NrmSpotifyPeriodChartFilters({
 
   return (
 
-    <View style={styles.root} collapsable={false}>
+    <View style={styles.root} collapsable={false} pointerEvents="auto">
 
       <NrmChartFilterScrollRow>
 
@@ -363,13 +357,15 @@ export function NrmSpotifyPeriodChartFilters({
 
           return (
 
-            <Pressable
+            <NrmChartFilterChip
 
               key={tab.id}
 
+              selected={selected}
+
               onPress={() => handleKindChange(tab.id)}
 
-              style={({ pressed }) => [
+              style={[
 
                 styles.tabChip,
 
@@ -381,13 +377,9 @@ export function NrmSpotifyPeriodChartFilters({
 
                 },
 
-                pressed && styles.tabChipPressed,
-
               ]}
 
-              accessibilityRole="tab"
-
-              accessibilityState={{ selected }}>
+              accessibilityRole="tab">
 
               <Text
 
@@ -409,7 +401,7 @@ export function NrmSpotifyPeriodChartFilters({
 
               </Text>
 
-            </Pressable>
+            </NrmChartFilterChip>
 
           );
 
@@ -419,7 +411,7 @@ export function NrmSpotifyPeriodChartFilters({
 
 
 
-      <View style={styles.dateRow}>
+      <View style={styles.dateRow} collapsable={false}>
 
         <NrmPeriodChartDropdownTrigger
 
@@ -541,29 +533,13 @@ export function NrmSpotifyPeriodChartFilters({
 
 
 
-      <View style={styles.regionRow}>
+      <View style={styles.regionRow} collapsable={false}>
 
         {renderRegionChip('kr', 'Korea')}
 
         {renderRegionChip('global', 'Global')}
 
       </View>
-
-
-
-      <NrmPeriodChartSharedPickerModal
-
-        picker={picker}
-
-        onClose={closePicker}
-
-        isDark={isDark}
-
-        titleColor={titleColor}
-
-        bodyColor={bodyColor}
-
-      />
 
     </View>
 

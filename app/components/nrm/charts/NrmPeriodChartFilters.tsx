@@ -1,23 +1,20 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
-
-
+import { NrmChartFilterChip } from '@/components/nrm/charts/NrmChartFilterChip';
 import { NrmChartFilterScrollRow } from '@/components/nrm/charts/NrmChartFilterScrollRow';
 
 import {
 
   NrmPeriodChartDropdownTrigger,
 
-  NrmPeriodChartSharedPickerModal,
-
   PERIOD_FILTER_CONTROL_HEIGHT,
 
   type PeriodChartPickerOpenRequest,
-  type PeriodChartPickerState,
 
 } from '@/components/nrm/charts/NrmPeriodChartDropdown';
+import type { NrmPeriodChartPickerControl } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 
@@ -65,6 +62,8 @@ type Props = {
 
   region: PeriodChartRegion;
 
+  pickerControl: NrmPeriodChartPickerControl;
+
   onGranularityChange: (g: PeriodChartGranularity) => void;
 
   onYearChange: (year: number) => void;
@@ -93,6 +92,8 @@ export function NrmPeriodChartFilters({
 
   region,
 
+  pickerControl,
+
   onGranularityChange,
 
   onYearChange,
@@ -103,9 +104,7 @@ export function NrmPeriodChartFilters({
 
 }: Props) {
 
-  const [picker, setPicker] = useState<PeriodChartPickerState | null>(null);
-
-  const closePicker = useCallback(() => setPicker(null), []);
+  const { openPicker, closePicker } = pickerControl;
 
 
 
@@ -171,29 +170,17 @@ export function NrmPeriodChartFilters({
 
 
 
-  const openPicker = useCallback(
-
-    (draft: PeriodChartPickerOpenRequest, onChange: (v: number) => void) => {
-
-      setPicker({ ...draft, onChange });
-
-    },
-
-    [],
-
-  );
-
-
-
   const renderRegionChip = (id: PeriodChartRegion, label: string) => {
 
     const selected = region === id;
 
     return (
 
-      <Pressable
+      <NrmChartFilterChip
 
         key={id}
+
+        selected={selected}
 
         onPress={() => {
 
@@ -203,7 +190,7 @@ export function NrmPeriodChartFilters({
 
         }}
 
-        style={({ pressed }) => [
+        style={[
 
           styles.regionChip,
 
@@ -215,13 +202,9 @@ export function NrmPeriodChartFilters({
 
           },
 
-          pressed && styles.regionChipPressed,
-
         ]}
 
-        accessibilityRole="button"
-
-        accessibilityState={{ selected }}>
+        accessibilityRole="button">
 
         <Text
 
@@ -243,7 +226,7 @@ export function NrmPeriodChartFilters({
 
         </Text>
 
-      </Pressable>
+      </NrmChartFilterChip>
 
     );
 
@@ -253,7 +236,7 @@ export function NrmPeriodChartFilters({
 
   return (
 
-    <View style={styles.root} collapsable={false}>
+    <View style={styles.root} collapsable={false} pointerEvents="auto">
 
       <NrmChartFilterScrollRow>
 
@@ -263,9 +246,11 @@ export function NrmPeriodChartFilters({
 
           return (
 
-            <Pressable
+            <NrmChartFilterChip
 
               key={tab.id}
+
+              selected={selected}
 
               onPress={() => {
 
@@ -275,7 +260,7 @@ export function NrmPeriodChartFilters({
 
               }}
 
-              style={({ pressed }) => [
+              style={[
 
                 styles.tabChip,
 
@@ -287,13 +272,9 @@ export function NrmPeriodChartFilters({
 
                 },
 
-                pressed && styles.tabChipPressed,
-
               ]}
 
-              accessibilityRole="tab"
-
-              accessibilityState={{ selected }}>
+              accessibilityRole="tab">
 
               <Text
 
@@ -315,7 +296,7 @@ export function NrmPeriodChartFilters({
 
               </Text>
 
-            </Pressable>
+            </NrmChartFilterChip>
 
           );
 
@@ -325,7 +306,7 @@ export function NrmPeriodChartFilters({
 
 
 
-      <View style={styles.dateRow}>
+      <View style={styles.dateRow} collapsable={false}>
 
         <NrmPeriodChartDropdownTrigger
 
@@ -383,7 +364,7 @@ export function NrmPeriodChartFilters({
 
 
 
-      <View style={styles.regionRow}>
+      <View style={styles.regionRow} collapsable={false}>
 
         {renderRegionChip('kr', 'Korea')}
 
@@ -392,20 +373,6 @@ export function NrmPeriodChartFilters({
       </View>
 
 
-
-      <NrmPeriodChartSharedPickerModal
-
-        picker={picker}
-
-        onClose={closePicker}
-
-        isDark={isDark}
-
-        titleColor={titleColor}
-
-        bodyColor={bodyColor}
-
-      />
 
     </View>
 

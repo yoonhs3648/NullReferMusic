@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -14,10 +15,12 @@ import {
   createInitialPeriodChartDate,
   NrmPeriodChartFilters,
 } from '@/components/nrm/charts/NrmPeriodChartFilters';
+import { NrmPeriodChartSharedPickerModal } from '@/components/nrm/charts/NrmPeriodChartDropdown';
 import {
   createInitialSpotifyPeriodChartDate,
   NrmSpotifyPeriodChartFilters,
 } from '@/components/nrm/charts/NrmSpotifyPeriodChartFilters';
+import { useNrmPeriodChartPicker } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
@@ -37,6 +40,7 @@ import {
   spotifyPeriodChartMaxRank,
   type SpotifyPeriodChartKind,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
+import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
 
 type Props = {
@@ -66,6 +70,8 @@ export function NrmPeriodChartsHome({
   const iconKey = platform;
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
+  const screenBg = getNrmRootBackgroundColor(isDark);
+  const pickerControl = useNrmPeriodChartPicker();
 
   const initialLastfm = createInitialPeriodChartDate();
   const initialSpotify = createInitialSpotifyPeriodChartDate();
@@ -236,26 +242,28 @@ export function NrmPeriodChartsHome({
       />
     ) : null;
 
-  const listHeader = (
-    <View style={{ paddingHorizontal }} collapsable={false}>
-      {platform !== 'spotify' && playlistTitle && !errorCode ? (
+  const listHeader =
+    platform !== 'spotify' && playlistTitle && !errorCode ? (
+      <View style={{ paddingHorizontal }}>
         <Text style={[styles.hint, { color: bodyColor }]}>
-          {playlistTitle} · {periodChartGranularityLabel(granularity)}{' '}
-          · 최대 {maxRank}곡 · {items.length}곡 표시
+          {playlistTitle} · {periodChartGranularityLabel(granularity)} · 최대 {maxRank}곡 ·{' '}
+          {items.length}곡 표시
         </Text>
-      ) : null}
-
-      {loading ? (
-        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
-      ) : null}
-    </View>
-  );
+      </View>
+    ) : null;
 
   return (
-    <View style={styles.screen} collapsable={false}>
-      <View style={[styles.filtersHost, { paddingHorizontal }]} collapsable={false}>
+    <View style={[styles.screen, { backgroundColor: screenBg }]} collapsable={false}>
+      <View
+        style={[styles.filtersHost, { paddingHorizontal, backgroundColor: screenBg }]}
+        collapsable={false}
+        pointerEvents="box-none">
         <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
-        <NrmChartPageHeading iconKey={iconKey} title={`${pageTitle} 기간별 차트`} titleColor={titleColor} />
+        <NrmChartPageHeading
+          iconKey={iconKey}
+          title={`${pageTitle} 기간별 차트`}
+          titleColor={titleColor}
+        />
 
         {platform === 'spotify' ? (
           <NrmSpotifyPeriodChartFilters
@@ -269,6 +277,7 @@ export function NrmPeriodChartsHome({
             weekOfMonth={weekOfMonth}
             snapshotDow={snapshotDow}
             region={region}
+            pickerControl={pickerControl}
             onKindChange={setSpotifyKind}
             onYearChange={setYear}
             onMonthChange={setMonth}
@@ -285,12 +294,17 @@ export function NrmPeriodChartsHome({
             year={year}
             month={month}
             region={region}
+            pickerControl={pickerControl}
             onGranularityChange={setGranularity}
             onYearChange={setYear}
             onMonthChange={setMonth}
             onRegionChange={setRegion}
           />
         )}
+
+        {loading ? (
+          <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
+        ) : null}
       </View>
 
       <FlatList
@@ -327,6 +341,15 @@ export function NrmPeriodChartsHome({
           (loading || (errorCode && items.length === 0)) && styles.listContentEmpty,
         ]}
         keyboardShouldPersistTaps="always"
+        removeClippedSubviews={Platform.OS === 'android' ? false : undefined}
+      />
+
+      <NrmPeriodChartSharedPickerModal
+        picker={pickerControl.picker}
+        onClose={pickerControl.closePicker}
+        isDark={isDark}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
       />
     </View>
   );
@@ -335,9 +358,10 @@ export function NrmPeriodChartsHome({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   filtersHost: {
-    zIndex: 10,
-    elevation: 10,
-    position: 'relative',
+    flexGrow: 0,
+    flexShrink: 0,
+    zIndex: 20,
+    elevation: 20,
   },
   list: { flex: 1, zIndex: 0 },
   listContent: { paddingBottom: nrmTokens.space.xxl },

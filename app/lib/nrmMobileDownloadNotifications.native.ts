@@ -11,6 +11,12 @@
  *   (이전에 끝난 뒤 새로 받기 시작하면 완료 목록은 초기화 — 지운 알림이 다시 묶이지 않음)
  */
 import { Platform } from 'react-native';
+
+import {
+  nrmBackgroundWorkAcquire,
+  nrmBackgroundWorkRelease,
+  nrmDownloadBackgroundWorkToken,
+} from '@/lib/nrmBackgroundWork';
 import {
   AndroidImportance,
   dismissNotificationAsync,
@@ -141,6 +147,7 @@ export function nrmNotifyDownloadStarted(
   videoId: string,
   displayLabel: string,
 ): void {
+  nrmBackgroundWorkAcquire(nrmDownloadBackgroundWorkToken(videoId));
   const wasIdle = activeDownloads.size === 0;
   activeDownloads.set(videoId, displayLabel);
   if (wasIdle) {
@@ -157,4 +164,9 @@ export function nrmNotifyDownloadFinished(
   activeDownloads.delete(videoId);
   void refreshProgressNotif();
   if (success) void refreshCompleteNotif(displayLabel, videoId);
+}
+
+/** ffmpeg·Whisper 포함 전체 후처리가 끝났을 때 호출 (오디오 저장만으로는 release 하지 않음) */
+export function nrmNotifyDownloadWorkEnded(videoId: string): void {
+  nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
 }

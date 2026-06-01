@@ -11,32 +11,32 @@ function toFilePayload(payload: Record<string, unknown>): string {
   }
 }
 
-/** @deprecated 파일 로깅 비활성 — __DEV__에서만 Metro 콘솔 */
+/** Release APK 포함 — Android에서 파일 로그 기록 */
 export function logNrmDev(
   tag: string,
   payload: Record<string, unknown>,
 ): void {
-  if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
-  console.warn(`[NRM:dev][${tag}]`, payload);
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn(`[NRM:dev][${tag}]`, payload);
+  }
   if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
     appendNrmFileLog(tag, 'info', toFilePayload(payload));
   }
 }
 
-/**
- * @deprecated 파일 로깅 비활성 — __DEV__에서만 Metro 콘솔
- */
+/** Release APK 포함 — Android에서 파일 로그 기록 */
 export function logNrmRunError(
   tag: string,
   err: unknown,
   context?: Record<string, unknown>,
 ): void {
-  if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
   const extra = context && Object.keys(context).length ? context : undefined;
   if (err instanceof Error) {
-    console.error(`[NRM:err][${tag}]`, err.message, extra ?? '');
-    if (err.stack) {
-      console.error(err.stack);
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.error(`[NRM:err][${tag}]`, err.message, extra ?? '');
+      if (err.stack) {
+        console.error(err.stack);
+      }
     }
     if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
       const ctx = extra ? ` ${toFilePayload(extra)}` : '';
@@ -44,7 +44,9 @@ export function logNrmRunError(
     }
     return;
   }
-  console.error(`[NRM:err][${tag}]`, err, extra ?? '');
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.error(`[NRM:err][${tag}]`, err, extra ?? '');
+  }
   if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
     const ctx = extra ? ` ${toFilePayload(extra)}` : '';
     appendNrmFileLog(tag, 'error', `${String(err)}${ctx}`);

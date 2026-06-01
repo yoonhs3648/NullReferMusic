@@ -24,6 +24,7 @@ import {
 import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadStarted,
+  nrmNotifyDownloadWorkEnded,
 } from '@/lib/nrmMobileDownloadNotifications';
 import {
   normalizeDownloadMetadata,
@@ -467,6 +468,9 @@ export function NrmYoutubeHome({
         } catch {
           /* notifyUser / overlays inside completeDownloadAfterExtraction */
         } finally {
+          if (Platform.OS !== 'web') {
+            nrmNotifyDownloadWorkEnded(videoId);
+          }
           clearDownloadSession(videoId);
         }
       })();
@@ -563,6 +567,9 @@ export function NrmYoutubeHome({
           handleMetadataPrefetchError(videoId, e);
         }
       } finally {
+        if (Platform.OS !== 'web') {
+          nrmNotifyDownloadWorkEnded(videoId);
+        }
         clearDownloadSession(videoId);
       }
     },

@@ -11,3 +11,5 @@ export function nrmNotifyDownloadFinished(
   _displayLabel: string,
   _success: boolean,
 ): void {}
+
+export function nrmNotifyDownloadWorkEnded(_videoId: string): void {}

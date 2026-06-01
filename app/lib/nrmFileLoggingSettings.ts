@@ -1,18 +1,26 @@
-/** @deprecated 파일 로깅 비활성 — 레거시 설정 API (항상 off) */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const STORAGE_KEY = 'nrm_file_logging_enabled';
+
+/** APK 파일 로깅 사용자 설정 UI (기본값 false). 네이티브 파일 로거는 빌드 정책으로 제어. */
 export type NrmFileLoggingMode = 'off' | 'on';
 
 export const NRM_FILE_LOG_DISPLAY_PATH =
   'Download/NullReferenceMusic/logs/nrm-debug.log';
 
 export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
-  return false;
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    return raw === 'true';
+  } catch {
+    return false;
+  }
 }
 
-export async function saveNrmFileLoggingEnabled(_enabled: boolean): Promise<void> {
-  /* no-op */
+export async function saveNrmFileLoggingEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
 }
 
 export async function loadNrmFileLoggingMode(): Promise<NrmFileLoggingMode> {
-  return 'off';
+  return (await loadNrmFileLoggingEnabled()) ? 'on' : 'off';
 }
