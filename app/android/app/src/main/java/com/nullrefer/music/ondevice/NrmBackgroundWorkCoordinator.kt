@@ -24,10 +24,16 @@ object NrmBackgroundWorkCoordinator {
     if (trimmed.isEmpty()) return
     tokens.add(trimmed)
     stopRequested = false
-    ensureService(context.applicationContext)
+    if (shouldRunForegroundService()) {
+      ensureService(context.applicationContext)
+    } else {
+      stopService(context.applicationContext)
+    }
     acquireWakeLock(context.applicationContext)
     NrmFileLogger.log("bg-work", "acquire token=$trimmed active=${tokens.size}")
-    NrmBackgroundWorkService.refreshNotification(context.applicationContext)
+    if (shouldRunForegroundService()) {
+      NrmBackgroundWorkService.refreshNotification(context.applicationContext)
+    }
   }
 
   fun release(context: Context, token: String) {
@@ -40,7 +46,11 @@ object NrmBackgroundWorkCoordinator {
       releaseWakeLock()
       stopService(context.applicationContext)
     } else {
-      NrmBackgroundWorkService.refreshNotification(context.applicationContext)
+      if (shouldRunForegroundService()) {
+        NrmBackgroundWorkService.refreshNotification(context.applicationContext)
+      } else {
+        stopService(context.applicationContext)
+      }
     }
   }
 
@@ -125,13 +135,25 @@ object NrmBackgroundWorkCoordinator {
   }
 
   fun shouldAutoRestartService(): Boolean {
-    return tokens.isNotEmpty() && !stopRequested
+    return shouldRunForegroundService() && !stopRequested
   }
 
   fun onServiceStarted() {
-    if (tokens.isNotEmpty()) {
+    if (shouldRunForegroundService()) {
       stopRequested = false
     }
+  }
+
+  fun activeForegroundTokenCount(): Int = tokens.count { requiresForegroundService(it) }
+
+  private fun shouldRunForegroundService(): Boolean = tokens.any { requiresForegroundService(it) }
+
+  /**
+   * 오디오/가사 진행 알림은 JS 로컬 알림이 별도로 담당한다.
+   * Foreground Service 알림은 모델 다운로드처럼 시스템 보존이 특히 필요한 작업에만 사용한다.
+   */
+  private fun requiresForegroundService(token: String): Boolean {
+    return token.startsWith("whisper-model:")
   }
 
   private fun acquireWakeLock(context: Context) {

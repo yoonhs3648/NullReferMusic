@@ -11,6 +11,7 @@
  *   (이전에 끝난 뒤 새로 받기 시작하면 완료 목록은 초기화 — 지운 알림이 다시 묶이지 않음)
  */
 import { Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
 import {
   nrmBackgroundWorkAcquire,
@@ -45,6 +46,20 @@ const completedAudioByVideoId = new Map<string, string>();
 /** 현재 가사 완료 묶음 (videoId → 표시 이름) */
 const completedLyricsByVideoId = new Map<string, string>();
 let setupDone = false;
+
+type NrmProgressNotificationNativeModule = {
+  showAudioProgress: (title: string, body: string) => void;
+  showLyricsProgress: (title: string, body: string) => void;
+  dismissAudioProgress: () => void;
+  dismissLyricsProgress: () => void;
+};
+
+function nativeProgressModule(): NrmProgressNotificationNativeModule | undefined {
+  if (Platform.OS !== 'android') return undefined;
+  return NativeModules.NrmProgressNotification as
+    | NrmProgressNotificationNativeModule
+    | undefined;
+}
 
 export async function setupNrmMobileDownloadNotifications(): Promise<void> {
   if (setupDone) return;
@@ -104,6 +119,11 @@ async function refreshAudioProgressNotif(): Promise<void> {
 
   const count = activeAudioDownloads.size;
   if (count === 0) {
+    const native = nativeProgressModule();
+    if (native?.dismissAudioProgress) {
+      native.dismissAudioProgress();
+      return;
+    }
     await dismissNotificationAsync(NOTIF_AUDIO_PROGRESS_ID).catch(() => {});
     return;
   }
@@ -114,22 +134,19 @@ async function refreshAudioProgressNotif(): Promise<void> {
       ? labels.join('\n')
       : `${labels.slice(0, 3).join('\n')}\n외 ${labels.length - 3}개`;
 
+  const title = `오디오 다운로드 중 (${count}개)`;
+  const native = nativeProgressModule();
+  if (native?.showAudioProgress) {
+    native.showAudioProgress(title, body);
+    return;
+  }
+
   await scheduleNotificationAsync({
     identifier: NOTIF_AUDIO_PROGRESS_ID,
     content: {
-      title: `오디오 다운로드 중 (${count}개)`,
+      title,
       body,
       data: {},
-      ...(Platform.OS === 'android'
-        ? ({
-            android: {
-              channelId: CH_AUDIO_PROGRESS,
-              ongoing: true,
-              sticky: true,
-              progress: { max: 100, current: 0, indeterminate: true },
-            },
-          } as object)
-        : {}),
     },
     trigger: null,
   });
@@ -140,6 +157,11 @@ async function refreshLyricsProgressNotif(): Promise<void> {
 
   const count = activeLyricsJobs.size;
   if (count === 0) {
+    const native = nativeProgressModule();
+    if (native?.dismissLyricsProgress) {
+      native.dismissLyricsProgress();
+      return;
+    }
     await dismissNotificationAsync(NOTIF_LYRICS_PROGRESS_ID).catch(() => {});
     return;
   }
@@ -151,22 +173,19 @@ async function refreshLyricsProgressNotif(): Promise<void> {
       ? list.join('\n')
       : `${list.slice(0, 3).join('\n')}\n외 ${list.length - 3}개`;
 
+  const title = `가사 생성 중 (${count}개)`;
+  const native = nativeProgressModule();
+  if (native?.showLyricsProgress) {
+    native.showLyricsProgress(title, body);
+    return;
+  }
+
   await scheduleNotificationAsync({
     identifier: NOTIF_LYRICS_PROGRESS_ID,
     content: {
-      title: `가사 생성 중 (${count}개)`,
+      title,
       body,
       data: {},
-      ...(Platform.OS === 'android'
-        ? ({
-            android: {
-              channelId: CH_LYRICS_PROGRESS,
-              ongoing: true,
-              sticky: true,
-              progress: { max: 100, current: 0, indeterminate: true },
-            },
-          } as object)
-        : {}),
     },
     trigger: null,
   });

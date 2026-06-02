@@ -139,8 +139,12 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         metadata.getString("artist")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           values.put(MediaStore.Audio.Media.ARTIST, it)
         }
-        metadata.getString("album")?.trim()?.takeIf { it.isNotEmpty() }?.let {
-          values.put(MediaStore.Audio.Media.ALBUM, it)
+        val albumValue = metadata.getString("album")?.trim().orEmpty()
+        if (albumValue.isNotEmpty()) {
+          values.put(MediaStore.Audio.Media.ALBUM, albumValue)
+        } else {
+          // 앨범 정보가 없을 때 폴더명(예: NullReferenceMusic)이 앨범으로 보이는 현상을 방지.
+          values.putNull(MediaStore.Audio.Media.ALBUM)
         }
         metadata.getString("genre")?.trim()?.takeIf { it.isNotEmpty() }?.let {
           values.put(MediaStore.Audio.Media.GENRE, it)
@@ -314,6 +318,20 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         }
       cmd.add("-metadata"); cmd.add("$ffmpegKey=$value")
     }
+    fun putTagAllowEmpty(logicalKey: String, value: String) {
+      val ffmpegKey =
+        if (mp4Family) {
+          when (logicalKey) {
+            "artist" -> "author"
+            "date" -> "year"
+            "disc" -> "disk"
+            else -> logicalKey
+          }
+        } else {
+          logicalKey
+        }
+      cmd.add("-metadata"); cmd.add("$ffmpegKey=$value")
+    }
     fun putArtistTag(value: String) {
       if (value.isEmpty()) return
       putTag("artist", value)
@@ -325,7 +343,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     putTag("title", tags.title)
     putArtistTag(tags.artist)
     putTag("album_artist", tags.albumArtist)
-    putTag("album", tags.album)
+    // 앨범 값이 비어 있으면 빈 태그를 명시해 플레이어 기본값 주입을 막는다.
+    putTagAllowEmpty("album", tags.album)
     putTag("genre", tags.genre)
     putTag("date", tags.releaseDate)
     putTag("track", tags.trackNumber)

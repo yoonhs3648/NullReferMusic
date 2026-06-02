@@ -37,9 +37,9 @@ class NrmBackgroundWorkService : Service() {
     }
     NrmFileLogger.log(
         "bg-work",
-        "ForegroundService start tokens=${NrmBackgroundWorkCoordinator.activeTokenCount()}",
+        "ForegroundService start tokens=${NrmBackgroundWorkCoordinator.activeForegroundTokenCount()}",
     )
-    if (NrmBackgroundWorkCoordinator.activeTokenCount() == 0) {
+    if (NrmBackgroundWorkCoordinator.activeForegroundTokenCount() == 0) {
       stopSelf()
     }
     return START_STICKY
