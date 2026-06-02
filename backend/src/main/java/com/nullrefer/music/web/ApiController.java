@@ -21,6 +21,7 @@ import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
 import com.nullrefer.music.config.NrmSettings;
 import com.nullrefer.music.youtube.YoutubeSearchHit;
 import com.nullrefer.music.youtube.YoutubeSearchService;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URI;
@@ -28,6 +29,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -196,6 +198,111 @@ public class ApiController {
     } catch (Exception e) {
       return ResponseEntity.status(502).body(Map.of("error", "deepl_network_failed"));
     }
+  }
+
+  @PostMapping("/api/deepl/translate")
+  public ResponseEntity<?> deepLTranslate(@RequestBody DeepLTranslateRequest req) {
+    String apiKey = req != null && req.apiKey != null ? req.apiKey.trim() : "";
+    if (apiKey.isEmpty()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "deepl_not_configured"));
+    }
+    List<String> texts =
+        req != null && req.texts != null
+            ? req.texts.stream().map(s -> s == null ? "" : s.trim()).toList()
+            : List.of();
+    if (texts.isEmpty()) {
+      return ResponseEntity.ok(Map.of("translations", List.of(), "apiUsed", "free"));
+    }
+    try {
+      HttpClient client =
+          HttpClient.newBuilder()
+              .connectTimeout(Duration.ofSeconds(30))
+              .build();
+      List<Map<String, String>> translations = new ArrayList<>();
+      String apiUsed = "free";
+      List<List<String>> chunks = chunkDeepLTexts(texts);
+      for (int ci = 0; ci < chunks.size(); ci++) {
+        if (ci > 0) {
+          Thread.sleep(50);
+        }
+        List<String> chunk = chunks.get(ci);
+        String payload =
+            JSON.writeValueAsString(
+                Map.of(
+                    "text",
+                    chunk,
+                    "target_lang",
+                    "KO",
+                    "preserve_formatting",
+                    true,
+                    "split_sentences",
+                    "nonewlines"));
+        HttpResponse<String> res =
+            postDeepLTranslate(client, "https://api-free.deepl.com/v2/translate", apiKey, payload);
+        if (res.statusCode() == 403 || res.statusCode() == 404) {
+          apiUsed = "pro";
+          res =
+              postDeepLTranslate(
+                  client, "https://api.deepl.com/v2/translate", apiKey, payload);
+        }
+        if (res.statusCode() == 401 || res.statusCode() == 403) {
+          return ResponseEntity.status(401).body(Map.of("error", "deepl_auth_failed"));
+        }
+        if (res.statusCode() < 200 || res.statusCode() >= 300) {
+          return ResponseEntity.status(502).body(Map.of("error", "deepl_translate_failed"));
+        }
+        JsonNode root = JSON.readTree(res.body());
+        JsonNode arr = root.path("translations");
+        if (!arr.isArray()) {
+          return ResponseEntity.status(502).body(Map.of("error", "deepl_translate_invalid"));
+        }
+        for (JsonNode node : arr) {
+          translations.add(Map.of("text", node.path("text").asText("")));
+        }
+      }
+      return ResponseEntity.ok(Map.of("translations", translations, "apiUsed", apiUsed));
+    } catch (Exception e) {
+      return ResponseEntity.status(502).body(Map.of("error", "deepl_network_failed"));
+    }
+  }
+
+  private static final int DEEPL_MAX_LINES_PER_REQUEST = 50;
+
+  private static List<List<String>> chunkDeepLTexts(List<String> lines) {
+    List<List<String>> out = new ArrayList<>();
+    List<String> current = new ArrayList<>();
+    int currentBytes = 96;
+    for (String line : lines) {
+      int add = line.length() + 4;
+      if (!current.isEmpty()
+          && (current.size() + 1 > DEEPL_MAX_LINES_PER_REQUEST
+              || currentBytes + add > 120 * 1024)) {
+        out.add(new ArrayList<>(current));
+        current.clear();
+        currentBytes = 96;
+      }
+      current.add(line);
+      currentBytes += add;
+    }
+    if (!current.isEmpty()) {
+      out.add(current);
+    }
+    return out;
+  }
+
+  private static HttpResponse<String> postDeepLTranslate(
+      HttpClient client, String url, String apiKey, String jsonBody)
+      throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(120))
+            .header("Authorization", "DeepL-Auth-Key " + apiKey)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build();
+    return client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
   }
 
   @GetMapping("/api/charts/spotify/top100")
@@ -1109,6 +1216,11 @@ public class ApiController {
 
   public static class DeepLUsageRequest {
     public String apiKey;
+  }
+
+  public static class DeepLTranslateRequest {
+    public String apiKey;
+    public List<String> texts;
   }
 
   public static class CleanupRequest {

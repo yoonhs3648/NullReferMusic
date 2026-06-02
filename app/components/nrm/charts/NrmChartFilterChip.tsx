@@ -32,7 +32,7 @@ export function NrmChartFilterChip({
         onPress={onPress}
         activeOpacity={0.85}
         hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-        style={style}
+        style={[styles.chip, style]}
         accessibilityRole={accessibilityRole}
         accessibilityState={{ selected }}
         accessibilityLabel={accessibilityLabel}>
@@ -44,7 +44,7 @@ export function NrmChartFilterChip({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.chip, style, pressed && styles.pressed]}
       accessibilityRole={accessibilityRole}
       accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel}>
@@ -54,5 +54,6 @@ export function NrmChartFilterChip({
 }
 
 const styles = StyleSheet.create({
+  chip: { flexShrink: 0 },
   pressed: { opacity: 0.9 },
 });

@@ -1172,7 +1172,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    가사 임베드 설정
+                    AI 가사 추출 엔진 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"

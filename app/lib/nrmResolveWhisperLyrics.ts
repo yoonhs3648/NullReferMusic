@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import {
   buildAutoWhisperLyricsSentinel,
@@ -64,13 +65,38 @@ export async function resolveWhisperLyricsInMetadata(
 
   let lrc = '';
   let lyricsTranslationFailed = false;
+  logNrmDev('download.whisper', {
+    event: 'resolve_transcribe_start',
+    extension,
+    mode,
+    audioUri: fileUri.slice(0, 120),
+  });
+  const transcribeT0 = Date.now();
   try {
     lrc = normalizeWhisperLrc(await transcribeAudioToLrc(fileUri, mode));
-  } catch {
+    logNrmDev('download.whisper', {
+      event: 'resolve_transcribe_ok',
+      elapsedMs: Date.now() - transcribeT0,
+      lrcChars: lrc.trim().length,
+      mode,
+    });
+  } catch (e) {
+    logNrmRunError('download.whisper', e, {
+      event: 'resolve_transcribe_fail',
+      elapsedMs: Date.now() - transcribeT0,
+      mode,
+    });
     lrc = '';
   }
 
   if (mode === 'translation' && lrc.trim()) {
+    const lrcCharsBefore = lrc.trim().length;
+    logNrmDev('lyrics.translate', {
+      event: 'resolve_deepl_start',
+      extension,
+      lrcChars: lrcCharsBefore,
+    });
+    const translateT0 = Date.now();
     try {
       const [{ getDeepLApiKey }, { translateLrcToKoreanWithDeepL }] = await Promise.all([
         import('@/lib/nrmDeepLApiSettings'),
@@ -78,18 +104,35 @@ export async function resolveWhisperLyricsInMetadata(
       ]);
       const apiKey = await getDeepLApiKey();
       const translated = await translateLrcToKoreanWithDeepL(lrc, apiKey);
+      const elapsedMs = Date.now() - translateT0;
       if (translated.ok) {
         lrc = translated.lrc;
+        logNrmDev('lyrics.translate', {
+          event: 'resolve_deepl_ok',
+          elapsedMs,
+          lrcCharsAfter: lrc.trim().length,
+        });
       } else {
         lyricsTranslationFailed = true;
+        lrc = '';
+        logNrmDev('lyrics.translate', {
+          event: 'resolve_deepl_fail',
+          elapsedMs,
+          message: translated.message,
+        });
       }
-    } catch {
+    } catch (e) {
       lyricsTranslationFailed = true;
+      lrc = '';
+      logNrmRunError('lyrics.translate', e, {
+        event: 'resolve_deepl_throw',
+        elapsedMs: Date.now() - translateT0,
+      });
     }
   }
 
   const audioPath = toFsPath(fileUri);
-  if (lrc.trim()) {
+  if (lrc.trim() && !lyricsTranslationFailed) {
     try {
       await writeLrcSidecar(audioPath, lrc);
     } catch {

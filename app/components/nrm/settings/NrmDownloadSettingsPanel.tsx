@@ -62,7 +62,7 @@ const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   quality: '비트레이트 설정',
   filename: '파일명 설정',
   metadata: '메타데이터 설정',
-  lyricsEmbed: '가사 임베드 설정',
+  lyricsEmbed: 'AI 가사 추출 엔진 설정',
 };
 
 type Props = {

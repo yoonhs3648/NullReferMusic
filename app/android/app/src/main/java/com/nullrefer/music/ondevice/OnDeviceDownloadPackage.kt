@@ -14,6 +14,7 @@ class OnDeviceDownloadPackage : ReactPackage {
         NrmSpotifyCookieModule(reactContext),
         NrmFileLoggerModule(reactContext),
         NrmBackgroundWorkModule(reactContext),
+        NrmDeepLModule(reactContext),
     )
   }
 

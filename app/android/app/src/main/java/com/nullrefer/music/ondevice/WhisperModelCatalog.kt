@@ -1,5 +1,7 @@
 package com.nullrefer.music.ondevice
 
+import android.content.Context
+
 /** JS `nrmWhisperCatalog.ts` 와 동일한 5종 모델 ID */
 object WhisperModelCatalog {
   data class Entry(
@@ -12,25 +14,25 @@ object WhisperModelCatalog {
       listOf(
           Entry(
               "whisper:large-v3-turbo",
-              listOf("ggml-large-v3-turbo-q5_0.bin", "ggml-large-v3-turbo.bin"),
+              listOf("ggml-large-v3-turbo.bin", "ggml-large-v3-turbo-q5_0.bin"),
               300_000_000L,
           ),
           Entry(
               "whisper:large-v3",
-              listOf("ggml-large-v3-q5_0.bin", "ggml-large-v3.bin"),
+              listOf("ggml-large-v3.bin", "ggml-large-v3-q5_0.bin"),
               700_000_000L,
           ),
           Entry(
               "whisper:medium",
-              listOf("ggml-medium-q5_0.bin", "ggml-medium.bin"),
+              listOf("ggml-medium.bin", "ggml-medium-q5_0.bin"),
               300_000_000L,
           ),
           Entry(
               "whisper:small",
-              listOf("ggml-small-q5_1.bin", "ggml-small.bin"),
+              listOf("ggml-small.bin", "ggml-small-q5_1.bin"),
               100_000_000L,
           ),
-          Entry("whisper:base", listOf("ggml-base-q5_1.bin", "ggml-base.bin"), 50_000_000L),
+          Entry("whisper:base", listOf("ggml-base.bin", "ggml-base-q5_1.bin"), 50_000_000L),
       )
 
   private val BY_ID = ENTRIES.associateBy { it.id }
@@ -52,9 +54,28 @@ object WhisperModelCatalog {
     return migrateLegacy(pref)
   }
 
+  /**
+   * 설치·전사에 쓸 ggml 파일 우선순위.
+   * RAM이 부족하면 양자화(q5 등)를 full .bin 보다 먼저 둡니다.
+   */
+  fun ggmlOrderForPreference(context: Context, preference: String?): List<String> {
+    val entry = entryForPreference(preference) ?: BY_ID["whisper:large-v3-turbo"]!!
+    return orderGgmlFilesForDevice(context, entry.ggmlFiles)
+  }
+
+  /** @deprecated Context 없는 호출 — RAM 정책 미적용 */
   fun ggmlOrderForPreference(preference: String?): List<String> {
     val entry = entryForPreference(preference) ?: BY_ID["whisper:large-v3-turbo"]!!
     return entry.ggmlFiles
+  }
+
+  private fun orderGgmlFilesForDevice(context: Context, files: List<String>): List<String> {
+    if (!NrmWhisperDevicePolicy.preferQuantizedGgml(context)) {
+      return files
+    }
+    val quantized = files.filter { NrmWhisperDevicePolicy.isQuantizedGgmlFileName(it) }
+    val full = files.filter { !NrmWhisperDevicePolicy.isQuantizedGgmlFileName(it) }
+    return quantized + full
   }
 
   fun minBytesFor(fileName: String): Long {

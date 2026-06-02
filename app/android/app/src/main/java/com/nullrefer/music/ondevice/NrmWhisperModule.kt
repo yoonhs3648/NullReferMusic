@@ -20,11 +20,6 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
   private val processTimeoutSec = 1800L
 
-  /** no-speech threshold 완화 — 인트로·보컬 구간 no-speech 판정 완화 */
-  private companion object {
-    const val NO_SPEECH_THRESHOLD = "0.45"
-  }
-
   init {
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
@@ -145,6 +140,12 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         return
       }
 
+      if (NrmWhisperDevicePolicy.preferQuantizedGgml(reactApplicationContext)) {
+        NrmFileLogger.log(
+            "whisper",
+            "transcribe lowRamPolicy ${NrmWhisperDevicePolicy.memorySnapshot(reactApplicationContext)}",
+        )
+      }
       val paths = WhisperBootstrap.ensure(reactApplicationContext, modelPreference)
       perf?.mark("bootstrap", "ready=${paths.isReady()}")
       NrmWhisperPerfLog.logPaths(
@@ -179,8 +180,11 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
 
       try {
         val ffmpegT0 = SystemClock.elapsedRealtime()
-        convertTo16kMonoWav(inFile, wav)
+        val ffmpegSkipped = convertTo16kMonoWav(inFile, wav)
         val ffmpegMs = SystemClock.elapsedRealtime() - ffmpegT0
+        if (ffmpegSkipped) {
+          perf?.mark("ffmpeg", "skipped_already_16k_wav durationMs=$ffmpegMs")
+        }
         perf?.mark("ffmpeg", "durationMs=$ffmpegMs")
         NrmWhisperPerfLog.logFileInfo("wav16k", wav)
 
@@ -223,7 +227,13 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         .emit(event, body)
   }
 
-  private fun convertTo16kMonoWav(inFile: File, wavOut: File) {
+  /** @return true if ffmpeg was skipped (input already usable 16k mono WAV) */
+  private fun convertTo16kMonoWav(inFile: File, wavOut: File): Boolean {
+    if (canUseAsWhisperWav(inFile)) {
+      inFile.copyTo(wavOut, overwrite = true)
+      NrmFileLogger.log("whisper", "ffmpeg skip — already 16k mono wav ${inFile.length()} bytes")
+      return true
+    }
     if (NrmWhisperPerfLog.ENABLED) {
       NrmFileLogger.log(
           NrmWhisperPerfLog.TAG,
@@ -246,6 +256,33 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         ),
         tag = "ffmpeg-whisper",
     )
+    return false
+  }
+
+  /** RIFF WAVE pcm_s16le mono 16kHz — whisper 입력으로 재인코딩 생략 */
+  private fun canUseAsWhisperWav(file: File): Boolean {
+    if (!file.isFile || file.length() < 48) return false
+    if (!file.name.lowercase().endsWith(".wav")) return false
+    return try {
+      file.inputStream().use { input ->
+        val h = ByteArray(44)
+        if (input.read(h) < 44) return false
+        val riff = String(h, 0, 4, Charsets.US_ASCII)
+        val wave = String(h, 8, 4, Charsets.US_ASCII)
+        val fmt = String(h, 12, 4, Charsets.US_ASCII)
+        if (riff != "RIFF" || wave != "WAVE" || fmt != "fmt ") return false
+        val channels = (h[22].toInt() and 0xff) or ((h[23].toInt() and 0xff) shl 8)
+        val sampleRate =
+            (h[24].toInt() and 0xff) or
+                ((h[25].toInt() and 0xff) shl 8) or
+                ((h[26].toInt() and 0xff) shl 16) or
+                ((h[27].toInt() and 0xff) shl 24)
+        val bits = (h[34].toInt() and 0xff) or ((h[35].toInt() and 0xff) shl 8)
+        channels == 1 && sampleRate == 16_000 && bits == 16
+      }
+    } catch (_: Exception) {
+      false
+    }
   }
 
   data class WhisperRunResult(
@@ -260,10 +297,20 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       outPrefix: File,
       queueDepthAtStart: Int,
   ): WhisperRunResult {
-    val threadCount = NrmWhisperPerfLog.resolveThreadCount(queueDepthAtStart)
+    val baseThreadCount = NrmWhisperPerfLog.resolveThreadCount(queueDepthAtStart)
+    val beam = NrmWhisperLrcParams.resolveBeam(queueDepthAtStart)
+    val modelFile = File(paths.modelPath).name
+    val lowRam = NrmWhisperDevicePolicy.preferQuantizedGgml(reactApplicationContext)
+    val isLargeV3 = modelFile.contains("large-v3", ignoreCase = true)
+    val threadCount =
+        if (lowRam && isLargeV3) {
+          baseThreadCount.coerceAtMost(4)
+        } else {
+          baseThreadCount
+        }
     NrmFileLogger.log(
         "whisper",
-        "runWhisper threads=$threadCount queueDepth=$queueDepthAtStart wavBytes=${wav.length()}",
+        "runWhisper model=$modelFile threads=$threadCount bs=${beam.size} bo=${beam.bestOf} nth=${NrmWhisperLrcParams.NO_SPEECH_THRESHOLD} lpt=${NrmWhisperLrcParams.LOGPROB_THRESHOLD} queueDepth=$queueDepthAtStart wavBytes=${wav.length()}",
     )
     val cmd =
         mutableListOf(
@@ -278,15 +325,8 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             wav.absolutePath,
             "-of",
             outPrefix.absolutePath,
-            "--output-lrc",
-            "-bs",
-            "1",
-            "-bo",
-            "1",
-            "-nth",
-            NO_SPEECH_THRESHOLD,
         )
-    NrmFileLogger.log("whisper", "runWhisper nth=$NO_SPEECH_THRESHOLD")
+    cmd.addAll(NrmWhisperLrcParams.qualityTailArgs(beam))
     // perf: --no-prints 제거 → system_info·RTF·timing 로그
     if (NrmWhisperPerfLog.ENABLED) {
       NrmFileLogger.log(

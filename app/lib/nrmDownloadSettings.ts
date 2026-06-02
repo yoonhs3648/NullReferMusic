@@ -52,7 +52,7 @@ export type NrmDownloadMetadataMode =
   (typeof NRM_DOWNLOAD_METADATA_MODES)[number]['id'];
 
 const DEFAULT_METADATA_MODE: NrmDownloadMetadataMode = 'manual';
-const DEFAULT_WHISPER_MODEL_PREFERENCE = 'whisper:large-v3-turbo';
+const DEFAULT_WHISPER_MODEL_PREFERENCE = 'whisper:large-v3';
 
 export function isNrmDownloadMetadataMode(v: string): v is NrmDownloadMetadataMode {
   return (NRM_DOWNLOAD_METADATA_MODES as readonly { id: string }[]).some(

@@ -15,11 +15,11 @@ public final class WhisperModelCatalog {
   private static final Map<String, Long> MIN_BYTES_BY_FILE = new LinkedHashMap<>();
 
   static {
-    put("whisper:large-v3-turbo", 300_000_000L, "ggml-large-v3-turbo-q5_0.bin", "ggml-large-v3-turbo.bin");
-    put("whisper:large-v3", 700_000_000L, "ggml-large-v3-q5_0.bin", "ggml-large-v3.bin");
-    put("whisper:medium", 300_000_000L, "ggml-medium-q5_0.bin", "ggml-medium.bin");
-    put("whisper:small", 100_000_000L, "ggml-small-q5_1.bin", "ggml-small.bin");
-    put("whisper:base", 50_000_000L, "ggml-base-q5_1.bin", "ggml-base.bin");
+    put("whisper:large-v3-turbo", 300_000_000L, "ggml-large-v3-turbo.bin", "ggml-large-v3-turbo-q5_0.bin");
+    put("whisper:large-v3", 700_000_000L, "ggml-large-v3.bin", "ggml-large-v3-q5_0.bin");
+    put("whisper:medium", 300_000_000L, "ggml-medium.bin", "ggml-medium-q5_0.bin");
+    put("whisper:small", 100_000_000L, "ggml-small.bin", "ggml-small-q5_1.bin");
+    put("whisper:base", 50_000_000L, "ggml-base.bin", "ggml-base-q5_1.bin");
   }
 
   private WhisperModelCatalog() {}

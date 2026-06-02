@@ -30,6 +30,8 @@ object WhisperModelDownloader {
   private val executor = Executors.newCachedThreadPool()
   private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
   private val progressByModel = ConcurrentHashMap<String, Int>()
+  private val lowRamWarnAtMsByModel = ConcurrentHashMap<String, Long>()
+  private const val LOW_RAM_WARN_DEBOUNCE_MS = 30_000L
 
   @Volatile private var eventEmitter: ((String, WritableMap) -> Unit)? = null
   @Volatile private var notifContext: Context? = null
@@ -76,9 +78,53 @@ object WhisperModelDownloader {
 
   /** 이미 받아 둔 모델만 반환 (다운로드 없음) */
   fun resolveInstalledFile(context: Context, modelId: String): File? {
-    val order = WhisperModelCatalog.ggmlOrderForPreference(modelId)
+    val order = WhisperModelCatalog.ggmlOrderForPreference(context, modelId)
+    val lowRam = NrmWhisperDevicePolicy.preferQuantizedGgml(context)
+    if (lowRam) {
+      maybeLogLowRamResolve(modelId, order, context)
+    }
     val dir = whisperDir(context)
+    val quantizedHit = findInstalledGgmlInOrder(context, dir, order, allowFullBin = !lowRam)
+    if (quantizedHit != null) return quantizedHit
+    if (lowRam) {
+      maybeWarnLowRamMissingQuantized(modelId)
+      return null
+    }
+    return findInstalledGgmlInOrder(context, dir, order, allowFullBin = true)
+  }
+
+  private fun maybeLogLowRamResolve(modelId: String, order: List<String>, context: Context) {
+    val now = System.currentTimeMillis()
+    val last = lowRamWarnAtMsByModel[modelId] ?: 0L
+    if (now - last < LOW_RAM_WARN_DEBOUNCE_MS) return
+    lowRamWarnAtMsByModel[modelId] = now
+    NrmFileLogger.log(
+        "whisper",
+        "resolveInstalled preferQuantized modelId=$modelId ${NrmWhisperDevicePolicy.memorySnapshot(context)} order=${order.joinToString()}",
+    )
+  }
+
+  private fun maybeWarnLowRamMissingQuantized(modelId: String) {
+    val now = System.currentTimeMillis()
+    val last = lowRamWarnAtMsByModel[modelId] ?: 0L
+    if (now - last < LOW_RAM_WARN_DEBOUNCE_MS) return
+    lowRamWarnAtMsByModel[modelId] = now
+    NrmFileLogger.warn(
+        "whisper",
+        "resolveInstalled RAM 부족 — 설치된 양자화(q5) ggml 없음. full bin은 사용하지 않습니다. AI 가사 추출 엔진 설정에서 q5 모델을 받아 주세요.",
+    )
+  }
+
+  private fun findInstalledGgmlInOrder(
+      context: Context,
+      dir: File,
+      order: List<String>,
+      allowFullBin: Boolean,
+  ): File? {
     for (name in order) {
+      if (!allowFullBin && !NrmWhisperDevicePolicy.isQuantizedGgmlFileName(name)) {
+        continue
+      }
       val dest = File(dir, name)
       val minBytes = WhisperModelCatalog.minBytesFor(name)
       if (dest.isFile && dest.length() >= minBytes) {
@@ -111,7 +157,13 @@ object WhisperModelDownloader {
     executor.execute {
       var ok = false
       try {
-        val order = WhisperModelCatalog.ggmlOrderForPreference(modelId)
+        val order = WhisperModelCatalog.ggmlOrderForPreference(appContext, modelId)
+        if (NrmWhisperDevicePolicy.preferQuantizedGgml(appContext)) {
+          NrmFileLogger.log(
+              "whisper",
+              "startDownload preferQuantized modelId=$modelId order=${order.joinToString()}",
+          )
+        }
         for (name in order) {
           val dest = File(whisperDir(appContext), name)
           val minBytes = WhisperModelCatalog.minBytesFor(name)

@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger
 object WhisperTranscribeQueue {
   private val pending = AtomicInteger(0)
   /** 연속 전사 후 SoC 스로틀 완화용 짧은 휴식(ms) */
-  private const val COOLDOWN_AFTER_BACKLOG_MS = 20_000L
-  private const val COOLDOWN_AFTER_LONG_WAIT_MS = 15_000L
+  private const val COOLDOWN_AFTER_BACKLOG_MS = 12_000L
+  private const val COOLDOWN_AFTER_LONG_WAIT_MS = 10_000L
   private const val LONG_QUEUE_WAIT_MS = 120_000L
 
   private val executor: ExecutorService =

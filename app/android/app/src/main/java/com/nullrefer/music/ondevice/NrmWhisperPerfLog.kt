@@ -274,7 +274,7 @@ object NrmWhisperPerfLog {
     logThreadPlan(
         cores,
         chosen,
-        "LRC speed queueDepth=$queueDepthAtStart backlog=$backlog + -bs 1 -bo 1",
+        "LRC threads queueDepth=$queueDepthAtStart backlog=$backlog",
     )
     return chosen
   }

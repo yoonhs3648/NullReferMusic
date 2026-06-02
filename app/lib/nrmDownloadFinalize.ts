@@ -185,42 +185,56 @@ async function finalizeNativeParallel(
     },
   );
 
+  const whisperTask: Promise<WhisperLrcStageResult | null> = whisperMode
+    ? (async () => {
+        logNrmDev('download.whisper', {
+          event: 'finalize_whisper_parallel_start',
+          fileName: safeName,
+          mode: whisperMode,
+          extension,
+        });
+        const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+        try {
+          const result = await runWhisperTranscribeSerial(safeName, () =>
+            transcribeWhisperLrc(whisperSourceUri, whisperMode, extension),
+          );
+          logNrmDev('download.whisper', {
+            event: 'finalize_whisper_done',
+            fileName: safeName,
+            mode: whisperMode,
+            lyricsTranslationFailed: result.lyricsTranslationFailed ?? false,
+            lrcChars: result.lrcFull?.length ?? 0,
+          });
+          return { ...result, lyricsEmbedded: false };
+        } catch (e) {
+          logNrmRunError('download.whisper', e, { extension, mode: whisperMode });
+          return {
+            lyricsRequested: true,
+            lyricsEmbedded: false,
+          };
+        }
+      })()
+    : Promise.resolve(null);
+
   let audioSaved: { savedLabel: string; location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation };
   try {
-    audioSaved = await audioTask;
+    const [saved, whisperResult] = await Promise.all([audioTask, whisperTask]);
+    audioSaved = saved;
+    whisperRef.result = whisperResult;
   } catch (e) {
     throw e;
   }
 
-  if (whisperMode) {
-    logNrmDev('download.whisper', {
-      event: 'finalize_whisper_scheduled',
-      fileName: safeName,
-      mode: whisperMode,
-      extension,
-    });
-    const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
-    logNrmDev('download.whisper', { event: 'sequential_after_audio', fileName: safeName, mode: whisperMode });
-    try {
-      const result = await runWhisperTranscribeSerial(safeName, () =>
-        transcribeWhisperLrc(whisperSourceUri, whisperMode, extension),
-      );
-      whisperRef.result = { ...result, lyricsEmbedded: false };
-    } catch (e) {
-      logNrmRunError('download.whisper', e, { extension, mode: whisperMode });
-      whisperRef.result = {
-        lyricsRequested: true,
-        lyricsEmbedded: false,
-      };
-    }
-  }
+  const whisperDone = whisperRef.result;
+  const lrcToPersist = whisperDone?.lrcFull?.trim() ?? '';
+  const canPersistLrc = lrcToPersist.length > 0 && !whisperDone?.lyricsTranslationFailed;
 
-  if (whisperRef.result?.lrcFull?.trim()) {
+  if (canPersistLrc && whisperDone) {
     try {
       const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
-      const lrcUri = await persistLrcForSavedAudio(audioSaved.location, whisperRef.result.lrcFull);
+      const lrcUri = await persistLrcForSavedAudio(audioSaved.location, lrcToPersist);
       whisperRef.result = {
-        ...whisperRef.result,
+        ...whisperDone,
         lyricsEmbedded: !!lrcUri,
       };
       if (!lrcUri) {
@@ -235,13 +249,15 @@ async function finalizeNativeParallel(
         audioFileName: audioSaved.location.fileName,
       });
       whisperRef.result = {
-        ...whisperRef.result,
+        ...whisperDone,
         lyricsEmbedded: false,
       };
     }
   } else if (whisperRef.result?.lyricsRequested) {
     logNrmDev('download.lrc', {
-      event: 'finalize_skip_no_text',
+      event: whisperRef.result.lyricsTranslationFailed
+        ? 'finalize_skip_translation_failed'
+        : 'finalize_skip_no_text',
       audioFileName: audioSaved.location.fileName,
       lyricsEmbedded: whisperRef.result.lyricsEmbedded,
     });

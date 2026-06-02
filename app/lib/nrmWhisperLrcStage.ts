@@ -69,21 +69,63 @@ export async function transcribeWhisperLrc(
 
   let lyricsTranslationFailed = false;
   if (mode === 'translation' && lrc.trim()) {
+    const lrcCharsBefore = lrc.trim().length;
+    const lineCount = lrc.split(/\r?\n/).filter((v) => v.trim().length > 0).length;
+    logNrmDev('lyrics.translate', {
+      event: 'deepl_start',
+      mode,
+      extension,
+      lrcChars: lrcCharsBefore,
+      lineCount,
+    });
+    const translateT0 = Date.now();
     try {
       const [{ getDeepLApiKey }, { translateLrcToKoreanWithDeepL }] = await Promise.all([
         import('@/lib/nrmDeepLApiSettings'),
         import('@/lib/nrmDeepLApiClient'),
       ]);
       const apiKey = await getDeepLApiKey();
+      logNrmDev('lyrics.translate', {
+        event: 'deepl_key_loaded',
+        hasApiKey: apiKey.trim().length > 0,
+        apiKeyLen: apiKey.trim().length,
+      });
       const translated = await translateLrcToKoreanWithDeepL(lrc, apiKey);
+      const elapsedMs = Date.now() - translateT0;
       if (translated.ok) {
         lrc = translated.lrc;
+        logNrmDev('lyrics.translate', {
+          event: 'deepl_ok',
+          elapsedMs,
+          lrcCharsBefore,
+          lrcCharsAfter: lrc.trim().length,
+        });
       } else {
         lyricsTranslationFailed = true;
+        lrc = '';
+        logNrmDev('lyrics.translate', {
+          event: 'deepl_fail',
+          elapsedMs,
+          message: translated.message,
+          lrcCharsBefore,
+        });
       }
-    } catch {
+    } catch (e) {
       lyricsTranslationFailed = true;
+      lrc = '';
+      logNrmRunError('lyrics.translate', e, {
+        event: 'deepl_throw',
+        elapsedMs: Date.now() - translateT0,
+        lrcCharsBefore,
+        lineCount,
+      });
     }
+  } else if (mode === 'translation' && !lrc.trim()) {
+    logNrmDev('lyrics.translate', {
+      event: 'deepl_skip_empty_lrc',
+      mode,
+      extension,
+    });
   }
 
   if (!lrc.trim()) {
@@ -96,7 +138,7 @@ export async function transcribeWhisperLrc(
     return {
       lyricsRequested: true,
       lyricsEmbedded: false,
-      lyricsTranslationFailed,
+      lyricsTranslationFailed: mode === 'translation' ? lyricsTranslationFailed : undefined,
     };
   }
 
@@ -110,7 +152,7 @@ export async function transcribeWhisperLrc(
 
   return {
     lyricsRequested: true,
-    lyricsEmbedded: true,
+    lyricsEmbedded: false,
     lyricsTranslationFailed,
     lrcFull: lrc.trim(),
   };

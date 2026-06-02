@@ -16,7 +16,7 @@ export type NrmWhisperModelCatalogEntry = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
-  /** whisper.cpp ggml 파일 (용량 작은 양자화 우선) */
+  /** whisper.cpp ggml 파일 (품질: 비양자화 .bin 우선, 없으면 q5 폴백) */
   ggmlFiles: readonly string[];
   /** Hugging Face `ggerganov/whisper.cpp` 파일명 */
   minBytes: number;
@@ -27,16 +27,16 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     id: 'whisper:large-v3-turbo',
     label: 'large-v3-turbo',
     speedLabel: '빠름',
-    qualityLabel: '매우 높음',
-    ggmlFiles: ['ggml-large-v3-turbo-q5_0.bin', 'ggml-large-v3-turbo.bin'],
+    qualityLabel: '높음',
+    ggmlFiles: ['ggml-large-v3-turbo.bin', 'ggml-large-v3-turbo-q5_0.bin'],
     minBytes: 300_000_000,
   },
   {
     id: 'whisper:large-v3',
     label: 'large-v3',
     speedLabel: '매우 느림',
-    qualityLabel: '매우 높음',
-    ggmlFiles: ['ggml-large-v3-q5_0.bin', 'ggml-large-v3.bin'],
+    qualityLabel: '다국어처리 우수',
+    ggmlFiles: ['ggml-large-v3.bin', 'ggml-large-v3-q5_0.bin'],
     minBytes: 700_000_000,
   },
   {
@@ -44,7 +44,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'medium',
     speedLabel: '보통',
     qualityLabel: '높음',
-    ggmlFiles: ['ggml-medium-q5_0.bin', 'ggml-medium.bin'],
+    ggmlFiles: ['ggml-medium.bin', 'ggml-medium-q5_0.bin'],
     minBytes: 300_000_000,
   },
   {
@@ -52,7 +52,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'small',
     speedLabel: '빠름',
     qualityLabel: '중간',
-    ggmlFiles: ['ggml-small-q5_1.bin', 'ggml-small.bin'],
+    ggmlFiles: ['ggml-small.bin', 'ggml-small-q5_1.bin'],
     minBytes: 100_000_000,
   },
   {
@@ -60,7 +60,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'base',
     speedLabel: '매우 빠름',
     qualityLabel: '낮음',
-    ggmlFiles: ['ggml-base-q5_1.bin', 'ggml-base.bin'],
+    ggmlFiles: ['ggml-base.bin', 'ggml-base-q5_1.bin'],
     minBytes: 50_000_000,
   },
 ];
@@ -103,7 +103,7 @@ export function migrateWhisperModelPreference(raw: string): NrmWhisperModelId {
     'model:ggml-tiny-q5_1.bin': 'whisper:base',
     'model:ggml-tiny.bin': 'whisper:base',
   };
-  return legacy[raw] ?? 'whisper:large-v3-turbo';
+  return legacy[raw] ?? 'whisper:large-v3';
 }
 
 export const NRM_WHISPER_HF_BASE =

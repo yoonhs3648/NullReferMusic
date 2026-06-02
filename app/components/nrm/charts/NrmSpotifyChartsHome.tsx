@@ -323,6 +323,7 @@ const styles = StyleSheet.create({
   },
   tabChip: {
     flexDirection: 'row',
+    flexShrink: 0,
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: nrmTokens.space.md,

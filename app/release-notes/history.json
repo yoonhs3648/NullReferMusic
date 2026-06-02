@@ -1,6 +1,43 @@
 {
   "entries": [
     {
+      "version": "1.6.7",
+      "lines": [
+        "large-v3 안정화(저RAM에서도 large-v3 유지, 스레드·빔 안정값 복귀)",
+        "저RAM 모델 미설치 경고 로그 디바운스(로그 스팸 완화)"
+      ]
+    },
+    {
+      "version": "1.6.6",
+      "lines": [
+        "RAM 부족 시 Whisper q5 우선·DeepL 가사만 번역·[MUSIC] 로컬 (음악)"
+      ]
+    },
+    {
+      "version": "1.6.5",
+      "lines": [
+        "DeepL LRC 줄 단위 번역·네이티브 HTTP, ffmpeg·Whisper 병렬·번역 실패 시 MP3만"
+      ]
+    },
+    {
+      "version": "1.6.4",
+      "lines": [
+        "Whisper LRC 품질·large-v3 full ggml 우선 설정 포함"
+      ]
+    },
+    {
+      "version": "1.6.3",
+      "lines": [
+        "Whisper LRC 품질 강화(nth·빔·full ggml·large-v3 기본), ffmpeg 스킵·큐 최적화"
+      ]
+    },
+    {
+      "version": "1.6.2",
+      "lines": [
+        "가사·Whisper·DeepL 번역 파일 로깅 재활성화 및 번역 단계 진단 로그 추가"
+      ]
+    },
+    {
       "version": "1.6.1",
       "lines": [
         "Spotify 기간별 차트 필터 UI 재구성·메뉴 스와이프 레이어 터치 간섭 수정",
@@ -50,7 +87,9 @@
     },
     {
       "version": "1.1.1",
-      "lines": ["NullReference Music 서비스 시작"]
+      "lines": [
+        "NullReference Music 서비스 시작"
+      ]
     }
   ]
 }

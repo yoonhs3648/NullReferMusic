@@ -748,7 +748,7 @@ export function NrmMetadataEditModal({
                     </Text>
                     <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
                       {Platform.OS === 'web'
-                        ? '가사 자동 생성에 쓸 Whisper 모델이 PC 서버(library/whisper)에 없습니다. 메뉴 → 가사 임베드 설정에서 설치 안내를 확인하세요.'
+                        ? '가사 자동 생성에 쓸 Whisper 모델이 PC 서버(library/whisper)에 없습니다. 메뉴 → AI 가사 추출 엔진 설정에서 설치 안내를 확인하세요.'
                         : '가사 자동 생성을 쓰려면 먼저 메뉴에서 모델을 기기에 받아 주세요. 받는 동안 다른 화면도 이용할 수 있습니다.'}
                     </Text>
                     {onOpenWhisperModelSettings ? (
@@ -759,7 +759,7 @@ export function NrmMetadataEditModal({
                           pressed && styles.pressed,
                         ]}
                         accessibilityRole="button">
-                        <Text style={styles.whisperGateBtnLabel}>가사 임베드 설정으로 이동</Text>
+                        <Text style={styles.whisperGateBtnLabel}>AI 가사 추출 엔진 설정으로 이동</Text>
                       </Pressable>
                     ) : null}
                   </View>

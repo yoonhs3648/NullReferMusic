@@ -6,7 +6,11 @@ const STORAGE_KEY = 'nrmYoutubeSearchSuffixMode';
 export type NrmYoutubeSearchSuffixMode =
   | 'default'
   | 'topic'
-  | 'official_audio';
+  | 'official_audio'
+  | 'album_track'
+  | 'uncensored'
+  | 'explicit'
+  | 'official_mv';
 
 export const NRM_YOUTUBE_SEARCH_SUFFIX_DEFAULT: NrmYoutubeSearchSuffixMode =
   'default';
@@ -18,12 +22,20 @@ export const NRM_YOUTUBE_SEARCH_SUFFIX_LABELS: Record<
   default: '기본',
   topic: 'Topic',
   official_audio: 'Official Audio',
+  album_track: 'Album Track',
+  uncensored: 'Uncensored',
+  explicit: 'Explicit',
+  official_mv: 'Official MV',
 };
 
 const ORDER: NrmYoutubeSearchSuffixMode[] = [
   'default',
   'topic',
   'official_audio',
+  'album_track',
+  'uncensored',
+  'explicit',
+  'official_mv',
 ];
 
 export function listYoutubeSearchSuffixModes(): NrmYoutubeSearchSuffixMode[] {
@@ -36,7 +48,11 @@ export async function getYoutubeSearchSuffixMode(): Promise<NrmYoutubeSearchSuff
     if (
       raw === 'default' ||
       raw === 'topic' ||
-      raw === 'official_audio'
+      raw === 'official_audio' ||
+      raw === 'album_track' ||
+      raw === 'uncensored' ||
+      raw === 'explicit' ||
+      raw === 'official_mv'
     ) {
       return raw;
     }

@@ -1,5 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+
 type NrmWhisperNative = {
   transcribeToLrc: (
     audioPath: string,
@@ -21,6 +23,29 @@ export async function transcribeAudioToLrcNative(fileUri: string): Promise<strin
   }
   const { loadWhisperModelPreference } = await import('@/lib/nrmDownloadSettings');
   const preference = await loadWhisperModelPreference();
-  const out = await mod.transcribeToLrc(toFsPath(fileUri), preference);
-  return (out?.lrc ?? '').trim();
+  const audioPath = toFsPath(fileUri);
+  logNrmDev('download.whisper', {
+    event: 'native_transcribe_start',
+    audioPath: audioPath.slice(-120),
+    modelPreference: preference,
+  });
+  const t0 = Date.now();
+  try {
+    const out = await mod.transcribeToLrc(audioPath, preference);
+    const lrc = (out?.lrc ?? '').trim();
+    logNrmDev('download.whisper', {
+      event: 'native_transcribe_end',
+      elapsedMs: Date.now() - t0,
+      lrcChars: lrc.length,
+      firstLine: lrc.split(/\r?\n/).find((l) => l.startsWith('['))?.slice(0, 48) ?? '(none)',
+    });
+    return lrc;
+  } catch (e) {
+    logNrmRunError('download.whisper', e, {
+      event: 'native_transcribe_throw',
+      elapsedMs: Date.now() - t0,
+      audioPath: audioPath.slice(-120),
+    });
+    throw e;
+  }
 }

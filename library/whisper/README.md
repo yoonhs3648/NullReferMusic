@@ -43,9 +43,13 @@ nrm.whisper-model=
 nrm.whisper-dir=
 ```
 
-## LRC no-speech threshold
+## LRC 전사 인자 (APK·백엔드)
 
-APK·PC 백엔드 whisper 인자: `-nth 0.45` (no-speech threshold 완화, 인트로·보컬 구간).
+- **VAD 없음** (1.5.17~): 전곡 전사, 가사 있는 구간만 LRC 타임스탬프.
+- `-nth 0.30` `-lpt -1.25` `-et 3.00` `-tp 0` — 앞·약한 보컬·노래 구간 유지
+- `-l auto` — 한·영 팝 혼용
+- APK 단일 곡: `-bs 5 -bo 5`, 큐 1곡: `-bs 4 -bo 3`, 2곡+: `-bs 2 -bo 2`
+- 모델: `ggml-*.bin` 우선, 기본 추천 ID `whisper:large-v3`
 
 ## Android APK (용량 최소화)
 
