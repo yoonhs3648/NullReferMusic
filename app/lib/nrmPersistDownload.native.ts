@@ -416,6 +416,52 @@ function joinFolderFile(folderUri: string, fileName: string): string {
   return `${folderUri}${sep}${fileName}`;
 }
 
+function stemOfName(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  return (dot > 0 ? fileName.slice(0, dot) : fileName).trim().toLowerCase();
+}
+
+function extractSafEntryName(uri: string): string {
+  const decoded = decodeURIComponent(uri);
+  const nameFromDoc = decoded.match(/\/document\/[^:]+:(?:.*\/)?([^/?#]+)/i)?.[1];
+  if (nameFromDoc) return nameFromDoc;
+  const tail = decoded.split('/').pop() ?? '';
+  return tail.split('?')[0];
+}
+
+/**
+ * 현재 다운로드 경로(사용자 설정 폴더)에서 확장자 제외 stem 중복 여부 확인.
+ * - Android: SAF grant 폴더 또는 legacy 외부 저장소
+ * - iOS: 앱 Documents/NullReferenceMusic
+ */
+export async function hasConflictingFileStemInDownloadDir(fileName: string): Promise<boolean> {
+  const targetStem = stemOfName(storageFileName(fileName));
+  if (!targetStem) return false;
+
+  if (Platform.OS === 'ios') {
+    const docRoot = FileSystem.documentDirectory;
+    if (!docRoot) return false;
+    const folderUri = `${docRoot}${NRM_FOLDER}/`;
+    await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true }).catch(() => {});
+    const names = await FileSystem.readDirectoryAsync(folderUri).catch(() => []);
+    return names.some((name) => stemOfName(name) === targetStem);
+  }
+
+  if (Platform.OS !== 'android') return false;
+
+  if ((Platform.Version as number) < 29) {
+    const dirUri = `file:///storage/emulated/0/${NRM_FOLDER}`;
+    await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true }).catch(() => {});
+    const names = await FileSystem.readDirectoryAsync(dirUri).catch(() => []);
+    return names.some((name) => stemOfName(name) === targetStem);
+  }
+
+  const dirUri = await loadStoredSafGrant();
+  if (!dirUri) return false;
+  const entries = await StorageAccessFramework.readDirectoryAsync(dirUri).catch(() => []);
+  return entries.some((entryUri) => stemOfName(extractSafEntryName(entryUri)) === targetStem);
+}
+
 function logLrcPersist(
   event: string,
   payload: Record<string, unknown>,

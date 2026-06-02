@@ -4,12 +4,14 @@ export async function setupNrmMobileDownloadNotifications(): Promise<void> {}
 export function nrmNotifyDownloadStarted(
   _videoId: string,
   _displayLabel: string,
+  _kind: 'audio' | 'lyrics' = 'audio',
 ): void {}
 
 export function nrmNotifyDownloadFinished(
   _videoId: string,
   _displayLabel: string,
   _success: boolean,
+  _kind: 'audio' | 'lyrics' = 'audio',
 ): void {}
 
 export function nrmNotifyDownloadWorkEnded(_videoId: string): void {}

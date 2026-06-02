@@ -34,6 +34,12 @@ import {
 export type FinalizeParallelOptions = {
   /** APK: 오디오가 저장 경로에 쓰인 직후 (알림용) */
   onAudioPersisted?: (savedLabel: string) => void;
+  /** APK: 가사 생성 작업 큐 진입/시작 (알림용) */
+  onLyricsStageStarted?: () => void;
+  /** APK: 가사 생성 작업 종료 (성공/실패 무관) */
+  onLyricsStageEnded?: () => void;
+  /** APK: LRC 사이드카가 실제 저장 경로에 쓰인 직후 (알림용) */
+  onLyricsPersisted?: (lrcUri: string) => void;
 };
 
 export type FinalizeParallelResult = {
@@ -187,6 +193,7 @@ async function finalizeNativeParallel(
 
   const whisperTask: Promise<WhisperLrcStageResult | null> = whisperMode
     ? (async () => {
+        options?.onLyricsStageStarted?.();
         logNrmDev('download.whisper', {
           event: 'finalize_whisper_parallel_start',
           fileName: safeName,
@@ -212,6 +219,8 @@ async function finalizeNativeParallel(
             lyricsRequested: true,
             lyricsEmbedded: false,
           };
+        } finally {
+          options?.onLyricsStageEnded?.();
         }
       })()
     : Promise.resolve(null);
@@ -231,12 +240,27 @@ async function finalizeNativeParallel(
 
   if (canPersistLrc && whisperDone) {
     try {
+      logNrmDev('download.lrc', {
+        event: 'move_to_audio_dir_start',
+        audioFileName: audioSaved.location.fileName,
+        storageKind: audioSaved.location.kind,
+        lrcChars: lrcToPersist.length,
+      });
       const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
       const lrcUri = await persistLrcForSavedAudio(audioSaved.location, lrcToPersist);
       whisperRef.result = {
         ...whisperDone,
         lyricsEmbedded: !!lrcUri,
       };
+      logNrmDev('download.lrc', {
+        event: lrcUri ? 'move_to_audio_dir_ok' : 'move_to_audio_dir_empty_uri',
+        audioFileName: audioSaved.location.fileName,
+        storageKind: audioSaved.location.kind,
+        lrcUri: lrcUri ?? '',
+      });
+      if (lrcUri) {
+        options?.onLyricsPersisted?.(lrcUri);
+      }
       if (!lrcUri) {
         logNrmDev('download.lrc', {
           event: 'finalize_no_uri',
@@ -246,7 +270,9 @@ async function finalizeNativeParallel(
     } catch (e) {
       logNrmRunError('download.lrc', e, {
         event: 'finalize_persist_failed',
+        stage: 'move_to_audio_dir_fail',
         audioFileName: audioSaved.location.fileName,
+        storageKind: audioSaved.location.kind,
       });
       whisperRef.result = {
         ...whisperDone,

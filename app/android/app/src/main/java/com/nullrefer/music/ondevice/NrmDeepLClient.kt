@@ -48,7 +48,11 @@ object NrmDeepLClient {
 
 
 
-  data class TranslateResult(val texts: List<String>, val apiUsed: String)
+  data class TranslateResult(
+      val texts: List<String>,
+      val sourceLangs: List<String>,
+      val apiUsed: String,
+  )
 
 
 
@@ -62,13 +66,14 @@ object NrmDeepLClient {
 
     if (key.isEmpty()) throw DeepLException("API 토큰이 비어 있습니다.")
 
-    if (lines.isEmpty()) return TranslateResult(emptyList(), "free")
+    if (lines.isEmpty()) return TranslateResult(emptyList(), emptyList(), "free")
 
 
 
     val chunks = chunkLines(lines)
 
     val merged = ArrayList<String>(lines.size)
+    val mergedSourceLangs = ArrayList<String>(lines.size)
 
     var apiUsed = "free"
 
@@ -85,12 +90,13 @@ object NrmDeepLClient {
       }
 
       merged.addAll(batch.texts)
+      mergedSourceLangs.addAll(batch.sourceLangs)
 
       if (batch.apiUsed == "pro") apiUsed = "pro"
 
     }
 
-    return TranslateResult(merged, apiUsed)
+    return TranslateResult(merged, mergedSourceLangs, apiUsed)
 
   }
 
@@ -211,14 +217,18 @@ object NrmDeepLClient {
         ?: throw DeepLException("DeepL 응답에 translations가 없습니다.")
 
     val out = ArrayList<String>(lines.size)
+    val sourceLangs = ArrayList<String>(lines.size)
 
     for (i in lines.indices) {
 
       out.add(arr.optJSONObject(i)?.optString("text")?.trim() ?: "")
+      sourceLangs.add(
+          arr.optJSONObject(i)?.optString("detected_source_language")?.trim()?.uppercase() ?: "",
+      )
 
     }
 
-    return TranslateResult(out, apiUsed)
+    return TranslateResult(out, sourceLangs, apiUsed)
 
   }
 

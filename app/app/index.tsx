@@ -300,24 +300,40 @@ export default function HomeScreen() {
 
   const openSpotifyArtistSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
+    setChartReturnView(null);
+    setChartSearchQuery(undefined);
+    setChartDownloadTrack(null);
+    setChartDownloadSource(null);
     setMainView('spotifySearchArtist');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyAlbumSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
+    setChartReturnView(null);
+    setChartSearchQuery(undefined);
+    setChartDownloadTrack(null);
+    setChartDownloadSource(null);
     setMainView('spotifySearchAlbum');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyTrackSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
+    setChartReturnView(null);
+    setChartSearchQuery(undefined);
+    setChartDownloadTrack(null);
+    setChartDownloadSource(null);
     setMainView('spotifySearchTrack');
     setLayoutPhase('browsing');
   }, []);
 
   const openLastfmSearch = useCallback((kind: LastfmSearchKind) => {
     setSearchViewEpoch((v) => v + 1);
+    setChartReturnView(null);
+    setChartSearchQuery(undefined);
+    setChartDownloadTrack(null);
+    setChartDownloadSource(null);
     setLastfmNavRestore(null);
     setLastfmNavSnapshot(null);
     setSearchReturnView(null);

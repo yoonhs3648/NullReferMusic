@@ -27,15 +27,23 @@ import {
   setNotificationChannelAsync,
 } from '@/lib/nrmNotificationsApi.native';
 
-const CH_PROGRESS = 'nrm_dl_progress';
-const CH_COMPLETE = 'nrm_dl_complete';
-const NOTIF_PROGRESS_ID = 'nrm-dl-busy';
-const NOTIF_DONE_SUMMARY_ID = 'nrm-dl-done-summary';
-const GROUP_DONE = 'nrm_dl_complete';
+const CH_AUDIO_PROGRESS = 'nrm_audio_progress';
+const CH_AUDIO_COMPLETE = 'nrm_audio_complete';
+const CH_LYRICS_PROGRESS = 'nrm_lyrics_progress';
+const CH_LYRICS_COMPLETE = 'nrm_lyrics_complete';
+const NOTIF_AUDIO_PROGRESS_ID = 'nrm-audio-busy';
+const NOTIF_AUDIO_DONE_SUMMARY_ID = 'nrm-audio-done-summary';
+const NOTIF_LYRICS_PROGRESS_ID = 'nrm-lyrics-busy';
+const NOTIF_LYRICS_DONE_SUMMARY_ID = 'nrm-lyrics-done-summary';
+const GROUP_AUDIO_DONE = 'nrm_audio_complete';
+const GROUP_LYRICS_DONE = 'nrm_lyrics_complete';
 
-const activeDownloads = new Map<string, string>();
-/** 현재 다운로드 묶음에서 완료된 항목 (videoId → 표시 이름) */
-const completedByVideoId = new Map<string, string>();
+const activeAudioDownloads = new Map<string, string>();
+const activeLyricsJobs = new Map<string, string>();
+/** 현재 오디오 완료 묶음 (videoId → 표시 이름) */
+const completedAudioByVideoId = new Map<string, string>();
+/** 현재 가사 완료 묶음 (videoId → 표시 이름) */
+const completedLyricsByVideoId = new Map<string, string>();
 let setupDone = false;
 
 export async function setupNrmMobileDownloadNotifications(): Promise<void> {
@@ -55,15 +63,29 @@ export async function setupNrmMobileDownloadNotifications(): Promise<void> {
     if (!granted) return;
 
     if (Platform.OS === 'android') {
-      await setNotificationChannelAsync(CH_PROGRESS, {
-        name: '다운로드 진행',
+      await setNotificationChannelAsync(CH_AUDIO_PROGRESS, {
+        name: '오디오 다운로드 진행',
         importance: AndroidImportance.LOW,
         enableLights: false,
         enableVibrate: false,
         showBadge: false,
       });
-      await setNotificationChannelAsync(CH_COMPLETE, {
-        name: '다운로드 완료',
+      await setNotificationChannelAsync(CH_AUDIO_COMPLETE, {
+        name: '오디오 다운로드 완료',
+        importance: AndroidImportance.DEFAULT,
+        enableLights: false,
+        enableVibrate: false,
+        showBadge: true,
+      });
+      await setNotificationChannelAsync(CH_LYRICS_PROGRESS, {
+        name: '가사 생성 진행',
+        importance: AndroidImportance.LOW,
+        enableLights: false,
+        enableVibrate: false,
+        showBadge: false,
+      });
+      await setNotificationChannelAsync(CH_LYRICS_COMPLETE, {
+        name: '가사 생성 완료',
         importance: AndroidImportance.DEFAULT,
         enableLights: false,
         enableVibrate: false,
@@ -77,31 +99,31 @@ export async function setupNrmMobileDownloadNotifications(): Promise<void> {
   }
 }
 
-async function refreshProgressNotif(): Promise<void> {
+async function refreshAudioProgressNotif(): Promise<void> {
   if (!setupDone) return;
 
-  const count = activeDownloads.size;
+  const count = activeAudioDownloads.size;
   if (count === 0) {
-    await dismissNotificationAsync(NOTIF_PROGRESS_ID).catch(() => {});
+    await dismissNotificationAsync(NOTIF_AUDIO_PROGRESS_ID).catch(() => {});
     return;
   }
 
-  const labels = [...activeDownloads.values()];
+  const labels = [...activeAudioDownloads.values()];
   const body =
     labels.length <= 3
       ? labels.join('\n')
       : `${labels.slice(0, 3).join('\n')}\n외 ${labels.length - 3}개`;
 
   await scheduleNotificationAsync({
-    identifier: NOTIF_PROGRESS_ID,
+    identifier: NOTIF_AUDIO_PROGRESS_ID,
     content: {
-      title: `다운로드 중 (${count}개)`,
+      title: `오디오 다운로드 중 (${count}개)`,
       body,
       data: {},
       ...(Platform.OS === 'android'
         ? ({
             android: {
-              channelId: CH_PROGRESS,
+              channelId: CH_AUDIO_PROGRESS,
               ongoing: true,
               sticky: true,
               progress: { max: 100, current: 0, indeterminate: true },
@@ -113,31 +135,94 @@ async function refreshProgressNotif(): Promise<void> {
   });
 }
 
-async function refreshCompleteNotif(newLabel: string, videoId: string): Promise<void> {
+async function refreshLyricsProgressNotif(): Promise<void> {
   if (!setupDone) return;
 
-  completedByVideoId.set(videoId, newLabel);
-  const labels = [...completedByVideoId.values()];
+  const count = activeLyricsJobs.size;
+  if (count === 0) {
+    await dismissNotificationAsync(NOTIF_LYRICS_PROGRESS_ID).catch(() => {});
+    return;
+  }
+
+  const labels = [...activeLyricsJobs.values()];
+  const list = labels.map((label) => `가사 - ${label} 가사 생성중`);
+  const body =
+    list.length <= 3
+      ? list.join('\n')
+      : `${list.slice(0, 3).join('\n')}\n외 ${list.length - 3}개`;
+
+  await scheduleNotificationAsync({
+    identifier: NOTIF_LYRICS_PROGRESS_ID,
+    content: {
+      title: `가사 생성 중 (${count}개)`,
+      body,
+      data: {},
+      ...(Platform.OS === 'android'
+        ? ({
+            android: {
+              channelId: CH_LYRICS_PROGRESS,
+              ongoing: true,
+              sticky: true,
+              progress: { max: 100, current: 0, indeterminate: true },
+            },
+          } as object)
+        : {}),
+    },
+    trigger: null,
+  });
+}
+
+async function refreshAudioCompleteNotif(newLabel: string, videoId: string): Promise<void> {
+  if (!setupDone) return;
+
+  completedAudioByVideoId.set(videoId, newLabel);
+  const labels = [...completedAudioByVideoId.values()];
   const count = labels.length;
 
-  // ▸ 개별 알림 없음 — 항상 하나의 요약 알림만 업데이트
-  // ▸ 1건: "파일명 다운로드 완료", 다건: "다운로드 완료 (N)" + 목록
   const title =
     count === 1
       ? `${labels[0]} 다운로드 완료`
-      : `다운로드 완료 (${count})`;
+      : `오디오 다운로드 완료 (${count})`;
   const body = count === 1 ? '' : labels.join('\n');
 
   await scheduleNotificationAsync({
-    identifier: NOTIF_DONE_SUMMARY_ID,
+    identifier: NOTIF_AUDIO_DONE_SUMMARY_ID,
     content: {
       title,
       body,
       data: {},
       ...(Platform.OS === 'android'
-        ? ({ android: { channelId: CH_COMPLETE } } as object)
+        ? ({ android: { channelId: CH_AUDIO_COMPLETE } } as object)
         : {}),
-      ...(Platform.OS === 'ios' ? { threadIdentifier: GROUP_DONE } : {}),
+      ...(Platform.OS === 'ios' ? { threadIdentifier: GROUP_AUDIO_DONE } : {}),
+    },
+    trigger: null,
+  });
+}
+
+async function refreshLyricsCompleteNotif(newLabel: string, videoId: string): Promise<void> {
+  if (!setupDone) return;
+
+  completedLyricsByVideoId.set(videoId, newLabel);
+  const labels = [...completedLyricsByVideoId.values()];
+  const count = labels.length;
+
+  const title =
+    count === 1
+      ? `가사 - ${labels[0]} 가사 생성 완료`
+      : `가사 생성 완료 (${count})`;
+  const body = count === 1 ? '' : labels.join('\n');
+
+  await scheduleNotificationAsync({
+    identifier: NOTIF_LYRICS_DONE_SUMMARY_ID,
+    content: {
+      title,
+      body,
+      data: {},
+      ...(Platform.OS === 'android'
+        ? ({ android: { channelId: CH_LYRICS_COMPLETE } } as object)
+        : {}),
+      ...(Platform.OS === 'ios' ? { threadIdentifier: GROUP_LYRICS_DONE } : {}),
     },
     trigger: null,
   });
@@ -146,24 +231,41 @@ async function refreshCompleteNotif(newLabel: string, videoId: string): Promise<
 export function nrmNotifyDownloadStarted(
   videoId: string,
   displayLabel: string,
+  kind: 'audio' | 'lyrics' = 'audio',
 ): void {
-  nrmBackgroundWorkAcquire(nrmDownloadBackgroundWorkToken(videoId));
-  const wasIdle = activeDownloads.size === 0;
-  activeDownloads.set(videoId, displayLabel);
-  if (wasIdle) {
-    completedByVideoId.clear();
+  if (kind === 'audio') {
+    nrmBackgroundWorkAcquire(nrmDownloadBackgroundWorkToken(videoId));
+    const wasIdle = activeAudioDownloads.size === 0;
+    activeAudioDownloads.set(videoId, displayLabel);
+    if (wasIdle) {
+      completedAudioByVideoId.clear();
+    }
+    void refreshAudioProgressNotif();
+    return;
   }
-  void refreshProgressNotif();
+  const wasIdle = activeLyricsJobs.size === 0;
+  activeLyricsJobs.set(videoId, displayLabel);
+  if (wasIdle) {
+    completedLyricsByVideoId.clear();
+  }
+  void refreshLyricsProgressNotif();
 }
 
 export function nrmNotifyDownloadFinished(
   videoId: string,
   displayLabel: string,
   success: boolean,
+  kind: 'audio' | 'lyrics' = 'audio',
 ): void {
-  activeDownloads.delete(videoId);
-  void refreshProgressNotif();
-  if (success) void refreshCompleteNotif(displayLabel, videoId);
+  if (kind === 'audio') {
+    activeAudioDownloads.delete(videoId);
+    void refreshAudioProgressNotif();
+    if (success) void refreshAudioCompleteNotif(displayLabel, videoId);
+    return;
+  }
+  activeLyricsJobs.delete(videoId);
+  void refreshLyricsProgressNotif();
+  if (success) void refreshLyricsCompleteNotif(displayLabel, videoId);
 }
 
 /** ffmpeg·Whisper 포함 전체 후처리가 끝났을 때 호출 (오디오 저장만으로는 release 하지 않음) */

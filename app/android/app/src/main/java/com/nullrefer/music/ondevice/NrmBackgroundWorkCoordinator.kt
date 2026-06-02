@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 object NrmBackgroundWorkCoordinator {
   private val tokens = ConcurrentHashMap.newKeySet<String>()
   @Volatile private var wakeLock: PowerManager.WakeLock? = null
+  @Volatile private var stopRequested: Boolean = false
 
   fun activeTokenCount(): Int = tokens.size
 
@@ -22,6 +23,7 @@ object NrmBackgroundWorkCoordinator {
     val trimmed = token.trim()
     if (trimmed.isEmpty()) return
     tokens.add(trimmed)
+    stopRequested = false
     ensureService(context.applicationContext)
     acquireWakeLock(context.applicationContext)
     NrmFileLogger.log("bg-work", "acquire token=$trimmed active=${tokens.size}")
@@ -34,6 +36,7 @@ object NrmBackgroundWorkCoordinator {
     tokens.remove(trimmed)
     NrmFileLogger.log("bg-work", "release token=$trimmed active=${tokens.size}")
     if (tokens.isEmpty()) {
+      stopRequested = true
       releaseWakeLock()
       stopService(context.applicationContext)
     } else {
@@ -46,6 +49,7 @@ object NrmBackgroundWorkCoordinator {
     val appContext = context.applicationContext
     val hadTokens = tokens.size
     tokens.clear()
+    stopRequested = true
     releaseWakeLock()
     stopService(appContext)
     NrmFileLogger.log("bg-work", "Force clear reason=$reason tokens=$hadTokens")
@@ -76,9 +80,9 @@ object NrmBackgroundWorkCoordinator {
     if (dlCount > 0) {
       lines.add(
           if (dlCount == 1) {
-            "음원 다운로드·가사 생성 중"
+            "오디오 파일 다운로드 중"
           } else {
-            "음원 다운로드·가사 생성 중 (${dlCount}곡)"
+            "오디오 파일 다운로드 중 (${dlCount}곡)"
           },
       )
     }
@@ -107,6 +111,7 @@ object NrmBackgroundWorkCoordinator {
   }
 
   private fun ensureService(context: Context) {
+    stopRequested = false
     val intent = Intent(context, NrmBackgroundWorkService::class.java)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       context.startForegroundService(intent)
@@ -119,6 +124,16 @@ object NrmBackgroundWorkCoordinator {
     context.stopService(Intent(context, NrmBackgroundWorkService::class.java))
   }
 
+  fun shouldAutoRestartService(): Boolean {
+    return tokens.isNotEmpty() && !stopRequested
+  }
+
+  fun onServiceStarted() {
+    if (tokens.isNotEmpty()) {
+      stopRequested = false
+    }
+  }
+
   private fun acquireWakeLock(context: Context) {
     if (wakeLock?.isHeld == true) return
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -126,7 +141,7 @@ object NrmBackgroundWorkCoordinator {
         pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NullReferenceMusic:nrm-bg-work").apply {
           setReferenceCounted(false)
         }
-    wl.acquire(6L * 60L * 60L * 1000L)
+    wl.acquire()
     wakeLock = wl
     NrmFileLogger.log("bg-work", "WakeLock acquire tokens=${tokens.size}")
   }

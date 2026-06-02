@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'nrm_file_logging_enabled';
 
-/** APK 파일 로깅 사용자 설정 UI (기본값 false). 네이티브 파일 로거는 빌드 정책으로 제어. */
+/** APK 파일 로깅 사용자 설정 UI. 네이티브 파일 로거는 빌드 정책으로 제어. */
 export type NrmFileLoggingMode = 'off' | 'on';
 
 export const NRM_FILE_LOG_DISPLAY_PATH =

@@ -311,6 +311,7 @@ export function NrmMetadataEditModal({
   const [extension, setExtension] = useState('.mp3');
   const [fileNameFormat, setFileNameFormat] =
     useState<NrmDownloadFileNameFormat>('artist-title');
+  const [nameConflict, setNameConflict] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const albumArtistLinkedRef = useRef(true);
@@ -420,6 +421,7 @@ export function NrmMetadataEditModal({
   const blocked = busy;
   const canSubmit =
     !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
+  const canSubmitWithConflict = canSubmit && !nameConflict;
 
   const stackCoverColumn = cardMaxWidth < 400;
 
@@ -539,6 +541,36 @@ export function NrmMetadataEditModal({
       setLyricsMode('unset');
     }
   }, [lyricsMode, translationOptionEnabled]);
+
+  useEffect(() => {
+    if (!visible || !item || !artist.trim() || !title.trim()) {
+      setNameConflict(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      if (Platform.OS === 'web') {
+        if (!cancelled) setNameConflict(false);
+        return;
+      }
+      try {
+        const { hasConflictingFileStemInDownloadDir } = await import(
+          '@/lib/nrmPersistDownload.native'
+        );
+        const hasConflict = await hasConflictingFileStemInDownloadDir(preview);
+        if (!cancelled) {
+          setNameConflict(hasConflict);
+        }
+      } catch {
+        if (!cancelled) {
+          setNameConflict(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [artist, item, preview, title, visible]);
 
   const lyricsOptions = useMemo(
     () =>
@@ -888,6 +920,15 @@ export function NrmMetadataEditModal({
           <Text style={[styles.preview, { color: bodyColor }]} numberOfLines={2}>
             파일명: {preview}
           </Text>
+          {nameConflict ? (
+            <Text
+              style={[
+                styles.conflictHint,
+                { color: isDark ? '#fda4af' : '#b91c1c' },
+              ]}>
+              동일한 이름의 파일이 있습니다.
+            </Text>
+          ) : null}
 
           <View style={styles.actions}>
             <Pressable
@@ -904,7 +945,7 @@ export function NrmMetadataEditModal({
 
             <Pressable
               onPress={() => {
-                if (!item || !canSubmit) return;
+                if (!item || !canSubmitWithConflict) return;
                 const metadata: NrmAudioFileMetadata = {
                   artist: artist.trim(),
                   title: title.trim(),
@@ -931,11 +972,11 @@ export function NrmMetadataEditModal({
                 );
                 onConfirm(item.videoId, fileName, metadata);
               }}
-              disabled={!canSubmit}
+              disabled={!canSubmitWithConflict}
               style={({ pressed }) => [
                 styles.btnPrimary,
-                !canSubmit && styles.btnDisabled,
-                pressed && canSubmit && styles.pressed,
+                !canSubmitWithConflict && styles.btnDisabled,
+                pressed && canSubmitWithConflict && styles.pressed,
               ]}>
               <Text style={styles.btnPrimaryLabel}>다운로드</Text>
             </Pressable>
@@ -1136,6 +1177,10 @@ const styles = StyleSheet.create({
   preview: {
     fontSize: nrmTokens.font.caption,
     marginTop: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.md,
+  },
+  conflictHint: {
+    fontSize: nrmTokens.font.caption,
     marginBottom: nrmTokens.space.md,
   },
   actions: {

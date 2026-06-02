@@ -31,8 +31,13 @@ class NrmDeepLModule(reactContext: ReactApplicationContext) :
             for (t in result.texts) {
               outTexts.pushString(t)
             }
+            val outSourceLangs = WritableNativeArray()
+            for (lang in result.sourceLangs) {
+              outSourceLangs.pushString(lang)
+            }
             val map = WritableNativeMap()
             map.putArray("texts", outTexts)
+            map.putArray("sourceLangs", outSourceLangs)
             map.putString("apiUsed", result.apiUsed)
             NrmFileLogger.log(
                 "deepl",

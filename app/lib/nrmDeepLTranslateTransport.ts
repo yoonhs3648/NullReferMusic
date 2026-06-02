@@ -23,7 +23,7 @@ const DEEPL_PRO_API = 'https://api.deepl.com/v2';
 const DEEPL_BATCH_TIMEOUT_MS = 120_000;
 
 type DeepLTranslateJsonResponse = {
-  translations?: Array<{ text?: string }>;
+  translations?: Array<{ text?: string; detected_source_language?: string }>;
 };
 
 function authHeader(apiKey: string): Record<string, string> {
@@ -49,14 +49,19 @@ async function fetchWithTimeout(
   }
 }
 
-function parseTranslateJson(body: string, expectedCount: number): string[] {
+function parseTranslateJson(
+  body: string,
+  expectedCount: number,
+): { texts: string[]; sourceLangs: string[] } {
   const json = JSON.parse(body) as DeepLTranslateJsonResponse;
   const arr = json.translations ?? [];
-  const out: string[] = [];
+  const texts: string[] = [];
+  const sourceLangs: string[] = [];
   for (let i = 0; i < expectedCount; i++) {
-    out.push((arr[i]?.text ?? '').trim());
+    texts.push((arr[i]?.text ?? '').trim());
+    sourceLangs.push((arr[i]?.detected_source_language ?? '').trim().toUpperCase());
   }
-  return out;
+  return { texts, sourceLangs };
 }
 
 function httpErrorMessage(status: number): string {
@@ -69,7 +74,13 @@ function httpErrorMessage(status: number): string {
 async function translateOneBatchDirect(
   apiKey: string,
   texts: string[],
-): Promise<{ texts: string[]; apiUsed: 'free' | 'pro' }> {
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro' }> {
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_http_request',
+    transport: 'direct',
+    lineCount: texts.length,
+    sample: texts.slice(0, 3),
+  });
   const payload = JSON.stringify({
     text: texts,
     target_lang: 'KO',
@@ -103,14 +114,30 @@ async function translateOneBatchDirect(
     throw err;
   }
   const raw = await res.text();
-  return { texts: parseTranslateJson(raw, texts.length), apiUsed };
+  const parsed = parseTranslateJson(raw, texts.length);
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_http_response',
+    transport: 'direct',
+    status: res.status,
+    apiUsed,
+    lineCount: parsed.texts.length,
+    sourceLangSample: parsed.sourceLangs.slice(0, 5),
+    textSample: parsed.texts.slice(0, 3),
+  });
+  return { texts: parsed.texts, sourceLangs: parsed.sourceLangs, apiUsed };
 }
 
 async function translateOneBatchBackend(
   apiKey: string,
   texts: string[],
   baseUrl: string,
-): Promise<{ texts: string[]; apiUsed: 'free' | 'pro' }> {
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro' }> {
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_http_request',
+    transport: 'backend',
+    lineCount: texts.length,
+    sample: texts.slice(0, 3),
+  });
   const res = await nrmBackendFetch(`${baseUrl}/api/deepl/translate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -122,13 +149,27 @@ async function translateOneBatchBackend(
     throw err;
   }
   const json = (await res.json()) as {
-    translations?: Array<{ text?: string }>;
+    translations?: Array<{ text?: string; detected_source_language?: string }>;
     apiUsed?: string;
   };
   const out = (json.translations ?? []).map((t) => (t.text ?? '').trim());
+  const sourceLangs = (json.translations ?? []).map((t) =>
+    (t.detected_source_language ?? '').trim().toUpperCase(),
+  );
   while (out.length < texts.length) out.push('');
+  while (sourceLangs.length < texts.length) sourceLangs.push('');
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_http_response',
+    transport: 'backend',
+    status: res.status,
+    apiUsed: json.apiUsed === 'pro' ? 'pro' : 'free',
+    lineCount: out.length,
+    sourceLangSample: sourceLangs.slice(0, 5),
+    textSample: out.slice(0, 3),
+  });
   return {
     texts: out.slice(0, texts.length),
+    sourceLangs: sourceLangs.slice(0, texts.length),
     apiUsed: json.apiUsed === 'pro' ? 'pro' : 'free',
   };
 }
@@ -149,7 +190,7 @@ async function translateOneBatchWithRetry(
   texts: string[],
   transport: BatchTransport,
   backendBase: string | null,
-): Promise<{ texts: string[]; apiUsed: 'free' | 'pro' }> {
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro' }> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= DEEPL_TRANSLATE_MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -186,9 +227,10 @@ async function translateAllChunks(
   texts: string[],
   primaryTransport: BatchTransport,
   backendBase: string | null,
-): Promise<{ texts: string[]; apiUsed: 'free' | 'pro'; transport: string }> {
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro'; transport: string }> {
   const chunks = chunkLrcLinesForDeepL(texts);
   const merged: string[] = [];
+  const mergedSourceLangs: string[] = [];
   let apiUsed: 'free' | 'pro' = 'free';
   let transportUsed = primaryTransport;
 
@@ -207,7 +249,7 @@ async function translateAllChunks(
       estBytes: estimateTranslateJsonBytes(chunk),
     });
     const batchT0 = Date.now();
-    let batch: { texts: string[]; apiUsed: 'free' | 'pro' };
+    let batch: { texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro' };
     try {
       batch = await translateOneBatchWithRetry(apiKey, chunk, primaryTransport, backendBase);
     } catch (primaryErr) {
@@ -232,7 +274,11 @@ async function translateAllChunks(
     if (batch.texts.length !== chunk.length) {
       throw new Error('DeepL 번역 결과 개수가 요청과 일치하지 않습니다.');
     }
+    if (batch.sourceLangs.length !== chunk.length) {
+      throw new Error('DeepL 감지 언어 결과 개수가 요청과 일치하지 않습니다.');
+    }
     merged.push(...batch.texts);
+    mergedSourceLangs.push(...batch.sourceLangs);
     if (batch.apiUsed === 'pro') apiUsed = 'pro';
     logNrmDev('lyrics.translate', {
       event: 'deepl_batch_ok',
@@ -242,7 +288,7 @@ async function translateAllChunks(
     });
   }
 
-  return { texts: merged, apiUsed, transport: transportUsed };
+  return { texts: merged, sourceLangs: mergedSourceLangs, apiUsed, transport: transportUsed };
 }
 
 /** LRC 가사 줄 텍스트 배열을 DeepL로 번역 (플랫폼 transport 자동 선택) */
@@ -255,7 +301,7 @@ export async function translateTextsWithDeepL(
     return { ok: false, message: 'API 토큰을 먼저 등록해주세요.' };
   }
   if (texts.length === 0) {
-    return { ok: true, texts: [], transport: 'none', apiUsed: 'free' };
+    return { ok: true, texts: [], sourceLangs: [], transport: 'none', apiUsed: 'free' };
   }
 
   const backendBase = await canUseBackendDeepLProxy();
@@ -288,6 +334,7 @@ export async function translateTextsWithDeepL(
     return {
       ok: true,
       texts: out.texts,
+      sourceLangs: out.sourceLangs,
       transport: out.transport,
       apiUsed: out.apiUsed,
     };

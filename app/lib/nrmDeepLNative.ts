@@ -4,7 +4,7 @@ type NrmDeepLNativeModule = {
   translateTexts: (
     apiKey: string,
     texts: string[],
-  ) => Promise<{ texts: string[]; apiUsed: string }>;
+  ) => Promise<{ texts: string[]; sourceLangs?: string[]; apiUsed: string }>;
 };
 
 export function isNativeDeepLTranslateAvailable(): boolean {
@@ -14,7 +14,7 @@ export function isNativeDeepLTranslateAvailable(): boolean {
 export async function translateTextsViaNative(
   apiKey: string,
   texts: string[],
-): Promise<{ texts: string[]; apiUsed: 'free' | 'pro' }> {
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro' }> {
   const mod = NativeModules.NrmDeepL as NrmDeepLNativeModule | undefined;
   if (!mod?.translateTexts) {
     throw new Error('NrmDeepL.translateTexts unavailable');
@@ -23,6 +23,9 @@ export async function translateTextsViaNative(
   const apiUsed = out.apiUsed === 'pro' ? 'pro' : 'free';
   return {
     texts: Array.isArray(out.texts) ? out.texts.map((t) => String(t ?? '').trim()) : [],
+    sourceLangs: Array.isArray(out.sourceLangs)
+      ? out.sourceLangs.map((v) => String(v ?? '').trim().toUpperCase())
+      : [],
     apiUsed,
   };
 }

@@ -18,7 +18,13 @@ export const DEEPL_TRANSLATE_MAX_RETRIES = 2;
 export const DEEPL_RETRY_BASE_MS = 800;
 
 export type DeepLTranslateTextsOutcome =
-  | { ok: true; texts: string[]; transport: string; apiUsed: 'free' | 'pro' }
+  | {
+      ok: true;
+      texts: string[];
+      sourceLangs: string[];
+      transport: string;
+      apiUsed: 'free' | 'pro';
+    }
   | { ok: false; message: string; transport?: string };
 
 export function estimateTranslateJsonBytes(texts: string[]): number {

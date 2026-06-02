@@ -189,6 +189,9 @@ export function NrmYoutubeHome({
   const [metadataUnavailableOpen, setMetadataUnavailableOpen] = useState(false);
   const [lyricsEmbedUnavailableOpen, setLyricsEmbedUnavailableOpen] = useState(false);
   const [lyricsTranslationFailedOpen, setLyricsTranslationFailedOpen] = useState(false);
+  const [chartContextActive, setChartContextActive] = useState(
+    !!chartDownloadTrack && !!initialQuery,
+  );
   const latestSearchTokenRef = useRef(0);
 
   type DownloadSession = {
@@ -207,6 +210,7 @@ export function NrmYoutubeHome({
   useEffect(() => {
     if (!initialQuery || initialQueryFiredRef.current) return;
     initialQueryFiredRef.current = true;
+    setChartContextActive(!!chartDownloadTrack);
     setQuery(initialQuery);
     const q = initialQuery.trim();
     if (!q) return;
@@ -228,9 +232,16 @@ export function NrmYoutubeHome({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!chartDownloadTrack || !initialQuery) {
+      setChartContextActive(false);
+    }
+  }, [chartDownloadTrack, initialQuery]);
+
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
+    setChartContextActive(false);
     const token = ++latestSearchTokenRef.current;
     onSearchCommitted?.();
     setLoading(true);
@@ -260,12 +271,15 @@ export function NrmYoutubeHome({
     }
   }, [query, onSearchCommitted]);
 
+  const effectiveChartTrack = chartContextActive ? chartDownloadTrack : null;
+  const effectiveChartSource = chartContextActive ? chartDownloadSource : null;
+
   const metadataContext = useMemo(
     () => ({
-      chartTrack: chartDownloadTrack,
-      chartSource: chartDownloadSource,
+      chartTrack: effectiveChartTrack,
+      chartSource: effectiveChartSource,
     }),
-    [chartDownloadSource, chartDownloadTrack],
+    [effectiveChartSource, effectiveChartTrack],
   );
 
   const clearDownloadSession = useCallback((videoId: string) => {
@@ -414,7 +428,30 @@ export function NrmYoutubeHome({
           onAudioPersisted:
             Platform.OS !== 'web'
               ? () => {
-                  nrmNotifyDownloadFinished(videoId, displayLabel, true);
+                  nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
+                }
+              : undefined,
+          onLyricsStageStarted:
+            Platform.OS !== 'web'
+              ? () => {
+                  nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
+                }
+              : undefined,
+          onLyricsStageEnded:
+            Platform.OS !== 'web'
+              ? () => {
+                  nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+                }
+              : undefined,
+          onLyricsPersisted:
+            Platform.OS !== 'web'
+              ? () => {
+                  nrmNotifyDownloadFinished(
+                    videoId,
+                    displayLabel,
+                    true,
+                    'lyrics',
+                  );
                 }
               : undefined,
         });
@@ -425,7 +462,7 @@ export function NrmYoutubeHome({
         }
       } catch (e) {
         if (Platform.OS !== 'web') {
-          nrmNotifyDownloadFinished(videoId, displayLabel, false);
+          nrmNotifyDownloadFinished(videoId, displayLabel, false, 'audio');
           logNrmRunError('download.native', e, {
             videoId,
             stage: parseDownloadStage(e),
@@ -614,14 +651,14 @@ export function NrmYoutubeHome({
         item={downloadModalItem}
         isDark={isDark}
         metadataSource={
-          chartDownloadSource === 'lastfm'
+          effectiveChartSource === 'lastfm'
             ? 'lastfm'
-            : chartDownloadTrack
+            : effectiveChartTrack
               ? 'chart'
               : 'main'
         }
-        initialArtist={chartDownloadTrack?.artists}
-        initialTitle={chartDownloadTrack?.title}
+        initialArtist={effectiveChartTrack?.artists}
+        initialTitle={effectiveChartTrack?.title}
         initialMetadataFields={downloadModalInitialFields}
         busy={!!(downloadModalItem && dlMetaBusy[downloadModalItem.videoId])}
         onClose={handleModalClose}

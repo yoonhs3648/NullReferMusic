@@ -257,7 +257,10 @@ public class ApiController {
           return ResponseEntity.status(502).body(Map.of("error", "deepl_translate_invalid"));
         }
         for (JsonNode node : arr) {
-          translations.add(Map.of("text", node.path("text").asText("")));
+          translations.add(
+              Map.of(
+                  "text", node.path("text").asText(""),
+                  "detected_source_language", node.path("detected_source_language").asText("")));
         }
       }
       return ResponseEntity.ok(Map.of("translations", translations, "apiUsed", apiUsed));

@@ -24,6 +24,7 @@ class NrmBackgroundWorkService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    NrmBackgroundWorkCoordinator.onServiceStarted()
     val notification = buildNotification(this)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       startForeground(
@@ -41,10 +42,22 @@ class NrmBackgroundWorkService : Service() {
     if (NrmBackgroundWorkCoordinator.activeTokenCount() == 0) {
       stopSelf()
     }
-    return START_NOT_STICKY
+    return START_STICKY
   }
 
   override fun onDestroy() {
+    if (NrmBackgroundWorkCoordinator.shouldAutoRestartService()) {
+      NrmFileLogger.warn(
+          "bg-work",
+          "ForegroundService destroyed unexpectedly while work remains; restarting service",
+      )
+      val intent = Intent(applicationContext, NrmBackgroundWorkService::class.java)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        applicationContext.startForegroundService(intent)
+      } else {
+        applicationContext.startService(intent)
+      }
+    }
     clearForegroundNotification(this)
     NrmFileLogger.log("bg-work", "ForegroundService destroy")
     super.onDestroy()

@@ -1,6 +1,29 @@
 {
   "entries": [
     {
+      "version": "1.6.12",
+      "lines": [
+        "가사 생성 알림을 오디오 알림과 분리하고 큐 묶음 진행/완료 알림으로 개선",
+        "유튜브 화면 내 재검색 후 다운로드 모달이 직전 차트 트랙 정보를 물려받는 버그 수정",
+        "APK 파일 로깅을 다시 비활성화해 휴대폰 물리 경로 로그 파일 생성 차단"
+      ]
+    },
+    {
+      "version": "1.6.11",
+      "lines": [
+        "Android APK 네이티브 파일 로깅 스위치를 실제 활성화로 반영",
+        "Download/NullReferenceMusic/logs/nrm-debug.log 경로에 DeepL·Whisper·다운로드 로그 기록 정상화"
+      ]
+    },
+    {
+      "version": "1.6.10",
+      "lines": [
+        "APK 파일 로깅 재활성화 및 오디오 다운로드·Whisper·DeepL 단계 로그 보강",
+        "DeepL 요청/응답 및 LRC merge(원문+번역 결합) 진단 로그 추가",
+        "LRC를 오디오 저장 경로로 이동할 때 성공/실패 로그 강화"
+      ]
+    },
+    {
       "version": "1.6.7",
       "lines": [
         "large-v3 안정화(저RAM에서도 large-v3 유지, 스레드·빔 안정값 복귀)",
