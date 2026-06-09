@@ -1,10 +1,13 @@
 import { NativeModules } from 'react-native';
 
-import { NRM_FILE_LOGGING_ENABLED } from '@/lib/nrmFileLoggingPolicy';
+import { NRM_FILE_LOGGING_BUILD_ALLOWED } from '@/lib/nrmFileLoggingPolicy';
+import { isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
 
 type NrmFileLoggerNative = {
   log?: (tag: string, level: string, message: string) => void;
   getLogFilePath?: () => Promise<string>;
+  setLoggingEnabled?: (enabled: boolean) => void;
+  deleteAllLogFiles?: () => Promise<number>;
 };
 
 const mod = NativeModules.NrmFileLogger as NrmFileLoggerNative | undefined;
@@ -15,7 +18,8 @@ export function appendNrmFileLog(
   level: 'info' | 'warn' | 'error',
   message: string,
 ): void {
-  if (!NRM_FILE_LOGGING_ENABLED) return;
+  if (!NRM_FILE_LOGGING_BUILD_ALLOWED) return;
+  if (!isNrmFileLoggingActive()) return;
   try {
     mod?.log?.(tag, level, message);
   } catch {
@@ -24,11 +28,19 @@ export function appendNrmFileLog(
 }
 
 export async function getNrmLogFilePath(): Promise<string | null> {
-  if (!NRM_FILE_LOGGING_ENABLED) return null;
+  if (!NRM_FILE_LOGGING_BUILD_ALLOWED) return null;
   try {
     const path = await mod?.getLogFilePath?.();
     return path?.trim() || null;
   } catch {
     return null;
+  }
+}
+
+export async function syncNativeFileLoggingEnabled(enabled: boolean): Promise<void> {
+  try {
+    mod?.setLoggingEnabled?.(enabled);
+  } catch {
+    /* optional */
   }
 }

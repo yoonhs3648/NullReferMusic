@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -55,9 +56,11 @@ async function spotifyApiGet<T>(
     return fail('not_configured');
   }
   try {
-    const res = await fetch(`${SPOTIFY_API}${apiPath}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await nrmDirectFetch(
+      `${SPOTIFY_API}${apiPath}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      'spotify-search',
+    );
     if (!res.ok) {
       let apiCode: string | undefined;
       try {

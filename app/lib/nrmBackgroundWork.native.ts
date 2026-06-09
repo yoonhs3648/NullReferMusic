@@ -11,7 +11,7 @@ export function nrmDownloadBackgroundWorkToken(videoId: string): string {
   return `dl:${videoId}`;
 }
 
-/** 다운로드·Whisper 세션 시작 — Android Foreground Service 유지 */
+/** 다운로드·Whisper 세션 시작 — Android Foreground Service + WakeLock 유지 */
 export function nrmBackgroundWorkAcquire(token: string): void {
   if (Platform.OS !== 'android') return;
   const t = token.trim();

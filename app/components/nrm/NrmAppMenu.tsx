@@ -38,6 +38,7 @@ import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWee
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
+import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import {
   ensureLastfmChartAccess,
   ensureSearchApiAccess,
@@ -127,6 +128,7 @@ type Panel =
   | 'downloadFilenameSettings'
   | 'downloadMetadataSettings'
   | 'downloadLyricsEmbedSettings'
+  | 'fileLoggingSettings'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -443,6 +445,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         setPanel('settings');
         break;
       case 'downloadManage':
+        setPanel('root');
+        break;
+      case 'fileLoggingSettings':
         setPanel('root');
         break;
       case 'appSettings':
@@ -785,6 +790,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     다운로드 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('fileLoggingSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    로깅
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1180,6 +1200,19 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'fileLoggingSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmFileLoggingSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('root')}
+                />
               </DrawerShell>
             ) : null}
 

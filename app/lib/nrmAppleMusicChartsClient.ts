@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -29,7 +30,11 @@ async function fetchAppleMusicDirect(chart: AppleMusicChartTabId): Promise<Fetch
   const meta = APPLE_CHART_FEED[chart];
   if (!meta) return { ok: false, errorCode: 'not_found' };
   try {
-    const res = await fetch(meta.url, { headers: { Accept: 'application/json' } });
+    const res = await nrmDirectFetch(
+      meta.url,
+      { headers: { Accept: 'application/json' } },
+      'apple-music-charts',
+    );
     if (!res.ok) {
       if (res.status === 403 || res.status === 401) return { ok: false, errorCode: 'forbidden' };
       if (res.status === 404) return { ok: false, errorCode: 'not_found' };

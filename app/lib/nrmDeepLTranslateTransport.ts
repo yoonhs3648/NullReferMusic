@@ -16,6 +16,7 @@ import { isNativeDeepLTranslateAvailable, translateTextsViaNative } from '@/lib/
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 
 const DEEPL_FREE_API = 'https://api-free.deepl.com/v2';
 const DEEPL_PRO_API = 'https://api.deepl.com/v2';
@@ -38,7 +39,11 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await nrmDirectFetch(
+      url,
+      { ...init, signal: controller.signal },
+      'deepl-translate',
+    );
   } catch (e) {
     if (controller.signal.aborted) {
       throw new Error('DeepL 요청 시간이 초과되었습니다.');

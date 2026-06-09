@@ -10,6 +10,7 @@ import {
 import { translateTextsWithDeepL } from '@/lib/nrmDeepLTranslateTransport';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { saveDeepLUsageSnapshot, type NrmDeepLUsageSnapshot } from '@/lib/nrmDeepLApiSettings';
 
 const DEEPL_FREE_API = 'https://api-free.deepl.com/v2';
@@ -29,7 +30,11 @@ function authHeader(apiKey: string): Record<string, string> {
 }
 
 async function fetchUsageWithBase(baseUrl: string, apiKey: string): Promise<Response> {
-  return fetch(`${baseUrl}/usage`, { headers: authHeader(apiKey) });
+  return nrmDirectFetch(
+    `${baseUrl}/usage`,
+    { headers: authHeader(apiKey) },
+    'deepl-usage',
+  );
 }
 
 async function fetchUsageViaBackend(apiKey: string): Promise<Response | null> {

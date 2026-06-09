@@ -9,6 +9,7 @@ import { copyToClipboard } from '@/lib/nrmCopyText';
 import { fetchDeepLUsage } from '@/lib/nrmDeepLApiClient';
 import { getDeepLApiKey, loadDeepLUsageSnapshot, saveDeepLApiKey, type NrmDeepLUsageSnapshot } from '@/lib/nrmDeepLApiSettings';
 import { NRM_API_SETTINGS_SAVED_MESSAGE, NRM_API_SETTINGS_UNSAVED_CONFIRM, NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE } from '@/lib/nrmApiSettingsUi';
+import { hasDeepLWebLogin, logoutDeepLWebLogin } from '@/lib/nrmDeepLWebLogout';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue' | 'usage';
@@ -59,6 +60,7 @@ export function NrmDeepLApiManagePanel({
   const [draftKey, setDraftKey] = useState('');
   const [usageLoading, setUsageLoading] = useState(false);
   const [usage, setUsage] = useState<NrmDeepLUsageSnapshot | null>(null);
+  const [deeplWebLoginActive, setDeeplWebLoginActive] = useState(false);
   const savedSnapshotRef = useRef('');
 
   const reload = useCallback(async () => {
@@ -66,6 +68,7 @@ export function NrmDeepLApiManagePanel({
     setDraftKey(savedKey);
     savedSnapshotRef.current = savedKey.trim();
     setUsage(await loadDeepLUsageSnapshot());
+    setDeeplWebLoginActive(await hasDeepLWebLogin());
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
@@ -179,6 +182,16 @@ export function NrmDeepLApiManagePanel({
     if (Platform.OS === 'web') void notifyUser(ok ? 'API Key를 복사했습니다.' : '복사에 실패했습니다.');
   };
 
+  const handleDeepLLogout = async () => {
+    if (!deeplWebLoginActive) return;
+    await logoutDeepLWebLogin();
+    setDraftKey('');
+    setUsage(null);
+    savedSnapshotRef.current = '';
+    setDeeplWebLoginActive(false);
+    void notifyUser('DeepL 로그인 정보를 삭제했습니다.');
+  };
+
   if (screen === 'manage') {
     return (
       <>
@@ -259,6 +272,19 @@ export function NrmDeepLApiManagePanel({
       <Pressable onPress={() => setScreen('manage')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API Key 관리</Text></Pressable>
       <Pressable onPress={() => setScreen('issue')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API Key 발급</Text></Pressable>
       <Pressable onPress={() => setScreen('usage')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API 사용량 조회</Text></Pressable>
+      <Pressable
+        onPress={() => void handleDeepLLogout()}
+        disabled={!deeplWebLoginActive}
+        style={({ pressed }) => [
+          styles.hubRow,
+          styles.hubRowFixed,
+          !deeplWebLoginActive && styles.hubRowDisabled,
+          pressed && deeplWebLoginActive && styles.hubRowPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !deeplWebLoginActive }}>
+        <Text style={[styles.hubRowTitleSm, { color: titleColor }]}>로그아웃</Text>
+      </Pressable>
     </>
   );
 }
@@ -271,6 +297,7 @@ const styles = StyleSheet.create({
   hubRow: { justifyContent: 'center', paddingHorizontal: nrmTokens.space.md, borderRadius: nrmTokens.radius.pill, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(128,128,128,0.4)', marginBottom: nrmTokens.space.sm },
   hubRowFixed: { height: HUB_ROW_H, overflow: 'hidden' },
   hubRowPressed: { opacity: 0.92 },
+  hubRowDisabled: { opacity: 0.55 },
   hubRowTitleSm: { fontSize: 15, fontWeight: '600', textAlign: 'center', lineHeight: 18 },
   fieldShell: { alignSelf: 'stretch', maxWidth: '100%', borderRadius: nrmTokens.radius.sm, overflow: 'hidden', marginBottom: nrmTokens.space.sm },
   fieldInner: { paddingHorizontal: nrmTokens.space.sm, paddingVertical: Platform.OS === 'ios' ? 12 : 10, fontSize: nrmTokens.font.body },

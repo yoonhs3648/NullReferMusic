@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -68,14 +69,14 @@ async function issueTokenWithBase(
 async function issueTokenDirect(creds: NrmSpotifyCredentials): Promise<SpotifyTokenIssueOutcome> {
   try {
     const credentials = btoa(`${creds.clientId}:${creds.clientSecret}`);
-    const res = await fetch('https://accounts.spotify.com/api/token', {
+    const res = await nrmDirectFetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: {
         Authorization: `Basic ${credentials}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: 'grant_type=client_credentials',
-    });
+    }, 'spotify-token');
     if (!res.ok) {
       if (res.status === 400 || res.status === 401) {
         return { ok: false, message: 'Spotify 인증에 실패했습니다. ID·Secret을 확인하세요.' };

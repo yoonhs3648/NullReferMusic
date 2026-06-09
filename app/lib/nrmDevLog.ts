@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 import { appendNrmFileLog } from '@/lib/nrmFileLog';
-import { NRM_FILE_LOGGING_ENABLED } from '@/lib/nrmFileLoggingPolicy';
+import { isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
 
 function toFilePayload(payload: Record<string, unknown>): string {
   try {
@@ -11,7 +11,7 @@ function toFilePayload(payload: Record<string, unknown>): string {
   }
 }
 
-/** Release APK 포함 — Android에서 파일 로그 기록 */
+/** Release APK 포함 — Android에서 파일 로그 기록 (사용자 토글 on) */
 export function logNrmDev(
   tag: string,
   payload: Record<string, unknown>,
@@ -19,12 +19,12 @@ export function logNrmDev(
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.warn(`[NRM:dev][${tag}]`, payload);
   }
-  if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
+  if (isNrmFileLoggingActive() && Platform.OS === 'android') {
     appendNrmFileLog(tag, 'info', toFilePayload(payload));
   }
 }
 
-/** Release APK 포함 — Android에서 파일 로그 기록 */
+/** Release APK 포함 — Android에서 파일 로그 기록 (사용자 토글 on) */
 export function logNrmRunError(
   tag: string,
   err: unknown,
@@ -38,7 +38,7 @@ export function logNrmRunError(
         console.error(err.stack);
       }
     }
-    if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
+    if (isNrmFileLoggingActive() && Platform.OS === 'android') {
       const ctx = extra ? ` ${toFilePayload(extra)}` : '';
       appendNrmFileLog(tag, 'error', `${err.message}${ctx}\n${err.stack ?? ''}`);
     }
@@ -47,7 +47,7 @@ export function logNrmRunError(
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.error(`[NRM:err][${tag}]`, err, extra ?? '');
   }
-  if (NRM_FILE_LOGGING_ENABLED && Platform.OS === 'android') {
+  if (isNrmFileLoggingActive() && Platform.OS === 'android') {
     const ctx = extra ? ` ${toFilePayload(extra)}` : '';
     appendNrmFileLog(tag, 'error', `${String(err)}${ctx}`);
   }

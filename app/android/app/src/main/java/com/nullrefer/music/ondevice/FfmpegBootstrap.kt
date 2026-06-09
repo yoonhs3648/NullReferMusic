@@ -61,6 +61,7 @@ object FfmpegBootstrap {
         return cached
       }
       NrmFileLogger.warn("ffmpeg", "캐시 ffmpeg 프로브 실패 — 재다운로드")
+      FfmpegExec.invalidateProbeCache()
       cached.binary.delete()
       File(cached.libDir, "libffmpeg.so").delete()
     }
@@ -74,6 +75,7 @@ object FfmpegBootstrap {
         if (FfmpegExec.probePaths(cached.binary, cached.libDir)) {
           return cached
         }
+        FfmpegExec.invalidateProbeCache()
         bin.delete()
         lib.delete()
       }
@@ -126,6 +128,7 @@ object FfmpegBootstrap {
         FfmpegPaths(bin, dir)
       } catch (e: Exception) {
         NrmFileLogger.error("ffmpeg", "부트스트랩 실패", e)
+        FfmpegExec.invalidateProbeCache()
         bin.delete()
         lib.delete()
         null

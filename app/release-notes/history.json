@@ -1,6 +1,40 @@
 {
   "entries": [
     {
+      "version": "1.6.19",
+      "lines": [
+        "Spotify Charts / Last.fm / DeepL 로그아웃 시 웹 세션 쿠키 실제 삭제",
+        "Charts 로그아웃 후 WebView 리마운트",
+        "Spotify 로그아웃 버튼 → Charts API 로그아웃"
+      ]
+    },
+    {
+      "version": "1.6.18",
+      "lines": [
+        "메뉴 로깅 탭 (토글·일별 로그·삭제, 기본 OFF)",
+        "Spotify / Last.fm / DeepL API 로그아웃",
+        "API 요청·응답 로깅·실패 강조 로그",
+        "Whisper·ffmpeg 변환 타임아웃 제거",
+        "Last.fm API 키 확인 페이지 URL 분기"
+      ]
+    },
+    {
+      "version": "1.6.17",
+      "lines": [
+        "APK 파일 로깅 활성화 (Download/NullReferenceMusic/logs/nrm-debug.log)",
+        "Whisper·가사 생성·DeepL·다운로드·백그라운드 작업 로그 기록 (큐 멈춤 진단용)"
+      ]
+    },
+    {
+      "version": "1.6.16",
+      "lines": [
+        "오디오/LRC 작업에 Foreground Service 복원 및 진행 알림과 FG 알림 중복 제거",
+        "가사 생성 FG 알림 우선, 오디오·가사·완료 알림을 항목별 개별 ID로 분리",
+        "진행 알림 문구 정리(가사 - 접두어 제거, 완료 알림 곡마다 개별 표시)",
+        "앱 kill·스와이프 종료 후 남는 ongoing 진행 알림 cold start 시 자동 정리"
+      ]
+    },
+    {
       "version": "1.6.15",
       "lines": [
         "안드로이드 진행 알림(오디오/가사)을 네이티브 ongoing 알림으로 전환해 알림창 지우기/스와이프 삭제 방지",

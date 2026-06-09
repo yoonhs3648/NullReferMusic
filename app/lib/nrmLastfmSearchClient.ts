@@ -1,5 +1,6 @@
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -88,7 +89,11 @@ async function lastfmGet(
 ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; errorCode: LastfmSearchErrorCode; message: string }> {
   try {
     const qs = new URLSearchParams({ ...params, format: 'json' });
-    const res = await fetch(`${LASTFM_API}?${qs.toString()}`);
+    const res = await nrmDirectFetch(
+      `${LASTFM_API}?${qs.toString()}`,
+      undefined,
+      'lastfm-search',
+    );
     if (!res.ok) {
       const errorCode: LastfmSearchErrorCode =
         res.status === 401 || res.status === 403 ? 'auth_failed' : 'unknown';

@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -146,15 +147,19 @@ async function fetchSpotifyChartDirectInner(
     }
     try {
       const url = `${CHARTS_API_BASE}/auth/v0/charts/${meta.slug}/${date}`;
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${bearerToken}`,
-          Accept: 'application/json',
-          Origin: 'https://charts.spotify.com',
-          Referer: 'https://charts.spotify.com/',
+      const res = await nrmDirectFetch(
+        url,
+        {
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+            Accept: 'application/json',
+            Origin: 'https://charts.spotify.com',
+            Referer: 'https://charts.spotify.com/',
+          },
+          signal,
         },
-        signal,
-      });
+        'spotify-charts',
+      );
       if (!res.ok) {
         if (res.status === 401) return { ok: false, errorCode: 'auth_failed', authFailed: true, premiumBlocked: false };
         if (res.status === 403) {

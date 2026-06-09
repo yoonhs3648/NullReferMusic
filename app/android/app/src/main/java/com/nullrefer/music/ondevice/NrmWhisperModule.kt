@@ -13,13 +13,10 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.Charset
-import java.util.concurrent.TimeUnit
 
 /** APK 내 로컬 whisper.cpp 전사 → LRC (모델은 사전 다운로드만) */
 class NrmWhisperModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
-  private val processTimeoutSec = 1800L
-
   init {
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
@@ -376,29 +373,33 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     pb.redirectErrorStream(true)
     val procT0 = SystemClock.elapsedRealtime()
     val p = pb.start()
+    NrmMediaCpuPriority.registerWhisperProcess(p)
     val out = StringBuilder()
-    BufferedReader(InputStreamReader(p.inputStream, Charset.defaultCharset())).use { r ->
-      var line: String?
-      while (r.readLine().also { line = it } != null) {
-        out.append(line).append('\n')
-        if (NrmWhisperPerfLog.ENABLED) {
-          NrmWhisperPerfLog.logStdoutLine(line!!)
+    val code: Int
+    try {
+      BufferedReader(InputStreamReader(p.inputStream, Charset.defaultCharset())).use { r ->
+        var line: String?
+        while (r.readLine().also { line = it } != null) {
+          out.append(line).append('\n')
+          if (NrmWhisperPerfLog.ENABLED) {
+            NrmWhisperPerfLog.logStdoutLine(line!!)
+          }
         }
       }
+      p.waitFor()
+      val wallMs = SystemClock.elapsedRealtime() - procT0
+      code = p.exitValue()
+      if (NrmWhisperPerfLog.ENABLED) {
+        NrmFileLogger.log(
+            NrmWhisperPerfLog.TAG,
+            "process wallMs=$wallMs exit=$code outputChars=${out.length}",
+        )
+      }
+    } finally {
+      NrmMediaCpuPriority.unregisterWhisperProcess(p)
     }
-    val finished = p.waitFor(processTimeoutSec, TimeUnit.SECONDS)
-    val wallMs = SystemClock.elapsedRealtime() - procT0
-    if (!finished) {
-      p.destroyForcibly()
-      NrmFileLogger.error(tag, "프로세스 타임아웃 (${processTimeoutSec}s) wallMs=$wallMs", null)
-      throw Exception("whisper_timeout")
-    }
-    val code = p.exitValue()
     val fullOut = out.toString()
     NrmFileLogger.logProcess(tag, argv, code, fullOut)
-    if (NrmWhisperPerfLog.ENABLED) {
-      NrmFileLogger.log(NrmWhisperPerfLog.TAG, "process wallMs=$wallMs exit=$code outputChars=${fullOut.length}")
-    }
     if (code != 0) {
       throw Exception("${tag}_exit_$code")
     }

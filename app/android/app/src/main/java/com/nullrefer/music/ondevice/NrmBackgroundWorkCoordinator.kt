@@ -19,11 +19,20 @@ object NrmBackgroundWorkCoordinator {
 
   fun activeTokenCount(): Int = tokens.size
 
+  fun hasDownloadTokens(): Boolean = tokens.any { it.startsWith("dl:") }
+
+  fun hasLyricsTokens(): Boolean = tokens.any { it.startsWith("whisper-lrc:") }
+
+  fun hasModelTokens(): Boolean = tokens.any { it.startsWith("whisper-model:") }
+
   fun acquire(context: Context, token: String) {
     val trimmed = token.trim()
     if (trimmed.isEmpty()) return
     tokens.add(trimmed)
     stopRequested = false
+    if (tokens.size == 1) {
+      NrmStaleWorkNotificationCleanup.markWorkActive(context.applicationContext, true)
+    }
     if (shouldRunForegroundService()) {
       ensureService(context.applicationContext)
     } else {
@@ -44,6 +53,7 @@ object NrmBackgroundWorkCoordinator {
     if (tokens.isEmpty()) {
       stopRequested = true
       releaseWakeLock()
+      NrmStaleWorkNotificationCleanup.markWorkActive(context.applicationContext, false)
       stopService(context.applicationContext)
     } else {
       if (shouldRunForegroundService()) {
@@ -61,7 +71,8 @@ object NrmBackgroundWorkCoordinator {
     tokens.clear()
     stopRequested = true
     releaseWakeLock()
-    stopService(appContext)
+    NrmStaleWorkNotificationCleanup.markWorkActive(appContext, false)
+    NrmStaleWorkNotificationCleanup.forceClearOngoingWorkNotifications(appContext, reason)
     NrmFileLogger.log("bg-work", "Force clear reason=$reason tokens=$hadTokens")
   }
 
@@ -98,7 +109,7 @@ object NrmBackgroundWorkCoordinator {
     }
 
     val whisperLrc = tokens.count { it.startsWith("whisper-lrc:") }
-    if (whisperLrc > 0 && dlCount == 0 && modelTokens.isEmpty()) {
+    if (whisperLrc > 0) {
       lines.add(
           if (whisperLrc == 1) {
             "가사(LRC) 생성 중"
@@ -144,17 +155,10 @@ object NrmBackgroundWorkCoordinator {
     }
   }
 
-  fun activeForegroundTokenCount(): Int = tokens.count { requiresForegroundService(it) }
+  fun activeForegroundTokenCount(): Int = tokens.size
 
-  private fun shouldRunForegroundService(): Boolean = tokens.any { requiresForegroundService(it) }
-
-  /**
-   * 오디오/가사 진행 알림은 JS 로컬 알림이 별도로 담당한다.
-   * Foreground Service 알림은 모델 다운로드처럼 시스템 보존이 특히 필요한 작업에만 사용한다.
-   */
-  private fun requiresForegroundService(token: String): Boolean {
-    return token.startsWith("whisper-model:")
-  }
+  /** 오디오 다운로드·LRC·모델 다운로드 등 활성 작업이 있으면 Foreground Service 유지 */
+  private fun shouldRunForegroundService(): Boolean = tokens.isNotEmpty()
 
   private fun acquireWakeLock(context: Context) {
     if (wakeLock?.isHeld == true) return

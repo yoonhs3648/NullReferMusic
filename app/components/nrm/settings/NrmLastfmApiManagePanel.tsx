@@ -25,6 +25,11 @@ import {
   NRM_API_SETTINGS_UNSAVED_CONFIRM,
   NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
 } from '@/lib/nrmApiSettingsUi';
+import { resolveLastfmApiDashboardUrl } from '@/lib/nrmLastfmApiDashboardUrl';
+import {
+  hasLastfmWebLogin,
+  logoutLastfmWebLogin,
+} from '@/lib/nrmLastfmWebLogout';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue';
@@ -47,8 +52,6 @@ type Props = {
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   registerDrawerDismiss?: (handler: (() => void) | null) => void;
 };
-
-const LASTFM_DASHBOARD_URL = 'https://www.last.fm/api/account/create';
 
 function MenuBackRow({ onPress }: { onPress: () => void }) {
   return (
@@ -183,6 +186,7 @@ export function NrmLastfmApiManagePanel({
   const [draftId, setDraftId] = useState('');
   const [draftSecret, setDraftSecret] = useState('');
   const [issuing, setIssuing] = useState(false);
+  const [lastfmWebLoginActive, setLastfmWebLoginActive] = useState(false);
   const savedSnapshotRef = useRef<DraftSnapshot | null>(null);
 
   const reload = useCallback(async () => {
@@ -195,6 +199,7 @@ export function NrmLastfmApiManagePanel({
       clientId: id.trim(),
       clientSecret: secret.trim(),
     };
+    setLastfmWebLoginActive(await hasLastfmWebLogin());
   }, []);
 
   useEffect(() => {
@@ -354,7 +359,18 @@ export function NrmLastfmApiManagePanel({
   };
 
   const openDashboard = async () => {
-    await WebBrowser.openBrowserAsync(LASTFM_DASHBOARD_URL);
+    const url = await resolveLastfmApiDashboardUrl();
+    await WebBrowser.openBrowserAsync(url);
+  };
+
+  const handleLastfmLogout = async () => {
+    if (!lastfmWebLoginActive) return;
+    await logoutLastfmWebLogin();
+    setDraftId('');
+    setDraftSecret('');
+    savedSnapshotRef.current = { clientId: '', clientSecret: '' };
+    setLastfmWebLoginActive(false);
+    void notifyUser('Last.fm 로그인 정보를 삭제했습니다.');
   };
 
   if (screen === 'manage') {
@@ -508,6 +524,24 @@ export function NrmLastfmApiManagePanel({
           API 토큰 발급
         </Text>
       </Pressable>
+
+      <Pressable
+        onPress={() => void handleLastfmLogout()}
+        disabled={!lastfmWebLoginActive}
+        style={({ pressed }) => [
+          styles.hubRow,
+          styles.hubRowFixed,
+          !lastfmWebLoginActive && styles.hubRowDisabled,
+          pressed && lastfmWebLoginActive && styles.hubRowPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !lastfmWebLoginActive }}>
+        <Text
+          style={[styles.hubRowTitleSm, { color: titleColor }]}
+          numberOfLines={1}>
+          로그아웃
+        </Text>
+      </Pressable>
     </>
   );
 }
@@ -555,6 +589,9 @@ const styles = StyleSheet.create({
   },
   hubRowPressed: {
     opacity: 0.92,
+  },
+  hubRowDisabled: {
+    opacity: 0.55,
   },
   hubRowTitleSm: {
     fontSize: 15,

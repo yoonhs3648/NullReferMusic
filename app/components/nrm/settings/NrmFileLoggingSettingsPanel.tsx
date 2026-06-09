@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -13,18 +14,14 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { getNrmLogFilePath } from '@/lib/nrmFileLog';
 import {
-  loadNrmFileLoggingEnabled,
+  deleteAllNrmLogFiles,
   NRM_FILE_LOG_DISPLAY_PATH,
-  saveNrmFileLoggingEnabled,
 } from '@/lib/nrmFileLoggingSettings';
-
-const SEGMENT_BORDER = 'rgba(128,128,128,0.4)';
-const SEGMENT_BORDER_WIDTH = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
-
-const LOGGING_OPTIONS = [
-  { value: false, label: '미설정' },
-  { value: true, label: '설정' },
-] as const;
+import {
+  refreshNrmFileLoggingFromStorage,
+  setNrmFileLoggingActive,
+} from '@/lib/nrmFileLoggingRuntime';
+import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type Props = {
   titleColor: string;
@@ -54,15 +51,13 @@ export function NrmFileLoggingSettingsPanel({
   const [logPath, setLogPath] = useState(NRM_FILE_LOG_DISPLAY_PATH);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const segmentBg = 'rgba(128,128,128,0.08)';
-  const segmentActiveBg = 'rgba(0, 102, 204, 0.28)';
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       const [stored, resolvedPath] = await Promise.all([
-        loadNrmFileLoggingEnabled(),
+        refreshNrmFileLoggingFromStorage(),
         getNrmLogFilePath(),
       ]);
       if (cancelled) return;
@@ -77,29 +72,43 @@ export function NrmFileLoggingSettingsPanel({
     };
   }, []);
 
-  const persist = useCallback(
+  const onToggleLogging = useCallback(
     async (next: boolean) => {
-      if (next === enabled) return;
+      if (next === enabled || saving) return;
       setSaving(true);
       try {
-        await saveNrmFileLoggingEnabled(next);
+        await setNrmFileLoggingActive(next);
         setEnabled(next);
       } finally {
         setSaving(false);
       }
     },
-    [enabled],
+    [enabled, saving],
   );
+
+  const onDeleteLogs = useCallback(async () => {
+    if (deleting) return;
+    const ok = await confirmUser('모든 로그를 삭제할까요?');
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      const count = await deleteAllNrmLogFiles();
+      void notifyUser(
+        count > 0
+          ? `${count}개의 로그 파일을 삭제했습니다.`
+          : '삭제할 로그 파일이 없습니다.',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting]);
 
   return (
     <NrmMenuDrawerScroll>
       <MenuBackRow onPress={onBack} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>로깅</Text>
-      <Text style={[styles.lead, { color: bodyColor }]}>
-        앱 실행·다운로드·Whisper 등 디버그 로그를 기기 Download 폴더에 기록합니다.
-      </Text>
       <Text style={[styles.pathLabel, { color: bodyColor }]}>
-        로깅 경로 : {logPath}
+        로그위치 : {logPath}
       </Text>
       {Platform.OS !== 'android' ? (
         <Text style={[styles.note, { color: bodyColor }]}>
@@ -110,41 +119,36 @@ export function NrmFileLoggingSettingsPanel({
       {loading ? (
         <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
       ) : (
-        <View
-          style={[
-            styles.segmentBar,
-            { backgroundColor: segmentBg, borderColor: SEGMENT_BORDER },
-          ]}
-          accessibilityRole="radiogroup"
-          accessibilityLabel="로깅 설정">
-          {LOGGING_OPTIONS.map((opt, index) => {
-            const active = enabled === opt.value;
-            return (
-              <Pressable
-                key={opt.label}
-                disabled={saving}
-                onPress={() => void persist(opt.value)}
-                style={({ pressed }) => [
-                  styles.segmentCell,
-                  index > 0 && styles.segmentDivider,
-                  active && { backgroundColor: segmentActiveBg },
-                  pressed && !active && styles.segmentPressed,
-                ]}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled: saving }}>
-                <Text
-                  style={[
-                    styles.segmentLabel,
-                    { color: active ? titleColor : bodyColor },
-                    active && styles.segmentLabelActive,
-                  ]}
-                  numberOfLines={1}>
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <>
+          <View style={styles.switchRow}>
+            <Text style={[styles.switchTitle, { color: titleColor }]}>로깅</Text>
+            <Switch
+              value={enabled}
+              onValueChange={(v) => void onToggleLogging(v)}
+              disabled={saving || Platform.OS !== 'android'}
+              trackColor={{
+                false: 'rgba(128,128,128,0.35)',
+                true: nrmTokens.color.accentDim,
+              }}
+              thumbColor={enabled ? nrmTokens.color.accent : '#f4f4f5'}
+            />
+          </View>
+
+          <Pressable
+            onPress={() => void onDeleteLogs()}
+            disabled={deleting || Platform.OS !== 'android'}
+            style={({ pressed }) => [
+              styles.deleteBtn,
+              (deleting || Platform.OS !== 'android') && styles.deleteBtnDisabled,
+              pressed && !deleting && styles.deleteBtnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="로그 삭제">
+            <Text style={[styles.deleteBtnLabel, { color: titleColor }]}>
+              로그 삭제
+            </Text>
+          </Pressable>
+        </>
       )}
     </NrmMenuDrawerScroll>
   );
@@ -167,16 +171,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: nrmTokens.space.sm,
   },
-  lead: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 20,
-    marginBottom: nrmTokens.space.sm,
-  },
   pathLabel: {
     fontSize: nrmTokens.font.caption,
     lineHeight: 20,
-    marginBottom: nrmTokens.space.md,
-    fontWeight: '500',
+    marginBottom: nrmTokens.space.lg,
   },
   note: {
     fontSize: nrmTokens.font.caption,
@@ -185,32 +183,34 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   loader: { marginVertical: nrmTokens.space.xl },
-  segmentBar: {
+  switchRow: {
     flexDirection: 'row',
-    alignSelf: 'stretch',
-    width: '100%',
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: SEGMENT_BORDER_WIDTH,
-    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: nrmTokens.space.lg,
+    paddingVertical: nrmTokens.space.xs,
   },
-  segmentCell: {
-    flex: 1,
-    minWidth: 0,
-    height: 48,
+  switchTitle: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+  },
+  deleteBtn: {
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(128,128,128,0.4)',
   },
-  segmentDivider: {
-    borderLeftWidth: SEGMENT_BORDER_WIDTH,
-    borderLeftColor: SEGMENT_BORDER,
+  deleteBtnDisabled: {
+    opacity: 0.55,
   },
-  segmentPressed: { opacity: 0.85 },
-  segmentLabel: {
+  deleteBtnPressed: {
+    opacity: 0.92,
+  },
+  deleteBtnLabel: {
     fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  segmentLabelActive: {
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });

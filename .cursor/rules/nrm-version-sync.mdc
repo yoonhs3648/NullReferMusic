@@ -1,0 +1,23 @@
+---
+description: When the user asks to bump app version (even without APK build), always sync all in-app version sources.
+alwaysApply: true
+---
+
+# 앱 버전 동기화 규칙
+
+사용자가 **버전 올려줘**, **버전만 올려**, **APK는 말지 말고 버전 반영**처럼 요청하면 APK 빌드 여부와 무관하게 아래를 반드시 같이 반영한다.
+
+## 필수 동기화 대상
+
+- `app/package.json` → `"version"`
+- `app/app.config.ts` → `version`
+- `app/android/app/build.gradle` → `versionName` (버전 릴리스면 `versionCode`도 +1)
+
+## 이유 (앱 내 버전 정보)
+
+- 앱 메뉴의 **버전 정보 UI**는 `app/lib/nrmAppInfo.ts`에서 `package.json.version`을 읽는다.
+- 따라서 `package.json`을 올리지 않으면 APK가 새 버전이어도 UI는 구버전으로 보일 수 있다.
+
+## 금지
+
+- 사용자가 **APK 빌드 금지**를 말한 경우, 버전 동기화만 수행하고 `assembleRelease`/APK 생성은 실행하지 않는다.

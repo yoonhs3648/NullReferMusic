@@ -20,6 +20,7 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { hasEmbeddableAudioMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
+import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
@@ -695,7 +696,7 @@ export async function persistAudioAfterServerJob(
   }
 
   const out = await persistLocalAudioFile(tempUri, safeName);
-  await fetch(`${base}/api/download/cleanup`, {
+  await nrmBackendFetch(`${base}/api/download/cleanup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jobId }),

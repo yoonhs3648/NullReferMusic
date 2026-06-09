@@ -1,13 +1,16 @@
 import { Platform } from 'react-native';
 
 import { prefetchFfmpegOnDevice } from '@/lib/nrmFfmpegPrefetch';
-import { NRM_FILE_LOGGING_ENABLED } from '@/lib/nrmFileLoggingPolicy';
+import { appendNrmFileLog, getNrmLogFilePath } from '@/lib/nrmFileLog';
+import { initNrmFileLoggingRuntime, isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
+import { reconcileStaleArtifactsOnColdStart } from '@/lib/nrmStartupArtifactCleanup';
 
 void (async () => {
   if (Platform.OS !== 'android') return;
 
-  if (NRM_FILE_LOGGING_ENABLED) {
-    const { appendNrmFileLog, getNrmLogFilePath } = await import('@/lib/nrmFileLog');
+  await initNrmFileLoggingRuntime();
+
+  if (isNrmFileLoggingActive()) {
     const Constants = (await import('expo-constants')).default;
     const { ExecutionEnvironment } = await import('expo-constants');
 
@@ -35,5 +38,6 @@ void (async () => {
     );
   }
 
+  void reconcileStaleArtifactsOnColdStart();
   void prefetchFfmpegOnDevice();
 })();

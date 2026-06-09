@@ -39,6 +39,10 @@ import {
   NRM_API_SETTINGS_UNSAVED_CONFIRM,
   NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
 } from '@/lib/nrmApiSettingsUi';
+import {
+  hasSpotifyChartsWebLogin,
+  logoutSpotifyChartsWebLogin,
+} from '@/lib/nrmSpotifyChartsLogout';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue' | 'chartsSession';
@@ -229,7 +233,9 @@ export function NrmSpotifyApiManagePanel({
   const [draftAccessToken, setDraftAccessToken] = useState('');
   const [chartsBearerToken, setChartsBearerToken] = useState('');
   const [chartsSessionActive, setChartsSessionActive] = useState(false);
+  const [chartsWebLoginActive, setChartsWebLoginActive] = useState(false);
   const [chartsLoginModalOpen, setChartsLoginModalOpen] = useState(false);
+  const [chartsWebViewKey, setChartsWebViewKey] = useState(0);
   const webViewLoginVisible = isSpotifyChartsWebViewLoginVisible();
   const [issuing, setIssuing] = useState(false);
   const savedSnapshotRef = useRef<DraftSnapshot | null>(null);
@@ -273,6 +279,7 @@ export function NrmSpotifyApiManagePanel({
     chartsSavedRef.current = {
       bearerToken: account?.bearerToken ?? '',
     };
+    setChartsWebLoginActive(await hasSpotifyChartsWebLogin());
   }, []);
 
   useEffect(() => {
@@ -537,6 +544,18 @@ export function NrmSpotifyApiManagePanel({
     await WebBrowser.openBrowserAsync(SPOTIFY_DASHBOARD_URL);
   };
 
+  const handleChartsLogout = async () => {
+    if (!chartsWebLoginActive) return;
+    setChartsLoginModalOpen(false);
+    await logoutSpotifyChartsWebLogin();
+    setChartsBearerToken('');
+    setChartsSessionActive(false);
+    chartsSavedRef.current = { bearerToken: '' };
+    setChartsWebLoginActive(false);
+    setChartsWebViewKey((k) => k + 1);
+    void notifyUser('Spotify Charts 로그인 정보를 삭제했습니다.');
+  };
+
   const tokenExpiryLabel =
     tokenExpiresAt != null
       ? new Date(tokenExpiresAt).toLocaleString('ko-KR')
@@ -581,6 +600,7 @@ export function NrmSpotifyApiManagePanel({
           visible={chartsLoginModalOpen}
           titleColor={titleColor}
           bodyColor={bodyColor}
+          webViewSessionKey={chartsWebViewKey}
           onClose={() => setChartsLoginModalOpen(false)}
           onSessionCaptured={(payload) => void onChartsSessionCaptured(payload)}
         />
@@ -808,6 +828,24 @@ export function NrmSpotifyApiManagePanel({
           Charts 세션 관리
         </Text>
       </Pressable>
+
+      <Pressable
+        onPress={() => void handleChartsLogout()}
+        disabled={!chartsWebLoginActive}
+        style={({ pressed }) => [
+          styles.hubRow,
+          styles.hubRowFixed,
+          !chartsWebLoginActive && styles.hubRowDisabled,
+          pressed && chartsWebLoginActive && styles.hubRowPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !chartsWebLoginActive }}>
+        <Text
+          style={[styles.hubRowTitleSm, { color: titleColor }]}
+          numberOfLines={1}>
+          Charts API 로그아웃
+        </Text>
+      </Pressable>
     </>
   );
 }
@@ -881,6 +919,9 @@ const styles = StyleSheet.create({
   },
   hubRowPressed: {
     opacity: 0.92,
+  },
+  hubRowDisabled: {
+    opacity: 0.55,
   },
   hubRowTitleSm: {
     fontSize: 15,

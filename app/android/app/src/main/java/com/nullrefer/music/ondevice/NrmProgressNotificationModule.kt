@@ -4,16 +4,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
-import androidx.core.app.NotificationCompat
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.nullrefer.music.R
 
 /**
- * 다운로드 "진행" 알림을 네이티브 ongoing 알림으로 관리한다.
- * - 알림창 "지우기" / 스와이프로 제거되지 않음
- * - 완료 알림은 JS(expo-notifications) 경로를 그대로 사용
+ * 오디오/가사 "진행" 알림 — Foreground Service와 동일 ID를 공유한다.
+ * 완료 알림은 JS(expo-notifications)에서 항목별 개별 ID로 표시한다.
  */
 class NrmProgressNotificationModule(
     private val reactContext: ReactApplicationContext,
@@ -24,50 +21,53 @@ class NrmProgressNotificationModule(
   @ReactMethod
   fun showAudioProgress(title: String, body: String) {
     ensureChannel(CH_AUDIO_PROGRESS, "오디오 다운로드 진행")
-    notify(
-        id = NOTIF_AUDIO_PROGRESS_ID,
-        channelId = CH_AUDIO_PROGRESS,
-        title = title.trim(),
-        body = body.trim(),
-    )
+    val trimmedTitle = title.trim()
+    val trimmedBody = body.trim()
+    NrmForegroundNotificationBinder.onAudioProgressShown(trimmedTitle, trimmedBody)
+    val notification =
+        NrmForegroundNotificationBinder.buildAudioProgressNotification(
+            reactContext,
+            trimmedTitle,
+            trimmedBody,
+        )
+    notificationManager().notify(NOTIF_AUDIO_PROGRESS_ID, notification)
+    NrmForegroundNotificationBinder.syncForeground(reactContext)
   }
 
   @ReactMethod
   fun showLyricsProgress(title: String, body: String) {
     ensureChannel(CH_LYRICS_PROGRESS, "가사 생성 진행")
-    notify(
-        id = NOTIF_LYRICS_PROGRESS_ID,
-        channelId = CH_LYRICS_PROGRESS,
-        title = title.trim(),
-        body = body.trim(),
-    )
+    val trimmedTitle = title.trim()
+    val trimmedBody = body.trim()
+    NrmForegroundNotificationBinder.onLyricsProgressShown(trimmedTitle, trimmedBody)
+    val notification =
+        NrmForegroundNotificationBinder.buildLyricsProgressNotification(
+            reactContext,
+            trimmedTitle,
+            trimmedBody,
+        )
+    notificationManager().notify(NOTIF_LYRICS_PROGRESS_ID, notification)
+    NrmForegroundNotificationBinder.syncForeground(reactContext)
   }
 
   @ReactMethod
   fun dismissAudioProgress() {
+    NrmForegroundNotificationBinder.onAudioProgressDismissed()
     notificationManager().cancel(NOTIF_AUDIO_PROGRESS_ID)
+    NrmForegroundNotificationBinder.syncForeground(reactContext)
   }
 
   @ReactMethod
   fun dismissLyricsProgress() {
+    NrmForegroundNotificationBinder.onLyricsProgressDismissed()
     notificationManager().cancel(NOTIF_LYRICS_PROGRESS_ID)
+    NrmForegroundNotificationBinder.syncForeground(reactContext)
   }
 
-  private fun notify(id: Int, channelId: String, title: String, body: String) {
-    val notification =
-        NotificationCompat.Builder(reactContext, channelId)
-            .setSmallIcon(R.drawable.notification_icon)
-            .setContentTitle(title.ifBlank { "작업 진행 중" })
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-    notificationManager().notify(id, notification)
+  /** JS cold start 시 네이티브·expo 잔존 진행 알림 이중 정리 */
+  @ReactMethod
+  fun reconcileStaleProgressOnColdStart() {
+    NrmStaleWorkNotificationCleanup.reconcileOnColdStart(reactContext)
   }
 
   private fun ensureChannel(channelId: String, name: String) {
@@ -88,9 +88,9 @@ class NrmProgressNotificationModule(
   }
 
   companion object {
-    private const val CH_AUDIO_PROGRESS = "nrm_audio_progress"
-    private const val CH_LYRICS_PROGRESS = "nrm_lyrics_progress"
-    private const val NOTIF_AUDIO_PROGRESS_ID = 9201
-    private const val NOTIF_LYRICS_PROGRESS_ID = 9202
+    const val CH_AUDIO_PROGRESS = "nrm_audio_progress"
+    const val CH_LYRICS_PROGRESS = "nrm_lyrics_progress"
+    private const val NOTIF_AUDIO_PROGRESS_ID = NrmForegroundNotificationBinder.NOTIF_AUDIO_PROGRESS_ID
+    private const val NOTIF_LYRICS_PROGRESS_ID = NrmForegroundNotificationBinder.NOTIF_LYRICS_PROGRESS_ID
   }
 }

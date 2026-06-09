@@ -19,140 +19,263 @@ import java.util.TimeZone
 /**
  * 사용자가 파일 관리자에서 바로 열 수 있는 경로에 디버그 로그를 기록합니다.
  *
- * 경로: Download/NullReferenceMusic/logs/nrm-debug.log
+ * 경로: Download/NullReferenceMusic/logs/nrm-debug-YYYY-MM-DD.log
  * (Android/data 아래가 아님)
+ *
+ * on/off — SharedPreferences `nrm_file_logging` / JS AsyncStorage 와 동기화. 기본 off.
  */
 object NrmFileLogger {
-  private const val FILE_LOGGING_ENABLED = false
+  private const val PREFS_NAME = "nrm_file_logging"
+  private const val KEY_ENABLED = "enabled"
 
   private const val LOG_TAG = "NrmFileLogger"
-  private const val LOG_FILE_NAME = "nrm-debug.log"
+  private const val LOG_FILE_PREFIX = "nrm-debug-"
+  private const val LOG_FILE_SUFFIX = ".log"
   private const val FOLDER = "NullReferenceMusic/logs"
-  private const val MAX_BYTES = 5L * 1024 * 1024
+  private const val FAILURE_PAD = "\n\n\n"
 
   @Volatile private var appContext: Context? = null
+  @Volatile private var userLoggingEnabled: Boolean = false
   private val lock = Any()
   private var mediaStoreUri: Uri? = null
   private var legacyLogFile: File? = null
+  private var activeLogDateKey: String? = null
   private var displayPath: String =
-    "${Environment.DIRECTORY_DOWNLOADS}/NullReferenceMusic/logs/$LOG_FILE_NAME"
+    "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER/${LOG_FILE_PREFIX}YYYY-MM-DD$LOG_FILE_SUFFIX"
 
   fun init(context: Context) {
-    if (!FILE_LOGGING_ENABLED) return
     if (appContext != null) return
     synchronized(lock) {
       if (appContext != null) return
       appContext = context.applicationContext
+      userLoggingEnabled =
+          appContext!!
+              .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+              .getBoolean(KEY_ENABLED, false)
+      updateDisplayPath()
+      if (userLoggingEnabled) {
+        ensureLogSink(createIfMissing = true)
+        logSessionHeader()
+      }
+    }
+  }
+
+  fun setUserLoggingEnabled(enabled: Boolean) {
+    val ctx = appContext
+    if (ctx != null) {
+      ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+          .edit()
+          .putBoolean(KEY_ENABLED, enabled)
+          .apply()
+    }
+    synchronized(lock) {
+      userLoggingEnabled = enabled
+      if (!enabled) {
+        mediaStoreUri = null
+        legacyLogFile = null
+        activeLogDateKey = null
+        return
+      }
       ensureLogSink(createIfMissing = true)
       logSessionHeader()
     }
   }
 
-  fun getDisplayPath(): String =
-    if (FILE_LOGGING_ENABLED) displayPath else ""
+  fun isUserLoggingEnabled(): Boolean = userLoggingEnabled
+
+  fun getDisplayPath(): String = if (userLoggingEnabled) displayPath else ""
 
   /** JS/레거시 — 파일 로깅 활성 여부 */
-  fun isEnabled(): Boolean = FILE_LOGGING_ENABLED
+  fun isEnabled(): Boolean = userLoggingEnabled
 
   fun log(tag: String, message: String) {
-    if (!FILE_LOGGING_ENABLED) return
+    if (!userLoggingEnabled) return
     write("I", tag, message, null)
   }
 
   fun warn(tag: String, message: String) {
-    if (!FILE_LOGGING_ENABLED) return
+    if (!userLoggingEnabled) return
     write("W", tag, message, null)
   }
 
   fun error(tag: String, message: String, throwable: Throwable? = null) {
-    if (!FILE_LOGGING_ENABLED) return
+    if (!userLoggingEnabled) return
     write("E", tag, message, throwable)
   }
 
+  fun logFailure(tag: String, title: String, detail: String, throwable: Throwable? = null) {
+    if (!userLoggingEnabled) return
+    val block =
+        buildString {
+          append(FAILURE_PAD)
+          append("████████████████████████████████████████\n")
+          append("██  FAILURE\n")
+          append("██  ")
+          append(title.replace('\n', ' '))
+          append('\n')
+          append("████████████████████████████████████████\n")
+          append(detail)
+          append('\n')
+          append("████████████████████████████████████████")
+          append(FAILURE_PAD)
+        }
+    write("E", tag, block, throwable)
+  }
+
   fun logProcess(tag: String, cmd: List<String>, exitCode: Int, output: String) {
-    if (!FILE_LOGGING_ENABLED) return
+    if (!userLoggingEnabled) return
     val cmdLine = cmd.joinToString(" ")
+    if (exitCode != 0) {
+      logFailure(
+          tag,
+          "process exit=$exitCode",
+          "cmd=$cmdLine\n${output.trim().takeLast(8000)}",
+      )
+      return
+    }
+    if (tag == "ffmpeg-probe" || tag == "ffmpeg-encoders") {
+      log(tag, "cmd=$cmdLine exit=0")
+      return
+    }
     val tailLimit =
         when {
           tag == "whisper" || tag == NrmWhisperPerfLog.TAG -> 32_000
           else -> 8_000
         }
     val tail = output.trim().takeLast(tailLimit)
-    val level = if (exitCode == 0) "I" else "E"
     write(
-      level,
-      tag,
-      buildString {
-        append("cmd=$cmdLine")
-        append(" exit=$exitCode")
-        if (tail.isNotBlank()) {
-          append('\n')
-          append(tail)
-        }
-      },
-      null,
+        "I",
+        tag,
+        buildString {
+          append("cmd=$cmdLine")
+          append(" exit=$exitCode")
+          if (tail.isNotBlank()) {
+            append('\n')
+            append(tail)
+          }
+        },
+        null,
     )
   }
 
+  /** logs 폴더의 nrm-debug*.log 전부 삭제 */
+  fun deleteAllLogFiles(): Int {
+    val ctx = appContext ?: return 0
+    var removed = 0
+    synchronized(lock) {
+      mediaStoreUri = null
+      legacyLogFile = null
+      activeLogDateKey = null
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER"
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+        val selection =
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+        val args = arrayOf("$relativePath%", "${LOG_FILE_PREFIX}%")
+        ctx.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+          val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+          while (cursor.moveToNext()) {
+            val id = cursor.getLong(idCol)
+            val uri = ContentUris.withAppendedId(collection, id)
+            if (ctx.contentResolver.delete(uri, null, null) > 0) removed++
+          }
+        }
+      } else {
+        @Suppress("DEPRECATION")
+        val dir =
+            File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                FOLDER,
+            )
+        if (dir.isDirectory) {
+          dir.listFiles()?.forEach { f ->
+            if (f.isFile && f.name.startsWith(LOG_FILE_PREFIX) && f.name.endsWith(LOG_FILE_SUFFIX)) {
+              if (f.delete()) removed++
+            }
+          }
+        }
+      }
+    }
+    log("file-log", "Deleted $removed log file(s)")
+    return removed
+  }
+
   private fun logSessionHeader() {
+    if (!userLoggingEnabled) return
     val ctx = appContext ?: return
     val pm = ctx.packageManager
     val pkg = ctx.packageName
     val pkgInfo =
-      try {
-        pm.getPackageInfo(pkg, 0)
-      } catch (_: Exception) {
-        null
-      }
+        try {
+          pm.getPackageInfo(pkg, 0)
+        } catch (_: Exception) {
+          null
+        }
     val abis = Build.SUPPORTED_ABIS.joinToString(",")
     log(
-      "app-start",
-      buildString {
-        append("=== NRM session start ===")
-        append(" version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})")
-        append(" debug=${BuildConfig.DEBUG}")
-        append(" sdk=${Build.VERSION.SDK_INT}")
-        append(" device=${Build.MANUFACTURER} ${Build.MODEL}")
-        append(" abi=$abis")
-        if (pkgInfo != null) {
-          append(" install=${pkgInfo.firstInstallTime}")
-          append(" update=${pkgInfo.lastUpdateTime}")
-        }
-        append(" logPath=$displayPath")
-      },
+        "app-start",
+        buildString {
+          append("=== NRM session start ===")
+          append(" version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})")
+          append(" debug=${BuildConfig.DEBUG}")
+          append(" sdk=${Build.VERSION.SDK_INT}")
+          append(" device=${Build.MANUFACTURER} ${Build.MODEL}")
+          append(" abi=$abis")
+          if (pkgInfo != null) {
+            append(" install=${pkgInfo.firstInstallTime}")
+            append(" update=${pkgInfo.lastUpdateTime}")
+          }
+          append(" logPath=$displayPath")
+        },
     )
+  }
+
+  private fun todayKey(): String {
+    val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    fmt.timeZone = TimeZone.getDefault()
+    return fmt.format(Date())
+  }
+
+  private fun logFileNameForDate(dateKey: String): String =
+      "$LOG_FILE_PREFIX$dateKey$LOG_FILE_SUFFIX"
+
+  private fun updateDisplayPath() {
+    displayPath =
+        "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER/${logFileNameForDate(todayKey())}"
   }
 
   private fun write(level: String, tag: String, message: String, throwable: Throwable?) {
     val ctx = appContext
+    if (!userLoggingEnabled) return
     if (ctx == null) {
       Log.println(
-        when (level) {
-          "E" -> Log.ERROR
-          "W" -> Log.WARN
-          else -> Log.INFO
-        },
-        LOG_TAG,
-        "[$tag] $message",
+          when (level) {
+            "E" -> Log.ERROR
+            "W" -> Log.WARN
+            else -> Log.INFO
+          },
+          LOG_TAG,
+          "[$tag] $message",
       )
       return
     }
 
     val ts = timestamp()
     val line =
-      buildString {
-        append(ts)
-        append(' ')
-        append(level)
-        append(" [")
-        append(tag)
-        append("] ")
-        append(message.replace('\r', ' '))
-        if (throwable != null) {
-          append('\n')
-          append(throwable.stackTraceToString().replace('\r', ' '))
+        buildString {
+          append(ts)
+          append(' ')
+          append(level)
+          append(" [")
+          append(tag)
+          append("] ")
+          append(message.replace('\r', ' '))
+          if (throwable != null) {
+            append('\n')
+            append(throwable.stackTraceToString().replace('\r', ' '))
+          }
         }
-      }
 
     when (level) {
       "E" -> Log.e(LOG_TAG, "[$tag] $message", throwable)
@@ -163,7 +286,6 @@ object NrmFileLogger {
     synchronized(lock) {
       try {
         if (!ensureLogSink(createIfMissing = true)) return
-        rotateIfNeeded()
         appendLine(line)
       } catch (e: Exception) {
         Log.w(LOG_TAG, "file log write failed: ${e.message}")
@@ -178,58 +300,65 @@ object NrmFileLogger {
   }
 
   private fun ensureLogSink(createIfMissing: Boolean): Boolean {
+    val dateKey = todayKey()
+    if (activeLogDateKey != dateKey) {
+      mediaStoreUri = null
+      legacyLogFile = null
+      activeLogDateKey = dateKey
+      updateDisplayPath()
+    }
     if (mediaStoreUri != null || legacyLogFile?.parentFile?.exists() == true) {
       return true
     }
     if (!createIfMissing) return false
 
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      mediaStoreUri = resolveOrCreateMediaStoreUri()
+      mediaStoreUri = resolveOrCreateMediaStoreUri(logFileNameForDate(dateKey))
       mediaStoreUri != null
     } else {
       @Suppress("DEPRECATION")
       val dir =
-        File(
-          Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-          FOLDER,
-        )
+          File(
+              Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+              FOLDER,
+          )
       if (!dir.exists() && !dir.mkdirs()) {
         Log.w(LOG_TAG, "legacy log dir create failed: ${dir.absolutePath}")
         return false
       }
-      legacyLogFile = File(dir, LOG_FILE_NAME)
-      displayPath = "${dir.absolutePath}/$LOG_FILE_NAME"
+      legacyLogFile = File(dir, logFileNameForDate(dateKey))
+      displayPath = "${dir.absolutePath}/${logFileNameForDate(dateKey)}"
       true
     }
   }
 
-  private fun resolveOrCreateMediaStoreUri(): Uri? {
+  private fun resolveOrCreateMediaStoreUri(fileName: String): Uri? {
     val ctx = appContext ?: return null
     val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER"
     val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val projection = arrayOf(MediaStore.MediaColumns._ID)
     val selection =
-      "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-    val args = arrayOf(LOG_FILE_NAME, "$relativePath%")
+        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+    val args = arrayOf(fileName, "$relativePath%")
 
     ctx.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
       if (cursor.moveToFirst()) {
         val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-        displayPath = "$relativePath/$LOG_FILE_NAME"
+        displayPath = "$relativePath/$fileName"
         return ContentUris.withAppendedId(collection, id)
       }
     }
 
     val values =
-      ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, LOG_FILE_NAME)
-        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-        put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-        put(MediaStore.MediaColumns.IS_PENDING, 0)
-      }
+        ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+          put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+          put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+          put(MediaStore.MediaColumns.IS_PENDING, 0)
+        }
     val uri = ctx.contentResolver.insert(collection, values)
     if (uri != null) {
-      displayPath = "$relativePath/$LOG_FILE_NAME"
+      displayPath = "$relativePath/$fileName"
     }
     return uri
   }
@@ -240,39 +369,9 @@ object NrmFileLogger {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       val uri = mediaStoreUri ?: return
       ctx.contentResolver.openOutputStream(uri, "wa")?.use { it.write(payload) }
-        ?: throw IOException("MediaStore append failed")
+          ?: throw IOException("MediaStore append failed")
     } else {
       legacyLogFile?.appendBytes(payload) ?: throw IOException("legacy log file missing")
-    }
-  }
-
-  private fun rotateIfNeeded() {
-    val size =
-      when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> mediaStoreSize()
-        else -> legacyLogFile?.length() ?: 0L
-      }
-    if (size < MAX_BYTES) return
-
-    val marker =
-      "${timestamp()} I [app] === log rotated (size=$size) ===\n".toByteArray(Charsets.UTF_8)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      val ctx = appContext ?: return
-      val uri = mediaStoreUri ?: return
-      ctx.contentResolver.openOutputStream(uri, "w")?.use { it.write(marker) }
-      mediaStoreUri = uri
-    } else {
-      legacyLogFile?.writeBytes(marker)
-    }
-  }
-
-  private fun mediaStoreSize(): Long {
-    val ctx = appContext ?: return 0L
-    val uri = mediaStoreUri ?: return 0L
-    return try {
-      ctx.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
-    } catch (_: Exception) {
-      0L
     }
   }
 }

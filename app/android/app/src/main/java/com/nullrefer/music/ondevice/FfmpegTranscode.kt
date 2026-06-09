@@ -66,7 +66,6 @@ object FfmpegTranscode {
       paths.libDir,
       args,
       tag = "ffmpeg-transcode",
-      timeoutSec = 600,
     )
 
     if (!out.isFile || out.length() <= 0L) {
@@ -100,31 +99,31 @@ object FfmpegTranscode {
         "ffmpeg-transcode",
         "shineenc mp3 in=${input.absolutePath} out=${out.absolutePath} kbps=$kbps",
       )
-      FfmpegExec.runWithPaths(
-        paths.binary,
-        paths.libDir,
-        listOf(
-          "-y",
-          "-i",
-          input.absolutePath,
-          "-vn",
-          "-ar",
-          "44100",
-          "-ac",
-          "2",
-          "-c:a",
-          "pcm_s16le",
-          wav.absolutePath,
-        ),
-        tag = "ffmpeg-shine-wav",
-        timeoutSec = 600,
-      )
-      ShineExec.run(
-        shineCli,
-        listOf("-q", "-b", kbps.toString(), wav.absolutePath, out.absolutePath),
-        tag = "shineenc",
-        timeoutSec = 600,
-      )
+      NrmMediaCpuPriority.runFfmpegPriority {
+        FfmpegExec.runWithPathsUnchecked(
+          paths.binary,
+          paths.libDir,
+          listOf(
+            "-y",
+            "-i",
+            input.absolutePath,
+            "-vn",
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s16le",
+            wav.absolutePath,
+          ),
+          tag = "ffmpeg-shine-wav",
+        )
+        ShineExec.runUnchecked(
+          shineCli,
+          listOf("-q", "-b", kbps.toString(), wav.absolutePath, out.absolutePath),
+          tag = "shineenc",
+        )
+      }
       if (!out.isFile || out.length() <= 0L) {
         throw Exception("SHINE_OUTPUT_EMPTY")
       }

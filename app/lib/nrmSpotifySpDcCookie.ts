@@ -8,7 +8,14 @@ export function hasNrmSpotifyCookieNativeModule(): boolean {
   return false;
 }
 
+type ReadSpDcOptions = {
+  maxAttempts?: number;
+  delayMs?: number;
+};
+
 /** @deprecated */
-export async function readSpotifySpDcCookie(): Promise<string | null> {
+export async function readSpotifySpDcCookie(
+  _options?: ReadSpDcOptions,
+): Promise<string | null> {
   return null;
 }

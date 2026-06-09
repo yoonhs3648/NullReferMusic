@@ -12,6 +12,8 @@ type Props = {
   bodyColor: string;
   /** 갱신·재시도 후에도 실패했을 때 만료 안내 문구 */
   bearerExpired?: boolean;
+  /** 로그아웃 후 WebView를 새로 마운트할 때 증가 */
+  webViewSessionKey?: number;
   onClose: () => void;
   onSessionCaptured: (payload: SpotifyChartsSessionSave) => void;
 };
@@ -21,6 +23,7 @@ export function NrmSpotifyChartsLoginModal({
   titleColor,
   bodyColor,
   bearerExpired = false,
+  webViewSessionKey = 0,
   onClose,
   onSessionCaptured,
 }: Props) {
@@ -54,6 +57,7 @@ export function NrmSpotifyChartsLoginModal({
         <View style={styles.webWrap}>
           {visible ? (
             <NrmSpotifyChartsLoginWebView
+              sessionKey={webViewSessionKey}
               onLoginComplete={(payload) => {
                 onSessionCaptured(payload);
                 onClose();

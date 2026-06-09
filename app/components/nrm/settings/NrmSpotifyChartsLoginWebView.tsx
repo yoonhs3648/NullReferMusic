@@ -11,10 +11,12 @@ import {
 import type { SpotifyChartsSessionSave } from '@/lib/nrmSpotifyChartsSession';
 
 type Props = {
+  /** 로그아웃 후 WebView 인스턴스·캐시를 비우기 위해 증가시킵니다 */
+  sessionKey?: number;
   onLoginComplete: (payload: SpotifyChartsSessionSave) => void;
 };
 
-export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
+export function NrmSpotifyChartsLoginWebView({ sessionKey = 0, onLoginComplete }: Props) {
   const userAgent = useSpotifyWebViewUserAgent();
   const { webRef, onNavigation, onLoadEnd, onMessage, onHttpError } =
     useSpotifyChartsTokenHarvest({
@@ -27,8 +29,11 @@ export function NrmSpotifyChartsLoginWebView({ onLoginComplete }: Props) {
   return (
     <View style={styles.wrap}>
       <WebView
+        key={sessionKey}
         ref={webRef}
         style={styles.webview}
+        cacheEnabled={false}
+        incognito={false}
         source={{ uri: NRM_SPOTIFY_CHARTS_LOGIN_URL }}
         userAgent={userAgent}
         applicationNameForUserAgent=""

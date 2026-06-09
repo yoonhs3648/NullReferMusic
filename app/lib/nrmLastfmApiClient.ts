@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -22,7 +23,11 @@ async function validateKeyDirect(creds: NrmLastfmCredentials): Promise<LastfmTok
       format: 'json',
       limit: '1',
     });
-    const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${qs.toString()}`);
+    const res = await nrmDirectFetch(
+      `https://ws.audioscrobbler.com/2.0/?${qs.toString()}`,
+      undefined,
+      'lastfm-api',
+    );
     if (!res.ok) return { ok: false, message: 'Last.fm API Key 확인에 실패했습니다.' };
     const data = (await res.json()) as { error?: number };
     if (typeof data.error === 'number') {

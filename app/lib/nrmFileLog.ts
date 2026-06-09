@@ -8,3 +8,5 @@ export function appendNrmFileLog(
 export async function getNrmLogFilePath(): Promise<string | null> {
   return null;
 }
+
+export async function syncNativeFileLoggingEnabled(_enabled: boolean): Promise<void> {}

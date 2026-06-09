@@ -15,6 +15,7 @@ import {
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
 import { DEFAULT_WEEKLY_SNAPSHOT_DAY } from '@/lib/nrmWeeklySnapshotSettings';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 
 const CHARTS_API = 'https://charts-spotify-com-service.spotify.com/auth/v0/charts';
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -160,7 +161,7 @@ async function chartsGet(
     Origin: 'https://charts.spotify.com',
     Referer: 'https://charts.spotify.com/',
   };
-  const res = await fetch(url, { headers, signal });
+  const res = await nrmDirectFetch(url, { headers, signal }, 'spotify-period-charts');
   if (res.status === 401 || res.status === 403) {
     return { ok: false, status: res.status, authFailed: true };
   }

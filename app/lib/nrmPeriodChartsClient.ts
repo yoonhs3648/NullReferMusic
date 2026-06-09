@@ -1,4 +1,5 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
@@ -115,7 +116,11 @@ async function fetchLastfmPeriodDirect(
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
   try {
-    const res = await fetch(`https://ws.audioscrobbler.com/2.0/?${qs}`);
+    const res = await nrmDirectFetch(
+      `https://ws.audioscrobbler.com/2.0/?${qs}`,
+      undefined,
+      'lastfm-period-charts',
+    );
     if (!res.ok) {
       const authFailed = res.status === 401 || res.status === 403;
       return {

@@ -382,7 +382,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   }
 
   private fun execFfmpeg(cmd: List<String>) {
-    FfmpegExec.run(reactApplicationContext, cmd, tag = "ffmpeg-meta", timeoutSec = 180)
+    FfmpegExec.run(reactApplicationContext, cmd, tag = "ffmpeg-meta")
   }
 
   /** Android albumart content provider (삼성 뮤직 등 로컬 라이브러리) */

@@ -18,13 +18,31 @@ object ShineExec {
   }
 
   fun run(cli: File, args: List<String>, tag: String = "shineenc", timeoutSec: Long = 600) {
-    val code = runCapture(cli, args, tag, timeoutSec).first
+    NrmMediaCpuPriority.runFfmpegPriority {
+      runUnchecked(cli, args, tag, timeoutSec)
+    }
+  }
+
+  /** 이미 [NrmMediaCpuPriority.runFfmpegPriority] 안에서 호출할 때 */
+  fun runUnchecked(cli: File, args: List<String>, tag: String = "shineenc", timeoutSec: Long = 600) {
+    val code = runCaptureInner(cli, args, tag, timeoutSec).first
     if (code != 0) {
       throw Exception("${tag}_exit_$code")
     }
   }
 
   private fun runCapture(
+    cli: File,
+    args: List<String>,
+    tag: String,
+    timeoutSec: Long,
+  ): Pair<Int, String> {
+    return NrmMediaCpuPriority.runFfmpegPriority {
+      runCaptureInner(cli, args, tag, timeoutSec)
+    }
+  }
+
+  private fun runCaptureInner(
     cli: File,
     args: List<String>,
     tag: String,
