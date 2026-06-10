@@ -14,31 +14,27 @@ import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
-import { fetchLastfmChart } from '@/lib/nrmLastfmChartsClient';
-import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
-import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
-import {
-  NRM_LASTFM_CHART_DEFAULT_TAB,
-  NRM_LASTFM_CHART_TABS,
-  type LastfmChartTabId,
-} from '@/lib/nrmLastfmChartCatalog';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
-import { useNrmLastfmChartCoverLoader } from '@/lib/useNrmLastfmChartCoverLoader';
+import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
+import { fetchMelonRealtimeChart } from '@/lib/nrmMelonRealtimeChartsClient';
+import {
+  NRM_MELON_REALTIME_CHART_DEFAULT_TAB,
+  NRM_MELON_REALTIME_CHART_TABS,
+  type MelonRealtimeChartTabId,
+} from '@/lib/nrmMelonRealtimeChartCatalog';
 
 type Props = {
   isDark: boolean;
   paddingHorizontal: number;
   onBackToHome: () => void;
   onTrackPress?: (item: ChartTrackItem) => void;
-  lastfmAuth: LastfmAuthHandlers;
 };
 
-export function NrmLastfmChartsHome({
+export function NrmMelonChartsHome({
   isDark,
   paddingHorizontal,
   onBackToHome,
   onTrackPress,
-  lastfmAuth,
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -50,41 +46,36 @@ export function NrmLastfmChartsHome({
     ? nrmTokens.color.borderOnDark
     : nrmTokens.color.hairline;
 
-  const [activeTab, setActiveTab] = useState<LastfmChartTabId>(
-    NRM_LASTFM_CHART_DEFAULT_TAB,
+  const [activeTab, setActiveTab] = useState<MelonRealtimeChartTabId>(
+    NRM_MELON_REALTIME_CHART_DEFAULT_TAB,
   );
   const [loading, setLoading] = useState(true);
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [items, setItems] = useState<ChartTrackItem[]>([]);
-  const [chartGeneration, setChartGeneration] = useState(0);
 
   const loadGenRef = useRef(0);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
-  const loadChart = useCallback(
-    async (tab: LastfmChartTabId, generation: number) => {
-      setLoading(true);
-      setErrorCode(null);
-      setItems([]);
-      setPlaylistTitle(null);
-      const out = await fetchLastfmChart(tab, lastfmAuth);
-      if (generation !== loadGenRef.current) return;
-      if (!out.ok) {
-        setErrorCode(out.errorCode);
-        setLoading(false);
-        return;
-      }
-      setPlaylistTitle(out.data.playlistName);
-      setItems(out.data.items);
-      setChartGeneration(generation);
+  const loadChart = useCallback(async (tab: MelonRealtimeChartTabId, generation: number) => {
+    setLoading(true);
+    setErrorCode(null);
+    setItems([]);
+    setPlaylistTitle(null);
+    const out = await fetchMelonRealtimeChart(tab);
+    if (generation !== loadGenRef.current) return;
+    if (!out.ok) {
+      setErrorCode(out.errorCode);
       setLoading(false);
-    },
-    [lastfmAuth],
-  );
+      return;
+    }
+    setPlaylistTitle(out.data.playlistName);
+    setItems(out.data.items);
+    setLoading(false);
+  }, []);
 
-  const selectTab = useCallback((tab: LastfmChartTabId) => {
+  const selectTab = useCallback((tab: MelonRealtimeChartTabId) => {
     if (tab === activeTabRef.current) return;
     setActiveTab(tab);
   }, []);
@@ -94,24 +85,14 @@ export function NrmLastfmChartsHome({
     void loadChart(activeTab, generation);
   }, [activeTab, loadChart]);
 
-  const coverLoader = useNrmLastfmChartCoverLoader({
-    items,
-    generation: chartGeneration,
-    enabled: !loading && !errorCode,
-  });
-
   const listHeader = (
     <View style={{ paddingHorizontal: paddingHorizontal }} collapsable={false}>
       <View style={styles.headerRow}>
         <NrmLogo compact tone={isDark ? 'dark' : 'light'} onPress={onBackToHome} />
       </View>
-      <NrmChartPageHeading
-        iconKey="lastfm"
-        title="Last.fm 차트"
-        titleColor={titleColor}
-      />
+      <NrmChartPageHeading iconKey="melon" title="Melon 차트" titleColor={titleColor} />
       <NrmChartFilterScrollRow>
-        {NRM_LASTFM_CHART_TABS.map((tab) => {
+        {NRM_MELON_REALTIME_CHART_TABS.map((tab) => {
           const selected = tab.id === activeTab;
           return (
             <Pressable
@@ -121,9 +102,7 @@ export function NrmLastfmChartsHome({
                 styles.tabChip,
                 {
                   backgroundColor: selected ? tabActiveBg : tabBg,
-                  borderColor: selected
-                    ? nrmTokens.color.primary
-                    : tabBorder,
+                  borderColor: selected ? nrmTokens.color.primary : tabBorder,
                 },
                 pressed && styles.tabChipPressed,
               ]}
@@ -150,10 +129,7 @@ export function NrmLastfmChartsHome({
         </Text>
       ) : null}
       {loading ? (
-        <ActivityIndicator
-          style={styles.loader}
-          color={nrmTokens.color.primary}
-        />
+        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
       ) : null}
     </View>
   );
@@ -161,7 +137,7 @@ export function NrmLastfmChartsHome({
   const listEmpty = loading ? null : errorCode ? (
     <NrmChartErrorHero
       isDark={isDark}
-      platform="lastfm"
+      platform="melon"
       errorCode={errorCode}
       paddingHorizontal={paddingHorizontal}
     />
@@ -173,20 +149,14 @@ export function NrmLastfmChartsHome({
       nestedScrollEnabled
       data={loading || errorCode ? [] : items}
       keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
-      onViewableItemsChanged={coverLoader.onViewableItemsChanged}
-      viewabilityConfig={coverLoader.viewabilityConfig}
       renderItem={({ item }) => (
         <View style={{ paddingHorizontal: paddingHorizontal }}>
           <NrmChartTrackRow
             item={item}
             titleColor={titleColor}
             bodyColor={bodyColor}
-            coverUrl={coverLoader.resolveItemCoverUrl(item)}
-            onPress={
-              onTrackPress
-                ? () => onTrackPress(item)
-                : undefined
-            }
+            coverUrl={item.imageUrl}
+            onPress={onTrackPress ? () => onTrackPress(item) : undefined}
           />
         </View>
       )}

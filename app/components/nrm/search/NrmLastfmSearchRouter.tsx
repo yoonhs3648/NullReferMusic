@@ -55,6 +55,7 @@ import {
   nrmSearchEmptyQuery,
   nrmSearchNoResults,
 } from '@/lib/nrmSearchStrings';
+import { useNrmLastfmArtistImageLoader } from '@/lib/useNrmLastfmArtistImageLoader';
 
 export type LastfmSearchKind = 'artist' | 'album' | 'track';
 
@@ -197,6 +198,12 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     }, [restoredState]);
 
     const top = stack[stack.length - 1];
+    const artistListFrame = top.type === 'artist-list' ? top : null;
+    const { resolveImageUrl: resolveArtistImageUrl } = useNrmLastfmArtistImageLoader({
+      hits: artistListFrame ? (artistListFrame.hits as LastfmArtistSearchHit[]) : [],
+      generation: artistListFrame?.id ?? '',
+      enabled: !!artistListFrame && artistListFrame.hits.length > 0,
+    });
     const isTopList =
       top.type === 'artist-list' ||
       top.type === 'album-list' ||
@@ -494,7 +501,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
                         styles.hitRow,
                         pressed && { backgroundColor: rowHover },
                       ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
+                      <NrmLastfmCoverImage uri={resolveArtistImageUrl(hit)} size={52} />
                       <View style={styles.hitMeta}>
                         <Text
                           style={[styles.hitTitle, { color: titleColor }]}

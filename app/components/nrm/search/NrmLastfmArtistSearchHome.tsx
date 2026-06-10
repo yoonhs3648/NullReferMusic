@@ -31,6 +31,7 @@ import {
   nrmSearchEmptyQuery,
   nrmSearchNoResults,
 } from '@/lib/nrmSearchStrings';
+import { useNrmLastfmArtistImageLoader } from '@/lib/useNrmLastfmArtistImageLoader';
 
 type Props = {
   isDark: boolean;
@@ -55,7 +56,14 @@ export function NrmLastfmArtistSearchHome({
   const [hits, setHits] = useState<LastfmArtistSearchHit[]>([]);
   const [detail, setDetail] = useState<LastfmArtistDetail | null>(null);
   const [searched, setSearched] = useState(false);
+  const [searchGeneration, setSearchGeneration] = useState(0);
   const reqRef = useRef(0);
+
+  const { resolveImageUrl } = useNrmLastfmArtistImageLoader({
+    hits,
+    generation: searchGeneration,
+    enabled: !detail && hits.length > 0,
+  });
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -77,6 +85,7 @@ export function NrmLastfmArtistSearchHome({
       return;
     }
     setHits(out.data.artists ?? []);
+    setSearchGeneration((g) => g + 1);
     if ((out.data.artists ?? []).length === 0) {
       setError(nrmSearchNoResults);
     }
@@ -134,7 +143,7 @@ export function NrmLastfmArtistSearchHome({
                 styles.hitRow,
                 pressed && { backgroundColor: rowHover },
               ]}>
-              <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
+              <NrmLastfmCoverImage uri={resolveImageUrl(hit)} size={52} />
               <View style={styles.hitMeta}>
                 <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
                   {hit.name}

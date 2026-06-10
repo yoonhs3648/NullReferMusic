@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.chart.LastfmChartService;
 import com.nullrefer.music.lastfm.LastfmApiExceptionMapper;
+import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistImageResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumDetailResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumSearchHit;
@@ -16,6 +17,7 @@ import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistSearchHit;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistSearchResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmSimilarArtistDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTagDto;
+import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackCoverResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackDetailResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchHit;
@@ -240,6 +242,35 @@ public class LastfmSearchService {
     return new LastfmTrackSearchResult(List.copyOf(hits));
   }
 
+  /** 검색 리스트 아티스트 사진 — artist.getInfo 1회, artist.image 만 반환 */
+  public LastfmArtistImageResult fetchArtistImage(
+      String apiKey, String artist, String mbid) {
+    String artistName = requireName(artist);
+    UriComponentsBuilder infoBuilder =
+        baseBuilder(apiKey)
+            .queryParam("method", "artist.getInfo")
+            .queryParam("artist", artistName);
+    if (mbid != null && !mbid.isBlank()) {
+      infoBuilder.queryParam("mbid", mbid.trim());
+    }
+    JsonNode root = lastfmGet(infoBuilder);
+    return new LastfmArtistImageResult(pickImage(root.path("artist").path("image")));
+  }
+
+  /** 차트 커버용 — track.getInfo(mbid) 1회, album.image 만 반환 */
+  public LastfmTrackCoverResult fetchTrackCoverByMbid(String apiKey, String trackMbid) {
+    if (trackMbid == null || trackMbid.isBlank()) {
+      return new LastfmTrackCoverResult("");
+    }
+    JsonNode root =
+        lastfmGet(
+            baseBuilder(apiKey)
+                .queryParam("method", "track.getInfo")
+                .queryParam("mbid", trackMbid.trim()));
+    JsonNode albumNode = root.path("track").path("album");
+    return new LastfmTrackCoverResult(pickImage(albumNode.path("image")));
+  }
+
   public LastfmTrackDetailResult fetchTrackDetail(
       String apiKey, String artist, String track, String trackMbid) {
     String artistName = requireName(artist);
@@ -376,21 +407,23 @@ public class LastfmSearchService {
     if (!images.isArray()) {
       return "";
     }
-    String large = "";
-    String medium = "";
-    for (JsonNode img : images) {
-      String url = img.path("#text").asText("");
-      if (url.isBlank()) {
-        url = img.asText("");
-      }
-      String size = img.path("size").asText("");
-      if ("extralarge".equals(size) || "large".equals(size)) {
-        large = url;
-      } else if ("medium".equals(size)) {
-        medium = url;
+    String[] priority = {"mega", "extralarge", "large", "medium", "small", ""};
+    for (String size : priority) {
+      for (JsonNode img : images) {
+        String url = img.path("#text").asText("");
+        if (url.isBlank()) {
+          url = img.asText("");
+        }
+        if (url.isBlank() || url.contains("2a96cbd8b46e442fc41c2b86b821562f")) {
+          continue;
+        }
+        String imgSize = img.path("size").asText("");
+        if (imgSize.equals(size) || (size.isEmpty() && !imgSize.isEmpty())) {
+          return url;
+        }
       }
     }
-    return !large.isBlank() ? large : medium;
+    return "";
   }
 
   private static long parseLong(String raw) {

@@ -40,6 +40,9 @@ public final class LastfmApiExceptionMapper {
     if (code == 7) {
       throw new IllegalStateException("lastfm_api_error");
     }
+    if (code == 29) {
+      throw new IllegalStateException("lastfm_rate_limited");
+    }
     throw new IllegalStateException("lastfm_api_error");
   }
 
@@ -60,6 +63,9 @@ public final class LastfmApiExceptionMapper {
       }
     }
     int status = e.getStatusCode().value();
+    if (status == 429) {
+      throw new IllegalStateException("lastfm_rate_limited");
+    }
     if (status == 401 || status == 403) {
       throw new IllegalStateException("lastfm_auth_failed");
     }

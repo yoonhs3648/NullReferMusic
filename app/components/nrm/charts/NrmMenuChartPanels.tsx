@@ -37,6 +37,8 @@ type Props = {
 
   onOpenLastfmCharts: () => void;
 
+  onOpenMelonCharts: () => void;
+
 };
 
 
@@ -89,6 +91,8 @@ export function NrmMenuChartPanels({
 
   onOpenLastfmCharts,
 
+  onOpenMelonCharts,
+
 }: Props) {
 
   if (panel !== 'charts') {
@@ -140,6 +144,10 @@ export function NrmMenuChartPanels({
               } else if (row.panel === 'chartLastfm') {
 
                 onOpenLastfmCharts();
+
+              } else if (row.panel === 'chartMelon') {
+
+                onOpenMelonCharts();
 
               }
 

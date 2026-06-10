@@ -17,7 +17,15 @@ _CLIENT_PROFILES = [
     ["android", "web"],
     ["ios", "web"],
     ["tv_embedded", "web"],
+    ["mweb"],
     ["web"],
+    ["android"],
+]
+
+_FORMAT_SELECTORS = [
+    "bestaudio[ext=m4a]/bestaudio/best",
+    "bestaudio/best",
+    "ba/b",
 ]
 
 
@@ -70,23 +78,51 @@ def _pick_best_audio_url(info):
     raise RuntimeError("NO_STREAM_URL")
 
 
+def _cookie_attempts(cookie_file):
+    attempts = []
+    if cookie_file and os.path.exists(cookie_file):
+        attempts.append(cookie_file)
+    attempts.append("")
+    return attempts
+
+
+def _is_format_availability_error(exc):
+    msg = str(exc).lower()
+    return (
+        "format is not available" in msg
+        or "requested format" in msg
+        or "no video formats" in msg
+        or "no formats found" in msg
+    )
+
+
 def get_audio_stream_url(video_id, cookie_file=""):
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
     _nrm_log("yt-dlp-py", f"get_audio_stream_url video_id={video_id} cookie={bool(cookie_file)}")
     last_error = None
-    for clients in _CLIENT_PROFILES:
-        opts = _common_opts(cookie_file)
-        opts["extractor_args"] = _extractor_args(clients)
-        try:
-            _nrm_log("yt-dlp-py", f"extract_info clients={clients}")
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(watch_url, download=False)
-            url = _pick_best_audio_url(info)
-            _nrm_log("yt-dlp-py", f"get_audio_stream_url OK clients={clients} url_len={len(url)}")
-            return url
-        except Exception as exc:
-            last_error = exc
-            _nrm_log("yt-dlp-py", f"get_audio_stream_url fail clients={clients} err={exc}")
+    for cf in _cookie_attempts(cookie_file):
+        for clients in _CLIENT_PROFILES:
+            opts = _common_opts(cf)
+            opts["extractor_args"] = _extractor_args(clients)
+            try:
+                _nrm_log(
+                    "yt-dlp-py",
+                    f"extract_info clients={clients} cookies={bool(cf)}",
+                )
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(watch_url, download=False)
+                url = _pick_best_audio_url(info)
+                _nrm_log(
+                    "yt-dlp-py",
+                    f"get_audio_stream_url OK clients={clients} cookies={bool(cf)} url_len={len(url)}",
+                )
+                return url
+            except Exception as exc:
+                last_error = exc
+                _nrm_log(
+                    "yt-dlp-py",
+                    f"get_audio_stream_url fail clients={clients} cookies={bool(cf)} err={exc}",
+                )
     raise RuntimeError(f"STREAM_URL_FAILED: {last_error}")
 
 
@@ -231,10 +267,20 @@ def _ensure_target_extension(path, target_fmt, ffmpeg_location, quality):
     return transcode_audio(path, target_fmt, quality, ffmpeg_location)
 
 
-def _attempt_download(url, out_dir, cookie_file, ffmpeg_location, use_convert, fmt, quality, clients):
+def _attempt_download(
+    url,
+    out_dir,
+    cookie_file,
+    ffmpeg_location,
+    use_convert,
+    fmt,
+    quality,
+    clients,
+    format_selector="bestaudio/best",
+):
     opts = _common_opts(cookie_file, ffmpeg_location)
     opts["extractor_args"] = _extractor_args(clients)
-    opts["format"] = "bestaudio/best"
+    opts["format"] = format_selector
     opts["outtmpl"] = os.path.join(out_dir, "%(title).100s.%(ext)s")
     opts["nopart"] = False
 
@@ -275,23 +321,37 @@ def download_audio(
     )
     os.makedirs(out_dir, exist_ok=True)
     last_error = None
-    for clients in _CLIENT_PROFILES:
-        try:
-            _nrm_log("yt-dlp-py", f"download attempt clients={clients}")
-            path = _attempt_download(
-                url,
-                out_dir,
-                cookie_file,
-                ffmpeg_location,
-                False,
-                "m4a",
-                "0",
-                clients,
-            )
-            _nrm_log("yt-dlp-py", f"download_audio OK path={path} size={os.path.getsize(path)}")
-            return path
-        except Exception as exc:
-            last_error = exc
-            _nrm_log("yt-dlp-py", f"download fail clients={clients} err={exc}")
+    for cf in _cookie_attempts(cookie_file):
+        for clients in _CLIENT_PROFILES:
+            for fmt_sel in _FORMAT_SELECTORS:
+                try:
+                    _nrm_log(
+                        "yt-dlp-py",
+                        f"download attempt clients={clients} cookies={bool(cf)} format={fmt_sel}",
+                    )
+                    path = _attempt_download(
+                        url,
+                        out_dir,
+                        cf,
+                        ffmpeg_location,
+                        False,
+                        "m4a",
+                        "0",
+                        clients,
+                        fmt_sel,
+                    )
+                    _nrm_log(
+                        "yt-dlp-py",
+                        f"download_audio OK path={path} size={os.path.getsize(path)}",
+                    )
+                    return path
+                except Exception as exc:
+                    last_error = exc
+                    _nrm_log(
+                        "yt-dlp-py",
+                        f"download fail clients={clients} cookies={bool(cf)} format={fmt_sel} err={exc}",
+                    )
+                    if not _is_format_availability_error(exc):
+                        break
 
     raise RuntimeError(f"DOWNLOAD_FAILED: {last_error}")

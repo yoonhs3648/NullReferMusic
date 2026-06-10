@@ -31,6 +31,33 @@ export function normalizeCoverArtUrl(url: string | undefined | null): string {
   return u;
 }
 
+/** Last.fm 기본 placeholder (차트·검색 공통) */
+export const LASTFM_PLACEHOLDER_IMAGE_ID = '2a96cbd8b46e442fc41c2b86b821562f';
+
+export function isLastfmPlaceholderCoverUrl(url: string | undefined | null): boolean {
+  const u = (url ?? '').trim();
+  return !u || u.includes(LASTFM_PLACEHOLDER_IMAGE_ID);
+}
+
+/** Last.fm image[] 노드에서 앨범/트랙 커버 URL (placeholder 제외) */
+export function pickLastfmCoverUrl(
+  images: { '#text'?: string; size?: string }[] | undefined,
+): string {
+  if (!Array.isArray(images)) return '';
+  const priority = ['mega', 'extralarge', 'large', 'medium', 'small', ''];
+  for (const size of priority) {
+    for (const img of images) {
+      const url = (img['#text'] ?? '').trim();
+      const imgSize = img.size ?? '';
+      if (!url || url.includes(LASTFM_PLACEHOLDER_IMAGE_ID)) continue;
+      if (imgSize === size || (size === '' && imgSize)) {
+        return normalizeCoverArtUrl(url);
+      }
+    }
+  }
+  return '';
+}
+
 /** Spotify images[] 배열에서 가장 큰 커버 URL */
 export function pickSpotifyCoverUrl(
   images: { url?: string; width?: number; height?: number }[] | undefined,

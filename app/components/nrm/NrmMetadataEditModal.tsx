@@ -51,6 +51,12 @@ export type NrmMetadataEditModalProps = {
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   /** 메타데이터 API 로딩 중 */
   busy?: boolean;
+  /** download: 다운로드 / trackEdit: 저장된 트랙 편집 */
+  purpose?: 'download' | 'trackEdit';
+  /** trackEdit: 현재 파일 stem — 이름 충돌 검사 제외 */
+  excludeFileStem?: string;
+  /** trackEdit: 트랙 확장자 고정 (.mp3 등) */
+  fixedExtension?: string;
   onClose: () => void;
   onConfirm: (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => void;
 };
@@ -273,6 +279,9 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   busy = false,
+  purpose = 'download',
+  excludeFileStem,
+  fixedExtension,
   onClose,
   onConfirm,
 }: NrmMetadataEditModalProps) {
@@ -337,7 +346,10 @@ export function NrmMetadataEditModal({
     let nextArtist = '';
     let nextTitle = '';
     if (
-      (metadataSource === 'chart' || metadataSource === 'lastfm' || metadataSource === 'spotify') &&
+      (purpose === 'trackEdit' ||
+        metadataSource === 'chart' ||
+        metadataSource === 'lastfm' ||
+        metadataSource === 'spotify') &&
       (initialArtist != null || initialTitle != null)
     ) {
       nextArtist = (initialArtist ?? '').trim();
@@ -382,17 +394,17 @@ export function NrmMetadataEditModal({
       setGenreSelection(resolved.selection);
       setGenreCustom(resolved.custom);
     });
-  }, [visible, item, metadataSource, initialArtist, initialTitle, initialMetadataFields]);
+  }, [visible, item, purpose, metadataSource, initialArtist, initialTitle, initialMetadataFields]);
 
   useEffect(() => {
     if (!item || !visible) return;
     void Promise.all([loadDownloadAudioExtension(), loadDownloadFileNameFormat()]).then(
       ([ext, format]) => {
-        setExtension(ext);
+        setExtension(fixedExtension?.trim() || ext);
         setFileNameFormat(format);
       },
     );
-  }, [item, visible]);
+  }, [fixedExtension, item, visible]);
 
   useEffect(() => {
     if (!visible || !albumArtistLinkedRef.current) return;
@@ -419,6 +431,7 @@ export function NrmMetadataEditModal({
   const canSubmit =
     !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
   const canSubmitWithConflict = canSubmit && !nameConflict;
+  const confirmLabel = purpose === 'trackEdit' ? '저장' : '다운로드';
 
   const stackCoverColumn = cardMaxWidth < 400;
 
@@ -562,8 +575,12 @@ export function NrmMetadataEditModal({
           '@/lib/nrmPersistDownload.native'
         );
         const hasConflict = await hasConflictingFileStemInDownloadDir(preview);
+        const exclude = (excludeFileStem ?? '').trim().toLowerCase();
+        const previewStem = preview.replace(/\.[^.]+$/, '').trim().toLowerCase();
+        const conflict =
+          hasConflict && (!exclude || previewStem !== exclude);
         if (!cancelled) {
-          setNameConflict(hasConflict);
+          setNameConflict(conflict);
         }
       } catch {
         if (!cancelled) {
@@ -574,7 +591,7 @@ export function NrmMetadataEditModal({
     return () => {
       cancelled = true;
     };
-  }, [artist, item, preview, title, visible]);
+  }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
 
   const lyricsOptions = useMemo(
     () =>
@@ -595,7 +612,7 @@ export function NrmMetadataEditModal({
   );
 
   function resolveLyricsForSubmit(): string | undefined {
-    if (lyricsUnsupported) return undefined;
+    if (lyricsUnsupported || whisperLyricsLocked) return undefined;
     if (lyricsMode === 'unset') {
       return undefined;
     }
@@ -944,7 +961,7 @@ export function NrmMetadataEditModal({
                 !canSubmitWithConflict && styles.btnDisabled,
                 pressed && canSubmitWithConflict && styles.pressed,
               ]}>
-              <Text style={styles.btnPrimaryLabel}>다운로드</Text>
+              <Text style={styles.btnPrimaryLabel}>{confirmLabel}</Text>
             </Pressable>
           </View>
         </View>

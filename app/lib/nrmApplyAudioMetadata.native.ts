@@ -11,6 +11,10 @@ type NativeAudioMetadata = {
     mediaUri: string,
     metadata: NrmAudioFileMetadata,
   ) => Promise<null>;
+  rescanMediaFile?: (
+    inputPath: string,
+    metadata: NrmAudioFileMetadata,
+  ) => Promise<null>;
 };
 
 function toFsPath(fileUri: string): string {
@@ -50,4 +54,47 @@ export async function syncMediaStoreAudioTags(
   const normalized = normalizeDownloadMetadata(metadata);
   if (!hasEmbeddableAudioMetadata(normalized)) return;
   await mod.updateMediaStoreAudioTags(mediaUri, normalized);
+}
+
+/** 메타 편집 후 MediaStore 재스캔·DB 태그 동기화 (삼성 뮤직 등) */
+export async function rescanMediaStoreAfterMetadataEdit(
+  audioUri: string,
+  metadata: NrmAudioFileMetadata,
+): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const { hasEmbeddableAudioMetadata, normalizeDownloadMetadata } = await import(
+    '@/lib/nrmDownloadAudioMetadata',
+  );
+  const normalized = normalizeDownloadMetadata(metadata);
+  if (!hasEmbeddableAudioMetadata(normalized)) return;
+
+  const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
+  const trimmed = audioUri.trim();
+  if (!trimmed) return;
+
+  try {
+    const ML = require('expo-media-library') as typeof import('expo-media-library');
+    let { status } = await ML.getPermissionsAsync();
+    if (status !== 'granted') {
+      const res = await ML.requestPermissionsAsync();
+      status = res.status;
+    }
+    if (status === 'granted') {
+      const asset = await ML.createAssetAsync(trimmed);
+      const mediaUri = asset?.uri?.trim();
+      if (mediaUri && mod?.updateMediaStoreAudioTags) {
+        await mod.updateMediaStoreAudioTags(mediaUri, normalized);
+        return;
+      }
+    }
+  } catch {
+    /* expo-media-library 실패 시 파일 경로 스캔 폴백 */
+  }
+
+  if (mod?.rescanMediaFile) {
+    const path = toFsPath(trimmed);
+    if (path.startsWith('/')) {
+      await mod.rescanMediaFile(path, normalized).catch(() => {});
+    }
+  }
 }

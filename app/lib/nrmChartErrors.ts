@@ -2,7 +2,7 @@
 
 
 
-export type ChartPlatformId = 'spotify' | 'lastfm' | 'appleMusic';
+export type ChartPlatformId = 'spotify' | 'lastfm' | 'appleMusic' | 'melon';
 
 
 
@@ -155,6 +155,23 @@ const APPLE_MESSAGES: Record<ChartErrorCode, string> = {
 
 
 
+const MELON_MESSAGES: Record<ChartErrorCode, string> = {
+  not_configured: 'Melon 차트를 불러올 수 없습니다.',
+  charts_session: 'Melon 차트를 불러올 수 없습니다.',
+  auth_failed: 'Melon 차트를 불러올 수 없습니다.',
+  access_blocked: 'Melon이 차트 요청을 거부했습니다.',
+  premium_required: 'Melon 차트를 불러올 수 없습니다.',
+  forbidden: 'Melon이 차트 요청을 거부했습니다(403).',
+  not_found: '요청한 Melon 차트를 찾을 수 없습니다.',
+  empty: '이 기간에 표시할 Melon 차트 곡이 없습니다.',
+  network: 'Melon 차트를 불러오지 못했습니다. 네트워크를 확인하세요.',
+  backend_unreachable:
+    'PC 차트 서버(8787)에 연결하지 못했습니다. 서버 실행·같은 Wi‑Fi를 확인하세요.',
+  rate_limited: 'Melon 요청이 너무 많습니다. 잠시 후 다시 시도하세요.',
+  server: 'Melon 차트 서버 오류입니다. 잠시 후 다시 시도하세요.',
+  unknown: 'Melon 차트를 불러올 수 없습니다.',
+};
+
 export function chartUserMessage(
 
   platform: ChartPlatformId,
@@ -173,7 +190,11 @@ export function chartUserMessage(
 
         ? LASTFM_MESSAGES
 
-        : APPLE_MESSAGES;
+        : platform === 'melon'
+
+          ? MELON_MESSAGES
+
+          : APPLE_MESSAGES;
 
   return table[code] ?? table.unknown;
 

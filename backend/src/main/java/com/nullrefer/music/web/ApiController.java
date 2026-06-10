@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.chart.AppleMusicRssChartService;
 import com.nullrefer.music.chart.LastfmChartService;
+import com.nullrefer.music.chart.MelonGenreChartService;
+import com.nullrefer.music.chart.MelonRealtimeChartService;
 import com.nullrefer.music.search.LastfmSearchService;
 import com.nullrefer.music.search.SpotifySearchService;
 import com.nullrefer.music.chart.PeriodChartPageResult;
@@ -63,6 +65,8 @@ public class ApiController {
   private final LastfmSearchService lastfmSearchService;
   private final SpotifySearchService spotifySearchService;
   private final AppleMusicRssChartService appleMusicRssChartService;
+  private final MelonGenreChartService melonGenreChartService;
+  private final MelonRealtimeChartService melonRealtimeChartService;
   private final SpotifyTokenProvider spotifyTokenProvider;
   private final NrmSettings settings;
   private final NrmPaths paths;
@@ -78,6 +82,8 @@ public class ApiController {
       LastfmSearchService lastfmSearchService,
       SpotifySearchService spotifySearchService,
       AppleMusicRssChartService appleMusicRssChartService,
+      MelonGenreChartService melonGenreChartService,
+      MelonRealtimeChartService melonRealtimeChartService,
       SpotifyTokenProvider spotifyTokenProvider,
       NrmSettings settings,
       NrmPaths paths) {
@@ -91,6 +97,8 @@ public class ApiController {
     this.lastfmSearchService = lastfmSearchService;
     this.spotifySearchService = spotifySearchService;
     this.appleMusicRssChartService = appleMusicRssChartService;
+    this.melonGenreChartService = melonGenreChartService;
+    this.melonRealtimeChartService = melonRealtimeChartService;
     this.spotifyTokenProvider = spotifyTokenProvider;
     this.settings = settings;
     this.paths = paths;
@@ -481,6 +489,49 @@ public class ApiController {
     }
   }
 
+  @GetMapping("/api/charts/melon/realtime")
+  public ResponseEntity<?> melonRealtimeChart(
+      @RequestParam(value = "chart", defaultValue = "top100") String chart) {
+    try {
+      return ResponseEntity.ok(melonRealtimeChartService.fetchChart(chart));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "melon_fetch_failed";
+      if ("melon_empty".equals(code)) {
+        return ResponseEntity.ok(
+            new SpotifyChartResult(
+                "melon",
+                chart,
+                chart,
+                "KR",
+                java.time.Instant.now(),
+                List.of()));
+      }
+      return ResponseEntity.status(502).body(Map.of("error", code));
+    }
+  }
+
+  @GetMapping("/api/charts/melon/genre")
+  public ResponseEntity<?> melonGenreChart(
+      @RequestParam(value = "kind", defaultValue = "weekly") String kind,
+      @RequestParam(value = "classCd", defaultValue = "GN0000") String classCd,
+      @RequestParam(value = "year") int year,
+      @RequestParam(value = "month", required = false) Integer month,
+      @RequestParam(value = "week", required = false) Integer week,
+      @RequestParam(value = "offset", defaultValue = "0") int offset,
+      @RequestParam(value = "limit", defaultValue = "50") int limit) {
+    try {
+      PeriodChartPageResult result =
+          melonGenreChartService.fetchGenrePage(kind, classCd, year, month, week, offset, limit);
+      return ResponseEntity.ok(result);
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
   @GetMapping("/api/charts/lastfm/tracks")
   public ResponseEntity<?> lastfmTracksChart(
       @RequestParam(value = "chart", defaultValue = "top50-kr") String chart,
@@ -503,6 +554,41 @@ public class ApiController {
     } catch (IllegalStateException e) {
       return lastfmErrorResponse(e);
     }
+  }
+
+  @GetMapping("/api/charts/lastfm/track-cover")
+  public ResponseEntity<?> lastfmChartTrackCover(
+      @RequestParam("mbid") String mbid,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Lastfm-Api-Key",
+              required = false)
+          String apiKeyHeader) {
+    return lastfmSearchWithKey(
+        apiKeyHeader,
+        authorization,
+        key -> lastfmSearchService.fetchTrackCoverByMbid(key, mbid));
+  }
+
+  @GetMapping("/api/search/lastfm/artist-image")
+  public ResponseEntity<?> lastfmArtistImage(
+      @RequestParam("artist") String artist,
+      @RequestParam(value = "mbid", required = false) String mbid,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = HttpHeaders.AUTHORIZATION,
+              required = false)
+          String authorization,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Lastfm-Api-Key",
+              required = false)
+          String apiKeyHeader) {
+    return lastfmSearchWithKey(
+        apiKeyHeader,
+        authorization,
+        key -> lastfmSearchService.fetchArtistImage(key, artist, mbid));
   }
 
   @GetMapping("/api/search/lastfm/artist")
@@ -877,6 +963,9 @@ public class ApiController {
     }
     if ("lastfm_auth_failed".equals(code)) {
       return ResponseEntity.status(502).body(Map.of("error", code));
+    }
+    if ("lastfm_rate_limited".equals(code)) {
+      return ResponseEntity.status(429).body(Map.of("error", code));
     }
     return ResponseEntity.status(502).body(Map.of("error", code));
   }

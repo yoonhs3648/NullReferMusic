@@ -1,4 +1,4 @@
-import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import { normalizeCoverArtUrl, pickLastfmCoverUrl } from '@/lib/nrmCoverArtUrl';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
@@ -56,17 +56,7 @@ function messageForError(code: LastfmSearchErrorCode): string {
 const LASTFM_API = 'https://ws.audioscrobbler.com/2.0/';
 
 function pickLastfmImage(images: { '#text'?: string; size?: string }[] | undefined): string {
-  if (!Array.isArray(images)) return '';
-  const priority = ['mega', 'extralarge', 'large', 'medium', 'small', ''];
-  for (const size of priority) {
-    for (const img of images) {
-      const url = (img['#text'] ?? '').trim();
-      const imgSize = img.size ?? '';
-      if (!url || url.includes('2a96cbd8b46e442fc41c2b86b821562f')) continue;
-      if (imgSize === size || (size === '' && imgSize)) return normalizeCoverArtUrl(url);
-    }
-  }
-  return '';
+  return pickLastfmCoverUrl(images);
 }
 
 function arrayOrSingle<T>(node: T | T[] | undefined | null): T[] {

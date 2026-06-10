@@ -62,7 +62,7 @@ const NRM_CHART_PLATFORM_ROWS_RAW: ChartPlatformRow[] = [
     panel: 'chartMelon',
     sortOrder: 50,
     label: 'Melon',
-    enabled: false,
+    enabled: true,
     iconKey: 'melon',
   },
   {

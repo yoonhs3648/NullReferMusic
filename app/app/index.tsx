@@ -27,7 +27,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 
 import { NrmAppleMusicChartsHome } from '@/components/nrm/charts/NrmAppleMusicChartsHome';
-import { NrmGenreChartsPlaceholder } from '@/components/nrm/charts/NrmGenreChartsPlaceholder';
+import { NrmMelonChartsHome } from '@/components/nrm/charts/NrmMelonChartsHome';
+import { NrmMelonGenreChartsHome } from '@/components/nrm/charts/NrmMelonGenreChartsHome';
 import { NrmLastfmChartsHome } from '@/components/nrm/charts/NrmLastfmChartsHome';
 import { NrmPeriodChartsHome } from '@/components/nrm/charts/NrmPeriodChartsHome';
 import { NrmSpotifyChartsHome } from '@/components/nrm/charts/NrmSpotifyChartsHome';
@@ -76,6 +77,7 @@ type MainView =
   | 'spotifyChartsOfficial'
   | 'spotifyChartsCharts'
   | 'lastfmCharts'
+  | 'melonCharts'
   | 'periodLastfmCharts'
   | 'periodSpotifyCharts'
   | 'genreCharts'
@@ -168,6 +170,7 @@ export default function HomeScreen() {
   const isSpotifyChartsOfficial = mainView === 'spotifyChartsOfficial';
   const isSpotifyChartsCharts = mainView === 'spotifyChartsCharts';
   const isLastfmCharts = mainView === 'lastfmCharts';
+  const isMelonCharts = mainView === 'melonCharts';
   const isPeriodLastfmCharts = mainView === 'periodLastfmCharts';
   const isPeriodSpotifyCharts = mainView === 'periodSpotifyCharts';
   const isGenreCharts = mainView === 'genreCharts';
@@ -186,6 +189,7 @@ export default function HomeScreen() {
     isSpotifyChartsOfficial ||
     isSpotifyChartsCharts ||
     isLastfmCharts ||
+    isMelonCharts ||
     isPeriodLastfmCharts ||
     isPeriodSpotifyCharts ||
     isGenreCharts;
@@ -280,6 +284,11 @@ export default function HomeScreen() {
 
   const openLastfmCharts = useCallback(() => {
     setMainView('lastfmCharts');
+    setLayoutPhase('browsing');
+  }, []);
+
+  const openMelonCharts = useCallback(() => {
+    setMainView('melonCharts');
     setLayoutPhase('browsing');
   }, []);
 
@@ -620,6 +629,13 @@ export default function HomeScreen() {
             onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
             lastfmAuth={lastfmAuthHandlers}
           />
+        ) : isMelonCharts ? (
+          <NrmMelonChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+          />
         ) : isPeriodLastfmCharts ? (
           <NrmPeriodChartsHome
             platform="lastfm"
@@ -641,13 +657,11 @@ export default function HomeScreen() {
             onShowBearerExpired={showChartsBearerExpiredOverlay}
           />
         ) : isGenreCharts ? (
-          <NrmGenreChartsPlaceholder
+          <NrmMelonGenreChartsHome
             isDark={isDark}
             paddingHorizontal={pad}
             onBackToHome={resetToYoutubeHome}
-            onOpenChartsSession={openChartsSessionSettings}
-            onRenewChartsBearer={renewChartsBearerViaWebView}
-            onShowBearerExpired={showChartsBearerExpiredOverlay}
+            onTrackPress={navigateToSearchFromChart}
           />
         ) : isSpotifySearchArtist ? (
           <NrmSpotifyArtistSearchHome
@@ -805,6 +819,7 @@ export default function HomeScreen() {
           onNavigateSpotifyChartsOfficial={openSpotifyChartsOfficial}
           onNavigateSpotifyChartsCharts={openSpotifyChartsCharts}
           onNavigateLastfmCharts={openLastfmCharts}
+          onNavigateMelonCharts={openMelonCharts}
           onNavigatePeriodLastfmCharts={openPeriodLastfmCharts}
           onNavigatePeriodSpotifyCharts={openPeriodSpotifyCharts}
           onNavigateGenreCharts={openGenreCharts}

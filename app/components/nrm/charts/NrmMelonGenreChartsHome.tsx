@@ -11,83 +11,48 @@ import {
 import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
-import {
-  createInitialPeriodChartDate,
-  NrmPeriodChartFilters,
-} from '@/components/nrm/charts/NrmPeriodChartFilters';
 import { NrmPeriodChartSharedPickerModal } from '@/components/nrm/charts/NrmPeriodChartDropdown';
-import {
-  createInitialSpotifyPeriodChartDate,
-  NrmSpotifyPeriodChartFilters,
-} from '@/components/nrm/charts/NrmSpotifyPeriodChartFilters';
+import { NrmMelonGenreChartFilters } from '@/components/nrm/charts/NrmMelonGenreChartFilters';
 import { useNrmPeriodChartPicker } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
-import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
-import type { SpotifyChartsAuthHandlers } from '@/lib/nrmSpotifyChartsAuthFlow';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
-  PERIOD_CHART_MAX_RANK,
-  PERIOD_CHART_PAGE_SIZE,
-  periodChartGranularityLabel,
-  type PeriodChartGranularity,
-  type PeriodChartPlatform,
-  type PeriodChartRegion,
-} from '@/lib/nrmPeriodChartCatalog';
-import { fetchPeriodChartPage } from '@/lib/nrmPeriodChartsClient';
-import {
-  spotifyPeriodChartMaxRank,
-  type SpotifyPeriodChartKind,
-} from '@/lib/nrmSpotifyPeriodChartCatalog';
+  createInitialMelonGenreChartDate,
+  MELON_DEFAULT_GENRE_ID,
+  MELON_PERIOD_MAX_RANK,
+  MELON_PERIOD_PAGE_SIZE,
+  type MelonGenreId,
+  type MelonPeriodChartKind,
+} from '@/lib/nrmMelonGenreChartCatalog';
+import { fetchMelonGenreChartPage } from '@/lib/nrmMelonGenreChartsClient';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
-import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
-import { useNrmLastfmChartCoverLoader } from '@/lib/useNrmLastfmChartCoverLoader';
 
 type Props = {
-  platform: PeriodChartPlatform;
   isDark: boolean;
   paddingHorizontal: number;
   onBackToHome: () => void;
   onTrackPress?: (item: ChartTrackItem) => void;
-  onOpenChartsSession?: () => void;
-  onRenewChartsBearer?: () => Promise<boolean>;
-  onShowBearerExpired?: () => void;
-  lastfmAuth?: LastfmAuthHandlers;
 };
 
-export function NrmPeriodChartsHome({
-  platform,
+export function NrmMelonGenreChartsHome({
   isDark,
   paddingHorizontal,
   onBackToHome,
   onTrackPress,
-  onOpenChartsSession,
-  onRenewChartsBearer,
-  onShowBearerExpired,
-  lastfmAuth,
 }: Props) {
-  const pageTitle = platform === 'spotify' ? 'Spotify' : 'Last.fm';
-  const iconKey = platform;
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const screenBg = getNrmRootBackgroundColor(isDark);
   const pickerControl = useNrmPeriodChartPicker();
 
-  const initialLastfm = createInitialPeriodChartDate();
-  const initialSpotify = createInitialSpotifyPeriodChartDate();
-  const [granularity, setGranularity] = useState<PeriodChartGranularity>('month');
-  const [spotifyKind, setSpotifyKind] = useState<SpotifyPeriodChartKind>('daily');
-  const [year, setYear] = useState(
-    platform === 'spotify' ? initialSpotify.year : initialLastfm.year,
-  );
-  const [month, setMonth] = useState(
-    platform === 'spotify' ? initialSpotify.month : initialLastfm.month,
-  );
-  const [day, setDay] = useState(initialSpotify.day);
-  const [weekOfMonth, setWeekOfMonth] = useState(initialSpotify.weekOfMonth);
-  const [snapshotDow, setSnapshotDow] = useState(DEFAULT_WEEKLY_SNAPSHOT_DAY);
-  const [region, setRegion] = useState<PeriodChartRegion>('kr');
+  const initial = createInitialMelonGenreChartDate();
+  const [kind, setKind] = useState<MelonPeriodChartKind>('weekly');
+  const [classCd, setClassCd] = useState<MelonGenreId>(MELON_DEFAULT_GENRE_ID);
+  const [year, setYear] = useState(initial.year);
+  const [month, setMonth] = useState(initial.month);
+  const [weekOfMonth, setWeekOfMonth] = useState(initial.weekOfMonth);
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
@@ -95,63 +60,28 @@ export function NrmPeriodChartsHome({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [chartGeneration, setChartGeneration] = useState(0);
 
   const loadGenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const offsetRef = useRef(0);
 
-  const maxRank =
-    platform === 'spotify'
-      ? spotifyPeriodChartMaxRank(spotifyKind)
-      : PERIOD_CHART_MAX_RANK;
-
-  const queryKey =
-    platform === 'spotify'
-      ? `${platform}-${region}-${spotifyKind}-${year}-${month}-${day}-${weekOfMonth}-${snapshotDow}`
-      : `${platform}-${region}-${granularity}-${year}-${month}`;
-
-  useEffect(() => {
-    if (platform !== 'spotify') return;
-    let cancelled = false;
-    void loadWeeklySnapshotDay().then((d) => {
-      if (!cancelled) setSnapshotDow(d);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [platform]);
+  const queryKey = `${kind}-${classCd}-${year}-${month}-${weekOfMonth}`;
 
   const loadPage = useCallback(
     async (offset: number, append: boolean, generation: number) => {
       const ac = new AbortController();
       abortRef.current = ac;
-      const query = {
-        region,
-        granularity,
-        spotifyKind,
-        year,
-        month,
-        day,
-        weekOfMonth,
-        snapshotDow,
-        offset,
-        limit: PERIOD_CHART_PAGE_SIZE,
-      };
-      const chartsAuth: SpotifyChartsAuthHandlers | undefined =
-        platform === 'spotify' && !append
-          ? {
-              onRenewChartsBearer,
-              onOpenChartsSession,
-              onShowBearerExpired,
-            }
-          : undefined;
-      const out = await fetchPeriodChartPage(
-        platform,
-        query,
+      const out = await fetchMelonGenreChartPage(
+        {
+          kind,
+          classCd,
+          year,
+          month,
+          weekOfMonth,
+          offset,
+          limit: MELON_PERIOD_PAGE_SIZE,
+        },
         ac.signal,
-        chartsAuth,
-        platform === 'lastfm' && !append ? lastfmAuth : undefined,
       );
       if (ac.signal.aborted || generation !== loadGenRef.current) return;
 
@@ -168,26 +98,9 @@ export function NrmPeriodChartsHome({
       setPlaylistTitle(out.data.playlistName);
       setHasMore(out.data.hasMore && out.data.items.length > 0);
       offsetRef.current = offset + out.data.items.length;
-      if (!append) {
-        setChartGeneration(generation);
-      }
       setItems((prev) => (append ? [...prev, ...out.data.items] : out.data.items));
     },
-    [
-      platform,
-      region,
-      granularity,
-      spotifyKind,
-      year,
-      month,
-      day,
-      weekOfMonth,
-      snapshotDow,
-      onOpenChartsSession,
-      onRenewChartsBearer,
-      onShowBearerExpired,
-      lastfmAuth,
-    ],
+    [kind, classCd, year, month, weekOfMonth],
   );
 
   const reload = useCallback(() => {
@@ -213,7 +126,7 @@ export function NrmPeriodChartsHome({
 
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasMore || errorCode) return;
-    if (offsetRef.current >= maxRank) {
+    if (offsetRef.current >= MELON_PERIOD_MAX_RANK) {
       setHasMore(false);
       return;
     }
@@ -222,7 +135,7 @@ export function NrmPeriodChartsHome({
     void loadPage(offsetRef.current, true, gen).finally(() => {
       if (gen === loadGenRef.current) setLoadingMore(false);
     });
-  }, [loading, loadingMore, hasMore, errorCode, loadPage, maxRank]);
+  }, [loading, loadingMore, hasMore, errorCode, loadPage]);
 
   const renderListEmpty = useCallback(() => {
     if (loading || items.length > 0) return null;
@@ -230,7 +143,7 @@ export function NrmPeriodChartsHome({
       return (
         <NrmChartErrorHero
           isDark={isDark}
-          platform={platform}
+          platform="melon"
           errorCode={errorCode}
           paddingHorizontal={paddingHorizontal}
         />
@@ -241,7 +154,7 @@ export function NrmPeriodChartsHome({
         이 기간에 표시할 차트가 없습니다.
       </Text>
     );
-  }, [loading, items.length, errorCode, isDark, platform, paddingHorizontal, bodyColor]);
+  }, [loading, items.length, errorCode, isDark, paddingHorizontal, bodyColor]);
 
   const listFooter =
     loadingMore && !errorCode ? (
@@ -251,61 +164,13 @@ export function NrmPeriodChartsHome({
       />
     ) : null;
 
-  const filterBar =
-    platform === 'spotify' ? (
-      <NrmSpotifyPeriodChartFilters
-        isDark={isDark}
-        titleColor={titleColor}
-        bodyColor={bodyColor}
-        kind={spotifyKind}
-        year={year}
-        month={month}
-        day={day}
-        weekOfMonth={weekOfMonth}
-        snapshotDow={snapshotDow}
-        region={region}
-        pickerControl={pickerControl}
-        onKindChange={setSpotifyKind}
-        onYearChange={setYear}
-        onMonthChange={setMonth}
-        onDayChange={setDay}
-        onWeekOfMonthChange={setWeekOfMonth}
-        onRegionChange={setRegion}
-        onReselect={() => reload()}
-      />
-    ) : (
-      <NrmPeriodChartFilters
-        isDark={isDark}
-        titleColor={titleColor}
-        bodyColor={bodyColor}
-        granularity={granularity}
-        year={year}
-        month={month}
-        region={region}
-        pickerControl={pickerControl}
-        onGranularityChange={setGranularity}
-        onYearChange={setYear}
-        onMonthChange={setMonth}
-        onRegionChange={setRegion}
-        onReselect={() => reload()}
-      />
-    );
-
-  const coverLoader = useNrmLastfmChartCoverLoader({
-    items,
-    generation: chartGeneration,
-    enabled: platform === 'lastfm' && !loading && !errorCode,
-  });
-
   const listHeader = (
     <View>
-      {platform !== 'spotify' && playlistTitle && !errorCode ? (
+      {playlistTitle && !errorCode ? (
         <Text style={[styles.hint, { color: bodyColor }]}>
-          {playlistTitle} · {periodChartGranularityLabel(granularity)} · 최대 {maxRank}곡 ·{' '}
-          {items.length}곡 표시
+          {playlistTitle} · 최대 {MELON_PERIOD_MAX_RANK}곡 · {items.length}곡 표시
         </Text>
       ) : null}
-
       {loading ? (
         <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
       ) : null}
@@ -317,44 +182,41 @@ export function NrmPeriodChartsHome({
       <View style={[styles.stickyChrome, { paddingHorizontal }]} collapsable={false}>
         <NrmFeatureScreenLogoHeader isDark={isDark} onPressHome={onBackToHome} />
         <NrmChartPageHeading
-          iconKey={iconKey}
-          title={`${pageTitle} 기간별 차트`}
+          iconKey="melon"
+          title="Melon 장르별 차트"
           titleColor={titleColor}
         />
-        {filterBar}
+        <NrmMelonGenreChartFilters
+          isDark={isDark}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          kind={kind}
+          classCd={classCd}
+          year={year}
+          month={month}
+          weekOfMonth={weekOfMonth}
+          pickerControl={pickerControl}
+          onKindChange={setKind}
+          onGenreChange={setClassCd}
+          onYearChange={setYear}
+          onMonthChange={setMonth}
+          onWeekOfMonthChange={setWeekOfMonth}
+          onReselect={() => reload()}
+        />
       </View>
 
       <FlatList
         style={styles.list}
         nestedScrollEnabled
         data={loading || errorCode ? [] : items}
-        keyExtractor={(item, index) =>
-          `${queryKey}-${item.trackId}-${item.rank}-${index}`
-        }
-        onViewableItemsChanged={
-          platform === 'lastfm' ? coverLoader.onViewableItemsChanged : undefined
-        }
-        viewabilityConfig={
-          platform === 'lastfm' ? coverLoader.viewabilityConfig : undefined
-        }
+        keyExtractor={(item, index) => `${queryKey}-${item.trackId}-${item.rank}-${index}`}
         renderItem={({ item }) => (
           <View style={{ paddingHorizontal }} collapsable={false}>
             <NrmChartTrackRow
               item={item}
               titleColor={titleColor}
               bodyColor={bodyColor}
-              coverUrl={
-                platform === 'lastfm'
-                  ? coverLoader.resolveItemCoverUrl(item)
-                  : undefined
-              }
-              countLabel={
-                platform === 'spotify'
-                  ? spotifyKind === 'monthly'
-                    ? '평균 순위'
-                    : '스트림'
-                  : undefined
-              }
+              coverUrl={item.imageUrl}
               onPress={onTrackPress ? () => onTrackPress(item) : undefined}
             />
           </View>

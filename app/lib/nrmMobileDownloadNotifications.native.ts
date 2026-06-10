@@ -522,3 +522,27 @@ export function nrmNotifyDownloadWorkEnded(videoId: string): void {
 }
 
 
+
+/** 트랙 메타데이터 설정 — ffmpeg 메타 반영 완료 (진행 알림 없음) */
+export async function nrmNotifyTrackMetadataEditComplete(
+  artist: string,
+  title: string,
+): Promise<void> {
+  if (!setupDone) return;
+  const label = `${artist.trim()} - ${title.trim()}`;
+  if (!label || label === '-') return;
+  await scheduleNotificationAsync({
+    identifier: `nrm-track-meta-done-${Date.now()}`,
+    content: {
+      title: `${label} 수정 완료`,
+      body: '',
+      data: {},
+      ...(Platform.OS === 'android'
+        ? ({ android: { channelId: CH_AUDIO_COMPLETE } } as object)
+        : {}),
+    },
+    trigger: null,
+  });
+}
+
+

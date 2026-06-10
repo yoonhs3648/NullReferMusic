@@ -9,7 +9,10 @@ import {
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
+import { isLastfmPlaceholderCoverUrl } from '@/lib/nrmCoverArtUrl';
 import type { LastfmTag } from '@/lib/nrmLastfmSearchTypes';
+
+const APP_ICON = require('@/assets/images/icon.png');
 
 /** Last.fm duration(초). 밀리초로 오는 경우 보정 */
 export function formatLastfmDuration(raw: number): string {
@@ -157,10 +160,11 @@ export function NrmLastfmCoverImage({
   radius?: number;
 }) {
   const r = radius ?? nrmTokens.radius.sm;
-  if (uri) {
+  const clean = isLastfmPlaceholderCoverUrl(uri) ? '' : uri.trim();
+  if (clean) {
     return (
       <Image
-        source={{ uri }}
+        source={{ uri: clean }}
         style={{ width: size, height: size, borderRadius: r }}
       />
     );
@@ -170,8 +174,9 @@ export function NrmLastfmCoverImage({
       style={[
         styles.coverPlaceholder,
         { width: size, height: size, borderRadius: r },
-      ]}
-    />
+      ]}>
+      <Image source={APP_ICON} style={styles.coverLogo} resizeMode="contain" />
+    </View>
   );
 }
 
@@ -367,6 +372,14 @@ const styles = StyleSheet.create({
   tagText: { fontSize: nrmTokens.font.caption, fontWeight: '500' },
   emptyTags: { fontSize: nrmTokens.font.caption },
   coverPlaceholder: {
-    backgroundColor: 'rgba(128,128,128,0.25)',
+    backgroundColor: 'rgba(128,128,128,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 6,
+    overflow: 'hidden',
+  },
+  coverLogo: {
+    width: '100%',
+    height: '100%',
   },
 });

@@ -9,7 +9,7 @@ type Props = {
   size?: number;
 };
 
-/** 차트 커버 — URL 없으면 앱 메인 로고(icon.png) */
+/** 차트 커버 — URL 없으면 앱 메인 로고(icon.png), 로드되면 앨범 커버 */
 export function NrmChartTrackArt({ imageUrl, size = 52 }: Props) {
   const row = nrmChartTrackListStyles;
   const uri = imageUrl?.trim() ?? '';

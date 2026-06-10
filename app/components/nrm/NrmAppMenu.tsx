@@ -39,6 +39,7 @@ import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiM
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
+import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { hasLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
 import {
   ensureLastfmChartAccess,
@@ -84,6 +85,7 @@ type Props = {
   onNavigateSpotifyChartsOfficial?: () => void;
   onNavigateSpotifyChartsCharts?: () => void;
   onNavigateLastfmCharts?: () => void;
+  onNavigateMelonCharts?: () => void;
   onNavigatePeriodLastfmCharts?: () => void;
   onNavigatePeriodSpotifyCharts?: () => void;
   onNavigateGenreCharts?: () => void;
@@ -130,6 +132,7 @@ type Panel =
   | 'downloadMetadataSettings'
   | 'downloadLyricsEmbedSettings'
   | 'fileLoggingSettings'
+  | 'trackMetadataSettings'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -142,6 +145,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateSpotifyChartsOfficial,
     onNavigateSpotifyChartsCharts,
     onNavigateLastfmCharts,
+    onNavigateMelonCharts,
     onNavigatePeriodLastfmCharts,
     onNavigatePeriodSpotifyCharts,
     onNavigateGenreCharts,
@@ -363,23 +367,19 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX,
   ]);
 
-  const closeMenuAndNavigateGenreCharts = useCallback(async () => {
-    const ok = await ensureSpotifyChartsSessionAccess(
-      openSpotifyChartsSessionSettings,
-      onRequestChartsBearerWebView,
-    );
-    if (!ok) return;
+  const closeMenuAndNavigateMelonCharts = useCallback(() => {
+    onNavigateMelonCharts?.();
+    setOpen(false);
+    setPanel('root');
+    translateX.setValue(-drawerW);
+  }, [drawerW, onNavigateMelonCharts, translateX]);
+
+  const closeMenuAndNavigateGenreCharts = useCallback(() => {
     onNavigateGenreCharts?.();
     setOpen(false);
     setPanel('root');
     translateX.setValue(-drawerW);
-  }, [
-    drawerW,
-    onNavigateGenreCharts,
-    onRequestChartsBearerWebView,
-    openSpotifyChartsSessionSettings,
-    translateX,
-  ]);
+  }, [drawerW, onNavigateGenreCharts, translateX]);
 
   const closeMenuAndNavigateSpotifySearch = useCallback(
     async (kind: SearchKind) => {
@@ -451,6 +451,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         break;
       case 'weeklySnapshotSettings':
         setPanel('settings');
+        break;
+      case 'trackMetadataSettings':
+        setPanel('root');
         break;
       case 'downloadManage':
         setPanel('root');
@@ -798,6 +801,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     다운로드 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('trackMetadataSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    트랙 메타데이터 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1281,6 +1299,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
+            {panel === 'trackMetadataSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmTrackMetadataSettingsHome
+                  isDark={isDark}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('root')}
+                />
+              </DrawerShell>
+            ) : null}
+
             {panel === 'downloadMetadataSettings' ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -1325,6 +1357,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   onOpenSpotifyChartsOfficial={closeMenuAndNavigateSpotifyChartsOfficial}
                   onOpenSpotifyChartsCharts={closeMenuAndNavigateSpotifyChartsCharts}
                   onOpenLastfmCharts={closeMenuAndNavigateLastfmCharts}
+                  onOpenMelonCharts={closeMenuAndNavigateMelonCharts}
                 />
               </DrawerShell>
             ) : null}

@@ -90,4 +90,10 @@ public final class LastfmSearchDtos {
       LastfmTrackInfoDto info,
       List<LastfmTrackSummaryDto> similarTracks,
       List<LastfmTagDto> tags) {}
+
+  /** 차트 리스트 커버 — track.getInfo 1회만 */
+  public record LastfmTrackCoverResult(String coverUrl) {}
+
+  /** 검색 리스트 아티스트 사진 — artist.getInfo 1회만 */
+  public record LastfmArtistImageResult(String imageUrl) {}
 }

@@ -61,10 +61,43 @@ function shouldRetryInnertubeDownload(msg: string): boolean {
   );
 }
 
+/** Chaquopy·네이티브 모듈 자체가 없을 때만 innertube 폴백을 건너뜁니다. */
 function shouldFallbackFromYtDlp(msg: string): boolean {
-  return /permission denied|error=13|eacces|operation not permitted|cannot run program/i.test(
-    msg,
-  );
+  if (
+    /NrmOnDeviceDownload unavailable|chaquopy|python.*not started|modulenotfound|no module named/i.test(
+      msg,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function innertubeClientAttempts(): Array<() => Promise<Innertube>> {
+  return [
+    getInnertube,
+    () =>
+      Innertube.create({
+        lang: 'ko',
+        location: 'KR',
+        client_type: ClientType.ANDROID,
+        fetch: nrmYoutubeFetch,
+      }),
+    () =>
+      Innertube.create({
+        lang: 'ko',
+        location: 'KR',
+        client_type: ClientType.IOS,
+        fetch: nrmYoutubeFetch,
+      }),
+    () =>
+      Innertube.create({
+        lang: 'ko',
+        location: 'KR',
+        client_type: ClientType.WEB,
+        fetch: nrmYoutubeFetch,
+      }),
+  ];
 }
 
 export function getInnertube(): Promise<Innertube> {
@@ -282,13 +315,26 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
   return rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 }
 
-async function downloadWithYtDlp(
-  videoId: string,
-  userSuggestedFileName: string,
-  metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string }> {
-  const fileUri = await extractWithYtDlp(videoId);
-  return tagThenPersist(fileUri, userSuggestedFileName, metadata);
+/** Android: yt-dlp 우선, 실패 시 innertube로 폴백합니다. */
+async function extractAudioWithFallback(videoId: string): Promise<string> {
+  const ytDlpAvailable =
+    Platform.OS === 'android' && isOnDeviceDownloadAvailable();
+
+  if (!ytDlpAvailable) {
+    return extractWithInnertube(videoId);
+  }
+
+  try {
+    return await extractWithYtDlp(videoId);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logNrmRunError('download.ytdlp.extract_failed', e, { videoId });
+    if (!shouldFallbackFromYtDlp(msg)) {
+      throw e;
+    }
+    logNrmRunError('download.ytdlp.fallback_innertube', null, { videoId });
+    return extractWithInnertube(videoId);
+  }
 }
 
 // ── youtubei.js (innertube) 폴백 경로 ────────────────────────────────────────
@@ -302,23 +348,7 @@ async function extractWithInnertube(videoId: string): Promise<string> {
     throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
   }
 
-  const attempts: Array<() => Promise<Innertube>> = [
-    getInnertube,
-    () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.ANDROID,
-        fetch: nrmYoutubeFetch,
-      }),
-    () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.IOS,
-        fetch: nrmYoutubeFetch,
-      }),
-  ];
+  const attempts = innertubeClientAttempts();
 
   let lastError: unknown;
   const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
@@ -404,25 +434,9 @@ async function downloadWithInnertube(
 
 /** yt-dlp/innertube로 오디오만 추출 (ffmpeg·저장 전) */
 export async function extractYoutubeAudioOnDevice(videoId: string): Promise<{ fileUri: string }> {
-  const ytDlpAvailable =
-    Platform.OS === 'android' && isOnDeviceDownloadAvailable();
-
   if (Platform.OS === 'android') {
-    if (!ytDlpAvailable) {
-      return { fileUri: await extractWithInnertube(videoId) };
-    }
-    try {
-      return { fileUri: await extractWithYtDlp(videoId) };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      logNrmRunError('download.ytdlp.extract_failed', e, { videoId });
-      if (shouldFallbackFromYtDlp(msg)) {
-        return { fileUri: await extractWithInnertube(videoId) };
-      }
-      throw e;
-    }
+    return { fileUri: await extractAudioWithFallback(videoId) };
   }
-
   return { fileUri: await extractWithInnertube(videoId) };
 }
 
@@ -438,23 +452,7 @@ export async function finalizeYoutubeAudioOnDevice(
 export async function getAudioStreamUrlWithInnertube(
   videoId: string,
 ): Promise<string> {
-  const attempts: Array<() => Promise<Innertube>> = [
-    getInnertube,
-    () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.ANDROID,
-        fetch: nrmYoutubeFetch,
-      }),
-    () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.IOS,
-        fetch: nrmYoutubeFetch,
-      }),
-  ];
+  const attempts = innertubeClientAttempts();
 
   let lastError: unknown;
   for (let i = 0; i < attempts.length; i++) {
@@ -486,13 +484,8 @@ export async function getAudioStreamUrlWithInnertube(
 /**
  * 모바일 오디오 다운로드 진입점.
  *
- * Android: yt-dlp (Chaquopy) 단독 사용.
- *   - yt-dlp는 내부에서 4개 profile(android→ios→tv_embedded→web)을 순차 retry한다.
- *   - 모든 profile 실패 시 throw (youtubei.js 폴백 없음).
- *   - 이유: youtubei.js는 쿠키 없음 + signature/poToken 미처리로 구조적 403이 발생.
- *
+ * Android: yt-dlp(Chaquopy) 우선 → 실패 시 youtubei.js(innertube) 폴백.
  * iOS: youtubei.js 경로 (yt-dlp 바이너리 실행 불가).
- *   - 쿠키 없는 한계는 있으나 현재 iOS에서 사용 가능한 유일한 방법.
  */
 export async function downloadYoutubeAudioOnDevice(
   videoId: string,
@@ -508,24 +501,10 @@ export async function downloadYoutubeAudioOnDevice(
     videoId,
   });
 
-  // ── Android: yt-dlp 우선, 실행권한 오류 등은 innertube 폴백 ────────────────
   if (Platform.OS === 'android') {
-    if (!ytDlpAvailable) {
-      return await downloadWithInnertube(videoId, userSuggestedFileName, metadata);
-    }
-    try {
-      return await downloadWithYtDlp(videoId, userSuggestedFileName, metadata);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      logNrmRunError('download.ytdlp.failed', e, { videoId });
-      if (shouldFallbackFromYtDlp(msg)) {
-        logNrmRunError('download.ytdlp.fallback_innertube', null, { videoId });
-        return await downloadWithInnertube(videoId, userSuggestedFileName, metadata);
-      }
-      throw e;
-    }
+    const fileUri = await extractAudioWithFallback(videoId);
+    return tagThenPersist(fileUri, userSuggestedFileName, metadata);
   }
 
-  // ── iOS: youtubei.js 경로 ──────────────────────────────────────────────────
   return downloadWithInnertube(videoId, userSuggestedFileName, metadata);
 }

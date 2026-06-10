@@ -29,6 +29,8 @@ type Props = {
   bodyColor: string;
   onPress?: () => void;
   countLabel?: string;
+  /** Last.fm 차트: 보강된 커버 URL (없으면 item.imageUrl) */
+  coverUrl?: string;
 };
 
 export function NrmChartTrackRow({
@@ -37,6 +39,7 @@ export function NrmChartTrackRow({
   bodyColor,
   onPress,
   countLabel = '',
+  coverUrl,
 }: Props) {
   const row = nrmChartTrackListStyles;
   const releaseSuffix = formatReleaseDate(item.releaseDate);
@@ -52,7 +55,7 @@ export function NrmChartTrackRow({
       accessibilityRole="button"
       accessibilityLabel={`${item.rank}위 ${item.title}`}>
       <Text style={[row.rank, { color: bodyColor }]}>{item.rank}</Text>
-      <NrmChartTrackArt imageUrl={item.imageUrl} />
+      <NrmChartTrackArt imageUrl={coverUrl ?? item.imageUrl} />
       <View style={row.trackMeta}>
         <Text style={[row.trackTitle, { color: titleColor }]} numberOfLines={1}>
           {item.title}

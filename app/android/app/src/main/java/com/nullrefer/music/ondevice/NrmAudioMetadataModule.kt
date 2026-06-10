@@ -4,14 +4,17 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Base64
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.WritableMap
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -125,54 +128,137 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
+  /** 저장된 오디오 ID3/컨테이너 메타 + 임베디드 커버 읽기 (ffmpeg -i 파싱) */
+  @ReactMethod
+  fun readMetadata(inputPath: String, promise: Promise) {
+    Thread {
+      try {
+        val inFile = File(inputPath)
+        if (!inFile.isFile) {
+          promise.reject("E_ARG", "입력 파일이 없습니다.")
+          return@Thread
+        }
+        val paths =
+            FfmpegExec.resolve(reactApplicationContext)
+                ?: throw Exception("ffmpeg를 사용할 수 없습니다.")
+        val (_, probeOut) =
+            FfmpegExec.runCapture(
+                paths.binary,
+                paths.libDir,
+                listOf("-hide_banner", "-i", inFile.absolutePath),
+                tag = "ffmpeg-read-meta",
+                timeoutSec = 90,
+            )
+        val out = Arguments.createMap()
+        parseFfmpegProbeMetadata(probeOut, out)
+        val coverFile = extractEmbeddedCoverFile(paths, inFile)
+        if (coverFile != null) {
+          out.putString("coverUrl", "file://${coverFile.absolutePath}")
+        }
+        promise.resolve(out)
+      } catch (e: Exception) {
+        promise.reject("E_READ_META", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
+  /** 파일 시스템 경로 재스캔 후 MediaStore 태그 동기화 */
+  @ReactMethod
+  fun rescanMediaFile(inputPath: String, metadata: ReadableMap, promise: Promise) {
+    Thread {
+      try {
+        val inFile = File(inputPath)
+        if (!inFile.isFile) {
+          promise.reject("E_ARG", "입력 파일이 없습니다.")
+          return@Thread
+        }
+        val mime =
+            when (inFile.extension.lowercase()) {
+              "mp3" -> "audio/mpeg"
+              "m4a", "mp4" -> "audio/mp4"
+              "flac" -> "audio/flac"
+              "ogg" -> "audio/ogg"
+              "wav" -> "audio/wav"
+              else -> "audio/*"
+            }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var mediaUri: Uri? = null
+        MediaScannerConnection.scanFile(
+            reactApplicationContext,
+            arrayOf(inFile.absolutePath),
+            arrayOf(mime),
+        ) { _, uri ->
+          mediaUri = uri
+          latch.countDown()
+        }
+        if (!latch.await(20, TimeUnit.SECONDS)) {
+          promise.reject("E_MEDIA_SCAN", "미디어 스캔 시간이 초과되었습니다.")
+          return@Thread
+        }
+        val uri = mediaUri
+        if (uri != null) {
+          applyMediaStoreTagUpdate(uri, metadata)
+        }
+        promise.resolve(null)
+      } catch (e: Exception) {
+        promise.reject("E_MEDIA_SCAN", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
   /** Samsung Music 등: MediaStore 텍스트 태그 + 앨범아트 DB */
   @ReactMethod
   fun updateMediaStoreAudioTags(mediaUriString: String, metadata: ReadableMap, promise: Promise) {
     Thread {
       try {
         val uri = Uri.parse(mediaUriString.trim())
-        val resolver = reactApplicationContext.contentResolver
-        val values = ContentValues()
-        metadata.getString("title")?.trim()?.takeIf { it.isNotEmpty() }?.let {
-          values.put(MediaStore.Audio.Media.TITLE, it)
-        }
-        metadata.getString("artist")?.trim()?.takeIf { it.isNotEmpty() }?.let {
-          values.put(MediaStore.Audio.Media.ARTIST, it)
-        }
-        val albumValue = metadata.getString("album")?.trim().orEmpty()
-        if (albumValue.isNotEmpty()) {
-          values.put(MediaStore.Audio.Media.ALBUM, albumValue)
-        } else {
-          // 앨범 정보가 없을 때 폴더명(예: NullReferenceMusic)이 앨범으로 보이는 현상을 방지.
-          values.putNull(MediaStore.Audio.Media.ALBUM)
-        }
-        metadata.getString("genre")?.trim()?.takeIf { it.isNotEmpty() }?.let {
-          values.put(MediaStore.Audio.Media.GENRE, it)
-        }
-        metadata.getString("releaseDate")?.trim()?.takeIf { it.isNotEmpty() }?.let {
-          values.put(MediaStore.Audio.Media.YEAR, it.take(4))
-        }
-        if (values.size() > 0) {
-          resolver.update(uri, values, null, null)
-        }
-
-        val coverUrl = metadata.getString("coverUrl")?.trim().orEmpty()
-        if (coverUrl.isNotEmpty()) {
-          val cover = downloadCover(coverUrl, reactApplicationContext.cacheDir)
-          if (cover != null) {
-            try {
-              trySetMediaStoreAlbumArt(uri, cover)
-            } finally {
-              cover.delete()
-            }
-          }
-        }
-
+        applyMediaStoreTagUpdate(uri, metadata)
         promise.resolve(null)
       } catch (e: Exception) {
         promise.reject("E_MEDIA_STORE", e.message ?: e.toString(), e)
       }
     }.start()
+  }
+
+  private fun applyMediaStoreTagUpdate(uri: Uri, metadata: ReadableMap) {
+    val resolver = reactApplicationContext.contentResolver
+    val values = ContentValues()
+    metadata.getString("title")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      values.put(MediaStore.Audio.Media.TITLE, it)
+    }
+    metadata.getString("artist")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      values.put(MediaStore.Audio.Media.ARTIST, it)
+    }
+    metadata.getString("albumArtist")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      values.put(MediaStore.Audio.Media.ALBUM_ARTIST, it)
+    }
+    val albumValue = metadata.getString("album")?.trim().orEmpty()
+    if (albumValue.isNotEmpty()) {
+      values.put(MediaStore.Audio.Media.ALBUM, albumValue)
+    } else {
+      values.putNull(MediaStore.Audio.Media.ALBUM)
+    }
+    metadata.getString("genre")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      values.put(MediaStore.Audio.Media.GENRE, it)
+    }
+    metadata.getString("releaseDate")?.trim()?.takeIf { it.isNotEmpty() }?.let {
+      values.put(MediaStore.Audio.Media.YEAR, it.take(4))
+    }
+    if (values.size() > 0) {
+      resolver.update(uri, values, null, null)
+    }
+
+    val coverUrl = metadata.getString("coverUrl")?.trim().orEmpty()
+    if (coverUrl.isNotEmpty()) {
+      val cover = downloadCover(coverUrl, reactApplicationContext.cacheDir)
+      if (cover != null) {
+        try {
+          trySetMediaStoreAlbumArt(uri, cover)
+        } finally {
+          cover.delete()
+        }
+      }
+    }
   }
 
   private data class FfmpegStrategy(val withCover: Boolean, val audioCopy: Boolean)
@@ -301,6 +387,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
     if (ext == "mp3") {
       cmd.add("-id3v2_version"); cmd.add("3")
+      cmd.add("-write_id3v1"); cmd.add("0")
     }
 
     fun putTag(logicalKey: String, value: String) {
@@ -415,6 +502,109 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     resolver.openOutputStream(artUri)?.use { output ->
       bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
     }
+  }
+
+  private enum class ProbeMetaContext {
+    FORMAT,
+    AUDIO_STREAM,
+    VIDEO_STREAM,
+    OTHER,
+  }
+
+  private fun isBogusEmbeddedTitle(value: String): Boolean {
+    return when (value.trim().lowercase()) {
+      "album cover",
+      "cover (front)",
+      "cover",
+      "front cover",
+      "album art" -> true
+      else -> false
+    }
+  }
+
+  private fun parseFfmpegProbeMetadata(output: String, out: WritableMap) {
+    val keyToField =
+        mapOf(
+            "title" to "title",
+            "artist" to "artist",
+            "album" to "album",
+            "album_artist" to "albumArtist",
+            "albumartist" to "albumArtist",
+            "genre" to "genre",
+            "date" to "releaseDate",
+            "composer" to "composer",
+            "track" to "trackNumber",
+            "disc" to "discNumber",
+            "copyright" to "copyright",
+            "website" to "website",
+            "tbpm" to "bpm",
+            "bpm" to "bpm",
+            "producer" to "producer",
+            "remixer" to "remixer",
+        )
+    var context = ProbeMetaContext.FORMAT
+    for (line in output.lineSequence()) {
+      when {
+        Regex("""^\s*Stream #\d+:\d+:\s*Audio:""").containsMatchIn(line) ->
+            context = ProbeMetaContext.AUDIO_STREAM
+        Regex("""^\s*Stream #\d+:\d+:\s*Video:""").containsMatchIn(line) ->
+            context = ProbeMetaContext.VIDEO_STREAM
+        line.trimStart().startsWith("Stream #") && !line.contains("Audio:") && !line.contains("Video:") ->
+            context = ProbeMetaContext.OTHER
+      }
+      if (context == ProbeMetaContext.VIDEO_STREAM || context == ProbeMetaContext.OTHER) {
+        continue
+      }
+      val m = Regex("""^\s+([A-Za-z0-9_]+)\s*:\s+(.*)$""").find(line) ?: continue
+      val rawKey = m.groupValues[1].lowercase()
+      val field = keyToField[rawKey] ?: continue
+      val value = m.groupValues[2].trim()
+      if (value.isEmpty() || out.hasKey(field)) continue
+      if (field == "title" && isBogusEmbeddedTitle(value)) continue
+      out.putString(field, value)
+    }
+  }
+
+  private fun extractEmbeddedCoverFile(
+      paths: FfmpegBootstrap.FfmpegPaths,
+      inFile: File,
+  ): File? {
+    if (!probeOutHasAttachedPic(inFile, paths)) return null
+    val cache = reactApplicationContext.cacheDir
+    val cover = File(cache, "nrm-read-cover-${System.currentTimeMillis()}.jpg")
+    val (code, _) =
+        FfmpegExec.runCapture(
+            paths.binary,
+            paths.libDir,
+            listOf(
+                "-hide_banner",
+                "-y",
+                "-i",
+                inFile.absolutePath,
+                "-map",
+                "0:v:0",
+                "-c",
+                "copy",
+                cover.absolutePath,
+            ),
+            tag = "ffmpeg-read-cover",
+            timeoutSec = 60,
+        )
+    if (cover.isFile && cover.length() >= 256L) return cover
+    cover.delete()
+    return null
+  }
+
+  private fun probeOutHasAttachedPic(inFile: File, paths: FfmpegBootstrap.FfmpegPaths): Boolean {
+    val (_, out) =
+        FfmpegExec.runCapture(
+            paths.binary,
+            paths.libDir,
+            listOf("-hide_banner", "-i", inFile.absolutePath),
+            tag = "ffmpeg-read-cover-probe",
+            timeoutSec = 30,
+        )
+    return out.contains("Video:") || out.contains("attached pic") || out.contains("mjpeg")
   }
 
   private fun downloadCover(url: String, dir: File?): File? {
