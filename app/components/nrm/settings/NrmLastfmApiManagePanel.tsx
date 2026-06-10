@@ -17,6 +17,7 @@ import { copyToClipboard } from '@/lib/nrmCopyText';
 import { issueLastfmAccessToken } from '@/lib/nrmLastfmApiClient';
 import {
   getLastfmCredentials,
+  hasLastfmCredentials,
   saveLastfmCredentials,
   type NrmLastfmCredentials,
 } from '@/lib/nrmLastfmApiSettings';
@@ -26,10 +27,6 @@ import {
   NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
 } from '@/lib/nrmApiSettingsUi';
 import { resolveLastfmApiDashboardUrl } from '@/lib/nrmLastfmApiDashboardUrl';
-import {
-  hasLastfmWebLogin,
-  logoutLastfmWebLogin,
-} from '@/lib/nrmLastfmWebLogout';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 type ScreenId = 'hub' | 'manage' | 'issue';
@@ -47,6 +44,7 @@ type Props = {
   titleColor: string;
   bodyColor: string;
   rowHover: string;
+  initialScreen?: ScreenId;
   onBack: () => void;
   onCloseDrawer?: () => void;
   registerBackHandler?: (handler: (() => boolean) | null) => void;
@@ -177,17 +175,33 @@ export function NrmLastfmApiManagePanel({
   titleColor,
   bodyColor,
   rowHover,
+  initialScreen,
   onBack,
   onCloseDrawer,
   registerBackHandler,
   registerDrawerDismiss,
 }: Props) {
-  const [screen, setScreen] = useState<ScreenId>('hub');
+  const [screen, setScreen] = useState<ScreenId>(initialScreen ?? 'hub');
   const [draftId, setDraftId] = useState('');
   const [draftSecret, setDraftSecret] = useState('');
   const [issuing, setIssuing] = useState(false);
-  const [lastfmWebLoginActive, setLastfmWebLoginActive] = useState(false);
   const savedSnapshotRef = useRef<DraftSnapshot | null>(null);
+
+  useEffect(() => {
+    if (initialScreen) {
+      setScreen(initialScreen);
+      return;
+    }
+    let cancelled = false;
+    void hasLastfmCredentials().then((registered) => {
+      if (!cancelled) {
+        setScreen(registered ? 'manage' : 'issue');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialScreen]);
 
   const reload = useCallback(async () => {
     const c = await getLastfmCredentials();
@@ -199,7 +213,6 @@ export function NrmLastfmApiManagePanel({
       clientId: id.trim(),
       clientSecret: secret.trim(),
     };
-    setLastfmWebLoginActive(await hasLastfmWebLogin());
   }, []);
 
   useEffect(() => {
@@ -363,16 +376,6 @@ export function NrmLastfmApiManagePanel({
     await WebBrowser.openBrowserAsync(url);
   };
 
-  const handleLastfmLogout = async () => {
-    if (!lastfmWebLoginActive) return;
-    await logoutLastfmWebLogin();
-    setDraftId('');
-    setDraftSecret('');
-    savedSnapshotRef.current = { clientId: '', clientSecret: '' };
-    setLastfmWebLoginActive(false);
-    void notifyUser('Last.fm 로그인 정보를 삭제했습니다.');
-  };
-
   if (screen === 'manage') {
     return (
       <>
@@ -413,11 +416,10 @@ export function NrmLastfmApiManagePanel({
         </Text>
         <View style={styles.issueGuideBlock}>
           <Text style={[styles.issueGuideLine, { color: bodyColor }]}>
-            Last.fm API 계정 페이지에서 API Key와 Shared Secret을 발급받으세요.
+            Last.fm API 계정 페이지에서 API Key를 발급받으세요.
           </Text>
           <Text style={[styles.issueGuideLine, { color: bodyColor }]}>
-            차트 조회에는 API Key만 사용합니다. Shared Secret은 확인·저장 시
-            함께 검증합니다.
+            차트·검색에는 API Key만 사용합니다. Shared Secret은 선택 입력입니다.
           </Text>
         </View>
         <Pressable
@@ -524,24 +526,6 @@ export function NrmLastfmApiManagePanel({
           API 토큰 발급
         </Text>
       </Pressable>
-
-      <Pressable
-        onPress={() => void handleLastfmLogout()}
-        disabled={!lastfmWebLoginActive}
-        style={({ pressed }) => [
-          styles.hubRow,
-          styles.hubRowFixed,
-          !lastfmWebLoginActive && styles.hubRowDisabled,
-          pressed && lastfmWebLoginActive && styles.hubRowPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !lastfmWebLoginActive }}>
-        <Text
-          style={[styles.hubRowTitleSm, { color: titleColor }]}
-          numberOfLines={1}>
-          로그아웃
-        </Text>
-      </Pressable>
     </>
   );
 }
@@ -589,9 +573,6 @@ const styles = StyleSheet.create({
   },
   hubRowPressed: {
     opacity: 0.92,
-  },
-  hubRowDisabled: {
-    opacity: 0.55,
   },
   hubRowTitleSm: {
     fontSize: 15,

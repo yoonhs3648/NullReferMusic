@@ -61,11 +61,8 @@ export async function getLastfmCredentials(): Promise<NrmLastfmCredentials | nul
 
 
 export async function hasLastfmCredentials(): Promise<boolean> {
-
   const c = await getLastfmCredentials();
-
-  return !!(c?.clientId && c?.clientSecret);
-
+  return !!c?.clientId;
 }
 
 
@@ -180,7 +177,7 @@ export async function hasLastfmChartAccess(): Promise<boolean> {
 
   const c = await getLastfmCredentials();
 
-  return !!(c?.clientId && c?.clientSecret);
+  return !!c?.clientId;
 
 }
 

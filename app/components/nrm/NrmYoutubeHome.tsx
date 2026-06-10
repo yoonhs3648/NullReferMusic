@@ -48,10 +48,7 @@ import { resolveDownloadFileName } from '@/lib/nrmResolveDownloadPayload';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
-import {
-  openDownloadSettingsPanel,
-  openLyricsEmbedSettingsPanel,
-} from '@/lib/nrmDownloadNavEvents';
+import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
 import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
 import { NrmDownloadMetadataUnavailableOverlay } from '@/components/nrm/NrmDownloadMetadataUnavailableOverlay';
@@ -662,10 +659,6 @@ export function NrmYoutubeHome({
         initialMetadataFields={downloadModalInitialFields}
         busy={!!(downloadModalItem && dlMetaBusy[downloadModalItem.videoId])}
         onClose={handleModalClose}
-        onOpenWhisperModelSettings={() => {
-          handleModalClose();
-          openLyricsEmbedSettingsPanel();
-        }}
         onConfirm={(videoId, fileName, metadata) => {
           void handleModalConfirm(videoId, fileName, metadata);
         }}

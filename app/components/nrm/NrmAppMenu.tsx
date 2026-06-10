@@ -39,6 +39,7 @@ import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiM
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
+import { hasLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
 import {
   ensureLastfmChartAccess,
   ensureSearchApiAccess,
@@ -173,6 +174,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const [versionOverlayOpen, setVersionOverlayOpen] = useState(false);
   const [suffixMode, setSuffixMode] =
     useState<NrmYoutubeSearchSuffixMode>('default');
+  const [lastfmEntryScreen, setLastfmEntryScreen] = useState<
+    'manage' | 'issue'
+  >('issue');
 
   useEffect(() => {
     if (panel !== 'searchSettings') return;
@@ -230,11 +234,15 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     translateX.setValue(0);
   }, [translateX]);
 
-  const openLastfmTokenSettings = useCallback(() => {
+  const openLastfmApiManage = useCallback(async () => {
+    const registered = await hasLastfmCredentials();
+    setLastfmEntryScreen(registered ? 'manage' : 'issue');
     setOpen(true);
     setPanel('lastfmApiManage');
     translateX.setValue(0);
   }, [translateX]);
+
+  const openLastfmTokenSettings = openLastfmApiManage;
 
   const lastfmGateHandlers = useMemo(
     () => ({
@@ -448,7 +456,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         setPanel('root');
         break;
       case 'fileLoggingSettings':
-        setPanel('root');
+        setPanel('settings');
         break;
       case 'appSettings':
       case 'searchSettings':
@@ -798,21 +806,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => setPanel('fileLoggingSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    로깅
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
                   onPress={() => setVersionOverlayOpen(true)}
                   style={({ pressed }) => [
                     styles.row,
@@ -925,6 +918,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('fileLoggingSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    로깅
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -964,7 +972,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => setPanel('lastfmApiManage')}
+                  onPress={() => void openLastfmApiManage()}
                   style={({ pressed }) => [
                     styles.row,
                     pressed && { backgroundColor: rowHover },
@@ -1057,6 +1065,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   rowHover={rowHover}
+                  initialScreen={lastfmEntryScreen}
                   onBack={() => setPanel('appSettings')}
                   onCloseDrawer={dismissDrawer}
                   registerBackHandler={(handler) => {
@@ -1211,7 +1220,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmFileLoggingSettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
-                  onBack={() => setPanel('root')}
+                  onBack={() => setPanel('settings')}
                 />
               </DrawerShell>
             ) : null}

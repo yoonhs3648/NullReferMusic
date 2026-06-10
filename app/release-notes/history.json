@@ -1,6 +1,32 @@
 {
   "entries": [
     {
+      "version": "1.6.22",
+      "lines": [
+        "Last.fm API Key만 등록해도 차트·검색 사용 가능",
+        "로깅 관리자 전송 기능 제거",
+        "Last.fm·DeepL 웹 로그아웃 제거 (Spotify Charts만 유지)",
+        "로깅 메뉴 앱 설정 하단 이동, Whisper 없을 때 가사 설정안함 고정"
+      ]
+    },
+    {
+      "version": "1.6.21",
+      "lines": [
+        "로그 관리자 전송 — nrm-debug*.txt 최신 파일",
+        "Last.fm API 페이지 accounts URL로 수정"
+      ]
+    },
+    {
+      "version": "1.6.20",
+      "lines": [
+        "로깅 메뉴를 앱 설정 하단으로 이동",
+        "Last.fm API 등록 여부에 따른 화면 자동 분기",
+        "Last.fm·DeepL 로그아웃 제거 (Spotify Charts만 유지)",
+        "로깅 관리자에게 전송 (최근 로그 첨부)",
+        "Whisper 없을 때 가사 설정안함 고정"
+      ]
+    },
+    {
       "version": "1.6.19",
       "lines": [
         "Spotify Charts / Last.fm / DeepL 로그아웃 시 웹 세션 쿠키 실제 삭제",

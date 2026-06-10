@@ -1,36 +1,14 @@
-import { Platform, NativeModules } from 'react-native';
-
-import { getLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
-
 export const LASTFM_API_CREATE_URL = 'https://www.last.fm/api/account/create';
 export const LASTFM_API_ACCOUNTS_URL = 'https://www.last.fm/api/accounts';
 
-type NrmSiteCookieModule = {
-  hasLastfmLoginCookies?: () => Promise<boolean>;
-};
-
-async function hasLastfmBrowserSession(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
-  const mod = NativeModules.NrmSiteCookie as NrmSiteCookieModule | undefined;
-  if (!mod?.hasLastfmLoginCookies) return false;
-  try {
-    return (await mod.hasLastfmLoginCookies()) === true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * API 계정을 이미 만든 사용자는 키·Secret 확인 페이지로,
- * 그 외에는 계정 생성 페이지로 연다.
+ * Last.fm API 계정·키 확인 페이지 URL.
+ *
+ * `expo-web-browser`(Chrome Custom Tab)는 앱 WebView 쿠키(NrmSiteCookie)와
+ * 세션을 공유하지 않아, 네이티브 쿠키 프로브로 등록·로그인 여부를 판별할 수 없다.
+ * 브라우저에 Last.fm 로그인·API 앱 등록이 되어 있으면 ACCOUNTS에서 목록이 보이고,
+ * 미등록·미로그인은 Last.fm이 로그인·생성 흐름으로 안내한다.
  */
 export async function resolveLastfmApiDashboardUrl(): Promise<string> {
-  const creds = await getLastfmCredentials();
-  if (creds?.clientId?.trim()) {
-    return LASTFM_API_ACCOUNTS_URL;
-  }
-  if (await hasLastfmBrowserSession()) {
-    return LASTFM_API_ACCOUNTS_URL;
-  }
-  return LASTFM_API_CREATE_URL;
+  return LASTFM_API_ACCOUNTS_URL;
 }

@@ -51,8 +51,6 @@ export type NrmMetadataEditModalProps = {
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   /** 메타데이터 API 로딩 중 */
   busy?: boolean;
-  /** APK: Whisper 모델 없을 때 가사 설정 대신 안내 → 다운로드 중단·메뉴 이동 */
-  onOpenWhisperModelSettings?: () => void;
   onClose: () => void;
   onConfirm: (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => void;
 };
@@ -275,7 +273,6 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   busy = false,
-  onOpenWhisperModelSettings,
   onClose,
   onConfirm,
 }: NrmMetadataEditModalProps) {
@@ -462,6 +459,13 @@ export function NrmMetadataEditModal({
   }
 
   const lyricsUnsupported = extension !== '.mp3';
+
+  const whisperChecksEnabled =
+    !lyricsUnsupported &&
+    (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+
+  const whisperLyricsLocked =
+    whisperChecksEnabled && (whisperGateLoading || whisperModelMissing);
 
   useEffect(() => {
     if (!visible || lyricsUnsupported) {
@@ -757,54 +761,16 @@ export function NrmMetadataEditModal({
                       mp3에서만 지원합니다.
                     </Text>
                   </View>
-                ) : whisperGateLoading ? (
-                  <View style={styles.whisperGateBox}>
-                    <ActivityIndicator size="small" color={nrmTokens.color.primary} />
-                    <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
-                      Whisper 모델 확인 중…
-                    </Text>
-                  </View>
-                ) : whisperModelMissing ? (
-                  <View
-                    style={[
-                      styles.whisperGateBox,
-                      styles.whisperGateCard,
-                      {
-                        borderColor: isDark
-                          ? nrmTokens.color.borderOnDark
-                          : 'rgba(128,128,128,0.35)',
-                      },
-                    ]}>
-                    <Text style={[styles.whisperGateTitle, { color: titleColor }]}>
-                      Whisper 모델이 필요합니다
-                    </Text>
-                    <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
-                      {Platform.OS === 'web'
-                        ? '가사 자동 생성에 쓸 Whisper 모델이 PC 서버(library/whisper)에 없습니다. 메뉴 → AI 가사 추출 엔진 설정에서 설치 안내를 확인하세요.'
-                        : '가사 자동 생성을 쓰려면 먼저 메뉴에서 모델을 기기에 받아 주세요. 받는 동안 다른 화면도 이용할 수 있습니다.'}
-                    </Text>
-                    {onOpenWhisperModelSettings ? (
-                      <Pressable
-                        onPress={onOpenWhisperModelSettings}
-                        style={({ pressed }) => [
-                          styles.whisperGateBtn,
-                          pressed && styles.pressed,
-                        ]}
-                        accessibilityRole="button">
-                        <Text style={styles.whisperGateBtnLabel}>AI 가사 추출 엔진 설정으로 이동</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
                 ) : (
                   <MetadataInlineSelect
                     label="가사"
-                    value={lyricsMode}
+                    value={whisperLyricsLocked ? 'unset' : lyricsMode}
                     options={lyricsOptions}
                     onChange={(v) => setLyricsMode(v as NrmWhisperLyricsUiMode)}
                     isDark={isDark}
                     titleColor={titleColor}
                     bodyColor={bodyColor}
-                    disabled={busy}
+                    disabled={busy || whisperLyricsLocked}
                     hideSheetTitle
                     scrollClassName={scrollClassName}
                     scrollStyle={scrollInlineStyle}
@@ -1070,33 +1036,6 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.caption,
     lineHeight: 20,
     opacity: 0.85,
-  },
-  whisperGateBox: {
-    gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.xs,
-  },
-  whisperGateCard: {
-    padding: nrmTokens.space.md,
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: 1,
-    gap: nrmTokens.space.sm,
-  },
-  whisperGateTitle: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '700',
-  },
-  whisperGateBtn: {
-    alignSelf: 'flex-start',
-    marginTop: nrmTokens.space.xs,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: nrmTokens.radius.pill,
-    backgroundColor: nrmTokens.color.primary,
-  },
-  whisperGateBtnLabel: {
-    color: nrmTokens.color.onPrimary,
-    fontSize: nrmTokens.font.buttonUtility,
-    fontWeight: '600',
   },
   inlineInput: {
     flex: 1,
