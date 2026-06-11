@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
-import { isLastfmPlaceholderCoverUrl } from '@/lib/nrmCoverArtUrl';
+import { isLastfmPlaceholderCoverUrl, isMelonPlaceholderCoverUrl } from '@/lib/nrmCoverArtUrl';
 import type { LastfmTag } from '@/lib/nrmLastfmSearchTypes';
 
 const APP_ICON = require('@/assets/images/icon.png');
@@ -160,7 +160,8 @@ export function NrmLastfmCoverImage({
   radius?: number;
 }) {
   const r = radius ?? nrmTokens.radius.sm;
-  const clean = isLastfmPlaceholderCoverUrl(uri) ? '' : uri.trim();
+  const clean =
+    isLastfmPlaceholderCoverUrl(uri) || isMelonPlaceholderCoverUrl(uri) ? '' : uri.trim();
   if (clean) {
     return (
       <Image

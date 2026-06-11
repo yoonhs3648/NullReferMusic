@@ -10,7 +10,15 @@ object ShineBootstrap {
   /** assets shineenc 교체 시 증가 — code_cache 구버전(정적 ET_EXEC) 무효화 */
   private const val ASSET_GENERATION = 2
 
+  @Volatile private var sessionCli: File? = null
+
   fun ensure(context: Context): File? {
+    sessionCli?.let { cached ->
+      if (cached.isFile && cached.length() >= MIN_CLI_BYTES && ShineExec.probeIfNeeded(cached)) {
+        return cached
+      }
+    }
+
     val dir = NrmExecutableFile.execBaseDir(context, "shine")
     val cli = File(dir, "shineenc")
     val genMarker = File(dir, ".shine-asset-gen")
@@ -23,7 +31,7 @@ object ShineBootstrap {
       genMarker.writeText(ASSET_GENERATION.toString())
     }
 
-    if (!cli.isFile || cli.length() < MIN_CLI_BYTES || !ShineExec.probe(cli)) {
+    if (!cli.isFile || cli.length() < MIN_CLI_BYTES || !ShineExec.probeIfNeeded(cli)) {
       NrmFileLogger.log("shine", "CLI asset 복사 시도")
       cli.delete()
       File(dir, "${cli.name}.use-linker").delete()
@@ -43,7 +51,7 @@ object ShineBootstrap {
     if (!NrmExecutableFile.isExecReady(cli)) {
       NrmExecutableFile.mirrorToExecCache(context, cli, "shine-exec")?.let { mirrored ->
         NrmExecutableFile.ensureExecMode(mirrored, NrmExecutableFile.PROBE_HELP)
-        if (ShineExec.probe(mirrored)) {
+        if (ShineExec.probeIfNeeded(mirrored)) {
           NrmFileLogger.log("shine", "codeCache CLI OK path=${mirrored.absolutePath}")
           return mirrored
         }
@@ -67,6 +75,7 @@ object ShineBootstrap {
     }
 
     NrmFileLogger.log("shine", "CLI OK path=${cli.absolutePath} bytes=${cli.length()}")
+    sessionCli = cli
     return cli
   }
 

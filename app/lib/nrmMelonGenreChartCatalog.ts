@@ -1,15 +1,13 @@
 /** 멜론 장르별 기간 차트 — 장르·주간/월간/연간·날짜 선택 */
 
 import {
-  clampPeriodChartMonth,
   getPeriodChartCurrentDate,
   listPeriodChartSelectableYears,
 } from '@/lib/nrmPeriodChartCatalog';
 import {
-  clampSpotifyWeekOfMonth,
   countSpotifyWeekSlotsInMonth,
-  defaultSpotifyWeekOfMonth,
   listSpotifyWeekOfMonthOptions,
+  listSpotifyWeekSlotsInMonth,
   spotifySnapshotAnchorForWeekSlot,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
 
@@ -44,6 +42,15 @@ export type MelonGenreId = (typeof MELON_GENRE_OPTIONS)[number]['id'];
 
 export const MELON_DEFAULT_GENRE_ID: MelonGenreId = 'GN0000';
 
+/** Melon 시대별(연간) 차트 — chartGenre 파라미터 기준 3종만 존재 */
+export const MELON_YEARLY_GENRE_OPTIONS = [
+  { id: 'GN0000', label: '장르종합', chartGenre: 'GN0000' },
+  { id: 'DM0000', label: '국내', chartGenre: 'KPOP' },
+  { id: 'AB0000', label: '해외', chartGenre: 'POP' },
+] as const;
+
+export type MelonYearlyGenreId = (typeof MELON_YEARLY_GENRE_OPTIONS)[number]['id'];
+
 export const MELON_PERIOD_KIND_TABS: { id: MelonPeriodChartKind; label: string }[] = [
   { id: 'weekly', label: '주간' },
   { id: 'monthly', label: '월간' },
@@ -76,6 +83,43 @@ export function melonGenreByIndex(index: number): MelonGenreId {
   return MELON_GENRE_OPTIONS[Math.min(MELON_GENRE_OPTIONS.length - 1, Math.max(0, index))]!.id;
 }
 
+export function listMelonGenreOptionsForKind(
+  kind: MelonPeriodChartKind,
+): readonly { id: MelonGenreId; label: string }[] {
+  return kind === 'yearly' ? MELON_YEARLY_GENRE_OPTIONS : MELON_GENRE_OPTIONS;
+}
+
+export function melonGenreIndexForKind(classCd: MelonGenreId, kind: MelonPeriodChartKind): number {
+  const options = listMelonGenreOptionsForKind(kind);
+  const idx = options.findIndex((g) => g.id === classCd);
+  return idx >= 0 ? idx : 0;
+}
+
+export function melonGenreByIndexForKind(index: number, kind: MelonPeriodChartKind): MelonGenreId {
+  const options = listMelonGenreOptionsForKind(kind);
+  return options[Math.min(options.length - 1, Math.max(0, index))]!.id;
+}
+
+const MELON_OVERSEAS_PERIOD_GENRE_IDS = new Set<MelonGenreId>([
+  'AB0000',
+  'GN0900',
+  'GN1000',
+  'GN1100',
+  'GN1200',
+  'GN1300',
+  'GN1900',
+]);
+
+/** 연간 차트에 없는 classCd → 국내(DM0000) 또는 해외(AB0000)로 보정 */
+export function clampMelonGenreForKind(
+  classCd: MelonGenreId,
+  kind: MelonPeriodChartKind,
+): MelonGenreId {
+  if (kind !== 'yearly') return classCd;
+  if (classCd === 'GN0000' || classCd === 'DM0000' || classCd === 'AB0000') return classCd;
+  return MELON_OVERSEAS_PERIOD_GENRE_IDS.has(classCd) ? 'AB0000' : 'DM0000';
+}
+
 export function melonGenreLabel(classCd: MelonGenreId): string {
   return MELON_GENRE_OPTIONS.find((g) => g.id === classCd)?.label ?? classCd;
 }
@@ -96,12 +140,48 @@ export function melonWeekRange(
   return { startDay: formatYmdCompact(start), endDay: formatYmdCompact(end) };
 }
 
+function utcToday(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/** 오늘이 속한 주차 (1-based). 해당 월에 없으면 0 */
+function currentMelonWeekOfMonth(
+  year: number,
+  month: number,
+  now: Date = new Date(),
+): number {
+  const today = utcToday(now).getTime();
+  for (const slot of listSpotifyWeekSlotsInMonth(year, month, MELON_WEEK_ANCHOR_DOW)) {
+    const [y, mo, d] = slot.anchor.split('-').map(Number);
+    if (!y || !mo || !d) continue;
+    const start = Date.UTC(y, mo - 1, d);
+    const end = start + 6 * 24 * 60 * 60 * 1000;
+    if (today >= start && today <= end) return slot.weekIndex;
+  }
+  return 0;
+}
+
+export function listMelonSelectableYears(
+  kind: MelonPeriodChartKind,
+  now: Date = new Date(),
+): number[] {
+  const years = listPeriodChartSelectableYears(now);
+  if (kind !== 'yearly') return years;
+  const cy = now.getFullYear();
+  return years.filter((y) => y < cy);
+}
+
 export function listMelonWeekOfMonthOptions(
   year: number,
   month: number,
   now: Date = new Date(),
 ): { value: number; label: string }[] {
-  return listSpotifyWeekOfMonthOptions(year, month, MELON_WEEK_ANCHOR_DOW, now);
+  const options = listSpotifyWeekOfMonthOptions(year, month, MELON_WEEK_ANCHOR_DOW, now);
+  const { year: cy, month: cm } = getPeriodChartCurrentDate(now);
+  if (year !== cy || month !== cm) return options;
+  const currentWeek = currentMelonWeekOfMonth(year, month, now);
+  if (currentWeek <= 0) return options;
+  return options.filter((o) => o.value < currentWeek);
 }
 
 export function clampMelonWeekOfMonth(
@@ -110,7 +190,10 @@ export function clampMelonWeekOfMonth(
   weekOfMonth: number,
   now: Date = new Date(),
 ): number {
-  return clampSpotifyWeekOfMonth(year, month, weekOfMonth, MELON_WEEK_ANCHOR_DOW, now);
+  const allowed = listMelonWeekOfMonthOptions(year, month, now);
+  if (allowed.length === 0) return 1;
+  if (allowed.some((w) => w.value === weekOfMonth)) return weekOfMonth;
+  return allowed[allowed.length - 1]!.value;
 }
 
 export function defaultMelonWeekOfMonth(
@@ -118,23 +201,47 @@ export function defaultMelonWeekOfMonth(
   month: number,
   now: Date = new Date(),
 ): number {
-  return defaultSpotifyWeekOfMonth(year, month, MELON_WEEK_ANCHOR_DOW, now);
+  const allowed = listMelonWeekOfMonthOptions(year, month, now);
+  if (allowed.length === 0) return 1;
+  return allowed[allowed.length - 1]!.value;
 }
 
 export function listMelonSelectableMonths(
   year: number,
   now: Date = new Date(),
+  kind: MelonPeriodChartKind = 'monthly',
 ): { value: number; label: string }[] {
   const { year: cy, month: cm } = getPeriodChartCurrentDate(now);
-  const lastMonth = year === cy ? cm : 12;
+
+  if (kind === 'weekly') {
+    const maxMonth = year === cy ? cm : 12;
+    const out: { value: number; label: string }[] = [];
+    for (let m = 1; m <= maxMonth; m++) {
+      if (listMelonWeekOfMonthOptions(year, m, now).length > 0) {
+        out.push({ value: m, label: `${m}월` });
+      }
+    }
+    return out;
+  }
+
+  const lastMonth = year === cy ? cm - 1 : 12;
+  if (lastMonth < 1) return [];
   return Array.from({ length: lastMonth }, (_, i) => ({
     value: i + 1,
     label: `${i + 1}월`,
   }));
 }
 
-export function clampMelonMonth(year: number, month: number, now: Date = new Date()): number {
-  return clampPeriodChartMonth(year, month, now);
+export function clampMelonMonth(
+  year: number,
+  month: number,
+  now: Date = new Date(),
+  kind: MelonPeriodChartKind = 'monthly',
+): number {
+  const allowed = listMelonSelectableMonths(year, now, kind);
+  if (allowed.length === 0) return 1;
+  if (allowed.some((m) => m.value === month)) return month;
+  return allowed[allowed.length - 1]!.value;
 }
 
 export function melonPeriodChartPlaylistLabel(query: {
@@ -144,7 +251,9 @@ export function melonPeriodChartPlaylistLabel(query: {
   month: number;
   weekOfMonth: number;
 }): string {
-  const genre = melonGenreLabel(query.classCd);
+  const genre =
+    listMelonGenreOptionsForKind(query.kind).find((g) => g.id === query.classCd)?.label ??
+    query.classCd;
   if (query.kind === 'yearly') {
     return `${genre} · ${query.year} · 연간`;
   }
@@ -155,12 +264,29 @@ export function melonPeriodChartPlaylistLabel(query: {
   return `${genre} · ${formatYmdDisplay(startDay)} ~ ${formatYmdDisplay(endDay)} · 주간`;
 }
 
+/** 멜론 연간(시대별) 차트 chartGenre — GN0000 / KPOP / POP 만 유효 */
+export function melonYearlyChartGenre(classCd: MelonGenreId): string {
+  const yearlyId = clampMelonGenreForKind(classCd, 'yearly');
+  const hit = MELON_YEARLY_GENRE_OPTIONS.find((g) => g.id === yearlyId);
+  return hit?.chartGenre ?? 'GN0000';
+}
+
 export function createInitialMelonGenreChartDate(now: Date = new Date()) {
   const { year, month } = getPeriodChartCurrentDate(now);
+  const monthOptions = listMelonSelectableMonths(year, now, 'weekly');
+  const pickMonth =
+    monthOptions.length > 0
+      ? monthOptions[monthOptions.length - 1]!.value
+      : Math.max(1, month - 1);
+  const weekOptions = listMelonWeekOfMonthOptions(year, pickMonth, now);
+  const pickWeek =
+    weekOptions.length > 0
+      ? weekOptions[weekOptions.length - 1]!.value
+      : defaultMelonWeekOfMonth(year, pickMonth, now);
   return {
     year,
-    month,
-    weekOfMonth: defaultMelonWeekOfMonth(year, month, now),
+    month: pickMonth,
+    weekOfMonth: pickWeek,
   };
 }
 

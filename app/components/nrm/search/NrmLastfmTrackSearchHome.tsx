@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -32,6 +32,7 @@ import {
   nrmSearchEmptyQuery,
   nrmSearchNoResults,
 } from '@/lib/nrmSearchStrings';
+import { useNrmLastfmTrackCoverLoader } from '@/lib/useNrmLastfmTrackCoverLoader';
 
 type Props = {
   isDark: boolean;
@@ -56,6 +57,37 @@ export function NrmLastfmTrackSearchHome({
   const [hits, setHits] = useState<LastfmTrackSearchHit[]>([]);
   const [detail, setDetail] = useState<LastfmTrackDetail | null>(null);
   const reqRef = useRef(0);
+  const viewGen = detail ? `detail-${detail.info.mbid}-${detail.info.name}` : `list-${hits.length}`;
+
+  const trackCoverHits = useMemo(() => {
+    if (detail) {
+      const hero = {
+        name: detail.info.name,
+        artist: detail.info.artist,
+        mbid: detail.info.mbid,
+        imageUrl: detail.info.imageUrl,
+      };
+      const similar = detail.similarTracks.map((t) => ({
+        name: t.name,
+        artist: t.artist,
+        mbid: t.mbid,
+        imageUrl: t.imageUrl,
+      }));
+      return [hero, ...similar];
+    }
+    return hits.map((hit) => ({
+      name: hit.name,
+      artist: hit.artist,
+      mbid: hit.mbid,
+      imageUrl: hit.imageUrl,
+    }));
+  }, [detail, hits]);
+
+  const { resolveCoverUrl: resolveTrackCoverUrl } = useNrmLastfmTrackCoverLoader({
+    hits: trackCoverHits,
+    generation: viewGen,
+    enabled: trackCoverHits.length > 0,
+  });
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -83,7 +115,7 @@ export function NrmLastfmTrackSearchHome({
     const req = ++reqRef.current;
     setDetailLoading(true);
     setError(null);
-    const out = await fetchLastfmTrackDetail(hit.artist, hit.name);
+    const out = await fetchLastfmTrackDetail(hit.artist, hit.name, hit.mbid);
     if (req !== reqRef.current) return;
     setDetailLoading(false);
     if (!out.ok) {
@@ -126,7 +158,7 @@ export function NrmLastfmTrackSearchHome({
                 styles.hitRow,
                 pressed && { backgroundColor: rowHover },
               ]}>
-              <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
+              <NrmLastfmCoverImage uri={resolveTrackCoverUrl(hit)} size={52} />
               <View style={styles.hitMeta}>
                 <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
                   {hit.name}
@@ -143,7 +175,15 @@ export function NrmLastfmTrackSearchHome({
       {detail ? (
         <>
           <View style={styles.heroRow}>
-            <NrmLastfmCoverImage uri={detail.info.imageUrl} size={120} />
+            <NrmLastfmCoverImage
+              uri={resolveTrackCoverUrl({
+                name: detail.info.name,
+                artist: detail.info.artist,
+                mbid: detail.info.mbid,
+                imageUrl: detail.info.imageUrl,
+              })}
+              size={120}
+            />
             <View style={styles.heroMeta}>
               <Text style={[styles.heroTitle, { color: titleColor }]}>
                 {detail.info.name}
@@ -189,6 +229,15 @@ export function NrmLastfmTrackSearchHome({
                   styles.hitRow,
                   pressed && { backgroundColor: rowHover },
                 ]}>
+                <NrmLastfmCoverImage
+                  uri={resolveTrackCoverUrl({
+                    name: t.name,
+                    artist: t.artist,
+                    mbid: t.mbid,
+                    imageUrl: t.imageUrl,
+                  })}
+                  size={44}
+                />
                 <Text style={[styles.rank, { color: bodyColor }]}>{t.rank}</Text>
                 <View style={styles.hitMeta}>
                   <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>

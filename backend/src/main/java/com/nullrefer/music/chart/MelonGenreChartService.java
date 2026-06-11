@@ -25,7 +25,7 @@ public class MelonGenreChartService {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   private static final int MAX_TRACKS = 100;
 
-  private static final Pattern ROW_SPLIT = Pattern.compile("<tr class=\"lst50\"");
+  private static final Pattern ROW_SPLIT = Pattern.compile("<tr class=\"lst(?:50|100)\"");
   private static final Pattern RANK = Pattern.compile("class=\"rank[^\"]*\">\\s*(\\d+)\\s*<");
   private static final Pattern SONG_ID_ATTR = Pattern.compile("data-song-no=\"(\\d+)\"");
   private static final Pattern SONG_ID_LINK = Pattern.compile("songId=(\\d+)");
@@ -63,7 +63,7 @@ public class MelonGenreChartService {
     String normalizedKind = normalizeKind(kind);
     String genre = normalizeClassCd(classCd);
     LocalDate today = LocalDate.now(ZoneOffset.ofHours(9));
-    int m = month != null ? MelonPeriodDates.clampMonth(year, month, today) : 1;
+    int m = month != null ? MelonPeriodDates.clampMonth(year, month, today, normalizedKind) : 1;
     int w =
         week != null
             ? MelonPeriodDates.clampWeek(year, m, week, today)
@@ -112,7 +112,7 @@ public class MelonGenreChartService {
       case "yearly" ->
           BASE
               + "/chart/age/list.htm?chartType=YE&chartGenre="
-              + classCd
+              + yearlyChartGenre(classCd)
               + "&chartDate="
               + year
               + "&moved=Y";
@@ -221,11 +221,35 @@ public class MelonGenreChartService {
     if (raw == null) {
       return "";
     }
-    return raw
-        .replace("&nbsp;", " ")
+    return decodeHtmlEntities(raw)
         .replaceAll("<[^>]+>", "")
         .replaceAll("\\s+", " ")
         .trim();
+  }
+
+  private static String decodeHtmlEntities(String raw) {
+    String s =
+        raw.replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'");
+    Matcher hex = Pattern.compile("&#x([0-9a-fA-F]+);").matcher(s);
+    StringBuffer hexOut = new StringBuffer();
+    while (hex.find()) {
+      int cp = Integer.parseInt(hex.group(1), 16);
+      hex.appendReplacement(hexOut, Matcher.quoteReplacement(new String(Character.toChars(cp))));
+    }
+    hex.appendTail(hexOut);
+    s = hexOut.toString();
+    Matcher dec = Pattern.compile("&#(\\d+);").matcher(s);
+    StringBuffer decOut = new StringBuffer();
+    while (dec.find()) {
+      int cp = Integer.parseInt(dec.group(1));
+      dec.appendReplacement(decOut, Matcher.quoteReplacement(new String(Character.toChars(cp))));
+    }
+    dec.appendTail(decOut);
+    return decOut.toString();
   }
 
   private static String normalizeKind(String kind) {
@@ -235,6 +259,16 @@ public class MelonGenreChartService {
       case "monthly", "month", "mo", "m" -> "monthly";
       case "yearly", "year", "ye", "y" -> "yearly";
       default -> throw new IllegalArgumentException("melon_invalid_kind");
+    };
+  }
+
+  private static String yearlyChartGenre(String classCd) {
+    return switch (classCd) {
+      case "GN0000" -> "GN0000";
+      case "AB0000" -> "POP";
+      case "DM0000" -> "KPOP";
+      case "GN0900", "GN1000", "GN1100", "GN1200", "GN1300", "GN1900" -> "POP";
+      default -> "KPOP";
     };
   }
 

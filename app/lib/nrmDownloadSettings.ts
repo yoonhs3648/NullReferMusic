@@ -84,6 +84,26 @@ export function extensionToYtDlpFormat(ext: NrmAudioExtension): string {
   return ext.slice(1);
 }
 
+/** 로컬 경로에서 확장자(점 제외, 소문자) */
+export function extensionFromLocalPath(pathOrUri: string): string | null {
+  const path = pathOrUri.replace(/^file:\/\//, '').split('?')[0] ?? '';
+  return path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? null;
+}
+
+/** 변환 결과가 사용자 설정 확장자와 일치하는지 검증 */
+export function assertLocalPathMatchesExtension(
+  pathOrUri: string,
+  ext: NrmAudioExtension,
+): void {
+  const want = ext.slice(1).toLowerCase();
+  const have = extensionFromLocalPath(pathOrUri);
+  if (have !== want) {
+    throw new Error(
+      `설정한 확장자(${ext})로 변환되지 않았습니다 (결과: .${have ?? '없음'}).`,
+    );
+  }
+}
+
 export function clampAudioQuality(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_QUALITY;
   return Math.min(9, Math.max(0, Math.round(n)));

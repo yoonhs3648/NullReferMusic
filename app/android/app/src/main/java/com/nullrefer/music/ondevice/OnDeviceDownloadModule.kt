@@ -3,6 +3,7 @@ package com.nullrefer.music.ondevice
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.webkit.CookieManager
 import com.chaquo.python.Python
@@ -144,9 +145,11 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
   ) {
     Thread {
       var cookieFilePath = ""
-      NrmFileLogger.log(
-        "yt-dlp",
-        "downloadAudio url=$url format=$audioFormat quality=$audioQuality",
+      val stageT0 = SystemClock.elapsedRealtime()
+      NrmStageLog.log(
+          "ytdlp",
+          "download_start",
+          mapOf("url" to url.take(120), "format" to audioFormat, "quality" to audioQuality),
       )
       try {
         if (url.isBlank()) {
@@ -167,6 +170,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         val py = Python.getInstance().getModule("nrm_ytdlp_bridge")
         val fmt = audioFormat.trim().ifBlank { "mp3" }
         val quality = audioQuality.coerceIn(0, 9)
+        val ytdlpT0 = SystemClock.elapsedRealtime()
         val outPath =
           py.callAttr(
             "download_audio",
@@ -178,19 +182,52 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
             ffmpegPath,
             ffmpegLibDir,
           ).toString()
+        val ytdlpMs = SystemClock.elapsedRealtime() - ytdlpT0
         val outFile = File(outPath)
         if (!outFile.exists()) {
           throw Exception("다운로드 결과 파일을 찾지 못했습니다.")
         }
-        NrmFileLogger.log(
-          "yt-dlp",
-          "downloadAudio OK path=${outFile.absolutePath} size=${outFile.length()}",
+        NrmStageLog.log(
+            "ytdlp",
+            "extract_ok",
+            mapOf(
+                "ytdlpMs" to ytdlpMs,
+                "rawBytes" to outFile.length(),
+                "rawExt" to outFile.extension.lowercase(),
+            ),
+        )
+        val demuxT0 = SystemClock.elapsedRealtime()
+        val audioFile = AudioDemux.ensureAudioOnly(ctx, outFile)
+        NrmStageLog.log(
+            "ytdlp",
+            "demux_ok",
+            mapOf(
+                "demuxMs" to (SystemClock.elapsedRealtime() - demuxT0),
+                "bytes" to audioFile.length(),
+                "path" to audioFile.name,
+            ),
+        )
+        NrmStageLog.log(
+            "ytdlp",
+            "download_ok",
+            mapOf(
+                "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
+                "bytes" to audioFile.length(),
+            ),
         )
         val map = Arguments.createMap()
-        map.putString("path", outFile.absolutePath)
+        map.putString("path", audioFile.absolutePath)
         map.putString("message", "기기에 저장되었습니다.")
         promise.resolve(map)
       } catch (e: Exception) {
+        NrmStageLog.log(
+            "ytdlp",
+            "download_fail",
+            mapOf(
+                "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
+                "err" to (e.message ?: e.toString()).take(200),
+            ),
+        )
         NrmFileLogger.error("yt-dlp", "downloadAudio 실패 url=$url", e)
         promise.reject("E_ONDEVICE", e.message ?: e.toString(), e)
       } finally {
@@ -210,9 +247,15 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) {
     Thread {
-      NrmFileLogger.log(
-        "yt-dlp",
-        "transcodeAudio input=$inputPath format=$audioFormat quality=$audioQuality",
+      val stageT0 = SystemClock.elapsedRealtime()
+      NrmStageLog.log(
+          "ffmpeg",
+          "transcode_start",
+          mapOf(
+              "input" to inputPath.take(120),
+              "format" to audioFormat,
+              "quality" to audioQuality,
+          ),
       )
       try {
         val srcPath = inputPath.removePrefix("file://")
@@ -224,32 +267,45 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         val ctx = reactApplicationContext.applicationContext
         val fmt = audioFormat.trim().ifBlank { "mp3" }
         val quality = audioQuality.coerceIn(0, 9)
+        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src)
         val result =
           FfmpegTranscode.transcode(
             ctx,
-            src,
+            audioSrc,
             fmt,
             quality,
           )
         val outFile = result.file
-        if (result.fallbackReason != null) {
-          NrmFileLogger.log(
-            "yt-dlp",
-            "transcodeAudio fallback reason=${result.fallbackReason} effective=${result.effectiveFormat}",
+        if (result.effectiveFormat.lowercase() != fmt.lowercase()) {
+          promise.reject(
+              "E_TRANSCODE",
+              "요청 확장자($fmt)와 변환 결과(${result.effectiveFormat})가 다릅니다.",
           )
+          return@Thread
         }
-        NrmFileLogger.log(
-          "yt-dlp",
-          "transcodeAudio OK path=${outFile.absolutePath} size=${outFile.length()}",
+        NrmStageLog.log(
+            "ffmpeg",
+            "transcode_ok",
+            mapOf(
+                "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
+                "requested" to fmt,
+                "effective" to result.effectiveFormat,
+                "bytes" to outFile.length(),
+            ),
         )
         val map = Arguments.createMap()
         map.putString("path", outFile.absolutePath)
         map.putString("format", result.effectiveFormat)
-        if (result.fallbackReason != null) {
-          map.putString("fallbackReason", result.fallbackReason)
-        }
         promise.resolve(map)
       } catch (e: Exception) {
+        NrmStageLog.log(
+            "ffmpeg",
+            "transcode_fail",
+            mapOf(
+                "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
+                "err" to (e.message ?: e.toString()).take(200),
+            ),
+        )
         NrmFileLogger.error("yt-dlp", "transcodeAudio 실패 input=$inputPath", e)
         promise.reject("E_TRANSCODE", e.message ?: e.toString(), e)
       }
@@ -283,6 +339,8 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
           promise.reject("E_ARG", "소스 파일이 없습니다.")
           return@Thread
         }
+        val t0 = System.currentTimeMillis()
+        val srcBytes = src.length()
         val tree = Uri.parse(treeUri.trim())
         val resolver = reactApplicationContext.contentResolver
         val parentDoc =
@@ -307,6 +365,10 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         resolver.openOutputStream(destUri)?.use { out ->
           src.inputStream().use { input -> input.copyTo(out) }
         } ?: throw Exception("SAF에 쓸 수 없습니다.")
+        NrmFileLogger.log(
+            "saf",
+            "copyFileToSaf OK name=$displayName bytes=$srcBytes ms=${System.currentTimeMillis() - t0}",
+        )
         val map = Arguments.createMap()
         map.putString("uri", destUri.toString())
         promise.resolve(map)

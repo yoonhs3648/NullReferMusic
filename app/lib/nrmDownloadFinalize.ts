@@ -20,12 +20,11 @@ import { deleteLocalAudioTemps } from '@/lib/nrmDownloadCleanup';
 import type { AudioExtractionResult } from '@/lib/nrmDownloadPipeline';
 import {
   applyDownloadExtension,
-  isNrmAudioExtension,
   loadDownloadEncodeSettings,
-  type NrmAudioExtension,
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import {
   transcribeWhisperLrc,
   type WhisperLrcStageResult,
@@ -135,11 +134,6 @@ async function finalizeServerJobParallel(
   return { ...out, lyricsWarning };
 }
 
-function extensionFromUri(uri: string): string | null {
-  const path = uri.replace(/^file:\/\//, '');
-  return path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? null;
-}
-
 async function finalizeNativeParallel(
   extractionUri: string,
   fileName: string,
@@ -147,19 +141,21 @@ async function finalizeNativeParallel(
   options?: FinalizeParallelOptions,
 ): Promise<FinalizeParallelResult> {
   const encode = await loadDownloadEncodeSettings();
-
-  // Android: mp3→m4a remux 등 실제 확장자를 Whisper·저장 전에 확정
-  const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
-  const extFromFile = extensionFromUri(transcodedUri);
-  const effectiveExtension: NrmAudioExtension =
-    extFromFile && isNrmAudioExtension(`.${extFromFile}`)
-      ? (`.${extFromFile}` as NrmAudioExtension)
-      : encode.extension;
-  const safeName = applyDownloadExtension(fileName, effectiveExtension);
-  const extension = effectiveExtension;
   const { whisperMode } = embedMetadata
     ? splitMetadataForDownloadStages(embedMetadata)
     : { whisperMode: null };
+
+  logDownloadStage('pipeline', 'finalize_start', {
+    fileName,
+    extension: encode.extension,
+    hasMetadata: !!embedMetadata,
+    whisperMode: whisperMode ?? null,
+  });
+
+  // Android: 사용자 설정 확장자로 변환 (Whisper·저장 전 확정)
+  const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
+  const safeName = applyDownloadExtension(fileName, encode.extension);
+  const extension = encode.extension;
 
   const temps = new Set<string>([extractionUri]);
   if (transcodedUri !== extractionUri) {
@@ -290,6 +286,12 @@ async function finalizeNativeParallel(
   }
 
   await deleteLocalAudioTemps(temps);
+
+  logDownloadStage('pipeline', 'finalize_ok', {
+    fileName: safeName,
+    extension,
+    lyricsWarning: whisperWarningFromResult(whisperRef.result) ?? null,
+  });
 
   return {
     savedLabel: audioSaved.savedLabel,

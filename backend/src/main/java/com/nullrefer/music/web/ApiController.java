@@ -7,6 +7,7 @@ import com.nullrefer.music.chart.LastfmChartService;
 import com.nullrefer.music.chart.MelonGenreChartService;
 import com.nullrefer.music.chart.MelonRealtimeChartService;
 import com.nullrefer.music.search.LastfmSearchService;
+import com.nullrefer.music.search.MelonSearchService;
 import com.nullrefer.music.search.SpotifySearchService;
 import com.nullrefer.music.chart.PeriodChartPageResult;
 import com.nullrefer.music.chart.SpotifyChartResult;
@@ -67,6 +68,7 @@ public class ApiController {
   private final AppleMusicRssChartService appleMusicRssChartService;
   private final MelonGenreChartService melonGenreChartService;
   private final MelonRealtimeChartService melonRealtimeChartService;
+  private final MelonSearchService melonSearchService;
   private final SpotifyTokenProvider spotifyTokenProvider;
   private final NrmSettings settings;
   private final NrmPaths paths;
@@ -84,6 +86,7 @@ public class ApiController {
       AppleMusicRssChartService appleMusicRssChartService,
       MelonGenreChartService melonGenreChartService,
       MelonRealtimeChartService melonRealtimeChartService,
+      MelonSearchService melonSearchService,
       SpotifyTokenProvider spotifyTokenProvider,
       NrmSettings settings,
       NrmPaths paths) {
@@ -99,6 +102,7 @@ public class ApiController {
     this.appleMusicRssChartService = appleMusicRssChartService;
     this.melonGenreChartService = melonGenreChartService;
     this.melonRealtimeChartService = melonRealtimeChartService;
+    this.melonSearchService = melonSearchService;
     this.spotifyTokenProvider = spotifyTokenProvider;
     this.settings = settings;
     this.paths = paths;
@@ -159,6 +163,12 @@ public class ApiController {
                 "/api/search/lastfm/album/detail?artist=...&album=...",
                 "/api/search/lastfm/track?q=...",
                 "/api/search/lastfm/track/detail?artist=...&track=...",
+                "/api/search/melon/artist?q=...",
+                "/api/search/melon/artist/detail?artistId=...",
+                "/api/search/melon/album?q=...",
+                "/api/search/melon/album/detail?albumId=...",
+                "/api/search/melon/track?q=...",
+                "/api/search/melon/track/detail?songId=...",
                 "/api/search/spotify/artist?q=...",
                 "/api/search/spotify/artist/detail?id=...",
                 "/api/search/spotify/album?q=...",
@@ -695,6 +705,74 @@ public class ApiController {
         apiKeyHeader,
         authorization,
         key -> lastfmSearchService.fetchTrackDetail(key, artist, track, mbid));
+  }
+
+  @GetMapping("/api/search/melon/artist")
+  public ResponseEntity<?> melonSearchArtist(@RequestParam("q") String query) {
+    try {
+      return ResponseEntity.ok(melonSearchService.searchArtists(query));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
+  @GetMapping("/api/search/melon/artist/detail")
+  public ResponseEntity<?> melonArtistDetail(
+      @RequestParam("artistId") String artistId,
+      @RequestParam(value = "artist", defaultValue = "") String artist) {
+    try {
+      return ResponseEntity.ok(melonSearchService.fetchArtistDetail(artistId, artist));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
+  @GetMapping("/api/search/melon/album")
+  public ResponseEntity<?> melonSearchAlbum(@RequestParam("q") String query) {
+    try {
+      return ResponseEntity.ok(melonSearchService.searchAlbums(query));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
+  @GetMapping("/api/search/melon/album/detail")
+  public ResponseEntity<?> melonAlbumDetail(@RequestParam("albumId") String albumId) {
+    try {
+      return ResponseEntity.ok(melonSearchService.fetchAlbumDetail(albumId));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
+  @GetMapping("/api/search/melon/track")
+  public ResponseEntity<?> melonSearchTrack(@RequestParam("q") String query) {
+    try {
+      return ResponseEntity.ok(melonSearchService.searchTracks(query));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
+  }
+
+  @GetMapping("/api/search/melon/track/detail")
+  public ResponseEntity<?> melonTrackDetail(@RequestParam("songId") String songId) {
+    try {
+      return ResponseEntity.ok(melonSearchService.fetchTrackDetail(songId));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    }
   }
 
   @GetMapping("/api/search/spotify/artist")

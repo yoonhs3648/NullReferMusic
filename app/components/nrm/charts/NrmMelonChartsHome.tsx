@@ -23,6 +23,9 @@ import {
   type MelonRealtimeChartTabId,
 } from '@/lib/nrmMelonRealtimeChartCatalog';
 
+const REALTIME_FIRST_PAGE_SIZE = 50;
+const REALTIME_MAX_RANK = 100;
+
 type Props = {
   isDark: boolean;
   paddingHorizontal: number;
@@ -50,19 +53,23 @@ export function NrmMelonChartsHome({
     NRM_MELON_REALTIME_CHART_DEFAULT_TAB,
   );
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [items, setItems] = useState<ChartTrackItem[]>([]);
 
   const loadGenRef = useRef(0);
   const activeTabRef = useRef(activeTab);
+  const pendingItemsRef = useRef<ChartTrackItem[]>([]);
   activeTabRef.current = activeTab;
 
   const loadChart = useCallback(async (tab: MelonRealtimeChartTabId, generation: number) => {
     setLoading(true);
+    setLoadingMore(false);
     setErrorCode(null);
     setItems([]);
     setPlaylistTitle(null);
+    pendingItemsRef.current = [];
     const out = await fetchMelonRealtimeChart(tab);
     if (generation !== loadGenRef.current) return;
     if (!out.ok) {
@@ -71,9 +78,20 @@ export function NrmMelonChartsHome({
       return;
     }
     setPlaylistTitle(out.data.playlistName);
-    setItems(out.data.items);
+    const all = out.data.items.slice(0, REALTIME_MAX_RANK);
+    pendingItemsRef.current = all.slice(REALTIME_FIRST_PAGE_SIZE);
+    setItems(all.slice(0, REALTIME_FIRST_PAGE_SIZE));
     setLoading(false);
   }, []);
+
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || errorCode || pendingItemsRef.current.length === 0) return;
+    setLoadingMore(true);
+    const rest = pendingItemsRef.current;
+    pendingItemsRef.current = [];
+    setItems((prev) => [...prev, ...rest]);
+    setLoadingMore(false);
+  }, [loading, loadingMore, errorCode]);
 
   const selectTab = useCallback((tab: MelonRealtimeChartTabId) => {
     if (tab === activeTabRef.current) return;
@@ -143,6 +161,11 @@ export function NrmMelonChartsHome({
     />
   ) : null;
 
+  const listFooter =
+    loadingMore && !errorCode ? (
+      <ActivityIndicator style={styles.footerLoader} color={nrmTokens.color.primary} />
+    ) : null;
+
   return (
     <FlatList
       style={styles.list}
@@ -162,6 +185,9 @@ export function NrmMelonChartsHome({
       )}
       ListHeaderComponent={listHeader}
       ListEmptyComponent={() => listEmpty}
+      ListFooterComponent={listFooter}
+      onEndReached={() => loadMore()}
+      onEndReachedThreshold={0.35}
       contentContainerStyle={[
         styles.listContent,
         (loading || errorCode) && styles.listContentEmpty,
@@ -194,4 +220,5 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   loader: { marginVertical: nrmTokens.space.lg },
+  footerLoader: { marginVertical: nrmTokens.space.md },
 });

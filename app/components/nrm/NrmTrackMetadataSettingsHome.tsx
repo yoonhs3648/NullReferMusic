@@ -15,7 +15,6 @@ import {
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
 import { nrmChartTrackListStyles } from '@/components/nrm/charts/nrmChartTrackListStyles';
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
-import { NrmTrackListSectionIndex } from '@/components/nrm/NrmTrackListSectionIndex';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import { detectLrcUiModeFromText, lyricsUiModeToMetadataField } from '@/lib/nrmLrcUiMode';
@@ -26,12 +25,14 @@ import { resolveEditableArtistTitle } from '@/lib/nrmAudioMetadataTitle';
 import {
   buildTrackListSections,
   filterTracksByQuery,
-  resolveSectionIndexForIndexLabel,
   sortTracksForList,
-  type TrackListIndexLabel,
   type TrackListSection,
 } from '@/lib/nrmTrackListIndex';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
+import {
+  trackListCoverKey,
+  useTrackListCoverMap,
+} from '@/lib/nrmTrackListCoverLoader';
 import { hasAnyWhisperModelOnDevice } from '@/lib/nrmWhisperModelNative';
 import type { NrmWhisperLyricsUiMode } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
@@ -68,6 +69,18 @@ const EMPTY_METADATA_FIELDS: Omit<NrmAudioFileMetadata, 'artist' | 'title'> = {
   coverUrl: '',
 };
 
+function TrackRowCoverArt({
+  coverKey,
+  coverUrl,
+}: {
+  coverKey: string;
+  coverUrl: string;
+}) {
+  return (
+    <NrmChartTrackArt imageUrl={coverUrl} cacheKey={coverKey} />
+  );
+}
+
 export function NrmTrackMetadataSettingsHome({
   isDark,
   titleColor,
@@ -80,6 +93,7 @@ export function NrmTrackMetadataSettingsHome({
 
   const [loading, setLoading] = useState(true);
   const [tracks, setTracks] = useState<NrmDownloadTrackItem[]>([]);
+  const [listGeneration, setListGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -93,12 +107,11 @@ export function NrmTrackMetadataSettingsHome({
     Omit<NrmAudioFileMetadata, 'artist' | 'title'>
   >(EMPTY_METADATA_FIELDS);
   const [initialLyricsMode, setInitialLyricsMode] = useState<NrmWhisperLyricsUiMode>('unset');
-  const [saving, setSaving] = useState(false);
+  const savingTracksRef = useRef<Set<string>>(new Set());
 
   const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const searchBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
   const sectionHeaderBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.surfacePearl;
-  const indexMuted = isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)';
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -111,6 +124,7 @@ export function NrmTrackMetadataSettingsHome({
       }
       const items = await listDownloadAudioTracks();
       setTracks(items);
+      setListGeneration((g) => g + 1);
       if (items.length === 0) {
         setError('다운로드 경로에 오디오 파일이 없습니다. 다운로드 설정에서 경로를 확인하세요.');
       }
@@ -145,32 +159,18 @@ export function NrmTrackMetadataSettingsHome({
     [filteredTracks],
   );
 
+  const coverByKey = useTrackListCoverMap(tracks, listGeneration);
+
   const searchFlatData = useMemo(
     () => sortTracksForList(filteredTracks),
     [filteredTracks],
   );
-
-  const showIndexBar = !searchOpen && !loading && sections.length > 0;
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
     setSearchQuery('');
   }, []);
-
-  const jumpToIndex = useCallback(
-    (label: TrackListIndexLabel) => {
-      const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
-      if (sectionIndex < 0) return;
-      sectionListRef.current?.scrollToLocation({
-        sectionIndex,
-        itemIndex: 0,
-        animated: true,
-        viewOffset: 0,
-      });
-    },
-    [sections],
-  );
 
   const openEditor = useCallback(async (track: NrmDownloadTrackItem) => {
     setEditTrack(track);
@@ -211,67 +211,74 @@ export function NrmTrackMetadataSettingsHome({
   }, []);
 
   const onSave = useCallback(
-    async (_videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
-      if (!editTrack || saving) return;
-      const newLyricsRaw = metadata.lyrics;
-      let newLyricsMode: NrmWhisperLyricsUiMode = 'unset';
-      if (newLyricsRaw) {
-        const { parseWhisperLyricsMode } = await import('@/lib/nrmWhisperLyrics');
-        newLyricsMode = parseWhisperLyricsMode(newLyricsRaw) ?? 'unset';
-      }
-      let effectiveNewLyricsMode = newLyricsMode;
-      const lyricsEditable =
-        editTrack.extension === '.mp3' &&
-        (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
-      if (lyricsEditable) {
-        const whisperReady = await hasAnyWhisperModelOnDevice();
-        if (!whisperReady && newLyricsMode === 'unset' && initialLyricsMode !== 'unset') {
-          effectiveNewLyricsMode = initialLyricsMode;
+    (_videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
+      if (!editTrack) return;
+      const trackKey = editTrack.audioUri;
+      if (savingTracksRef.current.has(trackKey)) return;
+
+      const track = editTrack;
+      const lyricsModeAtOpen = initialLyricsMode;
+      setEditTrack(null);
+
+      void (async () => {
+        savingTracksRef.current.add(trackKey);
+        try {
+          const newLyricsRaw = metadata.lyrics;
+          let newLyricsMode: NrmWhisperLyricsUiMode = 'unset';
+          if (newLyricsRaw) {
+            const { parseWhisperLyricsMode } = await import('@/lib/nrmWhisperLyrics');
+            newLyricsMode = parseWhisperLyricsMode(newLyricsRaw) ?? 'unset';
+          }
+          let effectiveNewLyricsMode = newLyricsMode;
+          const lyricsEditable =
+            track.extension === '.mp3' &&
+            (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+          if (lyricsEditable) {
+            const whisperReady = await hasAnyWhisperModelOnDevice();
+            if (!whisperReady && newLyricsMode === 'unset' && lyricsModeAtOpen !== 'unset') {
+              effectiveNewLyricsMode = lyricsModeAtOpen;
+            }
+          } else if (lyricsModeAtOpen !== 'unset') {
+            effectiveNewLyricsMode = lyricsModeAtOpen;
+          }
+
+          await applyTrackMetadataUpdate({
+            track,
+            newFileName: fileName,
+            metadata,
+            initialLyricsMode: lyricsModeAtOpen,
+            newLyricsMode: effectiveNewLyricsMode,
+          });
+          await reload();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : '저장에 실패했습니다.');
+        } finally {
+          savingTracksRef.current.delete(trackKey);
         }
-      } else if (initialLyricsMode !== 'unset') {
-        effectiveNewLyricsMode = initialLyricsMode;
-      }
-      setSaving(true);
-      try {
-        await applyTrackMetadataUpdate({
-          track: editTrack,
-          newFileName: fileName,
-          metadata,
-          initialLyricsMode,
-          newLyricsMode: effectiveNewLyricsMode,
-        });
-        setEditTrack(null);
-        await reload();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '저장에 실패했습니다.');
-      } finally {
-        setSaving(false);
-      }
+      })();
     },
-    [editTrack, initialLyricsMode, reload, saving],
+    [editTrack, initialLyricsMode, reload],
   );
 
   const renderTrackRow = useCallback(
-    (item: NrmDownloadTrackItem) => (
+    (item: NrmDownloadTrackItem) => {
+      const coverKey = trackListCoverKey(item);
+      return (
       <Pressable
         onPress={() => void openEditor(item)}
         style={({ pressed }) => [row.trackRow, pressed && row.trackRowPressed]}
         accessibilityRole="button">
-        <NrmChartTrackArt imageUrl="" />
+        <TrackRowCoverArt coverKey={coverKey} coverUrl={coverByKey[coverKey] ?? ''} />
         <View style={row.trackMeta}>
-          <Text style={[row.trackTitle, { color: titleColor }]} numberOfLines={1}>
+          <Text style={[row.trackTitle, { color: titleColor }]} numberOfLines={2}>
             {item.displayLabel}
-          </Text>
-          <Text style={[row.trackSub, { color: bodyColor }]} numberOfLines={1}>
-            {item.lrcUri ? '가사 LRC' : '가사 없음'}
-            {' · '}
-            {item.extension.replace('.', '').toUpperCase()}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={bodyColor} />
       </Pressable>
-    ),
-    [bodyColor, openEditor, row, titleColor],
+      );
+    },
+    [bodyColor, coverByKey, openEditor, row, titleColor],
   );
 
   const listEmpty = loading ? (
@@ -362,10 +369,7 @@ export function NrmTrackMetadataSettingsHome({
               </View>
             )}
             ListEmptyComponent={() => listEmpty}
-            contentContainerStyle={[
-              styles.listContent,
-              showIndexBar && styles.listContentWithIndex,
-            ]}
+            contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             stickySectionHeadersEnabled
             onScrollToIndexFailed={() => {
@@ -377,10 +381,6 @@ export function NrmTrackMetadataSettingsHome({
             }}
           />
         )}
-
-        {showIndexBar ? (
-          <NrmTrackListSectionIndex onSelect={jumpToIndex} mutedColor={indexMuted} />
-        ) : null}
       </View>
 
       <NrmMetadataEditModal
@@ -393,10 +393,8 @@ export function NrmTrackMetadataSettingsHome({
         initialArtist={initialArtist}
         initialTitle={initialTitle}
         initialMetadataFields={initialFields}
-        busy={modalBusy || saving}
-        onClose={() => {
-          if (!saving) setEditTrack(null);
-        }}
+        busy={modalBusy}
+        onClose={() => setEditTrack(null)}
         onConfirm={onSave}
       />
     </View>
@@ -466,9 +464,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: nrmTokens.space.xxl,
     flexGrow: 1,
-  },
-  listContentWithIndex: {
-    paddingRight: 22,
   },
   sectionHeader: {
     paddingHorizontal: nrmTokens.space.xs,

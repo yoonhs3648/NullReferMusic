@@ -45,6 +45,7 @@ import {
   type DownloadMetadataAuthHandlers,
 } from '@/lib/nrmDownloadMetadataAuth';
 import { resolveDownloadFileName } from '@/lib/nrmResolveDownloadPayload';
+import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
@@ -157,7 +158,7 @@ type Props = {
   initialQuery?: string;
   /** 차트·Last.fm에서 넘어온 트랙 — 다운로드 메타데이터·모달 기본값 */
   chartDownloadTrack?: ChartTrackItem | null;
-  chartDownloadSource?: 'chart' | 'lastfm' | null;
+  chartDownloadSource?: 'chart' | 'lastfm' | 'melon' | null;
   downloadMetadataAuth: DownloadMetadataAuthHandlers;
 };
 
@@ -197,6 +198,10 @@ export function NrmYoutubeHome({
     extractionError: unknown | null;
   };
   const downloadSessionsRef = useRef<Map<string, DownloadSession>>(new Map());
+  const melonChartMetaCacheRef = useRef<{
+    songId: string;
+    fields: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
+  } | null>(null);
 
   const inputColors = {
     backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
@@ -278,6 +283,42 @@ export function NrmYoutubeHome({
     }),
     [effectiveChartSource, effectiveChartTrack],
   );
+
+  /** Melon 차트 → YouTube: 다운로드 팝업 전 메타(작곡가·발매일 등) 선조회 */
+  useEffect(() => {
+    melonChartMetaCacheRef.current = null;
+    if (effectiveChartSource !== 'melon' || !effectiveChartTrack?.trackId?.trim()) {
+      return;
+    }
+    const t = effectiveChartTrack;
+    const songId = t.trackId.trim();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const meta = await enrichMelonDownloadMetadata(
+          {
+            songId,
+            artist: t.artists,
+            title: t.title,
+            album: t.album,
+            genre: t.genre,
+            releaseDate: t.releaseDate,
+            imageUrl: t.imageUrl,
+          },
+          t.artists,
+          t.title,
+        );
+        if (cancelled) return;
+        const { artist: _a, title: _t, ...fields } = meta;
+        melonChartMetaCacheRef.current = { songId, fields };
+      } catch {
+        /* 다운로드 시 재조회 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveChartTrack, effectiveChartSource]);
 
   const clearDownloadSession = useCallback((videoId: string) => {
     downloadSessionsRef.current.delete(videoId);
@@ -542,11 +583,17 @@ export function NrmYoutubeHome({
       if (mode === 'manual') {
         setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
         try {
-          const fields = await resolveModalInitialMetadataFieldsWithAuth(
-            item,
-            metadataContext,
-            downloadMetadataAuth,
-          );
+          const cached = melonChartMetaCacheRef.current;
+          const fields =
+            cached &&
+            effectiveChartSource === 'melon' &&
+            effectiveChartTrack?.trackId?.trim() === cached.songId
+              ? cached.fields
+              : await resolveModalInitialMetadataFieldsWithAuth(
+                  item,
+                  metadataContext,
+                  downloadMetadataAuth,
+                );
           setDownloadModalInitialFields(fields);
           setDownloadModalItem(item);
         } catch (e) {
@@ -563,6 +610,7 @@ export function NrmYoutubeHome({
 
       try {
         if (mode === 'auto') {
+          beginParallelExtraction(videoId);
           const [metadata, fileName] = await Promise.all([
             resolveAutoDownloadMetadataWithAuth(
               item,
@@ -571,7 +619,6 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
-          beginParallelExtraction(videoId);
           if (Platform.OS !== 'web') {
             const { applyDownloadExtension, loadDownloadEncodeSettings } =
               await import('@/lib/nrmDownloadSettings');
@@ -612,6 +659,8 @@ export function NrmYoutubeHome({
       clearDownloadSession,
       completeDownloadAfterExtraction,
       downloadMetadataAuth,
+      effectiveChartSource,
+      effectiveChartTrack,
       ensureDownloadReady,
       handleMetadataPrefetchError,
       metadataContext,
@@ -650,9 +699,11 @@ export function NrmYoutubeHome({
         metadataSource={
           effectiveChartSource === 'lastfm'
             ? 'lastfm'
-            : effectiveChartTrack
+            : effectiveChartSource === 'melon'
               ? 'chart'
-              : 'main'
+              : effectiveChartTrack
+                ? 'chart'
+                : 'main'
         }
         initialArtist={effectiveChartTrack?.artists}
         initialTitle={effectiveChartTrack?.title}

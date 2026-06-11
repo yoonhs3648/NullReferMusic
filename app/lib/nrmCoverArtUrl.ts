@@ -27,8 +27,30 @@ export function normalizeCoverArtUrl(url: string | undefined | null): string {
       .replace(/\/34s\//g, '/600s/');
   }
 
+  // Melon CDN — 목록·상세용으로 해상도 상향
+  if (u.includes('cdnimg.melon.co.kr') || u.includes('melon.co.kr')) {
+    u = u
+      .replace(/\/melon\/resize\/\d+/g, '/melon/resize/500')
+      .replace(/\/melon\/quality\/\d+/g, '/melon/quality/80');
+  }
+
   // Spotify CDN은 원본 해상도 URL 그대로 사용
   return u;
+}
+
+/** Melon 기본(noAlbum/noArtist) placeholder */
+export function isMelonPlaceholderCoverUrl(url: string | undefined | null): boolean {
+  const u = (url ?? '').trim();
+  return (
+    !u ||
+    u.includes('/default/noAlbum') ||
+    u.includes('/default/noArtist') ||
+    u.includes('/default/noMovie')
+  );
+}
+
+export function needsMelonCoverFallback(url: string | undefined | null): boolean {
+  return isMelonPlaceholderCoverUrl(url);
 }
 
 /** Last.fm 기본 placeholder (차트·검색 공통) */

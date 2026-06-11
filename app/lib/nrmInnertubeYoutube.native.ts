@@ -16,7 +16,8 @@ import type {
   YoutubeSearchItem,
   YoutubeSearchOutcome,
 } from '@/lib/youtubeSearchTypes';
-import { logNrmRunError } from '@/lib/nrmDevLog';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import {
   nrmYoutubeSearchEmptyQueryMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
@@ -62,17 +63,6 @@ function shouldRetryInnertubeDownload(msg: string): boolean {
 }
 
 /** Chaquopy·네이티브 모듈 자체가 없을 때만 innertube 폴백을 건너뜁니다. */
-function shouldFallbackFromYtDlp(msg: string): boolean {
-  if (
-    /NrmOnDeviceDownload unavailable|chaquopy|python.*not started|modulenotfound|no module named/i.test(
-      msg,
-    )
-  ) {
-    return false;
-  }
-  return true;
-}
-
 function innertubeClientAttempts(): Array<() => Promise<Innertube>> {
   return [
     getInnertube,
@@ -247,21 +237,27 @@ async function ensureAudioMatchesUserExtension(
   if (Platform.OS !== 'android' || !isOnDeviceDownloadAvailable()) {
     return fileUri;
   }
+  const {
+    extensionToYtDlpFormat,
+    extensionFromLocalPath,
+    assertLocalPathMatchesExtension,
+  } = await import('@/lib/nrmDownloadSettings');
   const wantExt = encode.extension.slice(1).toLowerCase();
   const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
-  const haveExt = path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const haveExt = extensionFromLocalPath(path);
   if (haveExt === wantExt) {
     return fileUri;
   }
 
-  const { extensionToYtDlpFormat } = await import('@/lib/nrmDownloadSettings');
   const { path: outPath } = await transcodeAudioOnDevice(
     path,
     extensionToYtDlpFormat(encode.extension),
     encode.audioQuality,
   );
+  const outUri = outPath.startsWith('file://') ? outPath : `file://${outPath}`;
+  assertLocalPathMatchesExtension(outUri, encode.extension);
   await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
-  return outPath.startsWith('file://') ? outPath : `file://${outPath}`;
+  return outUri;
 }
 
 // ── yt-dlp (Chaquopy) 경로 ────────────────────────────────────────────────────
@@ -277,20 +273,24 @@ async function tagThenPersist(
   safeName: string,
   metadata?: NrmAudioFileMetadata,
 ): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
-  const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
+  const { loadDownloadEncodeSettings, applyDownloadExtension } =
+    await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
+  const { applyFfmpegTranscodeStage } = await import('@/lib/nrmDownloadAudioStages');
+  let uri = await applyFfmpegTranscodeStage(fileUri);
+  const resolvedName = applyDownloadExtension(safeName, encode.extension);
   const { postProcessDownloadedAudio } = await import('@/lib/nrmDownloadAudioStages');
-  const { fileUri: uri, lyricsWarning } = await postProcessDownloadedAudio(
-    fileUri,
+  const { fileUri: processedUri, lyricsWarning } = await postProcessDownloadedAudio(
+    uri,
     metadata,
     encode.extension,
   );
   const { persistLocalAudioFile } = await import('@/lib/nrmPersistDownload.native');
   try {
-    const saved = await persistLocalAudioFile(uri, safeName, metadata);
+    const saved = await persistLocalAudioFile(processedUri, resolvedName, metadata);
     return { ...saved, lyricsWarning };
   } catch (persistErr) {
-    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    await FileSystem.deleteAsync(processedUri, { idempotent: true }).catch(() => {});
     throw stageWrapError('persist_media', persistErr);
   }
 }
@@ -302,6 +302,7 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
 
   const ytUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   let result: { path: string; message?: string };
+  const t0 = Date.now();
   try {
     result = await downloadOnDevice(ytUrl, true, {
       audioFormat: extensionToYtDlpFormat(encode.extension),
@@ -312,10 +313,15 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
   }
 
   const rawPath: string = result.path;
+  logDownloadStage('ytdlp', 'extract_ok', {
+    videoId,
+    elapsedMs: Date.now() - t0,
+    path: rawPath.slice(0, 96),
+  });
   return rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 }
 
-/** Android: yt-dlp 우선, 실패 시 innertube로 폴백합니다. */
+/** Android: yt-dlp · innertube 병렬 — 먼저 끝난 audio-only 경로 사용 */
 async function extractAudioWithFallback(videoId: string): Promise<string> {
   const ytDlpAvailable =
     Platform.OS === 'android' && isOnDeviceDownloadAvailable();
@@ -324,17 +330,37 @@ async function extractAudioWithFallback(videoId: string): Promise<string> {
     return extractWithInnertube(videoId);
   }
 
-  try {
-    return await extractWithYtDlp(videoId);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logNrmRunError('download.ytdlp.extract_failed', e, { videoId });
-    if (!shouldFallbackFromYtDlp(msg)) {
-      throw e;
-    }
-    logNrmRunError('download.ytdlp.fallback_innertube', null, { videoId });
-    return extractWithInnertube(videoId);
-  }
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+    const errors: unknown[] = [];
+
+    const win = (lane: 'ytdlp' | 'innertube', fileUri: string) => {
+      if (settled) return;
+      settled = true;
+      logDownloadStage('pipeline', 'extract_race_won', { videoId, lane });
+      resolve(fileUri);
+    };
+
+    const lose = (lane: 'ytdlp' | 'innertube', err: unknown) => {
+      errors.push(err);
+      failures += 1;
+      logNrmRunError(`download.${lane}.race_failed`, err, { videoId, failures });
+      if (failures >= 2 && !settled) {
+        settled = true;
+        const first = errors[0];
+        reject(first instanceof Error ? first : new Error(String(first)));
+      }
+    };
+
+    void extractWithYtDlp(videoId)
+      .then((uri) => win('ytdlp', uri))
+      .catch((e) => lose('ytdlp', e));
+
+    void extractWithInnertube(videoId)
+      .then((uri) => win('innertube', uri))
+      .catch((e) => lose('innertube', e));
+  });
 }
 
 // ── youtubei.js (innertube) 폴백 경로 ────────────────────────────────────────
@@ -395,6 +421,13 @@ async function extractWithInnertube(videoId: string): Promise<string> {
         tempUri,
         format,
       );
+
+      logDownloadStage('innertube', 'download_ok', {
+        videoId,
+        attempt: i + 1,
+        mime,
+        uri: tempUri.slice(0, 96),
+      });
 
       return tempUri;
     } catch (e) {

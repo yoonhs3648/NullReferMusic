@@ -23,6 +23,9 @@ object NrmStaleArtifactCleanup {
           "nrm-whisper-out-",
           "nrm-meta-",
           "nrm-cover-",
+          "nrm-read-cover-",
+          "nrm-list-cover-",
+          "nrm-read-audio-",
           "nrm-shine-",
       )
 

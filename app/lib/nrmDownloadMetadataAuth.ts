@@ -14,6 +14,7 @@ import {
   LastfmMetadataApiError,
   type LastfmDownloadSeed,
 } from '@/lib/nrmLastfmMetadataEnricher';
+import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import type { LastfmSearchErrorCode } from '@/lib/nrmLastfmSearchTypes';
 import type { DownloadMetadataContext } from '@/lib/nrmResolveDownloadPayload';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
@@ -47,7 +48,7 @@ function resolveArtistTitle(
 ): { artist: string; title: string } {
   if (
     ctx.chartTrack &&
-    (ctx.chartSource === 'chart' || ctx.chartSource === 'lastfm')
+    (ctx.chartSource === 'chart' || ctx.chartSource === 'lastfm' || ctx.chartSource === 'melon')
   ) {
     return {
       artist: (ctx.chartTrack.artists ?? '').trim(),
@@ -120,6 +121,25 @@ export async function resolveAutoDownloadMetadataWithAuth(
   if (ctx.chartSource === 'chart' && ctx.chartTrack) {
     return normalizeDownloadMetadata(
       buildChartAudioMetadata(ctx.chartTrack, artist, title),
+    );
+  }
+
+  if (ctx.chartSource === 'melon' && ctx.chartTrack) {
+    const t = ctx.chartTrack;
+    return normalizeDownloadMetadata(
+      await enrichMelonDownloadMetadata(
+        {
+          songId: t.trackId,
+          artist: t.artists,
+          title: t.title,
+          album: t.album,
+          genre: t.genre,
+          releaseDate: t.releaseDate,
+          imageUrl: t.imageUrl,
+        },
+        artist,
+        title,
+      ),
     );
   }
 

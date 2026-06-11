@@ -22,6 +22,7 @@ import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
@@ -191,6 +192,45 @@ function showSafFolderGuide(): Promise<void> {
   });
 }
 
+async function copyAudioToSafWithRetry(
+  sourceUri: string,
+  dirUri: string,
+  fileName: string,
+  mimeType: string,
+): Promise<{ destUri: string; via: 'native' | 'base64'; persistMs: number }> {
+  const srcPath = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
+  const t0 = Date.now();
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const destUri = await copyLocalFileToSaf(srcPath, dirUri, fileName, mimeType);
+      const persistMs = Date.now() - t0;
+      logDownloadStage('persist', 'saf_copy_ok', {
+        via: 'native',
+        attempt,
+        persistMs,
+        fileName,
+      });
+      return { destUri, via: 'native', persistMs };
+    } catch (e) {
+      logNrmRunError('download.persist', e, {
+        event: 'saf_copy_retry',
+        attempt,
+        fileName,
+      });
+      if (attempt < 2) continue;
+    }
+  }
+  const destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
+  await writeToBinarySafUri(sourceUri, destUri);
+  const persistMs = Date.now() - t0;
+  logDownloadStage('persist', 'saf_copy_ok', {
+    via: 'base64',
+    persistMs,
+    fileName,
+  });
+  return { destUri, via: 'base64', persistMs };
+}
+
 /**
  * SAF로 NullReferenceMusic 폴더(또는 사용자 선택 폴더)에 파일을 저장합니다.
  * Android 10+ (API 29+) 환경에서 사용합니다.
@@ -218,14 +258,7 @@ async function saveViaSaf(
   const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase() || '.m4a';
   const mimeType = mimeFromExt(ext);
 
-  let destUri: string;
-  try {
-    const srcPath = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
-    destUri = await copyLocalFileToSaf(srcPath, dirUri, fileName, mimeType);
-  } catch {
-    destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
-    await writeToBinarySafUri(sourceUri, destUri);
-  }
+  const { destUri } = await copyAudioToSafWithRetry(sourceUri, dirUri, fileName, mimeType);
 
   // MediaStore 등록 → Samsung My Files·뮤직 앱 인덱스
   await triggerMediaStoreScan(destUri, metadata);

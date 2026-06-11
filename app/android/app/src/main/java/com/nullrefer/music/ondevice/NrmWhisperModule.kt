@@ -199,6 +199,16 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             )
         val firstTs = lrc.lineSequence().firstOrNull { it.startsWith('[') }?.take(32) ?: "(none)"
         NrmFileLogger.log("whisper", "transcribeToLrc OK lrcLen=${lrc.length} firstLine=$firstTs")
+        NrmStageLog.log(
+            "whisper",
+            "transcribe_ok",
+            mapOf(
+                "ffmpegMs" to ffmpegMs,
+                "whisperMs" to whisperMs,
+                "lrcLen" to lrc.length,
+                "wavDurSec" to wavDur,
+            ),
+        )
         perf?.end("lrcLen=${lrc.length} ffmpegMs=$ffmpegMs whisperMs=$whisperMs firstLine=$firstTs")
         val ok = Arguments.createMap()
         ok.putString("lrc", lrc)
@@ -210,6 +220,11 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       }
     } catch (e: Exception) {
       perf?.end("error=${e.message}")
+      NrmStageLog.log(
+          "whisper",
+          "transcribe_fail",
+          mapOf("err" to (e.message ?: e.toString()).take(200)),
+      )
       NrmFileLogger.error("whisper", "transcribeToLrc 실패 audio=$audioPath", e)
       promise.reject("E_WHISPER", e.message ?: e.toString(), e)
     } finally {

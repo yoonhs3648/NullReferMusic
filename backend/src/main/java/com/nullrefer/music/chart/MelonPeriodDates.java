@@ -40,16 +40,34 @@ final class MelonPeriodDates {
     List<Integer> out = new ArrayList<>();
     YearMonth ym = YearMonth.of(year, month);
     YearMonth cur = YearMonth.from(today);
-    for (int w = 1; w <= total; w++) {
-      LocalDate anchor = weekAnchor(year, month, w);
-      if (ym.isBefore(cur) || !anchor.isAfter(today)) {
+    if (ym.isBefore(cur)) {
+      for (int w = 1; w <= total; w++) {
         out.add(w);
+      }
+    } else if (ym.equals(cur)) {
+      int currentWeek = currentWeekOfMonth(year, month, today);
+      for (int w = 1; w <= total; w++) {
+        if (currentWeek <= 0 || w < currentWeek) {
+          out.add(w);
+        }
       }
     }
     if (out.isEmpty()) {
       out.add(1);
     }
     return out;
+  }
+
+  private static int currentWeekOfMonth(int year, int month, LocalDate today) {
+    int total = weekSlotsInMonth(year, month);
+    for (int w = 1; w <= total; w++) {
+      LocalDate start = weekAnchor(year, month, w);
+      LocalDate end = start.plusDays(6);
+      if (!today.isBefore(start) && !today.isAfter(end)) {
+        return w;
+      }
+    }
+    return 0;
   }
 
   private static int weekSlotsInMonth(int year, int month) {
@@ -75,11 +93,31 @@ final class MelonPeriodDates {
     return allowed.get(allowed.size() - 1);
   }
 
-  static int clampMonth(int year, int month, LocalDate today) {
+  static int clampMonth(int year, int month, LocalDate today, String kind) {
+    if ("weekly".equals(kind)) {
+      YearMonth cur = YearMonth.from(today);
+      int maxMonth = year == cur.getYear() ? cur.getMonthValue() : 12;
+      List<Integer> allowed = new ArrayList<>();
+      for (int m = 1; m <= maxMonth; m++) {
+        if (!selectableWeeks(year, m, today).isEmpty()) {
+          allowed.add(m);
+        }
+      }
+      if (allowed.isEmpty()) {
+        return 1;
+      }
+      if (allowed.contains(month)) {
+        return month;
+      }
+      return allowed.get(allowed.size() - 1);
+    }
     YearMonth ym = YearMonth.of(year, month);
     YearMonth cur = YearMonth.from(today);
     if (ym.isAfter(cur)) {
-      return cur.getMonthValue();
+      return Math.max(1, cur.minusMonths(1).getMonthValue());
+    }
+    if (year == cur.getYear() && month >= cur.getMonthValue()) {
+      return Math.max(1, cur.getMonthValue() - 1);
     }
     return Math.min(12, Math.max(1, month));
   }

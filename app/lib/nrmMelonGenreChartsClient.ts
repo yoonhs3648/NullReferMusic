@@ -9,6 +9,7 @@ import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
   melonPeriodChartPlaylistLabel,
+  melonYearlyChartGenre,
   type MelonGenreId,
   type MelonPeriodChartKind,
   MELON_PERIOD_MAX_RANK,
@@ -47,7 +48,7 @@ function melonErrorFromBody(error: string | undefined, status: number): ChartErr
 function buildMelonFetchUrl(query: MelonGenreChartQuery): string {
   const { kind, classCd, year, month, weekOfMonth } = query;
   if (kind === 'yearly') {
-    return `${MELON_BASE}/chart/age/list.htm?chartType=YE&chartGenre=${classCd}&chartDate=${year}&moved=Y`;
+    return `${MELON_BASE}/chart/age/list.htm?chartType=YE&chartGenre=${melonYearlyChartGenre(classCd)}&chartDate=${year}&moved=Y`;
   }
   if (kind === 'monthly') {
     const rankMonth = `${year}${String(month).padStart(2, '0')}`;

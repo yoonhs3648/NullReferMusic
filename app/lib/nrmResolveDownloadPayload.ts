@@ -9,6 +9,7 @@ import {
   guessInitialDownloadFields,
 } from '@/lib/nrmYoutubeDownloadMeta';
 import { enrichLastfmDownloadMetadata } from '@/lib/nrmLastfmMetadataEnricher';
+import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import { normalizeLastfmMbid } from '@/lib/nrmLastfmMbid';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
@@ -19,7 +20,7 @@ import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 
 export type DownloadMetadataContext = {
   chartTrack: ChartTrackItem | null;
-  chartSource: 'chart' | 'lastfm' | null;
+  chartSource: 'chart' | 'lastfm' | 'melon' | null;
 };
 
 function resolveArtistTitle(
@@ -28,7 +29,7 @@ function resolveArtistTitle(
 ): { artist: string; title: string } {
   if (
     ctx.chartTrack &&
-    (ctx.chartSource === 'chart' || ctx.chartSource === 'lastfm')
+    (ctx.chartSource === 'chart' || ctx.chartSource === 'lastfm' || ctx.chartSource === 'melon')
   ) {
     return {
       artist: (ctx.chartTrack.artists ?? '').trim(),
@@ -70,6 +71,25 @@ export async function resolveAutoDownloadMetadata(
   if (ctx.chartSource === 'chart' && ctx.chartTrack) {
     return normalizeDownloadMetadata(
       buildChartAudioMetadata(ctx.chartTrack, artist, title),
+    );
+  }
+
+  if (ctx.chartSource === 'melon' && ctx.chartTrack) {
+    const t = ctx.chartTrack;
+    return normalizeDownloadMetadata(
+      await enrichMelonDownloadMetadata(
+        {
+          songId: t.trackId,
+          artist: t.artists,
+          title: t.title,
+          album: t.album,
+          genre: t.genre,
+          releaseDate: t.releaseDate,
+          imageUrl: t.imageUrl,
+        },
+        artist,
+        title,
+      ),
     );
   }
 

@@ -95,6 +95,9 @@ type Props = {
   onNavigateLastfmArtistSearch?: () => void;
   onNavigateLastfmAlbumSearch?: () => void;
   onNavigateLastfmTrackSearch?: () => void;
+  onNavigateMelonArtistSearch?: () => void;
+  onNavigateMelonAlbumSearch?: () => void;
+  onNavigateMelonTrackSearch?: () => void;
   /** Android — Bearer 없을 때 charts.spotify.com WebView 로그인 모달 호출 */
   onRequestChartsBearerWebView?: () => Promise<boolean>;
   /** 앱 — Last.fm API Key 미설정·오류 오버레이 */
@@ -155,6 +158,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateLastfmArtistSearch,
     onNavigateLastfmAlbumSearch,
     onNavigateLastfmTrackSearch,
+    onNavigateMelonArtistSearch,
+    onNavigateMelonAlbumSearch,
+    onNavigateMelonTrackSearch,
     onRequestChartsBearerWebView,
     onShowLastfmAuthInvalid,
   },
@@ -423,6 +429,24 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     ],
   );
 
+  const closeMenuAndNavigateMelonSearch = useCallback(
+    (kind: SearchKind) => {
+      if (kind === 'artist') onNavigateMelonArtistSearch?.();
+      else if (kind === 'album') onNavigateMelonAlbumSearch?.();
+      else onNavigateMelonTrackSearch?.();
+      setOpen(false);
+      setPanel('root');
+      translateX.setValue(-drawerW);
+    },
+    [
+      drawerW,
+      onNavigateMelonAlbumSearch,
+      onNavigateMelonArtistSearch,
+      onNavigateMelonTrackSearch,
+      translateX,
+    ],
+  );
+
   /** Android 하드웨어 뒤로: 하위 패널이면 한 단계 위로, 루트면 드로어 닫기 */
   const goBackInMenu = useCallback(() => {
     switch (panel) {
@@ -484,6 +508,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         break;
       case 'searchSpotify':
       case 'searchLastfm':
+      case 'searchMelon':
         setPanel('search');
         break;
       case 'search':
@@ -1392,7 +1417,13 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   onBackToRoot={() => setPanel('root')}
                   onBackToSearch={() => setPanel('search')}
                   onOpenPlatform={(platform) => {
-                    setPanel(platform === 'spotify' ? 'searchSpotify' : 'searchLastfm');
+                    setPanel(
+                      platform === 'spotify'
+                        ? 'searchSpotify'
+                        : platform === 'lastfm'
+                          ? 'searchLastfm'
+                          : 'searchMelon',
+                    );
                   }}
                   onOpenSpotifySearch={(kind) =>
                     void closeMenuAndNavigateSpotifySearch(kind)
@@ -1400,6 +1431,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   onOpenLastfmSearch={(kind) =>
                     void closeMenuAndNavigateLastfmSearch(kind)
                   }
+                  onOpenMelonSearch={(kind) => closeMenuAndNavigateMelonSearch(kind)}
                 />
               </DrawerShell>
             ) : null}

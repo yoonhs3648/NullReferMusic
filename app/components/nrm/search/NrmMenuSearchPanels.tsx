@@ -22,6 +22,7 @@ type Props = {
   onOpenPlatform: (platform: SearchPlatformId) => void;
   onOpenSpotifySearch: (kind: SearchKind) => void;
   onOpenLastfmSearch: (kind: SearchKind) => void;
+  onOpenMelonSearch: (kind: SearchKind) => void;
 };
 
 function MenuBackRow({ onPress }: { onPress: () => void }) {
@@ -76,6 +77,7 @@ export function NrmMenuSearchPanels({
   onOpenPlatform,
   onOpenSpotifySearch,
   onOpenLastfmSearch,
+  onOpenMelonSearch,
 }: Props) {
   if (panel === 'search') {
     return (
@@ -150,6 +152,23 @@ export function NrmMenuSearchPanels({
           bodyColor={bodyColor}
           rowHover={rowHover}
           onPress={onOpenLastfmSearch}
+        />
+      </>
+    );
+  }
+
+  if (panel === 'searchMelon') {
+    return (
+      <>
+        <MenuBackRow onPress={onBackToSearch} />
+        <Text style={[styles.panelTitle, { color: titleColor }]}>
+          {getSearchPlatformLabel('melon')}
+        </Text>
+        <KindRows
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          rowHover={rowHover}
+          onPress={onOpenMelonSearch}
         />
       </>
     );

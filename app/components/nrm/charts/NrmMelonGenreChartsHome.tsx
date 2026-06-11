@@ -55,7 +55,6 @@ export function NrmMelonGenreChartsHome({
   const [weekOfMonth, setWeekOfMonth] = useState(initial.weekOfMonth);
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
-  const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -95,7 +94,6 @@ export function NrmMelonGenreChartsHome({
       }
 
       setErrorCode(null);
-      setPlaylistTitle(out.data.playlistName);
       setHasMore(out.data.hasMore && out.data.items.length > 0);
       offsetRef.current = offset + out.data.items.length;
       setItems((prev) => (append ? [...prev, ...out.data.items] : out.data.items));
@@ -164,19 +162,6 @@ export function NrmMelonGenreChartsHome({
       />
     ) : null;
 
-  const listHeader = (
-    <View>
-      {playlistTitle && !errorCode ? (
-        <Text style={[styles.hint, { color: bodyColor }]}>
-          {playlistTitle} · 최대 {MELON_PERIOD_MAX_RANK}곡 · {items.length}곡 표시
-        </Text>
-      ) : null}
-      {loading ? (
-        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
-      ) : null}
-    </View>
-  );
-
   return (
     <View style={[styles.screen, { backgroundColor: screenBg }]}>
       <View style={[styles.stickyChrome, { paddingHorizontal }]} collapsable={false}>
@@ -221,7 +206,11 @@ export function NrmMelonGenreChartsHome({
             />
           </View>
         )}
-        ListHeaderComponent={listHeader}
+        ListHeaderComponent={
+          loading ? (
+            <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
+          ) : null
+        }
         ListHeaderComponentStyle={styles.listHeaderInset}
         ListEmptyComponent={renderListEmpty}
         ListFooterComponent={listFooter}
@@ -251,6 +240,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   stickyChrome: {
     zIndex: 2,
+    paddingBottom: nrmTokens.space.xs,
     ...Platform.select({
       android: { elevation: 2 },
     }),
@@ -261,11 +251,6 @@ const styles = StyleSheet.create({
   list: { flex: 1 },
   listContent: { paddingBottom: nrmTokens.space.xxl },
   listContentEmpty: { flexGrow: 1 },
-  hint: {
-    marginBottom: nrmTokens.space.sm,
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 20,
-  },
   loader: { marginVertical: nrmTokens.space.lg },
   footerLoader: { marginVertical: nrmTokens.space.md },
   empty: {

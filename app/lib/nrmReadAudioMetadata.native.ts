@@ -40,7 +40,7 @@ async function materializeAudioForRead(audioUri: string, fileName: string): Prom
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('캐시를 사용할 수 없습니다.');
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : '.mp3';
-  const dest = `${cacheRoot}nrm-read-audio-${Date.now()}${ext}`;
+  const dest = `${cacheRoot}nrm-read-audio-${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`;
   try {
     await FileSystem.copyAsync({ from: trimmed, to: dest });
     const info = await FileSystem.getInfoAsync(dest);

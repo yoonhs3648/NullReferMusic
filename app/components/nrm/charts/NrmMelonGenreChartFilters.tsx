@@ -2,26 +2,24 @@ import { useMemo } from 'react';
 
 import { Platform, StyleSheet, View } from 'react-native';
 
-import {
-  NrmChartFilterSection,
-  NrmChartSegmentedRow,
-} from '@/components/nrm/charts/NrmChartSegmentedRow';
+import { NrmChartSegmentedRow } from '@/components/nrm/charts/NrmChartSegmentedRow';
 import {
   NrmPeriodChartDropdownTrigger,
   PERIOD_FILTER_CONTROL_HEIGHT,
 } from '@/components/nrm/charts/NrmPeriodChartDropdown';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
+  clampMelonGenreForKind,
   clampMelonMonth,
   clampMelonWeekOfMonth,
   defaultMelonWeekOfMonth,
+  listMelonGenreOptionsForKind,
   listMelonSelectableMonths,
+  listMelonSelectableYears,
   listMelonWeekOfMonthOptions,
-  listPeriodChartSelectableYears,
-  MELON_GENRE_OPTIONS,
   MELON_PERIOD_KIND_TABS,
-  melonGenreByIndex,
-  melonGenreIndex,
+  melonGenreByIndexForKind,
+  melonGenreIndexForKind,
   type MelonGenreId,
   type MelonPeriodChartKind,
 } from '@/lib/nrmMelonGenreChartCatalog';
@@ -66,18 +64,21 @@ export function NrmMelonGenreChartFilters({
   const isWeb = Platform.OS === 'web';
   const now = useMemo(() => new Date(), []);
 
+  const panelBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
+  const panelBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+
   const yearOptions = useMemo(
     () =>
-      listPeriodChartSelectableYears(now).map((y) => ({
+      listMelonSelectableYears(kind, now).map((y) => ({
         value: y,
         label: `${y}년`,
       })),
-    [now],
+    [kind, now],
   );
 
   const monthOptions = useMemo(
-    () => listMelonSelectableMonths(year, now),
-    [year, now],
+    () => listMelonSelectableMonths(year, now, kind),
+    [year, now, kind],
   );
 
   const weekOptions = useMemo(
@@ -87,11 +88,16 @@ export function NrmMelonGenreChartFilters({
 
   const genreOptions = useMemo(
     () =>
-      MELON_GENRE_OPTIONS.map((g, index) => ({
+      listMelonGenreOptionsForKind(kind).map((g, index) => ({
         value: index,
         label: g.label,
       })),
-    [],
+    [kind],
+  );
+
+  const genrePickerValue = useMemo(
+    () => melonGenreIndexForKind(classCd, kind),
+    [classCd, kind],
   );
 
   const showMonth = kind === 'weekly' || kind === 'monthly';
@@ -99,14 +105,18 @@ export function NrmMelonGenreChartFilters({
 
   const handleYearChange = (y: number) => {
     onYearChange(y);
-    const m = clampMelonMonth(y, month, now);
+    const m = clampMelonMonth(y, month, now, kind);
     onMonthChange(m);
-    onWeekOfMonthChange(defaultMelonWeekOfMonth(y, m, now));
+    if (kind === 'weekly') {
+      onWeekOfMonthChange(defaultMelonWeekOfMonth(y, m, now));
+    }
   };
 
   const handleMonthChange = (m: number) => {
     onMonthChange(m);
-    onWeekOfMonthChange(defaultMelonWeekOfMonth(year, m, now));
+    if (kind === 'weekly') {
+      onWeekOfMonthChange(defaultMelonWeekOfMonth(year, m, now));
+    }
   };
 
   const applyKind = (next: MelonPeriodChartKind) => {
@@ -116,18 +126,27 @@ export function NrmMelonGenreChartFilters({
       return;
     }
     onKindChange(next);
+    const allowedYears = listMelonSelectableYears(next, now);
+    let nextYear = year;
+    if (allowedYears.length > 0 && !allowedYears.includes(year)) {
+      nextYear = allowedYears[0]!;
+      onYearChange(nextYear);
+    }
+    let nextMonth = month;
     if (next !== 'yearly') {
-      const m = clampMelonMonth(year, month, now);
-      if (m !== month) onMonthChange(m);
+      nextMonth = clampMelonMonth(nextYear, month, now, next);
+      if (nextMonth !== month) onMonthChange(nextMonth);
     }
     if (next === 'weekly') {
-      onWeekOfMonthChange(clampMelonWeekOfMonth(year, month, weekOfMonth, now));
+      onWeekOfMonthChange(defaultMelonWeekOfMonth(nextYear, nextMonth, now));
     }
+    const nextGenre = clampMelonGenreForKind(classCd, next);
+    if (nextGenre !== classCd) onGenreChange(nextGenre);
   };
 
   const applyGenreIndex = (index: number) => {
     closePicker();
-    const next = melonGenreByIndex(index);
+    const next = melonGenreByIndexForKind(index, kind);
     if (next === classCd) {
       onReselect?.();
       return;
@@ -137,24 +156,24 @@ export function NrmMelonGenreChartFilters({
 
   return (
     <View style={styles.root} collapsable={false} pointerEvents="auto">
-      <NrmChartFilterSection>
-        <NrmChartSegmentedRow
-          options={MELON_PERIOD_KIND_TABS}
-          value={kind}
-          onChange={applyKind}
-          isDark={isDark}
-          titleColor={titleColor}
-          bodyColor={bodyColor}
-          accessibilityRole="tab"
-        />
-      </NrmChartFilterSection>
+      <NrmChartSegmentedRow
+        options={MELON_PERIOD_KIND_TABS}
+        value={kind}
+        onChange={applyKind}
+        isDark={isDark}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        accessibilityRole="tab"
+      />
 
-      <NrmChartFilterSection>
+      <View
+        style={[styles.panel, { backgroundColor: panelBg, borderColor: panelBorder }]}
+        collapsable={false}>
         <View style={styles.dateRow} collapsable={false}>
           <NrmPeriodChartDropdownTrigger
             id="year"
-            flex={!isWeb}
-            boxWidth={isWeb ? 148 : undefined}
+            flex
+            minTriggerWidth={isWeb ? 108 : 96}
             label="연"
             value={year}
             options={yearOptions}
@@ -166,8 +185,8 @@ export function NrmMelonGenreChartFilters({
           {showMonth ? (
             <NrmPeriodChartDropdownTrigger
               id="month"
-              flex={!isWeb}
-              boxWidth={isWeb ? 118 : undefined}
+              flex
+              minTriggerWidth={isWeb ? 92 : 84}
               label="월"
               value={month}
               options={
@@ -182,8 +201,8 @@ export function NrmMelonGenreChartFilters({
           {showWeek ? (
             <NrmPeriodChartDropdownTrigger
               id="week"
-              flex={!isWeb}
-              boxWidth={isWeb ? 118 : undefined}
+              flex
+              minTriggerWidth={isWeb ? 92 : 84}
               label="주"
               value={weekOfMonth}
               options={
@@ -196,39 +215,56 @@ export function NrmMelonGenreChartFilters({
             />
           ) : null}
         </View>
-      </NrmChartFilterSection>
 
-      <NrmChartFilterSection style={styles.genreSection}>
-        <NrmPeriodChartDropdownTrigger
-          id="genre"
-          flex
-          label="장르"
-          value={melonGenreIndex(classCd)}
-          options={genreOptions}
-          onOpen={(draft) => openPicker(draft, applyGenreIndex)}
-          isDark={isDark}
-          titleColor={titleColor}
-          bodyColor={bodyColor}
-        />
-      </NrmChartFilterSection>
+        <View style={styles.genreDivider} />
+
+        <View style={styles.genreRow} collapsable={false}>
+          <NrmPeriodChartDropdownTrigger
+            id="genre"
+            fillWidth
+            label="장르"
+            value={genrePickerValue}
+            options={genreOptions}
+            onOpen={(draft) => openPicker(draft, applyGenreIndex)}
+            isDark={isDark}
+            titleColor={titleColor}
+            bodyColor={bodyColor}
+          />
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    marginBottom: nrmTokens.space.xs,
+    gap: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.sm,
+  },
+  panel: {
+    width: '100%',
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: nrmTokens.space.sm,
+    paddingVertical: nrmTokens.space.sm,
+    gap: nrmTokens.space.sm,
   },
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'nowrap',
-    gap: nrmTokens.space.xxs,
+    flexWrap: 'wrap',
+    gap: nrmTokens.space.xs,
     width: '100%',
-    overflow: 'hidden',
     minHeight: PERIOD_FILTER_CONTROL_HEIGHT,
   },
-  genreSection: {
-    marginBottom: 0,
+  genreDivider: {
+    height: StyleSheet.hairlineWidth,
+    width: '100%',
+    backgroundColor: 'rgba(128,128,128,0.28)',
+  },
+  genreRow: {
+    width: '100%',
+    minHeight: PERIOD_FILTER_CONTROL_HEIGHT,
+    flexShrink: 0,
   },
 });

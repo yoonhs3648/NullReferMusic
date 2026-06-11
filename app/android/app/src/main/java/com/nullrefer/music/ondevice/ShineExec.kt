@@ -8,6 +8,24 @@ import java.util.concurrent.TimeUnit
 
 /** shineenc CLI 실행 (linker64 / W^X 경유). */
 object ShineExec {
+  @Volatile private var lastProbedPath: String? = null
+  @Volatile private var lastProbedBytes: Long = -1L
+  @Volatile private var lastProbeOk: Boolean = false
+
+  /** 동일 파일·크기면 subprocess 프로브 생략 (세션 캐시). */
+  fun probeIfNeeded(cli: File): Boolean {
+    val path = cli.absolutePath
+    val bytes = if (cli.isFile) cli.length() else -1L
+    if (path == lastProbedPath && bytes == lastProbedBytes && lastProbeOk) {
+      return true
+    }
+    val ok = probe(cli)
+    lastProbedPath = path
+    lastProbedBytes = bytes
+    lastProbeOk = ok
+    return ok
+  }
+
   fun probe(cli: File, timeoutSec: Long = 10): Boolean {
     val (code, out) = runCapture(cli, listOf("-h"), "shine-probe", timeoutSec)
     if (code == 0) return true

@@ -13,6 +13,7 @@ import {
   normalizeDownloadMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { runWhisperLrcStage, type WhisperLrcStageResult } from '@/lib/nrmWhisperLrcStage';
 
@@ -30,28 +31,39 @@ export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string
     await import('@/lib/onDeviceDownload');
   if (!isOnDeviceDownloadAvailable()) return uri;
 
-  const { loadDownloadEncodeSettings, extensionToYtDlpFormat } =
-    await import('@/lib/nrmDownloadSettings');
+  const {
+    loadDownloadEncodeSettings,
+    extensionToYtDlpFormat,
+    assertLocalPathMatchesExtension,
+    extensionFromLocalPath,
+  } = await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
   const path = uri.startsWith('file://') ? uri.slice(7) : uri;
   const wantExt = encode.extension.slice(1).toLowerCase();
-  const haveExt = path.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const haveExt = extensionFromLocalPath(path);
   if (haveExt === wantExt) return uri;
 
+  const t0 = Date.now();
   const { path: outPath, format, fallbackReason } = await transcodeAudioOnDevice(
     path,
     extensionToYtDlpFormat(encode.extension),
     encode.audioQuality,
   );
+  const effective = (format ?? extensionFromLocalPath(outPath) ?? '').toLowerCase();
   if (fallbackReason) {
-    const { logNrmDev } = await import('@/lib/nrmDevLog');
-    logNrmDev('download.transcode.fallback', {
+    logDownloadStage('ffmpeg', 'transcode_fallback', {
       reason: fallbackReason,
       requested: wantExt,
-      effective: format ?? 'unknown',
+      effective,
     });
   }
   uri = outPath.startsWith('file://') ? outPath : `file://${outPath}`;
+  assertLocalPathMatchesExtension(uri, encode.extension);
+  logDownloadStage('ffmpeg', 'transcode_ok', {
+    requested: encode.extension,
+    effective: `.${effective}`,
+    elapsedMs: Date.now() - t0,
+  });
   return uri;
 }
 
@@ -77,9 +89,16 @@ export async function applyFfmpegMetadataStage(
     return fileUri;
   }
 
+  const t0 = Date.now();
+  logDownloadStage('ffmpeg', 'meta_embed_start', {
+    artist: normalized.artist,
+    title: normalized.title,
+  });
   try {
     const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
-    return await applyAudioFileMetadata(fileUri, normalized);
+    const out = await applyAudioFileMetadata(fileUri, normalized);
+    logDownloadStage('ffmpeg', 'meta_embed_ok', { elapsedMs: Date.now() - t0 });
+    return out;
   } catch (e) {
     logNrmRunError('download.metadata.ffmpeg', e, {
       artist: normalized.artist,
@@ -87,8 +106,14 @@ export async function applyFfmpegMetadataStage(
     });
     try {
       const { applyAudioFileMetadata: retryApply } = await import('@/lib/nrmApplyAudioMetadata');
-      return await retryApply(fileUri, normalized);
+      const out = await retryApply(fileUri, normalized);
+      logDownloadStage('ffmpeg', 'meta_embed_ok_retry', { elapsedMs: Date.now() - t0 });
+      return out;
     } catch (retryErr) {
+      logDownloadStage('ffmpeg', 'meta_embed_fail', {
+        elapsedMs: Date.now() - t0,
+        err: retryErr instanceof Error ? retryErr.message : String(retryErr),
+      });
       logNrmRunError('download.metadata.ffmpeg.retry', retryErr, {});
       return fileUri;
     }

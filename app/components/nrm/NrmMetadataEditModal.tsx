@@ -49,7 +49,7 @@ export type NrmMetadataEditModalProps = {
    * coverUrl은 웹 dataURL 또는 APK file:// / content:// uri 모두 허용합니다.
    */
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
-  /** 메타데이터 API 로딩 중 */
+  /** 초기 필드 로딩 중 (다운로드: API 선조회 / 트랙 편집: 파일에서 읽기) */
   busy?: boolean;
   /** download: 다운로드 / trackEdit: 저장된 트랙 편집 */
   purpose?: 'download' | 'trackEdit';
@@ -293,7 +293,6 @@ export function NrmMetadataEditModal({
   const [title, setTitle] = useState('');
 
   const [album, setAlbum] = useState('');
-  const [albumArtist, setAlbumArtist] = useState('');
   const [genreSelection, setGenreSelection] = useState(GENRE_MANUAL_VALUE);
   const [genreCustom, setGenreCustom] = useState('');
   const [genreCategoryNames, setGenreCategoryNames] = useState<string[]>([]);
@@ -320,7 +319,6 @@ export function NrmMetadataEditModal({
   const [nameConflict, setNameConflict] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const albumArtistLinkedRef = useRef(true);
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const scrollClassName = webScrollClassName(isDark);
@@ -364,14 +362,6 @@ export function NrmMetadataEditModal({
 
     const m = initialMetadataFields;
     setAlbum(normalizeString(m?.album));
-    const metaAlbumArtist = normalizeString(m?.albumArtist);
-    if (metaAlbumArtist) {
-      setAlbumArtist(metaAlbumArtist);
-      albumArtistLinkedRef.current = false;
-    } else {
-      setAlbumArtist(nextArtist);
-      albumArtistLinkedRef.current = true;
-    }
     setReleaseDate(normalizeString(m?.releaseDate));
     setTrackNumber(normalizeString(m?.trackNumber));
     setDiscNumber(normalizeString(m?.discNumber));
@@ -405,11 +395,6 @@ export function NrmMetadataEditModal({
       },
     );
   }, [fixedExtension, item, visible]);
-
-  useEffect(() => {
-    if (!visible || !albumArtistLinkedRef.current) return;
-    setAlbumArtist(artist);
-  }, [artist, visible]);
 
   const genreOptions = useMemo(() => {
     const fromSettings = genreCategoryNames.map((name) => ({ value: name, label: name }));
@@ -644,7 +629,9 @@ export function NrmMetadataEditModal({
             <View style={styles.busyRow}>
               <ActivityIndicator color={nrmTokens.color.primary} />
               <Text style={[styles.busyHint, { color: bodyColor }]}>
-                Last.fm/Spotify 메타데이터를 불러오는 중입니다...
+                {purpose === 'trackEdit'
+                  ? '저장된 파일에서 메타데이터를 읽는 중입니다...'
+                  : 'Last.fm/Spotify 메타데이터를 불러오는 중입니다...'}
               </Text>
             </View>
           ) : null}
@@ -812,17 +799,6 @@ export function NrmMetadataEditModal({
             {moreExpanded ? (
               <View style={styles.moreFields}>
                 <InlineTextField
-                  label="앨범가수"
-                  value={albumArtist}
-                  onChangeText={(v) => {
-                    albumArtistLinkedRef.current = false;
-                    setAlbumArtist(v);
-                  }}
-                  bodyColor={bodyColor}
-                  inputColors={inputColors}
-                  editable={!busy}
-                />
-                <InlineTextField
                   label="트랙번호"
                   value={trackNumber}
                   onChangeText={setTrackNumber}
@@ -936,7 +912,7 @@ export function NrmMetadataEditModal({
                   genre: resolvedGenre,
                   releaseDate: releaseDate.trim(),
                   coverUrl: coverUrl.trim(),
-                  albumArtist: albumArtist.trim() || artist.trim() || undefined,
+                  albumArtist: artist.trim() || undefined,
                   trackNumber: trackNumber.trim() || undefined,
                   discNumber: discNumber.trim() || undefined,
                   composer: composer.trim() || undefined,

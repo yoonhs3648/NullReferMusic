@@ -1,8 +1,10 @@
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import { cleanMelonLinkLabel } from '@/lib/nrmMelonSearchParse';
+import { cleanHtmlText } from '@/lib/nrmHtmlText';
 
 const MELON_BASE = 'https://www.melon.com';
-const ROW_SPLIT = /<tr class="lst50"/gi;
+const ROW_SPLIT = /<tr class="lst(?:50|100)"/gi;
 const RANK_RE = /class="rank[^"]*">\s*(\d+)\s*</;
 const SONG_ID_ATTR_RE = /data-song-no="(\d+)"/;
 const SONG_ID_LINK_RE = /songId=(\d+)/;
@@ -16,11 +18,7 @@ const ARTIST_RE = /rank02[\s\S]*?<a[^>]*>([^<]+)<\/a>/i;
 const ALBUM_RE = /rank03[\s\S]*?<a[^>]*>([^<]+)<\/a>/i;
 
 function cleanText(raw: string): string {
-  return raw
-    .replace(/&nbsp;/g, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return cleanHtmlText(raw);
 }
 
 function firstMatch(text: string, re: RegExp): string | null {
@@ -50,8 +48,8 @@ export function parseMelonGenreChartHtml(html: string): ChartTrackItem[] {
       const link = chunk.match(TITLE_LINK_RE);
       if (link) title = cleanText(link[1] || link[2] || '');
     }
-    const artists = cleanText(firstMatch(chunk, ARTIST_RE) ?? '');
-    const album = cleanText(firstMatch(chunk, ALBUM_RE) ?? '');
+    const artists = cleanMelonLinkLabel(firstMatch(chunk, ARTIST_RE) ?? '');
+    const album = cleanMelonLinkLabel(firstMatch(chunk, ALBUM_RE) ?? '');
     let imageUrl = firstMatch(chunk, IMG_SRC_RE) ?? '';
     if (imageUrl.startsWith('//')) imageUrl = `https:${imageUrl}`;
     imageUrl = normalizeCoverArtUrl(imageUrl);

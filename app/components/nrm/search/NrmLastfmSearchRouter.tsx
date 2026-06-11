@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -56,6 +57,10 @@ import {
   nrmSearchNoResults,
 } from '@/lib/nrmSearchStrings';
 import { useNrmLastfmArtistImageLoader } from '@/lib/useNrmLastfmArtistImageLoader';
+import {
+  type LastfmTrackCoverHit,
+  useNrmLastfmTrackCoverLoader,
+} from '@/lib/useNrmLastfmTrackCoverLoader';
 
 export type LastfmSearchKind = 'artist' | 'album' | 'track';
 
@@ -203,6 +208,57 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       hits: artistListFrame ? (artistListFrame.hits as LastfmArtistSearchHit[]) : [],
       generation: artistListFrame?.id ?? '',
       enabled: !!artistListFrame && artistListFrame.hits.length > 0,
+    });
+
+    const trackCoverHits = useMemo((): LastfmTrackCoverHit[] => {
+      if (top.type === 'track-list') {
+        return (top.hits as LastfmTrackSearchHit[]).map((hit) => ({
+          name: hit.name,
+          artist: hit.artist,
+          mbid: hit.mbid,
+          imageUrl: hit.imageUrl,
+        }));
+      }
+      if (top.type === 'artist-detail' && top.detail) {
+        return top.detail.topTracks.map((t) => ({
+          name: t.name,
+          artist: t.artist || top.detail!.info.name,
+          mbid: t.mbid,
+          imageUrl: t.imageUrl,
+        }));
+      }
+      if (top.type === 'track-detail' && top.detail) {
+        const hero: LastfmTrackCoverHit = {
+          name: top.detail.info.name,
+          artist: top.detail.info.artist,
+          mbid: top.detail.info.mbid,
+          imageUrl: top.detail.info.imageUrl,
+        };
+        const similar = top.detail.similarTracks.map((t) => ({
+          name: t.name,
+          artist: t.artist,
+          mbid: t.mbid,
+          imageUrl: t.imageUrl,
+        }));
+        return [hero, ...similar];
+      }
+      if (top.type === 'album-detail' && top.detail) {
+        return top.detail.info.tracks
+          .filter((t) => t.mbid.trim().length > 0)
+          .map((t) => ({
+            name: t.name,
+            artist: top.detail!.info.artist,
+            mbid: t.mbid,
+            imageUrl: '',
+          }));
+      }
+      return [];
+    }, [top]);
+
+    const { resolveCoverUrl: resolveTrackCoverUrl } = useNrmLastfmTrackCoverLoader({
+      hits: trackCoverHits,
+      generation: top.id,
+      enabled: trackCoverHits.length > 0,
     });
     const isTopList =
       top.type === 'artist-list' ||
@@ -409,7 +465,9 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         };
         pushFrame(frame);
         const req = ++reqRef.current;
-        const out = await withAuth(() => fetchLastfmTrackDetail(artist, track));
+        const out = await withAuth(() =>
+          fetchLastfmTrackDetail(artist, track, hit?.mbid),
+        );
         if (req !== reqRef.current) return;
         setStack((s) => {
           const next = [...s];
@@ -551,7 +609,10 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
                         styles.hitRow,
                         pressed && { backgroundColor: rowHover },
                       ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
+                      <NrmLastfmCoverImage
+                        uri={resolveTrackCoverUrl(hit)}
+                        size={52}
+                      />
                       <View style={styles.hitMeta}>
                         <Text
                           style={[styles.hitTitle, { color: titleColor }]}
@@ -666,6 +727,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
                 styles.hitRow,
                 pressed && { backgroundColor: rowHover },
               ]}>
+              <NrmLastfmCoverImage
+                uri={resolveTrackCoverUrl({
+                  name: t.name,
+                  artist: t.artist || detail.info.name,
+                  mbid: t.mbid,
+                  imageUrl: t.imageUrl,
+                })}
+                size={44}
+              />
               <Text style={[styles.rank, { color: bodyColor }]}>{t.rank}</Text>
               <View style={styles.hitMeta}>
                 <Text
@@ -834,7 +904,12 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       return (
         <>
           <NrmLastfmDetailHeroCard
-            imageUrl={info.imageUrl}
+            imageUrl={resolveTrackCoverUrl({
+              name: info.name,
+              artist: info.artist,
+              mbid: info.mbid,
+              imageUrl: info.imageUrl,
+            })}
             fields={metaFields}
             isDark={isDark}
             titleColor={titleColor}
@@ -862,6 +937,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
                   styles.hitRow,
                   pressed && { backgroundColor: rowHover },
                 ]}>
+                <NrmLastfmCoverImage
+                  uri={resolveTrackCoverUrl({
+                    name: t.name,
+                    artist: t.artist,
+                    mbid: t.mbid,
+                    imageUrl: t.imageUrl,
+                  })}
+                  size={44}
+                />
                 <Text style={[styles.rank, { color: bodyColor }]}>{t.rank}</Text>
                 <View style={styles.hitMeta}>
                   <Text

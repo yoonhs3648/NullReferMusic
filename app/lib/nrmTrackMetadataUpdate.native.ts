@@ -24,7 +24,6 @@ import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadStarted,
-  nrmNotifyTrackMetadataEditComplete,
 } from '@/lib/nrmMobileDownloadNotifications.native';
 
 const LRC_SAF_MIME = 'application/octet-stream';
@@ -64,7 +63,7 @@ async function materializeToCache(audioUri: string, fileName: string): Promise<s
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) throw new Error('캐시를 사용할 수 없습니다.');
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : '.mp3';
-  const dest = `${cacheRoot}nrm-track-edit-${Date.now()}${ext}`;
+  const dest = `${cacheRoot}nrm-track-edit-${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`;
   try {
     await FileSystem.copyAsync({ from: trimmed, to: dest });
   } catch {
@@ -216,12 +215,10 @@ export async function applyTrackMetadataUpdate(
 
   if (lyricsAction.kind === 'delete') {
     if (lrcUri) await deletePersistedLrc(lrcUri);
-    await nrmNotifyTrackMetadataEditComplete(metadata.artist, metadata.title);
     return;
   }
 
   if (lyricsAction.kind === 'none') {
-    await nrmNotifyTrackMetadataEditComplete(metadata.artist, metadata.title);
     return;
   }
 

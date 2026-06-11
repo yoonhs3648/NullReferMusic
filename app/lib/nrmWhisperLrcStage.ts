@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { Platform } from 'react-native';
 
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { normalizeWhisperLrc, type NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
@@ -52,13 +53,13 @@ export async function transcribeWhisperLrc(
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
 
-  logNrmDev('download.whisper', {
-    event: 'transcribe_start',
+  logDownloadStage('whisper', 'transcribe_start', {
     mode,
     extension,
     audioUri: fileUri.slice(0, 120),
   });
 
+  const t0 = Date.now();
   let lrc = '';
   try {
     lrc = normalizeWhisperLrc(await transcribeAudioToLrc(fileUri));
@@ -66,13 +67,18 @@ export async function transcribeWhisperLrc(
     logNrmRunError('whisper.lrc', e, { extension, mode });
     lrc = '';
   }
+  logDownloadStage('whisper', 'transcribe_done', {
+    mode,
+    extension,
+    elapsedMs: Date.now() - t0,
+    lrcChars: lrc.trim().length,
+  });
 
   let lyricsTranslationFailed = false;
   if (mode === 'translation' && lrc.trim()) {
     const lrcCharsBefore = lrc.trim().length;
     const lineCount = lrc.split(/\r?\n/).filter((v) => v.trim().length > 0).length;
-    logNrmDev('lyrics.translate', {
-      event: 'deepl_start',
+    logDownloadStage('translate', 'deepl_start', {
       mode,
       extension,
       lrcChars: lrcCharsBefore,
@@ -91,21 +97,18 @@ export async function transcribeWhisperLrc(
         apiKeyLen: apiKey.trim().length,
       });
       const translated = await translateLrcToKoreanWithDeepL(lrc, apiKey);
-      const elapsedMs = Date.now() - translateT0;
       if (translated.ok) {
         lrc = translated.lrc;
-        logNrmDev('lyrics.translate', {
-          event: 'deepl_ok',
-          elapsedMs,
+        logDownloadStage('translate', 'deepl_ok', {
+          elapsedMs: Date.now() - translateT0,
           lrcCharsBefore,
           lrcCharsAfter: lrc.trim().length,
         });
       } else {
         lyricsTranslationFailed = true;
         lrc = '';
-        logNrmDev('lyrics.translate', {
-          event: 'deepl_fail',
-          elapsedMs,
+        logDownloadStage('translate', 'deepl_fail', {
+          elapsedMs: Date.now() - translateT0,
           message: translated.message,
           lrcCharsBefore,
         });

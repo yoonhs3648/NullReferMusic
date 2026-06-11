@@ -1,6 +1,6 @@
 import type { ChartPlatformIconKey } from '@/lib/nrmChartsPlatforms';
 
-export type SearchMenuPanel = 'search' | 'searchSpotify' | 'searchLastfm';
+export type SearchMenuPanel = 'search' | 'searchSpotify' | 'searchLastfm' | 'searchMelon';
 
 export type SearchKind = 'artist' | 'album' | 'track';
 
@@ -9,7 +9,7 @@ export type SearchLastfmKind = SearchKind;
 
 export type SearchSpotifyKind = SearchKind;
 
-export type SearchPlatformId = 'spotify' | 'lastfm';
+export type SearchPlatformId = 'spotify' | 'lastfm' | 'melon';
 
 export type SearchPlatformRow = {
   id: SearchPlatformId;
@@ -21,6 +21,7 @@ export type SearchPlatformRow = {
 export const NRM_SEARCH_PLATFORM_ROWS: SearchPlatformRow[] = [
   { id: 'lastfm', label: 'Last.fm', iconKey: 'lastfm' },
   { id: 'spotify', label: 'Spotify (Premium)', iconKey: 'spotify' },
+  { id: 'melon', label: 'Melon', iconKey: 'melon' },
 ];
 
 export function getSearchPlatformLabel(id: SearchPlatformId): string {
@@ -42,5 +43,10 @@ export const NRM_SEARCH_KIND_ROWS: SearchKindRow[] = [
 export const NRM_SEARCH_LASTFM_ROWS = NRM_SEARCH_KIND_ROWS;
 
 export function isSearchMenuPanel(panel: string): panel is SearchMenuPanel {
-  return panel === 'search' || panel === 'searchSpotify' || panel === 'searchLastfm';
+  return (
+    panel === 'search' ||
+    panel === 'searchSpotify' ||
+    panel === 'searchLastfm' ||
+    panel === 'searchMelon'
+  );
 }

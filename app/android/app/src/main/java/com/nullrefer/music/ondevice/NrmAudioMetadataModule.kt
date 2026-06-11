@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import com.facebook.react.bridge.Arguments
@@ -19,16 +20,23 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
+
+  private fun uniqueCacheFile(dir: File, prefix: String, ext: String): File {
+    return File(dir, "$prefix-${System.currentTimeMillis()}-${UUID.randomUUID()}$ext")
+  }
 
   override fun getName(): String = "NrmAudioMetadata"
 
   @ReactMethod
   fun applyMetadata(inputPath: String, metadata: ReadableMap, promise: Promise) {
     Thread {
+      val stageT0 = SystemClock.elapsedRealtime()
+      NrmStageLog.log("ffmpeg", "meta_embed_start", mapOf("input" to inputPath.take(120)))
       try {
         val inFile = File(inputPath)
         if (!inFile.isFile) {
@@ -109,6 +117,15 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             val ok = com.facebook.react.bridge.Arguments.createMap()
             ok.putString("path", inFile.absolutePath)
             ok.putBoolean("coverEmbedded", strategy.withCover && coverFile != null)
+            NrmStageLog.log(
+                "ffmpeg",
+                "meta_embed_ok",
+                mapOf(
+                    "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
+                    "coverEmbedded" to (strategy.withCover && coverFile != null),
+                    "bytes" to inFile.length(),
+                ),
+            )
             promise.resolve(ok)
             return@Thread
           } catch (e: Exception) {
@@ -123,6 +140,14 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         }
         throw lastError ?: Exception("메타데이터 적용에 실패했습니다.")
       } catch (e: Exception) {
+        NrmStageLog.log(
+            "ffmpeg",
+            "meta_embed_fail",
+            mapOf(
+                "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
+                "err" to (e.message ?: e.toString()).take(200),
+            ),
+        )
         promise.reject("E_METADATA", e.message ?: e.toString(), e)
       }
     }.start()
@@ -452,7 +477,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     val ext = cover.extension.lowercase()
     if (ext == "jpg" || ext == "jpeg") return cover
     val bitmap = BitmapFactory.decodeFile(cover.absolutePath) ?: return cover
-    val jpeg = File(cacheDir, "nrm-cover-embed-${System.currentTimeMillis()}.jpg")
+    val jpeg = uniqueCacheFile(cacheDir, "nrm-cover-embed", ".jpg")
     return try {
       FileOutputStream(jpeg).use { output ->
         if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)) {
@@ -571,7 +596,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   ): File? {
     if (!probeOutHasAttachedPic(inFile, paths)) return null
     val cache = reactApplicationContext.cacheDir
-    val cover = File(cache, "nrm-read-cover-${System.currentTimeMillis()}.jpg")
+    val cover = uniqueCacheFile(cache, "nrm-read-cover", ".jpg")
     val (code, _) =
         FfmpegExec.runCapture(
             paths.binary,
@@ -615,7 +640,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       fun isMinSize(out: File): Boolean = out.length() >= 256L
 
       fun writeBytesToOut(bytes: ByteArray, ext: String): File {
-        val out = File(parent, "nrm-cover-${System.currentTimeMillis()}$ext")
+        val out = uniqueCacheFile(parent, "nrm-cover", ext)
         FileOutputStream(out).use { output -> output.write(bytes) }
         if (!isMinSize(out)) {
           out.delete()
@@ -647,7 +672,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         if (!src.isFile) return null
         val srcExt = src.extension.lowercase()
         val ext = if (srcExt.isNotEmpty()) ".$srcExt" else ".jpg"
-        val out = File(parent, "nrm-cover-${System.currentTimeMillis()}$ext")
+        val out = uniqueCacheFile(parent, "nrm-cover", ext)
         src.copyTo(out, overwrite = true)
         return if (isMinSize(out)) out else null
       }
@@ -663,7 +688,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             mime.contains("jpeg") || mime.contains("jpg") -> ".jpg"
             else -> ".jpg"
           }
-        val out = File(parent, "nrm-cover-${System.currentTimeMillis()}$ext")
+        val out = uniqueCacheFile(parent, "nrm-cover", ext)
         resolver.openInputStream(uri)?.use { input ->
           FileOutputStream(out).use { output -> input.copyTo(output) }
         } ?: return null
@@ -683,7 +708,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           httpsUrl.contains(".webp", ignoreCase = true) -> ".webp"
           else -> ".jpg"
         }
-      val out = File(parent, "nrm-cover-${System.currentTimeMillis()}$ext")
+      val out = uniqueCacheFile(parent, "nrm-cover", ext)
       val conn = URL(httpsUrl).openConnection() as HttpURLConnection
       conn.connectTimeout = 20_000
       conn.readTimeout = 30_000

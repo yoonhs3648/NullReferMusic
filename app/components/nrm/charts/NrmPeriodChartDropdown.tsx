@@ -93,6 +93,12 @@ type TriggerProps = {
 
   flex?: boolean;
 
+  /** column 레이아웃에서 가로 전체 너비 (flex:1 세로 확장 방지) */
+  fillWidth?: boolean;
+
+  /** flex 레이아웃일 때 트리거·행 최소 너비 (연/월/주 라벨 잘림 방지) */
+  minTriggerWidth?: number;
+
 };
 
 
@@ -123,6 +129,10 @@ export function NrmPeriodChartDropdownTrigger({
 
   flex = false,
 
+  fillWidth = false,
+
+  minTriggerWidth,
+
 }: TriggerProps) {
 
   const selected = options.find((o) => o.value === value);
@@ -145,7 +155,17 @@ export function NrmPeriodChartDropdownTrigger({
 
     <View
 
-      style={[styles.inlineRow, flex && styles.inlineRowFlex]}
+      style={[
+
+        styles.inlineRow,
+
+        flex && styles.inlineRowFlex,
+
+        flex && minTriggerWidth != null ? { minWidth: minTriggerWidth } : null,
+
+        fillWidth && styles.inlineRowFillWidth,
+
+      ]}
 
       collapsable={false}
 
@@ -160,12 +180,17 @@ export function NrmPeriodChartDropdownTrigger({
           hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
           style={[
             styles.trigger,
-            flex ? styles.triggerFlex : { width: boxWidth },
+            flex ? styles.triggerFlex : fillWidth ? styles.triggerFlex : { width: boxWidth },
+            flex && minTriggerWidth != null ? { minWidth: minTriggerWidth } : null,
             { borderColor: border, backgroundColor: bg },
           ]}
           accessibilityRole="button"
           accessibilityLabel={`${label} ${selected?.label ?? value}`}>
-          <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
+          <Text
+            style={[styles.triggerText, { color: titleColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={Platform.OS === 'android'}
+            minimumFontScale={0.82}>
             {selected?.label ?? String(value)}
           </Text>
           <Ionicons name="chevron-down" size={16} color={bodyColor} />
@@ -175,13 +200,18 @@ export function NrmPeriodChartDropdownTrigger({
           onPress={() => onOpen({ id, label, value, options })}
           style={({ pressed }) => [
             styles.trigger,
-            flex ? styles.triggerFlex : { width: boxWidth },
+            flex ? styles.triggerFlex : fillWidth ? styles.triggerFlex : { width: boxWidth },
+            flex && minTriggerWidth != null ? { minWidth: minTriggerWidth } : null,
             { borderColor: border, backgroundColor: bg },
             pressed && styles.triggerPressed,
           ]}
           accessibilityRole="button"
           accessibilityLabel={`${label} ${selected?.label ?? value}`}>
-          <Text style={[styles.triggerText, { color: titleColor }]} numberOfLines={1}>
+          <Text
+            style={[styles.triggerText, { color: titleColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={Platform.OS === 'ios'}
+            minimumFontScale={0.82}>
             {selected?.label ?? String(value)}
           </Text>
           <Ionicons name="chevron-down" size={16} color={bodyColor} />
@@ -545,9 +575,19 @@ const styles = StyleSheet.create({
 
     flex: 1,
 
-    minWidth: 0,
+    minWidth: 72,
 
     flexShrink: 1,
+
+  },
+
+  inlineRowFillWidth: {
+
+    width: '100%',
+
+    alignSelf: 'stretch',
+
+    flexShrink: 0,
 
   },
 
@@ -596,6 +636,8 @@ const styles = StyleSheet.create({
   triggerText: {
 
     flex: 1,
+
+    flexShrink: 1,
 
     fontSize: nrmTokens.font.caption,
 
