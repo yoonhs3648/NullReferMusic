@@ -380,15 +380,27 @@ export function applyArtistFanCount(detail: MelonArtistDetail, fanCount: number)
 }
 
 export function parseMelonAlbumDetailHtml(html: string, albumId: string): MelonAlbumDetail {
-  const name = cleanText(
-    html.match(/class="song_name"[\s\S]*?<strong[^>]*>[^<]*<\/strong>\s*([^<]+)</i)?.[1] ?? '',
+  let name = cleanText(
+    html.match(/class="song_name"[\s\S]*?<strong[^>]*>[\s\S]*?<\/strong>\s*([^<\r\n]+)/i)?.[1] ?? '',
   );
+  let nameFromOgTitle = false;
+  if (!name) {
+    name = cleanText(
+      html.match(/property="og:title"\s+content="([^"]+)"/i)?.[1] ?? '',
+    ).replace(/\s*\|.*$/, '').trim();
+    nameFromOgTitle = true;
+  }
   const imageUrl = parseMelonAlbumCoverFromDetailHtml(html);
   const artistMatch = html.match(
     /class="artist"[\s\S]*?goArtistDetail\(['"]?(\d+)['"]?\)[^>]*title="([^"]+)"[^>]*>([^<]*)</i,
   );
   const artistId = artistMatch?.[1] ?? '';
   const artist = cleanText(artistMatch?.[2] || artistMatch?.[3] || '');
+  if (nameFromOgTitle && artist && name) {
+    const escaped = artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stripped = name.replace(new RegExp(`\\s*-\\s*${escaped}\\s*$`, 'i'), '').trim();
+    if (stripped) name = stripped;
+  }
   const albumKind =
     normalizeMelonAlbumKind(
       cleanText(firstMatch(html, /class="gubun"[\s\S]*?\[([^[\]]+)\]/) ?? '') ||
@@ -501,9 +513,19 @@ function parseMelonSongCredits(html: string): MelonTrackCredits {
 }
 
 export function parseMelonSongDetailHtml(html: string, songId: string) {
-  const name = cleanText(
-    html.match(/class="song_name"[\s\S]*?<strong[^>]*>[^<]*<\/strong>\s*([^<]+)</i)?.[1] ?? '',
+  // Java와 동일하게: cleanText 후 빈 문자열이면 다음 폴백으로 이동
+  let name = cleanText(
+    html.match(/class="song_name"[\s\S]*?<strong[^>]*>[\s\S]*?<\/strong>\s*([^<\r\n]+)/i)?.[1] ?? '',
   );
+  let nameFromOgTitle = false;
+  if (!name) {
+    // og:title 폴백: Melon og:title = "곡명 - 아티스트 | 멜론" 형식
+    // "| 사이트명" 접미사 제거 후 사용 (아티스트 접미사는 artist 파싱 후 제거)
+    name = cleanText(
+      html.match(/property="og:title"\s+content="([^"]+)"/i)?.[1] ?? '',
+    ).replace(/\s*\|.*$/, '').trim();
+    nameFromOgTitle = true;
+  }
   const imageUrl = normalizeImg(
     firstMatch(html, /id="d_song_org"[\s\S]*?<img[^>]+src="([^"]+)"/i) ?? '',
   );
@@ -512,6 +534,12 @@ export function parseMelonSongDetailHtml(html: string, songId: string) {
   );
   const artistId = artistMatch?.[1] ?? '';
   const artist = cleanText(artistMatch?.[2] || artistMatch?.[3] || '');
+  // og:title "곡명 - 아티스트" 포맷에서 " - 아티스트" 접미사 제거
+  if (nameFromOgTitle && artist && name) {
+    const escaped = artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stripped = name.replace(new RegExp(`\\s*-\\s*${escaped}\\s*$`, 'i'), '').trim();
+    if (stripped) name = stripped;
+  }
 
   let album = '';
   let albumId = '';

@@ -20,8 +20,8 @@ import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 
 const DEEPL_FREE_API = 'https://api-free.deepl.com/v2';
 const DEEPL_PRO_API = 'https://api.deepl.com/v2';
-/** 배치 1회 HTTP (연결+읽기) 상한 */
-const DEEPL_BATCH_TIMEOUT_MS = 120_000;
+/** 배치 1회 HTTP (연결+읽기) 상한 — 가사 번역은 짧은 텍스트이므로 30 초면 충분 */
+const DEEPL_BATCH_TIMEOUT_MS = 30_000;
 
 type DeepLTranslateJsonResponse = {
   translations?: Array<{ text?: string; detected_source_language?: string }>;
@@ -212,7 +212,15 @@ async function translateOneBatchWithRetry(
     } catch (e) {
       lastError = e;
       const status = (e as { status?: number }).status;
-      if (attempt < DEEPL_TRANSLATE_MAX_RETRIES && (status == null || isRetryableDeepLError(status))) {
+      // 타임아웃(시간이 초과 / timed out)은 재시도해도 동일하게 실패 → 즉시 다음 transport로 전환
+      const isTimeout =
+        e instanceof Error &&
+        (e.message.includes('시간이 초과') || /timed?\s*out/i.test(e.message));
+      if (
+        !isTimeout &&
+        attempt < DEEPL_TRANSLATE_MAX_RETRIES &&
+        (status == null || isRetryableDeepLError(status))
+      ) {
         logNrmDev('lyrics.translate', {
           event: 'deepl_batch_retry',
           transport,
@@ -227,17 +235,76 @@ async function translateOneBatchWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/**
+ * native transport 전용: 전체 텍스트를 한 번에 네이티브 모듈에 전달.
+ *
+ * JS 루프 + setTimeout 간격 없이 네이티브 스레드에서 청크 분할·HTTP 요청·
+ * Thread.sleep(50ms)을 처리하므로 화면 잠금 시 JS 타이머가 일시 중지되는
+ * Android 동작과 무관하게 정상 동작한다.
+ */
+async function translateAllNative(
+  apiKey: string,
+  texts: string[],
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro'; transport: string }> {
+  const chunks = chunkLrcLinesForDeepL(texts);
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_batch_start',
+    transport: 'native',
+    chunkIndex: 0,
+    chunkCount: chunks.length,
+    lineCount: texts.length,
+    mode: 'native_all_at_once',
+  });
+  const t0 = Date.now();
+  const result = await translateTextsViaNative(apiKey, texts);
+  if (result.texts.length !== texts.length) {
+    throw new Error('DeepL 번역 결과 개수가 요청과 일치하지 않습니다.');
+  }
+  logNrmDev('lyrics.translate', {
+    event: 'deepl_batch_ok',
+    transport: 'native',
+    chunkIndex: 0,
+    chunkCount: chunks.length,
+    elapsedMs: Date.now() - t0,
+  });
+  return { ...result, transport: 'native' };
+}
+
 async function translateAllChunks(
   apiKey: string,
   texts: string[],
   primaryTransport: BatchTransport,
   backendBase: string | null,
 ): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro'; transport: string }> {
+  // native transport: 전체를 한 번에 전달 → 네이티브 스레드에서 청크·sleep 처리
+  // JS setTimeout 의존성이 없으므로 화면 잠금 중에도 정상 동작
+  if (primaryTransport === 'native') {
+    try {
+      return await translateAllNative(apiKey, texts);
+    } catch (nativeErr) {
+      logNrmDev('lyrics.translate', {
+        event: 'deepl_native_fail_try_direct',
+        error: nativeErr instanceof Error ? nativeErr.message : String(nativeErr),
+      });
+      // native 실패 시 direct로 폴백 (JS 청크 루프 사용)
+      return await translateAllChunksLoop(apiKey, texts, 'direct', backendBase);
+    }
+  }
+  return await translateAllChunksLoop(apiKey, texts, primaryTransport, backendBase);
+}
+
+/** direct / backend transport 전용 JS 청크 루프 */
+async function translateAllChunksLoop(
+  apiKey: string,
+  texts: string[],
+  primaryTransport: Exclude<BatchTransport, 'native'>,
+  backendBase: string | null,
+): Promise<{ texts: string[]; sourceLangs: string[]; apiUsed: 'free' | 'pro'; transport: string }> {
   const chunks = chunkLrcLinesForDeepL(texts);
   const merged: string[] = [];
   const mergedSourceLangs: string[] = [];
   let apiUsed: 'free' | 'pro' = 'free';
-  let transportUsed = primaryTransport;
+  let transportUsed: string = primaryTransport;
 
   for (let ci = 0; ci < chunks.length; ci++) {
     if (ci > 0) {
@@ -265,13 +332,6 @@ async function translateAllChunks(
         });
         batch = await translateOneBatchWithRetry(apiKey, chunk, 'backend', backendBase);
         transportUsed = 'backend';
-      } else if (primaryTransport === 'native') {
-        logNrmDev('lyrics.translate', {
-          event: 'deepl_native_fail_try_direct',
-          chunkIndex: ci,
-        });
-        batch = await translateOneBatchWithRetry(apiKey, chunk, 'direct', backendBase);
-        transportUsed = 'direct';
       } else {
         throw primaryErr;
       }

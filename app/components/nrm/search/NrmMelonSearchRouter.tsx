@@ -389,11 +389,11 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     );
 
     const goYoutubeFromTrack = useCallback(
-      (detail: MelonTrackDetail) => {
+      (detail: MelonTrackDetail, frame: TrackDetailFrame) => {
         const info = detail.info;
         onNavigateYoutube({
-          artist: info.artist,
-          title: info.name,
+          artist: info.artist || frame.artist,
+          title: info.name || frame.track,
           songId: info.songId,
           album: info.album,
           genre: info.genre,
@@ -822,10 +822,10 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       const info = detail.info;
 
       const metaFields: NrmLastfmMetaField[] = [
-        { label: '트랙', value: info.name },
+        { label: '트랙', value: info.name || frame.track },
         {
           label: '아티스트',
-          value: info.artist,
+          value: info.artist || frame.artist,
           onPress: info.artistId
             ? () =>
                 void openArtistDetail({
@@ -862,7 +862,7 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
             fields={metaFields}
             isDark={isDark}
             titleColor={titleColor}
-            onCardPress={() => goYoutubeFromTrack(detail)}
+            onCardPress={() => goYoutubeFromTrack(detail, frame)}
           />
 
           {detail.albumDetail ? (

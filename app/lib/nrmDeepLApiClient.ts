@@ -15,6 +15,8 @@ import { saveDeepLUsageSnapshot, type NrmDeepLUsageSnapshot } from '@/lib/nrmDee
 
 const DEEPL_FREE_API = 'https://api-free.deepl.com/v2';
 const DEEPL_PRO_API = 'https://api.deepl.com/v2';
+/** /v2/usage GET 요청 타임아웃 (ms). 단순 조회이므로 30초면 충분. */
+const DEEPL_USAGE_TIMEOUT_MS = 30_000;
 
 export type DeepLUsageOutcome =
   | { ok: true; usage: NrmDeepLUsageSnapshot }
@@ -30,11 +32,22 @@ function authHeader(apiKey: string): Record<string, string> {
 }
 
 async function fetchUsageWithBase(baseUrl: string, apiKey: string): Promise<Response> {
-  return nrmDirectFetch(
-    `${baseUrl}/usage`,
-    { headers: authHeader(apiKey) },
-    'deepl-usage',
-  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEEPL_USAGE_TIMEOUT_MS);
+  try {
+    return await nrmDirectFetch(
+      `${baseUrl}/usage`,
+      { headers: authHeader(apiKey), signal: controller.signal },
+      'deepl-usage',
+    );
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new Error('DeepL 사용량 조회 시간이 초과되었습니다.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchUsageViaBackend(apiKey: string): Promise<Response | null> {
@@ -230,16 +243,16 @@ export async function translateLrcToKoreanWithDeepL(
     localOnlyCount,
     outLrcChars: outLrc.length,
   });
+  const outLines = outLrc.split(/\r?\n/);
   logNrmDev('lyrics.translate', {
     event: 'deepl_merge_result_preview',
-    outLineCount: outLrc.split(/\r?\n/).length,
-    outSample: outLrc
-      .split(/\r?\n/)
+    outLineCount: outLines.length,
+    outSample: outLines
       .slice(0, 8)
       .map((line, i) => ({ i, line: previewText(line, 120) })),
   });
 
-  const translatedLineCount = outLrc.split(/\r?\n/).filter((l) => /\([^)]+\)\s*$/.test(l)).length;
+  const translatedLineCount = outLines.filter((l) => /\([^)]+\)\s*$/.test(l)).length;
   if (apiTexts.length > 0 && emptyApiTranslations === apiTexts.length && translatedLineCount === 0) {
     return { ok: false, message: 'DeepL 번역 결과가 비어 있습니다.' };
   }

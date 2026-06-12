@@ -10,6 +10,8 @@ type Props = {
   titleColor: string;
   bodyColor: string;
   onClose: () => void;
+  /** true면 DeepL 사용량 초과 전용 메시지를 표시한다 */
+  exhausted?: boolean;
 };
 
 export function NrmLyricsTranslationFailedOverlay({
@@ -18,18 +20,21 @@ export function NrmLyricsTranslationFailedOverlay({
   titleColor,
   bodyColor,
   onClose,
+  exhausted,
 }: Props) {
   const cardBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const title = exhausted ? '번역기 사용량 초과' : '가사 번역 안내';
+  const message = exhausted
+    ? '번역기 API 사용량이 초과했습니다. 원본 가사파일로 저장합니다.'
+    : '가사 번역에 실패했습니다. 원본 언어 LRC만 저장되었습니다.';
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.root}>
         <Pressable style={[StyleSheet.absoluteFill, styles.scrim]} onPress={onClose} accessibilityLabel="닫기" />
         <View style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <Text style={[styles.title, { color: titleColor }]}>가사 번역 안내</Text>
-          <Text style={[styles.message, { color: bodyColor }]}>
-            가사 번역에 실패했습니다. 원본 언어 LRC만 저장되었습니다.
-          </Text>
+          <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
+          <Text style={[styles.message, { color: bodyColor }]}>{message}</Text>
           <Pressable onPress={onClose} style={({ pressed }) => [styles.btnPrimary, pressed && styles.pressed]} accessibilityRole="button" accessibilityLabel="확인">
             <Text style={styles.btnPrimaryLabel}>알겠어요</Text>
           </Pressable>

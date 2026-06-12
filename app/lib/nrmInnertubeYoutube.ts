@@ -54,7 +54,7 @@ export async function finalizeYoutubeAudioOnDevice(
   fileUri: string,
   userSuggestedFileName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' }> {
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' }> {
   if (Platform.OS === 'web') {
     throw new Error('finalizeYoutubeAudioOnDevice is native-only');
   }

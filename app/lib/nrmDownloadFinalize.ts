@@ -20,7 +20,10 @@ import { deleteLocalAudioTemps } from '@/lib/nrmDownloadCleanup';
 import type { AudioExtractionResult } from '@/lib/nrmDownloadPipeline';
 import {
   applyDownloadExtension,
+  extensionFromLocalPath,
+  extensionToYtDlpFormat,
   loadDownloadEncodeSettings,
+  loadLyricsOutputMode,
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
@@ -43,13 +46,14 @@ export type FinalizeParallelOptions = {
 
 export type FinalizeParallelResult = {
   savedLabel: string;
-  lyricsWarning?: 'not_embedded' | 'translation_failed';
+  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted';
 };
 
 function whisperWarningFromResult(
   result: WhisperLrcStageResult | null,
-): 'not_embedded' | 'translation_failed' | undefined {
+): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined {
   if (!result) return undefined;
+  if (result.lyricsTranslationExhausted) return 'translation_exhausted';
   if (result.lyricsTranslationFailed) return 'translation_failed';
   if (result.lyricsRequested && !result.lyricsEmbedded) return 'not_embedded';
   return undefined;
@@ -141,9 +145,9 @@ async function finalizeNativeParallel(
   options?: FinalizeParallelOptions,
 ): Promise<FinalizeParallelResult> {
   const encode = await loadDownloadEncodeSettings();
-  const { whisperMode } = embedMetadata
+  const { whisperMode, ffmpegMetadata } = embedMetadata
     ? splitMetadataForDownloadStages(embedMetadata)
-    : { whisperMode: null };
+    : { whisperMode: null, ffmpegMetadata: undefined };
 
   logDownloadStage('pipeline', 'finalize_start', {
     fileName,
@@ -152,40 +156,108 @@ async function finalizeNativeParallel(
     whisperMode: whisperMode ?? null,
   });
 
-  // Android: 사용자 설정 확장자로 변환 (Whisper·저장 전 확정)
-  const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
   const safeName = applyDownloadExtension(fileName, encode.extension);
   const extension = encode.extension;
-
   const temps = new Set<string>([extractionUri]);
-  if (transcodedUri !== extractionUri) {
-    temps.add(transcodedUri);
-  }
-  const whisperRef: { result: WhisperLrcStageResult | null } = {
-    result: null,
-  };
+  const whisperRef: { result: WhisperLrcStageResult | null } = { result: null };
 
-  let whisperSourceUri = transcodedUri;
-  if (whisperMode) {
-    try {
-      whisperSourceUri = await copyAudioForWhisperParallel(transcodedUri);
-      temps.add(whisperSourceUri);
-    } catch {
-      whisperSourceUri = transcodedUri;
-    }
-  }
+  // ── 결합 패스 가능 여부 판단 ────────────────────────────────────────────────
+  // Android + 비MP3 포맷 변환 + 임베드 메타 있음 → transcode + metadata 단일 패스
+  // (MP3는 shineenc 파이프를 쓰므로 분리 유지)
+  const wantExt = encode.extension.slice(1).toLowerCase();
+  const srcFsPath = extractionUri.startsWith('file://') ? extractionUri.slice(7) : extractionUri;
+  const haveExt = extensionFromLocalPath(srcFsPath);
+  const willTranscodeNonMp3 = haveExt !== wantExt && wantExt !== 'mp3';
 
-  const audioTask = applyFfmpegMetadataStage(transcodedUri, embedMetadata).then(
-    async (processedUri) => {
-      if (processedUri !== transcodedUri) {
-        temps.add(processedUri);
+  const normalizedForCombined = ffmpegMetadata
+    ? normalizeDownloadMetadata(ffmpegMetadata)
+    : undefined;
+  const hasCombinableMetadata =
+    normalizedForCombined != null && hasEmbeddableAudioMetadata(normalizedForCombined);
+
+  const usesCombinedPath =
+    Platform.OS === 'android' && willTranscodeNonMp3 && hasCombinableMetadata;
+
+  // ── 오디오 태스크 + Whisper 소스 설정 ────────────────────────────────────────
+  let whisperSourceUri: string;
+  let audioTask: Promise<{
+    savedLabel: string;
+    location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation;
+  }>;
+
+  if (usesCombinedPath) {
+    // 결합 경로: Whisper 소스를 변환 전 원본(소파일)에서 복사 (WAV 등 대형 출력 전)
+    whisperSourceUri = extractionUri;
+    if (whisperMode) {
+      try {
+        const wCopy = await copyAudioForWhisperParallel(extractionUri);
+        temps.add(wCopy);
+        whisperSourceUri = wCopy;
+      } catch {
+        // fallback: extractionUri 사용 (트랜스코드 후 삭제될 수 있으나 Whisper가 먼저 읽음)
       }
+    }
+
+    // 단일 ffmpeg 패스: transcode + metadata
+    let combinedUri: string;
+    try {
+      const { transcodeAndApplyMetadataForAudio } = await import(
+        '@/lib/nrmApplyAudioMetadata.native'
+      );
+      const combinedResult = await transcodeAndApplyMetadataForAudio(
+        srcFsPath,
+        extensionToYtDlpFormat(encode.extension),
+        encode.audioQuality,
+        normalizedForCombined!,
+      );
+      combinedUri = combinedResult.path;
+      logDownloadStage('ffmpeg', 'combined_transcode_meta_ok', {
+        format: wantExt,
+        coverEmbedded: combinedResult.coverEmbedded,
+      });
+    } catch (combinedErr) {
+      logNrmRunError('download.combined.ffmpeg', combinedErr, { format: wantExt });
+      // 폴백: 기존 분리 패스
+      combinedUri = await applyFfmpegTranscodeStage(extractionUri);
+      combinedUri = await applyFfmpegMetadataStage(combinedUri, embedMetadata);
+    }
+    temps.add(combinedUri);
+
+    audioTask = (async () => {
       const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
-      const saved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
+      const saved = await persistAudioToDestination(combinedUri, safeName, embedMetadata);
       options?.onAudioPersisted?.(saved.savedLabel);
       return saved;
-    },
-  );
+    })();
+  } else {
+    // 기존 경로: 별도 transcode + metadata
+    const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
+    if (transcodedUri !== extractionUri) {
+      temps.add(transcodedUri);
+    }
+
+    whisperSourceUri = transcodedUri;
+    if (whisperMode) {
+      try {
+        whisperSourceUri = await copyAudioForWhisperParallel(transcodedUri);
+        temps.add(whisperSourceUri);
+      } catch {
+        whisperSourceUri = transcodedUri;
+      }
+    }
+
+    audioTask = applyFfmpegMetadataStage(transcodedUri, embedMetadata).then(
+      async (processedUri) => {
+        if (processedUri !== transcodedUri) {
+          temps.add(processedUri);
+        }
+        const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
+        const saved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
+        options?.onAudioPersisted?.(saved.savedLabel);
+        return saved;
+      },
+    );
+  }
 
   const whisperTask: Promise<WhisperLrcStageResult | null> = whisperMode
     ? (async () => {
@@ -206,6 +278,7 @@ async function finalizeNativeParallel(
             fileName: safeName,
             mode: whisperMode,
             lyricsTranslationFailed: result.lyricsTranslationFailed ?? false,
+            lyricsTranslationExhausted: result.lyricsTranslationExhausted ?? false,
             lrcChars: result.lrcFull?.length ?? 0,
           });
           return { ...result, lyricsEmbedded: false };
@@ -232,48 +305,88 @@ async function finalizeNativeParallel(
 
   const whisperDone = whisperRef.result;
   const lrcToPersist = whisperDone?.lrcFull?.trim() ?? '';
-  const canPersistLrc = lrcToPersist.length > 0 && !whisperDone?.lyricsTranslationFailed;
+  // 번역 실패 시에도 폴백 원본 LRC가 있으면 저장한다
+  const canPersistLrc = lrcToPersist.length > 0;
 
   if (canPersistLrc && whisperDone) {
-    try {
-      logNrmDev('download.lrc', {
-        event: 'move_to_audio_dir_start',
-        audioFileName: audioSaved.location.fileName,
-        storageKind: audioSaved.location.kind,
-        lrcChars: lrcToPersist.length,
-      });
-      const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
-      const lrcUri = await persistLrcForSavedAudio(audioSaved.location, lrcToPersist);
-      whisperRef.result = {
-        ...whisperDone,
-        lyricsEmbedded: !!lrcUri,
-      };
-      logNrmDev('download.lrc', {
-        event: lrcUri ? 'move_to_audio_dir_ok' : 'move_to_audio_dir_empty_uri',
-        audioFileName: audioSaved.location.fileName,
-        storageKind: audioSaved.location.kind,
-        lrcUri: lrcUri ?? '',
-      });
-      if (lrcUri) {
-        options?.onLyricsPersisted?.(lrcUri);
-      }
-      if (!lrcUri) {
+    const lyricsOutputMode = await loadLyricsOutputMode();
+    const audioExt = extension; // 예: '.mp3', '.m4a'
+    const supportsEmbed = audioExt === '.mp3' || audioExt === '.m4a';
+    const useEmbed = lyricsOutputMode === 'embed' && supportsEmbed;
+
+    if (useEmbed) {
+      try {
         logNrmDev('download.lrc', {
-          event: 'finalize_no_uri',
+          event: 'embed_lyrics_start',
           audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+          extension: audioExt,
+          lrcChars: lrcToPersist.length,
         });
+        const { embedSyncedLyricsIntoAudio } = await import('@/lib/nrmApplyAudioMetadata.native');
+        await embedSyncedLyricsIntoAudio(
+          audioSaved.location.audioUri,
+          lrcToPersist,
+          audioExt,
+        );
+        whisperRef.result = { ...whisperDone, lyricsEmbedded: true };
+        logNrmDev('download.lrc', {
+          event: 'embed_lyrics_ok',
+          audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+          extension: audioExt,
+        });
+        options?.onLyricsPersisted?.(audioSaved.location.audioUri);
+      } catch (e) {
+        logNrmRunError('download.lrc', e, {
+          event: 'embed_lyrics_fail',
+          audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+          extension: audioExt,
+        });
+        whisperRef.result = { ...whisperDone, lyricsEmbedded: false };
       }
-    } catch (e) {
-      logNrmRunError('download.lrc', e, {
-        event: 'finalize_persist_failed',
-        stage: 'move_to_audio_dir_fail',
-        audioFileName: audioSaved.location.fileName,
-        storageKind: audioSaved.location.kind,
-      });
-      whisperRef.result = {
-        ...whisperDone,
-        lyricsEmbedded: false,
-      };
+    } else {
+      try {
+        logNrmDev('download.lrc', {
+          event: 'move_to_audio_dir_start',
+          audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+          lrcChars: lrcToPersist.length,
+        });
+        const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
+        const lrcUri = await persistLrcForSavedAudio(audioSaved.location, lrcToPersist);
+        whisperRef.result = {
+          ...whisperDone,
+          lyricsEmbedded: !!lrcUri,
+        };
+        logNrmDev('download.lrc', {
+          event: lrcUri ? 'move_to_audio_dir_ok' : 'move_to_audio_dir_empty_uri',
+          audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+          lrcUri: lrcUri ?? '',
+        });
+        if (lrcUri) {
+          options?.onLyricsPersisted?.(lrcUri);
+        }
+        if (!lrcUri) {
+          logNrmDev('download.lrc', {
+            event: 'finalize_no_uri',
+            audioFileName: audioSaved.location.fileName,
+          });
+        }
+      } catch (e) {
+        logNrmRunError('download.lrc', e, {
+          event: 'finalize_persist_failed',
+          stage: 'move_to_audio_dir_fail',
+          audioFileName: audioSaved.location.fileName,
+          storageKind: audioSaved.location.kind,
+        });
+        whisperRef.result = {
+          ...whisperDone,
+          lyricsEmbedded: false,
+        };
+      }
     }
   } else if (whisperRef.result?.lyricsRequested) {
     logNrmDev('download.lrc', {

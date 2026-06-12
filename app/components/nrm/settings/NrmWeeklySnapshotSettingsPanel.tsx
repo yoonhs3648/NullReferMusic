@@ -19,7 +19,6 @@ import {
   type WeeklySnapshotDay,
 } from '@/lib/nrmWeeklySnapshotSettings';
 
-const SEGMENT_BORDER = 'rgba(128,128,128,0.4)';
 const SEGMENT_BORDER_WIDTH = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
 type Props = {
@@ -49,9 +48,6 @@ export function NrmWeeklySnapshotSettingsPanel({
   const [selected, setSelected] = useState<WeeklySnapshotDay>(DEFAULT_WEEKLY_SNAPSHOT_DAY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const segmentBg = 'rgba(128,128,128,0.08)';
-  const segmentActiveBg = 'rgba(0, 102, 204, 0.28)';
 
   useEffect(() => {
     let cancelled = false;
@@ -89,13 +85,10 @@ export function NrmWeeklySnapshotSettingsPanel({
         <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
       ) : (
         <View
-          style={[
-            styles.segmentBar,
-            { backgroundColor: segmentBg, borderColor: SEGMENT_BORDER },
-          ]}
+          style={styles.dayRow}
           accessibilityRole="radiogroup"
           accessibilityLabel="주간차트 스냅샷 요일">
-          {WEEKLY_SNAPSHOT_DAY_OPTIONS.map((opt, index) => {
+          {WEEKLY_SNAPSHOT_DAY_OPTIONS.map((opt) => {
             const active = selected === opt.value;
             return (
               <Pressable
@@ -103,20 +96,20 @@ export function NrmWeeklySnapshotSettingsPanel({
                 disabled={saving}
                 onPress={() => void persist(opt.value)}
                 style={({ pressed }) => [
-                  styles.segmentCell,
-                  index > 0 && styles.segmentDivider,
-                  active && { backgroundColor: segmentActiveBg },
-                  pressed && !active && styles.segmentPressed,
+                  styles.dayBubble,
+                  { borderColor: active ? nrmTokens.color.primary : 'rgba(128,128,128,0.35)' },
+                  active && styles.dayBubbleActive,
+                  pressed && !active && styles.dayBubblePressed,
+                  saving && { opacity: 0.5 },
                 ]}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: active, disabled: saving }}>
                 <Text
                   style={[
-                    styles.segmentLabel,
-                    { color: active ? titleColor : bodyColor },
-                    active && styles.segmentLabelActive,
-                  ]}
-                  numberOfLines={1}>
+                    styles.dayBubbleLabel,
+                    { color: active ? '#ffffff' : bodyColor },
+                    active && styles.dayBubbleLabelActive,
+                  ]}>
                   {opt.label}
                 </Text>
               </Pressable>
@@ -151,32 +144,32 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.lg,
   },
   loader: { marginVertical: nrmTokens.space.xl },
-  segmentBar: {
+  dayRow: {
     flexDirection: 'row',
-    alignSelf: 'stretch',
-    width: '100%',
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: SEGMENT_BORDER_WIDTH,
-    overflow: 'hidden',
+    justifyContent: 'space-between',
+    gap: nrmTokens.space.xxs,
   },
-  segmentCell: {
+  dayBubble: {
     flex: 1,
-    minWidth: 0,
-    height: 48,
+    aspectRatio: 1,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: SEGMENT_BORDER_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
-  segmentDivider: {
-    borderLeftWidth: SEGMENT_BORDER_WIDTH,
-    borderLeftColor: SEGMENT_BORDER,
+  dayBubbleActive: {
+    backgroundColor: nrmTokens.color.primary,
   },
-  segmentPressed: { opacity: 0.85 },
-  segmentLabel: {
+  dayBubblePressed: {
+    backgroundColor: 'rgba(128,128,128,0.12)',
+  },
+  dayBubbleLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
     textAlign: 'center',
   },
-  segmentLabelActive: {
+  dayBubbleLabelActive: {
     fontWeight: '700',
   },
 });

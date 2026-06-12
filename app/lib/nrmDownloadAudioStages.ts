@@ -15,11 +15,15 @@ import {
 import { logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
-import { runWhisperLrcStage, type WhisperLrcStageResult } from '@/lib/nrmWhisperLrcStage';
+import {
+  runWhisperLrcStage,
+  transcribeWhisperLrc,
+  type WhisperLrcStageResult,
+} from '@/lib/nrmWhisperLrcStage';
 
 export type PostProcessAudioResult = {
   fileUri: string;
-  lyricsWarning?: 'not_embedded' | 'translation_failed';
+  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted';
 };
 
 /** Android: 확장자 변환만 (메타·Whisper 전에 호출해 실제 확장자 확정) */
@@ -122,7 +126,8 @@ export async function applyFfmpegMetadataStage(
 
 function whisperWarningFromResult(
   result: WhisperLrcStageResult,
-): 'not_embedded' | 'translation_failed' | undefined {
+): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined {
+  if (result.lyricsTranslationExhausted) return 'translation_exhausted';
   if (result.lyricsTranslationFailed) return 'translation_failed';
   if (result.lyricsRequested && !result.lyricsEmbedded) return 'not_embedded';
   return undefined;
@@ -141,7 +146,7 @@ export async function postProcessDownloadedAudio(
 
   uri = await applyFfmpegMetadataStage(uri, metadata);
 
-  let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
+  let lyricsWarning: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined;
   if (whisperMode) {
     const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.whisper', {
@@ -149,7 +154,31 @@ export async function postProcessDownloadedAudio(
       mode: whisperMode,
       extension,
     });
-    const whisperResult = await runWhisperLrcStage(uri, whisperMode, extension);
+
+    const { loadLyricsOutputMode } = await import('@/lib/nrmDownloadSettings');
+    const lyricsOutputMode = await loadLyricsOutputMode();
+    const supportsEmbed = extension === '.mp3' || extension === '.m4a';
+    const useEmbed = lyricsOutputMode === 'embed' && supportsEmbed;
+
+    let whisperResult: WhisperLrcStageResult;
+    if (useEmbed) {
+      // 임베드 모드: 전사 후 오디오 파일에 직접 임베드
+      whisperResult = await transcribeWhisperLrc(uri, whisperMode, extension);
+      if (whisperResult.lrcFull?.trim()) {
+        try {
+          const { embedSyncedLyricsIntoAudio } = await import('@/lib/nrmApplyAudioMetadata.native');
+          await embedSyncedLyricsIntoAudio(uri, whisperResult.lrcFull, extension);
+          whisperResult = { ...whisperResult, lyricsEmbedded: true };
+        } catch (embedErr) {
+          logNrmRunError('download.lrc', embedErr, { event: 'embed_lyrics_fail_sequential', extension });
+          whisperResult = { ...whisperResult, lyricsEmbedded: false };
+        }
+      }
+    } else {
+      // 사이드카 모드: 기존 동작
+      whisperResult = await runWhisperLrcStage(uri, whisperMode, extension);
+    }
+
     lyricsWarning = whisperWarningFromResult(whisperResult);
     logNrmDev('download.whisper', {
       event: 'post_process_done',
@@ -157,7 +186,9 @@ export async function postProcessDownloadedAudio(
       extension,
       lyricsEmbedded: whisperResult.lyricsEmbedded,
       lyricsTranslationFailed: whisperResult.lyricsTranslationFailed ?? false,
+      lyricsTranslationExhausted: whisperResult.lyricsTranslationExhausted ?? false,
       lyricsWarning: lyricsWarning ?? null,
+      lyricsOutputMode: useEmbed ? 'embed' : 'sidecar',
     });
   }
 

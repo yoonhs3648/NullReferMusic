@@ -100,7 +100,8 @@ object FfmpegEncoderSupport {
         } else {
           TranscodePlan("m4a", listOf("-codec:a", "copy"), "flac_unavailable_m4a_remux")
         }
-      "wav" -> TranscodePlan("wav", listOf("-codec:a", "pcm_s16le"))
+      // 샘플레이트·채널 명시 → ffmpeg 추측 불필요, ShineMp3Transcode pcmFfmpegArgs 와 동일
+      "wav" -> TranscodePlan("wav", listOf("-ar", "44100", "-ac", "2", "-codec:a", "pcm_s16le"))
       else -> TranscodePlan(fmt.lowercase(), listOf("-codec:a", "copy"))
     }
   }

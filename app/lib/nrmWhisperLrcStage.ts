@@ -16,6 +16,8 @@ export type WhisperLrcStageResult = {
   /** LRC 파일을 썼는지 (API 호환 필드명 lyricsEmbedded) */
   lyricsEmbedded: boolean;
   lyricsTranslationFailed?: boolean;
+  /** 번역 실패 원인이 DeepL 사용량 초과인 경우 true */
+  lyricsTranslationExhausted?: boolean;
   lrcFull?: string;
 };
 
@@ -75,6 +77,9 @@ export async function transcribeWhisperLrc(
   });
 
   let lyricsTranslationFailed = false;
+  let lyricsTranslationExhausted = false;
+  // 번역 실패 시 폴백을 위해 원본 LRC 보존
+  const whisperLrc = lrc;
   if (mode === 'translation' && lrc.trim()) {
     const lrcCharsBefore = lrc.trim().length;
     const lineCount = lrc.split(/\r?\n/).filter((v) => v.trim().length > 0).length;
@@ -105,20 +110,27 @@ export async function transcribeWhisperLrc(
           lrcCharsAfter: lrc.trim().length,
         });
       } else {
+        // 번역 실패 → 원본 LRC 폴백 (사용량 초과·API 오류 등)
         lyricsTranslationFailed = true;
-        lrc = '';
-        logDownloadStage('translate', 'deepl_fail', {
+        lyricsTranslationExhausted = (translated.message ?? '').includes('사용량이 초과');
+        lrc = whisperLrc;
+        logDownloadStage('translate', 'deepl_fail_fallback', {
           elapsedMs: Date.now() - translateT0,
           message: translated.message,
+          exhausted: lyricsTranslationExhausted,
           lrcCharsBefore,
         });
       }
     } catch (e) {
+      // 네트워크 오류·타임아웃 → 원본 LRC 폴백
       lyricsTranslationFailed = true;
-      lrc = '';
+      const errMsg = e instanceof Error ? e.message : String(e);
+      lyricsTranslationExhausted = errMsg.includes('사용량이 초과');
+      lrc = whisperLrc;
       logNrmRunError('lyrics.translate', e, {
-        event: 'deepl_throw',
+        event: 'deepl_throw_fallback',
         elapsedMs: Date.now() - translateT0,
+        exhausted: lyricsTranslationExhausted,
         lrcCharsBefore,
         lineCount,
       });
@@ -142,6 +154,7 @@ export async function transcribeWhisperLrc(
       lyricsRequested: true,
       lyricsEmbedded: false,
       lyricsTranslationFailed: mode === 'translation' ? lyricsTranslationFailed : undefined,
+      lyricsTranslationExhausted: mode === 'translation' ? lyricsTranslationExhausted || undefined : undefined,
     };
   }
 
@@ -151,12 +164,14 @@ export async function transcribeWhisperLrc(
     extension,
     lrcChars: lrc.trim().length,
     lyricsTranslationFailed,
+    lyricsTranslationExhausted,
   });
 
   return {
     lyricsRequested: true,
     lyricsEmbedded: false,
     lyricsTranslationFailed,
+    lyricsTranslationExhausted: lyricsTranslationExhausted || undefined,
     lrcFull: lrc.trim(),
   };
 }

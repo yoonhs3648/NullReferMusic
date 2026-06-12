@@ -22,6 +22,8 @@ type NativeReadResult = {
   producer?: string;
   remixer?: string;
   coverUrl?: string;
+  /** 내장 가사 (LRC 텍스트). 가사 모드 감지용. */
+  lyrics?: string;
 };
 
 type NativeAudioMetadata = {
@@ -100,6 +102,7 @@ export async function readAudioFileMetadata(
     website: (raw.website ?? '').trim() || undefined,
     producer: (raw.producer ?? '').trim() || undefined,
     remixer: (raw.remixer ?? '').trim() || undefined,
+    lyrics: (raw.lyrics ?? '').trim() || undefined,
   });
 
   if (localUri.includes('/cache/') || localUri.includes('cache%2F')) {

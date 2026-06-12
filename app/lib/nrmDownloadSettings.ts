@@ -8,8 +8,8 @@ import {
 
 /** 다운로드 파일 확장자 (선택 UI 순서) */
 export const NRM_AUDIO_EXTENSIONS = [
-  '.mp3',
   '.m4a',
+  '.mp3',
   '.wav',
   '.opus',
   '.flac',
@@ -18,7 +18,7 @@ export const NRM_AUDIO_EXTENSIONS = [
 ] as const;
 
 export type NrmAudioExtension = (typeof NRM_AUDIO_EXTENSIONS)[number];
-export const NRM_ENABLED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a'] as const;
+export const NRM_ENABLED_AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav'] as const;
 
 const STORAGE_EXT = 'nrm_download_audio_ext_v1';
 const STORAGE_QUALITY = 'nrm_download_audio_quality_v1';
@@ -26,7 +26,7 @@ const STORAGE_FILENAME_FORMAT = 'nrm_download_filename_format_v1';
 const STORAGE_METADATA_MODE = 'nrm_download_metadata_mode_v1';
 const STORAGE_WHISPER_MODEL_PREFERENCE = 'nrm_download_whisper_model_preference_v1';
 
-const DEFAULT_EXT: NrmAudioExtension = '.mp3';
+const DEFAULT_EXT: NrmAudioExtension = '.m4a';
 const DEFAULT_QUALITY = 0;
 
 /** 다운로드 파일명 조합 (가수·트랙 필드 순서) */
@@ -53,6 +53,35 @@ export type NrmDownloadMetadataMode =
 
 const DEFAULT_METADATA_MODE: NrmDownloadMetadataMode = 'manual';
 const DEFAULT_WHISPER_MODEL_PREFERENCE = 'whisper:large-v3';
+
+/** 가사 저장 방식: 외부 LRC 사이드카 파일 | 오디오 파일 내 메타데이터로 임베드 */
+export const NRM_LYRICS_OUTPUT_MODES = [
+  { id: 'sidecar', label: '외부 LRC 사용' },
+  { id: 'embed', label: '임베드 사용' },
+] as const;
+
+export type NrmLyricsOutputMode = (typeof NRM_LYRICS_OUTPUT_MODES)[number]['id'];
+
+const STORAGE_LYRICS_OUTPUT_MODE = 'nrm_download_lyrics_output_mode_v1';
+const DEFAULT_LYRICS_OUTPUT_MODE: NrmLyricsOutputMode = 'sidecar';
+
+export function isNrmLyricsOutputMode(v: string): v is NrmLyricsOutputMode {
+  return (NRM_LYRICS_OUTPUT_MODES as readonly { id: string }[]).some((m) => m.id === v);
+}
+
+export async function loadLyricsOutputMode(): Promise<NrmLyricsOutputMode> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_LYRICS_OUTPUT_MODE);
+    if (raw && isNrmLyricsOutputMode(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LYRICS_OUTPUT_MODE;
+}
+
+export async function saveLyricsOutputMode(mode: NrmLyricsOutputMode): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_LYRICS_OUTPUT_MODE, mode);
+}
 
 export function isNrmDownloadMetadataMode(v: string): v is NrmDownloadMetadataMode {
   return (NRM_DOWNLOAD_METADATA_MODES as readonly { id: string }[]).some(

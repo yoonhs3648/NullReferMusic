@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 
 import {
   applyAudioFileMetadata,
+  embedSyncedLyricsIntoAudio,
   rescanMediaStoreAfterMetadataEdit,
   syncMediaStoreAudioTags,
 } from '@/lib/nrmApplyAudioMetadata.native';
@@ -25,6 +26,7 @@ import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadStarted,
 } from '@/lib/nrmMobileDownloadNotifications.native';
+import { loadLyricsOutputMode } from '@/lib/nrmDownloadSettings';
 
 const LRC_SAF_MIME = 'application/octet-stream';
 
@@ -192,7 +194,7 @@ export async function applyTrackMetadataUpdate(
 
   const { track, newFileName, metadata, initialLyricsMode, newLyricsMode } = input;
   const { ffmpegMetadata } = splitMetadataForDownloadStages(metadata);
-  const lyricsAction = resolveLyricsSidecarAction(initialLyricsMode, newLyricsMode);
+  const lyricsAction = resolveLyricsSidecarAction(initialLyricsMode, newLyricsMode, track.lrcUri);
   const displayLabel = `${metadata.artist.trim()} - ${metadata.title.trim()}`;
   const jobId = lyricsJobId(track);
 
@@ -222,15 +224,106 @@ export async function applyTrackMetadataUpdate(
     return;
   }
 
+  const ext = location.fileName.slice(location.fileName.lastIndexOf('.')).toLowerCase();
+  const supportsEmbed = ext === '.mp3' || ext === '.m4a';
+  // 파일에 기존 사이드카 LRC가 있으면 사이드카 유지, 없으면 앱 설정 따름
+  const lyricsOutputMode = await loadLyricsOutputMode();
+  const useEmbed = !track.lrcUri && lyricsOutputMode === 'embed' && supportsEmbed;
+
+  /**
+   * LRC 저장 헬퍼 – useEmbed 여부에 따라 오디오에 내장하거나 사이드카로 저장한다.
+   * 임베드 경로에서는 saved audio URI를 직접 수정하므로 location.audioUri 기준으로 처리.
+   */
+  async function saveLrc(lrcText: string): Promise<void> {
+    if (useEmbed) {
+      await embedSyncedLyricsIntoAudio(location.audioUri, lrcText, ext);
+    } else {
+      await persistLrcForSavedAudio(location, lrcText);
+    }
+  }
+
+  // translate-lrc / strip-translation은 기존 LRC 내용이 필요하므로 삭제 전에 미리 읽기
+  let preReadLrcText: string | null = null;
+  if (
+    (lyricsAction.kind === 'translate-lrc' || lyricsAction.kind === 'strip-translation') &&
+    track.lrcUri
+  ) {
+    try {
+      preReadLrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
+        encoding: EncodingType.UTF8,
+      });
+    } catch {
+      preReadLrcText = null;
+    }
+  }
+
   if (lrcUri) await deletePersistedLrc(lrcUri);
 
   nrmNotifyDownloadStarted(jobId, displayLabel, 'lyrics');
+
+  // configured → translation: Whisper 재실행 없이 기존 LRC를 DeepL로 번역
+  if (lyricsAction.kind === 'translate-lrc') {
+    const existingLrcText = preReadLrcText?.trim() ?? '';
+    if (!existingLrcText) {
+      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      throw new Error('기존 가사 파일을 읽을 수 없습니다.');
+    }
+    let notified = false;
+    const notify = (ok: boolean) => {
+      if (!notified) {
+        notified = true;
+        nrmNotifyDownloadFinished(jobId, displayLabel, ok, 'lyrics');
+      }
+    };
+    try {
+      const [{ getDeepLApiKey }, { translateLrcToKoreanWithDeepL }] = await Promise.all([
+        import('@/lib/nrmDeepLApiSettings'),
+        import('@/lib/nrmDeepLApiClient'),
+      ]);
+      const apiKey = await getDeepLApiKey();
+      const translated = await translateLrcToKoreanWithDeepL(existingLrcText, apiKey);
+      if (!translated.ok) {
+        // 번역 실패 — 원본 LRC 유지 후 경고 throw (UI에서 에러 메시지 표시)
+        await saveLrc(existingLrcText);
+        notify(false);
+        const isExhausted = (translated.message ?? '').includes('사용량이 초과');
+        throw new Error(
+          isExhausted
+            ? 'DeepL 사용량이 초과되었습니다. 번역 없이 원본 가사로 저장되었습니다.'
+            : `번역에 실패했습니다. 원본 가사로 저장되었습니다. (${translated.message ?? ''})`,
+        );
+      }
+      await saveLrc(translated.lrc);
+      notify(true);
+    } catch (e) {
+      notify(false);
+      throw e;
+    }
+    return;
+  }
+
+  // translation → configured: Whisper 재실행 없이 한글 번역 줄만 제거
+  if (lyricsAction.kind === 'strip-translation') {
+    const existingLrcText = preReadLrcText?.trim() ?? '';
+    try {
+      if (existingLrcText) {
+        const { stripTranslationsFromLrc } = await import('@/lib/nrmDeepLLrcFormat');
+        const stripped = stripTranslationsFromLrc(existingLrcText);
+        await saveLrc(stripped || existingLrcText);
+      }
+      nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
+    } catch {
+      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+    }
+    return;
+  }
+
+  // generate: Whisper 재전사 후 저장
   try {
-    const ext = location.fileName.slice(location.fileName.lastIndexOf('.')).toLowerCase();
     const workUri = await materializeToCache(location.audioUri, location.fileName);
     const whisper = await transcribeWhisperLrc(workUri, lyricsAction.mode, ext);
     if (whisper.lrcFull?.trim()) {
-      await persistLrcForSavedAudio(location, whisper.lrcFull);
+      await saveLrc(whisper.lrcFull);
       nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
     } else {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');

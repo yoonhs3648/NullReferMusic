@@ -55,7 +55,7 @@ export async function resolveWhisperLyricsInMetadata(
 ): Promise<ResolveWhisperLyricsResult> {
   const rawLyrics = (metadata.lyrics ?? '').trim();
   const mode = parseWhisperLyricsMode(rawLyrics);
-  if (!mode || extension !== '.mp3') {
+  if (!mode || (extension !== '.mp3' && extension !== '.m4a')) {
     return {
       metadata,
       lyricsRequested: false,
@@ -91,6 +91,8 @@ export async function resolveWhisperLyricsInMetadata(
 
   if (mode === 'translation' && lrc.trim()) {
     const lrcCharsBefore = lrc.trim().length;
+    // 번역 실패 시 원본 whisper LRC로 폴백하기 위해 보존
+    const whisperLrc = lrc;
     logNrmDev('lyrics.translate', {
       event: 'resolve_deepl_start',
       extension,
@@ -113,26 +115,30 @@ export async function resolveWhisperLyricsInMetadata(
           lrcCharsAfter: lrc.trim().length,
         });
       } else {
+        // 번역 실패 → whisper 원본 LRC 폴백 (사용량 초과·API 오류 등)
         lyricsTranslationFailed = true;
-        lrc = '';
+        lrc = whisperLrc;
         logNrmDev('lyrics.translate', {
-          event: 'resolve_deepl_fail',
+          event: 'resolve_deepl_fail_fallback',
           elapsedMs,
           message: translated.message,
+          lrcChars: lrc.trim().length,
         });
       }
     } catch (e) {
+      // 네트워크 오류·타임아웃 → whisper 원본 LRC 폴백
       lyricsTranslationFailed = true;
-      lrc = '';
+      lrc = whisperLrc;
       logNrmRunError('lyrics.translate', e, {
-        event: 'resolve_deepl_throw',
+        event: 'resolve_deepl_throw_fallback',
         elapsedMs: Date.now() - translateT0,
+        lrcChars: lrc.trim().length,
       });
     }
   }
 
   const audioPath = toFsPath(fileUri);
-  if (lrc.trim() && !lyricsTranslationFailed) {
+  if (lrc.trim()) {
     try {
       await writeLrcSidecar(audioPath, lrc);
     } catch {
@@ -162,7 +168,7 @@ export function metadataNeedsWhisperTranscription(
   metadata: NrmAudioFileMetadata | undefined,
   extension: string,
 ): boolean {
-  if (!metadata || extension !== '.mp3') return false;
+  if (!metadata || (extension !== '.mp3' && extension !== '.m4a')) return false;
   return isAutoWhisperLyricsValue(metadata.lyrics);
 }
 

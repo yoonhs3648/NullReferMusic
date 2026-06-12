@@ -96,7 +96,14 @@ export function normalizeDeepLLyricTranslation(
   return resp;
 }
 
-/** `[mm:ss.xx] 원문 (번역)` — 타임스탬프당 한 줄 */
+/**
+ * 원문과 번역을 같은 타임스탬프로 두 줄 출력.
+ *   [mm:ss.xx] 원문 가사
+ *   [mm:ss.xx] (한글 번역)
+ *
+ * DeepL이 원문 괄호를 그대로 보존(`(english)` → `(한글)`)하므로,
+ * 번역 결과가 이미 `(...)` 로 감싸진 경우 추가로 감싸지 않는다.
+ */
 export function buildTranslationSupportedLrc(
   sourceLines: string[],
   translatedByIndex: Map<number, string>,
@@ -111,11 +118,55 @@ export function buildTranslationSupportedLrc(
     }
     const translated = (translatedByIndex.get(i) ?? '').trim();
     if (translated) {
-      out.push(`[${parsed.ts}] ${parsed.text} (${translated})`);
+      out.push(`[${parsed.ts}] ${parsed.text}`);
+      // DeepL이 괄호를 보존하면 이미 `(...)` 형태 — 중복 감싸기 방지
+      const wrapped =
+        translated.startsWith('(') && translated.endsWith(')')
+          ? translated
+          : `(${translated})`;
+      out.push(`[${parsed.ts}] ${wrapped}`);
     } else {
       out.push(`[${parsed.ts}] ${parsed.text}`);
     }
   }
+  return out.join('\n').trim();
+}
+
+/**
+ * 번역 줄 제거 (가사 모드를 번역지원 → 설정으로 변경 시).
+ *
+ * **새 형식** (이번 수정 이후): 이전 줄과 동일 타임스탬프 + 텍스트 전체가 `(...)` → 번역 줄
+ * **구 형식** (이전 다운로드): `원문 (한글번역)` 형태 → 줄 끝의 ` (...)` 제거.
+ *   단, 원문이 `(`로 시작하면 내부 판별이 어려우므로 그대로 유지.
+ */
+export function stripTranslationsFromLrc(lrcText: string): string {
+  const lines = normalizeLrcLines(lrcText);
+  const out: string[] = [];
+
+  for (const line of lines) {
+    const parsed = splitLrcLine(line);
+    if (!parsed) {
+      out.push(line);
+      continue;
+    }
+
+    // 새 형식: 직전 출력 줄과 동일 타임스탬프 + 텍스트 전체가 (...)
+    if (out.length > 0) {
+      const prev = splitLrcLine(out[out.length - 1]);
+      if (prev?.ts === parsed.ts && parsed.text.startsWith('(') && parsed.text.endsWith(')')) {
+        continue; // 번역 줄 제거
+      }
+    }
+
+    // 구 형식: 줄 끝의 ` (번역)` 제거 — 원문이 (...)로 시작하지 않는 경우만
+    let text = parsed.text;
+    if (!text.startsWith('(')) {
+      const stripped = text.replace(/\s+\([^)]+\)\s*$/, '').trimEnd();
+      if (stripped) text = stripped;
+    }
+    out.push(`[${parsed.ts}] ${text}`);
+  }
+
   return out.join('\n').trim();
 }
 

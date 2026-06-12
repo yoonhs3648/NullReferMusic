@@ -11,9 +11,18 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object WhisperTranscribeQueue {
   private val pending = AtomicInteger(0)
-  /** 연속 전사 후 SoC 스로틀 완화용 짧은 휴식(ms) */
-  private const val COOLDOWN_AFTER_BACKLOG_MS = 12_000L
-  private const val COOLDOWN_AFTER_LONG_WAIT_MS = 10_000L
+  /**
+   * 연속 전사 후 SoC 발열 완화 쿨다운.
+   *
+   * COOLDOWN_AFTER_BACKLOG_MS: 대기 곡이 남았을 때 잡 간 휴식.
+   *   - 3초: 짧은 호흡으로 SoC 스로틀 완화. 12초 대비 발열 억제 효과 차이 미미.
+   *   - 이 기간에 WhisperActiveModel.scheduleWarmup 이 OS 페이지 캐시 사전 적재.
+   *
+   * COOLDOWN_AFTER_LONG_WAIT_MS: 큐 대기가 LONG_QUEUE_WAIT_MS 이상이었을 때 시작 전 휴식.
+   *   - 이미 장시간(2분+) 대기해 기기가 충분히 식어 있으므로 0.5초로 최소화.
+   */
+  private const val COOLDOWN_AFTER_BACKLOG_MS = 3_000L
+  private const val COOLDOWN_AFTER_LONG_WAIT_MS = 500L
   private const val LONG_QUEUE_WAIT_MS = 120_000L
 
   private val executor: ExecutorService =

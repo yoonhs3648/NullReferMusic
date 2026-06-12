@@ -16,6 +16,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -75,17 +76,26 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         var lastError: Exception? = null
         // m4a/mp4: copy만 쓰면 커버는 붙는데 제목·가수 태그가 플레이어에 안 보이는 경우가 많음 → remux 우선
         val mp4Family = ext in setOf("m4a", "mp4", "aac", "mov")
+        // 비 MP3 포맷에서 audioCopy=false는 결국 "-c:a copy"와 동일 → strategy 1·2 중복.
+        // WAV/FLAC는 attached_pic 지원이 불안정 → 커버 없이 바로 태그만.
+        // MP3만 strategy 2에서 실제 재인코딩이 이루어지므로 3가지 전략 유지.
         val strategies =
-          if (mp4Family) {
-            listOf(
+          when {
+            ext == "mp3" -> listOf(
               FfmpegStrategy(withCover = true, audioCopy = true),
-              FfmpegStrategy(withCover = true, audioCopy = false),
+              FfmpegStrategy(withCover = true, audioCopy = false),  // 재인코딩 폴백
               FfmpegStrategy(withCover = false, audioCopy = true),
             )
-          } else {
-            listOf(
+            ext in setOf("wav", "flac") -> listOf(
+              // WAV·FLAC: attached_pic 임베드 시도 시 ffmpeg 오류 또는 미지원 → 태그만
+              FfmpegStrategy(withCover = false, audioCopy = true),
+            )
+            mp4Family -> listOf(
               FfmpegStrategy(withCover = true, audioCopy = true),
-              FfmpegStrategy(withCover = true, audioCopy = false),
+              FfmpegStrategy(withCover = false, audioCopy = true),  // 커버 실패 폴백
+            )
+            else -> listOf(
+              FfmpegStrategy(withCover = true, audioCopy = true),
               FfmpegStrategy(withCover = false, audioCopy = true),
             )
           }
@@ -176,6 +186,11 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             )
         val out = Arguments.createMap()
         parseFfmpegProbeMetadata(probeOut, out)
+        // MP3: FFmpeg probe가 SYLT 바이너리 프레임을 텍스트로 출력하지 않으므로 직접 디코드
+        if (!out.hasKey("lyrics") && inFile.name.lowercase().endsWith(".mp3")) {
+          val syltLrc = readSyltLyricsFromMp3(inFile)
+          if (syltLrc != null) out.putString("lyrics", syltLrc)
+        }
         val coverFile = extractEmbeddedCoverFile(paths, inFile)
         if (coverFile != null) {
           out.putString("coverUrl", "file://${coverFile.absolutePath}")
@@ -497,6 +512,221 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     FfmpegExec.run(reactApplicationContext, cmd, tag = "ffmpeg-meta")
   }
 
+  // ── 결합 transcode + metadata (비 MP3 포맷 변환 최적화) ─────────────────────
+
+  /**
+   * 비 MP3 포맷 변환 시 transcode 와 메타데이터 삽입을 단일 ffmpeg 패스로 처리.
+   * 기존에는 transcode → 대형 파일 쓰기 → metadata remux → 다시 대형 파일 쓰기 의 2회 I/O.
+   * 특히 WAV (~30 MB/분) 는 단일 패스로 I/O 를 절반 이하로 줄인다.
+   *
+   * MP3 는 shineenc 파이프를 사용하므로 이 메서드 호출 대상 아님.
+   */
+  @ReactMethod
+  fun transcodeAndApplyMetadata(
+    inputPath: String,
+    audioFormat: String,
+    audioQuality: Int,
+    metadata: ReadableMap,
+    promise: Promise,
+  ) {
+    Thread {
+      val stageT0 = SystemClock.elapsedRealtime()
+      NrmStageLog.log(
+        "ffmpeg",
+        "transcode_meta_start",
+        mapOf("input" to inputPath.take(120), "format" to audioFormat),
+      )
+      try {
+        val srcPath = inputPath.removePrefix("file://")
+        val src = File(srcPath)
+        if (!src.isFile) {
+          promise.reject("E_ARG", "입력 파일이 없습니다.")
+          return@Thread
+        }
+
+        val ctx = reactApplicationContext.applicationContext
+        val fmt = audioFormat.trim().lowercase().ifBlank { "m4a" }
+        val quality = audioQuality.coerceIn(0, 9)
+
+        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src)
+
+        val paths =
+          FfmpegBootstrap.ensure(ctx)
+            ?: throw IllegalStateException("ffmpeg를 사용할 수 없습니다.")
+
+        val plan = FfmpegEncoderSupport.plan(ctx, fmt, quality)
+        if (plan.fallbackReason != null) {
+          throw Exception("TRANSCODE_FORMAT_UNAVAILABLE:$fmt")
+        }
+
+        val tagBundle = readMetadataTags(metadata)
+
+        // WAV·FLAC: attached_pic 지원 불안정 → 커버 스킵
+        val skipCover = fmt in setOf("wav", "flac")
+        var coverFile: File? = null
+        var coverEmbedTemp: File? = null
+        if (!skipCover && tagBundle.coverUrl.isNotEmpty()) {
+          val rawCover = downloadCover(tagBundle.coverUrl, reactApplicationContext.cacheDir)
+          if (rawCover != null) {
+            coverEmbedTemp = rawCover
+            coverFile = normalizeCoverForEmbed(rawCover, reactApplicationContext.cacheDir)
+          }
+        }
+
+        val basePath =
+          audioSrc.absolutePath.let { p ->
+            val d = p.lastIndexOf('.')
+            if (d > 0) p.substring(0, d) else p
+          }
+        val outFile = File("$basePath.${plan.outputExt}")
+
+        var coverEmbedded = false
+        NrmMediaCpuPriority.runFfmpegPriority {
+          try {
+            runCombinedTranscodeAndMetadata(
+              paths, audioSrc, outFile, plan.outputExt, plan.codecArgs, coverFile, tagBundle,
+            )
+            coverEmbedded = coverFile != null
+          } catch (e1: Exception) {
+            if (outFile.exists()) outFile.delete()
+            if (coverFile != null) {
+              // 커버 실패 → 커버 없이 재시도
+              NrmFileLogger.warn("ffmpeg-transcode-meta", "커버 포함 변환 실패, 커버 없이 재시도: ${e1.message}")
+              runCombinedTranscodeAndMetadata(
+                paths, audioSrc, outFile, plan.outputExt, plan.codecArgs, null, tagBundle,
+              )
+              coverEmbedded = false
+            } else {
+              throw e1
+            }
+          }
+        }
+
+        if (!outFile.isFile || outFile.length() <= 0L) {
+          throw Exception("TRANSCODE_META_OUTPUT_EMPTY")
+        }
+
+        coverFile?.delete()
+        if (coverEmbedTemp != null && coverEmbedTemp != coverFile) coverEmbedTemp.delete()
+        try {
+          audioSrc.delete()
+        } catch (_: Exception) {
+        }
+
+        NrmStageLog.log(
+          "ffmpeg",
+          "transcode_meta_ok",
+          mapOf(
+            "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
+            "format" to fmt,
+            "bytes" to outFile.length(),
+            "coverEmbedded" to coverEmbedded,
+          ),
+        )
+        val ok = Arguments.createMap()
+        ok.putString("path", outFile.absolutePath)
+        ok.putBoolean("coverEmbedded", coverEmbedded)
+        promise.resolve(ok)
+      } catch (e: Exception) {
+        NrmStageLog.log(
+          "ffmpeg",
+          "transcode_meta_fail",
+          mapOf(
+            "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
+            "err" to (e.message ?: e.toString()).take(200),
+          ),
+        )
+        promise.reject("E_TRANSCODE_META", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
+  /**
+   * transcode 와 메타데이터를 단일 ffmpeg 호출로 처리하는 내부 헬퍼.
+   * codecArgs: FfmpegEncoderSupport.plan() 이 반환한 코덱 인수
+   *   (예: ["-ar","44100","-ac","2","-codec:a","pcm_s16le"] for wav,
+   *        ["-codec:a","aac","-b:a","192k"] for m4a)
+   */
+  private fun runCombinedTranscodeAndMetadata(
+    paths: FfmpegBootstrap.FfmpegPaths,
+    input: File,
+    outFile: File,
+    outputExt: String,
+    codecArgs: List<String>,
+    coverFile: File?,
+    tags: MetadataTagBundle,
+  ) {
+    val mp4Family = outputExt in setOf("m4a", "mp4", "aac", "mov")
+
+    val cmd = mutableListOf("-y", "-i", input.absolutePath)
+    if (coverFile != null) {
+      cmd += listOf("-i", coverFile.absolutePath)
+    }
+
+    // 명시적 스트림 매핑 (-vn 미사용 → 커버 스트림과 충돌 방지)
+    cmd += listOf("-map_metadata", "-1")
+    cmd += listOf("-map", "0:a:0")
+    if (coverFile != null) {
+      cmd += listOf(
+        "-map", "1:v:0",
+        "-disposition:v:0", "attached_pic",
+        "-metadata:s:v", "title=Album cover",
+        "-metadata:s:v", "comment=Cover (front)",
+      )
+    }
+
+    // 오디오 코덱 인수 (transcode plan 에서 가져옴)
+    cmd.addAll(codecArgs)
+
+    if (coverFile != null) {
+      cmd += listOf("-c:v", "mjpeg")
+    }
+    if (mp4Family) {
+      cmd += listOf("-movflags", "+faststart")
+    }
+
+    // 태그 삽입 헬퍼
+    fun ffKey(key: String): String =
+      if (mp4Family) when (key) {
+        "artist" -> "author"; "date" -> "year"; "disc" -> "disk"; else -> key
+      } else key
+
+    fun putTag(key: String, value: String) {
+      if (value.isEmpty()) return
+      cmd += listOf("-metadata", "${ffKey(key)}=$value")
+    }
+
+    fun putTagAllowEmpty(key: String, value: String) {
+      cmd += listOf("-metadata", "${ffKey(key)}=$value")
+    }
+
+    putTag("title", tags.title)
+    if (tags.artist.isNotEmpty()) {
+      cmd += listOf("-metadata", "${ffKey("artist")}=${tags.artist}")
+      if (mp4Family) cmd += listOf("-metadata", "artist=${tags.artist}")
+    }
+    putTag("album_artist", tags.albumArtist)
+    putTagAllowEmpty("album", tags.album)
+    putTag("genre", tags.genre)
+    putTag("date", tags.releaseDate)
+    putTag("track", tags.trackNumber)
+    putTag("disc", tags.discNumber)
+    putTag("composer", tags.composer)
+    putTag("bpm", tags.bpm)
+    putTag("copyright", tags.copyright)
+    putTag("website", tags.website)
+    putTag("producer", tags.producer)
+    putTag("remixer", tags.remixer)
+
+    cmd.add(outFile.absolutePath)
+
+    NrmFileLogger.log(
+      "ffmpeg-transcode-meta",
+      "단일패스 시작 in=${input.absolutePath} out=${outFile.absolutePath} ext=$outputExt coverFile=${coverFile?.name}",
+    )
+    FfmpegExec.runWithPaths(paths.binary, paths.libDir, cmd, tag = "ffmpeg-transcode-meta")
+  }
+
   /** Android albumart content provider (삼성 뮤직 등 로컬 라이브러리) */
   private fun trySetMediaStoreAlbumArt(audioUri: Uri, coverFile: File) {
     val resolver = reactApplicationContext.contentResolver
@@ -566,28 +796,64 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             "bpm" to "bpm",
             "producer" to "producer",
             "remixer" to "remixer",
+            "lyrics" to "lyrics",
         )
     var context = ProbeMetaContext.FORMAT
+    // lyrics는 멀티라인이므로 별도 누적 처리
+    var collectingLyrics = false
+    val lyricsLines = mutableListOf<String>()
+
+    fun flushLyrics() {
+      if (collectingLyrics && lyricsLines.isNotEmpty() && !out.hasKey("lyrics")) {
+        out.putString("lyrics", lyricsLines.joinToString("\n"))
+      }
+      collectingLyrics = false
+      lyricsLines.clear()
+    }
+
     for (line in output.lineSequence()) {
       when {
-        Regex("""^\s*Stream #\d+:\d+:\s*Audio:""").containsMatchIn(line) ->
-            context = ProbeMetaContext.AUDIO_STREAM
-        Regex("""^\s*Stream #\d+:\d+:\s*Video:""").containsMatchIn(line) ->
-            context = ProbeMetaContext.VIDEO_STREAM
-        line.trimStart().startsWith("Stream #") && !line.contains("Audio:") && !line.contains("Video:") ->
-            context = ProbeMetaContext.OTHER
+        Regex("""^\s*Stream #\d+:\d+:\s*Audio:""").containsMatchIn(line) -> {
+          flushLyrics()
+          context = ProbeMetaContext.AUDIO_STREAM
+        }
+        Regex("""^\s*Stream #\d+:\d+:\s*Video:""").containsMatchIn(line) -> {
+          flushLyrics()
+          context = ProbeMetaContext.VIDEO_STREAM
+        }
+        line.trimStart().startsWith("Stream #") && !line.contains("Audio:") && !line.contains("Video:") -> {
+          flushLyrics()
+          context = ProbeMetaContext.OTHER
+        }
       }
       if (context == ProbeMetaContext.VIDEO_STREAM || context == ProbeMetaContext.OTHER) {
         continue
       }
-      val m = Regex("""^\s+([A-Za-z0-9_]+)\s*:\s+(.*)$""").find(line) ?: continue
-      val rawKey = m.groupValues[1].lowercase()
-      val field = keyToField[rawKey] ?: continue
-      val value = m.groupValues[2].trim()
-      if (value.isEmpty() || out.hasKey(field)) continue
-      if (field == "title" && isBogusEmbeddedTitle(value)) continue
-      out.putString(field, value)
+      val m = Regex("""^\s+([A-Za-z0-9_]+)\s*:\s+(.*)$""").find(line)
+      if (m != null) {
+        // 새 키-값 라인을 만나면 이전 lyrics 누적 완료
+        flushLyrics()
+        val rawKey = m.groupValues[1].lowercase()
+        val field = keyToField[rawKey] ?: continue
+        val value = m.groupValues[2].trim()
+        if (value.isEmpty() || out.hasKey(field)) continue
+        if (field == "title" && isBogusEmbeddedTitle(value)) continue
+        if (field == "lyrics") {
+          // 멀티라인 누적 시작
+          collectingLyrics = true
+          if (value.isNotEmpty()) lyricsLines.add(value)
+        } else {
+          out.putString(field, value)
+        }
+      } else if (collectingLyrics) {
+        // lyrics 값의 연속 라인 누적 (모드 감지에 필요한 50줄까지만)
+        if (lyricsLines.size < 50) {
+          val trimmed = line.trimEnd()
+          if (trimmed.isNotEmpty()) lyricsLines.add(trimmed)
+        }
+      }
     }
+    flushLyrics()
   }
 
   private fun extractEmbeddedCoverFile(
@@ -630,6 +896,334 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             timeoutSec = 30,
         )
     return out.contains("Video:") || out.contains("attached pic") || out.contains("mjpeg")
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 싱크 가사 임베드: m4a → ©lyr (FFmpeg), mp3 → ID3 SYLT 프레임
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * 오디오 파일에 LRC 동기화 가사를 직접 임베드.
+   * - m4a/mp4/aac: FFmpeg -metadata lyrics=<lrc> → ©lyr atom
+   * - mp3: SYLT ID3v2.3 프레임을 기존 ID3 태그에 삽입
+   * audioUri: file:// 또는 content:// (SAF) URI
+   */
+  @ReactMethod
+  fun embedSyncedLyrics(audioUri: String, lrcContent: String, extension: String, promise: Promise) {
+    Thread {
+      val t0 = SystemClock.elapsedRealtime()
+      NrmStageLog.log("ffmpeg", "embed_synced_lyrics_start", mapOf("uri" to audioUri.take(80), "ext" to extension))
+      try {
+        val ext = extension.lowercase().trimStart('.')
+        val (workFile, isTemp) = resolveAudioToWorkFile(audioUri, ext)
+        try {
+          when (ext) {
+            "m4a", "mp4", "aac" -> embedLyricsM4a(workFile, lrcContent)
+            "mp3" -> embedLyricsMp3(workFile, lrcContent)
+            else -> throw Exception("지원하지 않는 확장자: $ext")
+          }
+          if (isTemp) writeWorkFileBackToUri(workFile, audioUri)
+          NrmStageLog.log("ffmpeg", "embed_synced_lyrics_ok", mapOf(
+            "ext" to ext, "elapsedMs" to (SystemClock.elapsedRealtime() - t0)
+          ))
+          promise.resolve(null)
+        } finally {
+          if (isTemp) workFile.delete()
+        }
+      } catch (e: Exception) {
+        NrmStageLog.log("ffmpeg", "embed_synced_lyrics_fail", mapOf(
+          "ext" to extension, "err" to (e.message ?: e.toString()).take(200)
+        ))
+        promise.reject("E_EMBED_LYRICS", "가사 임베드 실패: ${e.message}", e)
+      }
+    }.start()
+  }
+
+  /** content:// (SAF) 또는 file:// URI → 작업용 임시 파일 반환. isTemp=true면 작업 후 원본에 다시 써야 함 */
+  private fun resolveAudioToWorkFile(audioUri: String, ext: String): Pair<File, Boolean> {
+    val cleanPath = audioUri.removePrefix("file://")
+    if (cleanPath.startsWith("/")) {
+      return Pair(File(cleanPath), false)
+    }
+    // content:// SAF URI → 임시 파일로 복사
+    val tempFile = uniqueCacheFile(reactApplicationContext.cacheDir, "nrm-embed-src", ".$ext")
+    val uri = Uri.parse(audioUri)
+    reactApplicationContext.contentResolver.openInputStream(uri)?.use { input ->
+      tempFile.outputStream().use { output -> input.copyTo(output) }
+    } ?: throw Exception("SAF 파일을 읽을 수 없습니다: $audioUri")
+    return Pair(tempFile, true)
+  }
+
+  /** 작업 완료된 파일을 SAF URI에 다시 씀 */
+  private fun writeWorkFileBackToUri(file: File, targetUri: String) {
+    val uri = Uri.parse(targetUri)
+    reactApplicationContext.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+      file.inputStream().use { input -> input.copyTo(output) }
+    } ?: throw Exception("SAF 파일에 쓸 수 없습니다: $targetUri")
+  }
+
+  /**
+   * m4a: FFmpeg -metadata lyrics=<lrc> → ©lyr atom.
+   *
+   * `-map 0 -c copy` 로 오디오·attached_pic(커버) 스트림을 모두 재인코딩 없이 복사.
+   * `-c:a copy` 만 지정하면 attached_pic 비디오 스트림에 기본 인코더가 적용되어
+   * 느려지거나 멈출 수 있다.
+   */
+  private fun embedLyricsM4a(file: File, lrc: String) {
+    val paths = FfmpegBootstrap.ensure(reactApplicationContext)
+      ?: throw Exception("FFmpeg를 사용할 수 없습니다.")
+    val tempOut = uniqueCacheFile(file.parentFile ?: reactApplicationContext.cacheDir, "nrm-lyr-m4a", ".m4a")
+    try {
+      FfmpegExec.runWithPaths(
+        paths.binary, paths.libDir,
+        listOf(
+          "-y", "-i", file.absolutePath,
+          "-map", "0",          // 오디오 + attached_pic 스트림 전체 포함
+          "-c", "copy",         // 재인코딩 없이 복사 (빠름)
+          "-map_metadata", "0",
+          "-metadata", "lyrics=$lrc",
+          "-movflags", "+faststart",
+          tempOut.absolutePath,
+        ),
+        tag = "ffmpeg-embed-lyrics-m4a",
+      )
+      if (!tempOut.isFile || tempOut.length() < 512L) throw Exception("FFmpeg 출력 파일이 없거나 너무 작음")
+      file.delete()
+      if (!tempOut.renameTo(file)) {
+        tempOut.inputStream().use { i -> file.outputStream().use { o -> i.copyTo(o) } }
+        tempOut.delete()
+      }
+    } catch (e: Exception) {
+      tempOut.delete()
+      throw e
+    }
+  }
+
+  /** mp3: LRC → SYLT ID3v2.3 프레임 삽입 */
+  private fun embedLyricsMp3(file: File, lrc: String) {
+    val syltFrame = buildSyltFrame(lrc)
+    if (syltFrame.isEmpty()) return
+    insertOrReplaceSyltInMp3(file, syltFrame)
+  }
+
+  /** LRC 텍스트 → SYLT ID3v2.3 프레임 바이너리 */
+  private fun buildSyltFrame(lrc: String): ByteArray {
+    val pattern = Regex("""^\[(\d+):(\d+(?:[.,]\d+)?)\](.*)$""")
+    val entries = mutableListOf<Pair<Int, String>>()
+    for (line in lrc.lines()) {
+      val m = pattern.matchEntire(line.trim()) ?: continue
+      val minutes = m.groupValues[1].toInt()
+      val seconds = m.groupValues[2].replace(',', '.').toDoubleOrNull() ?: continue
+      val text = m.groupValues[3].trim()
+      val ms = (minutes * 60 * 1000 + seconds * 1000).toInt()
+      entries += Pair(ms, text)
+    }
+    if (entries.isEmpty()) return ByteArray(0)
+
+    val body = ByteArrayOutputStream().also { os ->
+      os.write(3)                          // 인코딩: UTF-8
+      os.write("eng".toByteArray())        // 언어 (3 bytes)
+      os.write(1)                          // 타임스탬프 형식: ms
+      os.write(1)                          // 내용 유형: lyrics
+      os.write(0)                          // 내용 설명자 null 종료자
+      for ((ms, text) in entries) {
+        os.write(text.toByteArray(Charsets.UTF_8))
+        os.write(0)                        // 텍스트 null 종료자
+        os.write((ms ushr 24) and 0xFF)
+        os.write((ms ushr 16) and 0xFF)
+        os.write((ms ushr 8) and 0xFF)
+        os.write(ms and 0xFF)
+      }
+    }.toByteArray()
+
+    return ByteArrayOutputStream().also { os ->
+      os.write("SYLT".toByteArray())
+      os.write((body.size ushr 24) and 0xFF)
+      os.write((body.size ushr 16) and 0xFF)
+      os.write((body.size ushr 8) and 0xFF)
+      os.write(body.size and 0xFF)
+      os.write(byteArrayOf(0, 0))          // 프레임 플래그
+      os.write(body)
+    }.toByteArray()
+  }
+
+  /** MP3 SYLT 프레임 → LRC 텍스트 (없으면 null) */
+  private fun readSyltLyricsFromMp3(file: File): String? {
+    return try {
+      val bytes = file.readBytes()
+      if (bytes.size < 10 ||
+        bytes[0] != 'I'.code.toByte() ||
+        bytes[1] != 'D'.code.toByte() ||
+        bytes[2] != '3'.code.toByte()
+      ) return null
+      val id3Major = bytes[3].toInt() and 0xFF
+      if (id3Major < 3) return null
+      val tagBodySize = readId3SyncsafeInt(bytes, 6)
+      val tagEnd = 10 + tagBodySize
+      if (tagEnd > bytes.size) return null
+      var pos = 10
+      while (pos + 10 <= tagEnd) {
+        if (bytes[pos] == 0.toByte()) break
+        val frameId = String(bytes.sliceArray(pos until pos + 4))
+        val frameSize = if (id3Major >= 4) {
+          readId3SyncsafeInt(bytes, pos + 4)
+        } else {
+          ((bytes[pos + 4].toInt() and 0xFF) shl 24) or
+            ((bytes[pos + 5].toInt() and 0xFF) shl 16) or
+            ((bytes[pos + 6].toInt() and 0xFF) shl 8) or
+            (bytes[pos + 7].toInt() and 0xFF)
+        }
+        if (frameSize <= 0 || pos + 10 + frameSize > tagEnd) break
+        if (frameId == "SYLT") {
+          val frameData = bytes.sliceArray(pos + 10 until pos + 10 + frameSize)
+          return decodeSyltFrameToLrc(frameData)
+        }
+        pos += 10 + frameSize
+      }
+      null
+    } catch (_: Exception) { null }
+  }
+
+  /** SYLT 프레임 바이너리 → LRC 텍스트 */
+  private fun decodeSyltFrameToLrc(data: ByteArray): String? {
+    // 헤더: 1(encoding) + 3(lang) + 1(timestampFmt) + 1(contentType) + 설명자(null 종료)
+    if (data.size < 6) return null
+    val encoding = data[0].toInt() and 0xFF
+    // 설명자(null 종료) 끝 위치 찾기
+    var pos = 5
+    if (encoding == 1 || encoding == 2) {
+      while (pos + 1 < data.size) {
+        if (data[pos] == 0.toByte() && data[pos + 1] == 0.toByte()) { pos += 2; break }
+        pos += 2
+      }
+    } else {
+      while (pos < data.size) {
+        if (data[pos] == 0.toByte()) { pos += 1; break }
+        pos++
+      }
+    }
+    val entries = mutableListOf<Pair<Int, String>>()
+    while (pos < data.size) {
+      val textStart = pos
+      val text: String
+      if (encoding == 1 || encoding == 2) {
+        var end = textStart
+        while (end + 1 < data.size && !(data[end] == 0.toByte() && data[end + 1] == 0.toByte())) end += 2
+        text = String(data.sliceArray(textStart until end), Charsets.UTF_16LE)
+        pos = end + 2
+      } else {
+        var end = textStart
+        while (end < data.size && data[end] != 0.toByte()) end++
+        text = String(data.sliceArray(textStart until end), Charsets.UTF_8)
+        pos = end + 1
+      }
+      if (pos + 4 > data.size) break
+      val ms = ((data[pos].toInt() and 0xFF) shl 24) or
+        ((data[pos + 1].toInt() and 0xFF) shl 16) or
+        ((data[pos + 2].toInt() and 0xFF) shl 8) or
+        (data[pos + 3].toInt() and 0xFF)
+      pos += 4
+      if (entries.size < 50) entries.add(Pair(ms, text)) // 모드 감지용으로 50줄 충분
+    }
+    if (entries.isEmpty()) return null
+    return entries.joinToString("\n") { (ms, text) ->
+      val min = ms / 60000
+      val sec = (ms % 60000) / 1000
+      val centisec = (ms % 1000) / 10
+      "[%02d:%02d.%02d] %s".format(min, sec, centisec, text)
+    }
+  }
+
+  /** MP3 파일에서 기존 SYLT 프레임을 제거하고 새 SYLT 프레임을 삽입 */
+  private fun insertOrReplaceSyltInMp3(file: File, syltFrame: ByteArray) {
+    val bytes = file.readBytes()
+
+    // ID3v2 헤더 없으면 새로 만들어 앞에 붙임
+    if (bytes.size < 10 ||
+      bytes[0] != 'I'.code.toByte() ||
+      bytes[1] != 'D'.code.toByte() ||
+      bytes[2] != '3'.code.toByte()
+    ) {
+      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      return
+    }
+
+    val id3Major = bytes[3].toInt() and 0xFF
+    if (id3Major < 3) {
+      // ID3v2.2는 SYLT 미지원 → 기존 태그를 유지하고 앞에 새 미니 태그 삽입
+      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      return
+    }
+
+    val tagBodySize = readId3SyncsafeInt(bytes, 6)
+    val tagEnd = 10 + tagBodySize
+    if (tagEnd > bytes.size) {
+      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      return
+    }
+
+    val tagBody = bytes.sliceArray(10 until tagEnd)
+    val filtered = removeId3FramesFromBody(tagBody, setOf("SYLT"), usesSyncsafeFrameSize = id3Major >= 4)
+    val newTagBody = filtered + syltFrame
+
+    val newHeader = buildId3v2Header(id3Major, bytes[4], bytes[5], newTagBody.size)
+    val audioData = bytes.sliceArray(tagEnd until bytes.size)
+    file.writeBytes(newHeader + newTagBody + audioData)
+  }
+
+  private fun readId3SyncsafeInt(bytes: ByteArray, offset: Int): Int =
+    ((bytes[offset].toInt() and 0x7F) shl 21) or
+      ((bytes[offset + 1].toInt() and 0x7F) shl 14) or
+      ((bytes[offset + 2].toInt() and 0x7F) shl 7) or
+      (bytes[offset + 3].toInt() and 0x7F)
+
+  private fun encodeId3SyncsafeInt(value: Int): ByteArray = byteArrayOf(
+    ((value ushr 21) and 0x7F).toByte(),
+    ((value ushr 14) and 0x7F).toByte(),
+    ((value ushr 7) and 0x7F).toByte(),
+    (value and 0x7F).toByte(),
+  )
+
+  private fun buildId3v2Header(major: Int, minor: Byte, flags: Byte, bodySize: Int): ByteArray {
+    val os = ByteArrayOutputStream()
+    os.write("ID3".toByteArray())
+    os.write(major); os.write(minor.toInt()); os.write(flags.toInt())
+    os.write(encodeId3SyncsafeInt(bodySize))
+    return os.toByteArray()
+  }
+
+  private fun buildMinimalId3v2Tag(frame: ByteArray): ByteArray =
+    buildId3v2Header(3, 0, 0, frame.size) + frame
+
+  /**
+   * ID3 태그 바디에서 지정 프레임 ID를 제거.
+   * ID3v2.4(usesSyncsafeFrameSize=true)와 v2.3(false)의 프레임 크기 인코딩 차이 처리.
+   */
+  private fun removeId3FramesFromBody(
+    tagBody: ByteArray,
+    frameIdsToRemove: Set<String>,
+    usesSyncsafeFrameSize: Boolean,
+  ): ByteArray {
+    val result = ByteArrayOutputStream()
+    var pos = 0
+    while (pos + 10 <= tagBody.size) {
+      if (tagBody[pos] == 0.toByte()) break   // 패딩 시작
+      val frameId = String(tagBody.sliceArray(pos until pos + 4))
+      val frameSize = if (usesSyncsafeFrameSize) {
+        readId3SyncsafeInt(tagBody, pos + 4)
+      } else {
+        ((tagBody[pos + 4].toInt() and 0xFF) shl 24) or
+          ((tagBody[pos + 5].toInt() and 0xFF) shl 16) or
+          ((tagBody[pos + 6].toInt() and 0xFF) shl 8) or
+          (tagBody[pos + 7].toInt() and 0xFF)
+      }
+      if (frameSize < 0 || pos + 10 + frameSize > tagBody.size) break
+      if (!frameIdsToRemove.contains(frameId)) {
+        result.write(tagBody, pos, 10 + frameSize)
+      }
+      pos += 10 + frameSize
+    }
+    return result.toByteArray()
   }
 
   private fun downloadCover(url: String, dir: File?): File? {

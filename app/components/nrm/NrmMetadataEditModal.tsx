@@ -456,7 +456,7 @@ export function NrmMetadataEditModal({
     await pickCoverNative();
   }
 
-  const lyricsUnsupported = extension !== '.mp3';
+  const lyricsUnsupported = extension !== '.mp3' && extension !== '.m4a';
 
   const whisperChecksEnabled =
     !lyricsUnsupported &&
@@ -762,7 +762,7 @@ export function NrmMetadataEditModal({
                   <View style={styles.inlineFieldRow}>
                     <Text style={[styles.inlineFieldLabel, { color: bodyColor }]}>가사</Text>
                     <Text style={[styles.lyricsUnsupportedHint, { color: bodyColor }]}>
-                      mp3에서만 지원합니다.
+                      mp3, m4a에서만 지원합니다.
                     </Text>
                   </View>
                 ) : (

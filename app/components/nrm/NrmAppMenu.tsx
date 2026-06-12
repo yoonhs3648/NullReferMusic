@@ -134,6 +134,7 @@ type Panel =
   | 'downloadFilenameSettings'
   | 'downloadMetadataSettings'
   | 'downloadLyricsEmbedSettings'
+  | 'downloadLyricsOutputSettings'
   | 'fileLoggingSettings'
   | 'trackMetadataSettings'
   | ChartMenuPanel
@@ -471,6 +472,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'downloadFilenameSettings':
       case 'downloadMetadataSettings':
       case 'downloadLyricsEmbedSettings':
+      case 'downloadLyricsOutputSettings':
         setPanel('downloadManage');
         break;
       case 'weeklySnapshotSettings':
@@ -1238,6 +1240,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => setPanel('downloadLyricsOutputSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    가사 저장 방식 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => setPanel('downloadLyricsEmbedSettings')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1345,6 +1362,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
                   section="metadata"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadLyricsOutputSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="lyricsOutput"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={() => setPanel('downloadManage')}

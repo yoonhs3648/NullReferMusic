@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -187,6 +188,7 @@ export function NrmYoutubeHome({
   const [metadataUnavailableOpen, setMetadataUnavailableOpen] = useState(false);
   const [lyricsEmbedUnavailableOpen, setLyricsEmbedUnavailableOpen] = useState(false);
   const [lyricsTranslationFailedOpen, setLyricsTranslationFailedOpen] = useState(false);
+  const [lyricsTranslationExhausted, setLyricsTranslationExhausted] = useState(false);
   const [chartContextActive, setChartContextActive] = useState(
     !!chartDownloadTrack && !!initialQuery,
   );
@@ -459,6 +461,11 @@ export function NrmYoutubeHome({
       const safeName = applyDownloadExtension(fileName, encode.extension);
       const displayLabel = displayLabelFromAudioFileName(safeName);
 
+      // 다운로드 시작 알림 (중복 설정 로드 없이 여기서 한 번만)
+      if (Platform.OS !== 'web') {
+        nrmNotifyDownloadStarted(videoId, displayLabel);
+      }
+
       try {
         const extraction = await session.extractionPromise;
         if (session.aborted) return;
@@ -495,7 +502,11 @@ export function NrmYoutubeHome({
         });
         if (out.lyricsWarning === 'not_embedded') {
           setLyricsEmbedUnavailableOpen(true);
+        } else if (out.lyricsWarning === 'translation_exhausted') {
+          setLyricsTranslationExhausted(true);
+          setLyricsTranslationFailedOpen(true);
         } else if (out.lyricsWarning === 'translation_failed') {
+          setLyricsTranslationExhausted(false);
           setLyricsTranslationFailedOpen(true);
         }
       } catch (e) {
@@ -520,35 +531,31 @@ export function NrmYoutubeHome({
     (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
       const normalized = normalizeDownloadMetadata(metadata);
 
+      // 모달 닫기는 즉시 — UI 커밋·애니메이션이 끝난 후 추출 시작
       setDownloadModalItem(null);
       setDownloadModalInitialFields(undefined);
 
-      const session: DownloadSession = {
-        extractionPromise: beginParallelExtraction(videoId),
-        aborted: false,
-        extractionError: null,
-      };
-      downloadSessionsRef.current.set(videoId, session);
+      InteractionManager.runAfterInteractions(() => {
+        const session: DownloadSession = {
+          extractionPromise: beginParallelExtraction(videoId),
+          aborted: false,
+          extractionError: null,
+        };
+        downloadSessionsRef.current.set(videoId, session);
 
-      void (async () => {
-        if (Platform.OS !== 'web') {
-          const { applyDownloadExtension, loadDownloadEncodeSettings } =
-            await import('@/lib/nrmDownloadSettings');
-          const encode = await loadDownloadEncodeSettings();
-          const safeName = applyDownloadExtension(fileName, encode.extension);
-          nrmNotifyDownloadStarted(videoId, displayLabelFromAudioFileName(safeName));
-        }
-        try {
-          await completeDownloadAfterExtraction(videoId, fileName, normalized);
-        } catch {
-          /* notifyUser / overlays inside completeDownloadAfterExtraction */
-        } finally {
-          if (Platform.OS !== 'web') {
-            nrmNotifyDownloadWorkEnded(videoId);
+        void (async () => {
+          try {
+            await completeDownloadAfterExtraction(videoId, fileName, normalized);
+          } catch {
+            /* notifyUser / overlays inside completeDownloadAfterExtraction */
+          } finally {
+            if (Platform.OS !== 'web') {
+              nrmNotifyDownloadWorkEnded(videoId);
+            }
+            clearDownloadSession(videoId);
           }
-          clearDownloadSession(videoId);
-        }
-      })();
+        })();
+      });
     },
     [beginParallelExtraction, clearDownloadSession, completeDownloadAfterExtraction],
   );
@@ -596,6 +603,9 @@ export function NrmYoutubeHome({
                 );
           setDownloadModalInitialFields(fields);
           setDownloadModalItem(item);
+          // 모달이 열려있는 동안 확인 시 필요한 모듈/설정 미리 로드 (확인 직후 비용 감소)
+          void import('@/lib/nrmInnertubeYoutube');
+          void import('@/lib/nrmDownloadSettings').then((m) => m.loadDownloadEncodeSettings());
         } catch (e) {
           handleMetadataPrefetchError(videoId, e);
         } finally {
@@ -619,28 +629,12 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
-          if (Platform.OS !== 'web') {
-            const { applyDownloadExtension, loadDownloadEncodeSettings } =
-              await import('@/lib/nrmDownloadSettings');
-            const encode = await loadDownloadEncodeSettings();
-            nrmNotifyDownloadStarted(
-              videoId,
-              displayLabelFromAudioFileName(applyDownloadExtension(fileName, encode.extension)),
-            );
-          }
+          // 알림은 completeDownloadAfterExtraction 내부에서 설정 로드 후 한 번만 발송
           await completeDownloadAfterExtraction(videoId, fileName, metadata);
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
           beginParallelExtraction(videoId);
-          if (Platform.OS !== 'web') {
-            const { applyDownloadExtension, loadDownloadEncodeSettings } =
-              await import('@/lib/nrmDownloadSettings');
-            const encode = await loadDownloadEncodeSettings();
-            nrmNotifyDownloadStarted(
-              videoId,
-              displayLabelFromAudioFileName(applyDownloadExtension(fileName, encode.extension)),
-            );
-          }
+          // 알림은 completeDownloadAfterExtraction 내부에서 설정 로드 후 한 번만 발송
           await completeDownloadAfterExtraction(videoId, fileName, undefined);
         }
       } catch (e) {
@@ -719,6 +713,7 @@ export function NrmYoutubeHome({
         isDark={isDark}
         titleColor={titleColor}
         bodyColor={bodyColor}
+        exhausted={lyricsTranslationExhausted}
         onClose={() => setLyricsTranslationFailedOpen(false)}
       />
       <View style={styles.searchRowWrap}>

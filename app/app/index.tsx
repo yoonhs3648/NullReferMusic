@@ -113,11 +113,20 @@ type ChartView = Exclude<
   | 'melonSearchTrack'
 >;
 
-function formatYoutubeDisplayQuery(artist?: string | null, title?: string | null): string {
+async function formatYoutubeDisplayQuery(artist?: string | null, title?: string | null): Promise<string> {
   const a = (artist ?? '').trim();
   const t = (title ?? '').trim();
-  if (a && t) return `${a} - ${t}`;
-  return t || a;
+  if (!a && !t) return '';
+  if (!a) return t;
+  if (!t) return a;
+  try {
+    const { loadDownloadFileNameFormat } = await import('@/lib/nrmDownloadSettings');
+    const { formatDownloadFileStem } = await import('@/lib/nrmYoutubeDownloadMeta');
+    const format = await loadDownloadFileNameFormat();
+    return formatDownloadFileStem(a, t, format);
+  } catch {
+    return `${a} - ${t}`;
+  }
 }
 
 
@@ -241,8 +250,8 @@ export default function HomeScreen() {
 
   /** 차트 아이템 클릭: 유튜브 검색으로 이동하고 이전 차트 뷰를 저장 */
   const navigateToSearchFromChart = useCallback(
-    (item: ChartTrackItem, source: 'chart' | 'lastfm' | 'melon' = 'chart') => {
-      const q = formatYoutubeDisplayQuery(item.artists, item.title);
+    async (item: ChartTrackItem, source: 'chart' | 'lastfm' | 'melon' = 'chart') => {
+      const q = await formatYoutubeDisplayQuery(item.artists, item.title);
       if (!q) return;
       setChartReturnView(mainView as ChartView);
       setChartSearchQuery(q);
@@ -395,11 +404,11 @@ export default function HomeScreen() {
   );
 
   const navigateToYoutubeFromLastfm = useCallback(
-    (params: LastfmYoutubeNavigateParams) => {
+    async (params: LastfmYoutubeNavigateParams) => {
       const artist = params.artist.trim();
       const title = params.title.trim();
       if (!artist && !title) return;
-      const displayQ = formatYoutubeDisplayQuery(artist, title);
+      const displayQ = await formatYoutubeDisplayQuery(artist, title);
       setSearchReturnView(mainView);
       setLastfmNavSnapshot(lastfmNavRef.current?.captureState() ?? null);
       setChartSearchQuery(displayQ);
@@ -482,11 +491,11 @@ export default function HomeScreen() {
   );
 
   const navigateToYoutubeFromMelon = useCallback(
-    (params: MelonYoutubeNavigateParams) => {
+    async (params: MelonYoutubeNavigateParams) => {
       const artist = params.artist.trim();
       const title = params.title.trim();
       if (!artist && !title) return;
-      const displayQ = formatYoutubeDisplayQuery(artist, title);
+      const displayQ = await formatYoutubeDisplayQuery(artist, title);
       setSearchReturnView(mainView);
       setMelonNavSnapshot(melonNavRef.current?.captureState() ?? null);
       setChartSearchQuery(displayQ);

@@ -191,6 +191,9 @@ export function NrmTrackMetadataSettingsHome({
         } catch {
           lyricsMode = 'configured';
         }
+      } else if (meta.lyrics) {
+        // LRC 사이드카 없음 → 내장 가사로 모드 감지 (m4a ©lyr / mp3 SYLT)
+        lyricsMode = detectLrcUiModeFromText(meta.lyrics);
       }
       setInitialLyricsMode(lyricsMode);
       const { artist, title } = resolveEditableArtistTitle(
@@ -231,7 +234,7 @@ export function NrmTrackMetadataSettingsHome({
           }
           let effectiveNewLyricsMode = newLyricsMode;
           const lyricsEditable =
-            track.extension === '.mp3' &&
+            (track.extension === '.mp3' || track.extension === '.m4a') &&
             (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
           if (lyricsEditable) {
             const whisperReady = await hasAnyWhisperModelOnDevice();

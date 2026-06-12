@@ -258,23 +258,41 @@ object NrmWhisperPerfLog {
   }
 
   /**
-   * LRC 속도·발열 균형. 큐에 대기 곡이 있으면 스레드를 줄여 연속 전사 시 발열 스로틀을 완화한다.
+   * 모델 크기·큐 백로그에 따라 최적 스레드 수를 결정한다.
    *
+   * 모델별 행렬 크기 vs 스레드 오버헤드 균형점:
+   *  - large (32레이어 × 1280d): 큰 행렬 → 스레드 활용 효율 높음 → 최대 6
+   *  - medium (24레이어 × 1024d): 중간 → 최대 5
+   *  - small/base/tiny: 소형 행렬 → 스레드 오버헤드 지배 → 최대 4
+   *
+   * RAM 크기와 스레드 수는 무관(GGML은 행렬 병렬화에만 사용).
+   *
+   * @param modelFileName ggml 파일명 (빈 문자열이면 large 규칙 적용)
    * @param queueDepthAtStart enqueue 시점 depth (1=대기 없음, 2+=앞에 곡 있음)
    */
-  fun resolveThreadCount(queueDepthAtStart: Int = 1): Int {
+  fun resolveThreadCount(modelFileName: String = "", queueDepthAtStart: Int = 1): Int {
     val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     val backlog = (queueDepthAtStart - 1).coerceAtLeast(0)
+
+    val name = modelFileName.lowercase()
+    // 모델 tier별 최대 스레드 상한
+    val modelCeil =
+        when {
+          name.contains("large") -> 6
+          name.contains("medium") -> 5
+          else -> 4 // small / base / tiny
+        }
+
     val chosen =
         when {
-          backlog >= 2 -> 4.coerceAtMost(cores)
-          backlog >= 1 -> 5.coerceAtMost(cores).coerceAtLeast(4)
-          else -> cores.coerceIn(4, 6)
+          backlog >= 2 -> (modelCeil - 2).coerceAtLeast(2).coerceAtMost(cores)
+          backlog >= 1 -> (modelCeil - 1).coerceAtLeast(3).coerceAtMost(cores)
+          else -> modelCeil.coerceAtMost(cores)
         }
     logThreadPlan(
         cores,
         chosen,
-        "LRC threads queueDepth=$queueDepthAtStart backlog=$backlog",
+        "LRC threads queueDepth=$queueDepthAtStart model=${modelFileName.ifBlank { "(unknown)" }}",
     )
     return chosen
   }

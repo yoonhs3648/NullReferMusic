@@ -91,6 +91,11 @@ export function metadataForAudioExtension(
 ): NrmAudioFileMetadata | undefined {
   if (!meta) return undefined;
   if (extension !== '.m4a') return meta;
+  // m4a: Whisper sentinel(__AUTO_FROM_WHISPER__:...)은 보존해야 splitMetadataForDownloadStages가 whisperMode를 추출할 수 있음
+  // 실제 가사 텍스트(sentinel이 아닌 경우)만 제거 (m4a 메타에 직접 embed하지 않음)
+  if (parseWhisperLyricsMode(meta.lyrics) !== null) {
+    return meta;
+  }
   const { lyrics: _lyrics, ...rest } = meta;
   return normalizeDownloadMetadata(rest);
 }

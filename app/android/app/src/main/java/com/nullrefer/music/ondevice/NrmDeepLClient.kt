@@ -34,7 +34,8 @@ object NrmDeepLClient {
 
   private const val CONNECT_MS = 30_000
 
-  private const val READ_MS = 120_000
+  /** 가사 번역은 짧은 텍스트이므로 30 초면 충분; 120 초는 사용자가 "멈춤"으로 인식 */
+  private const val READ_MS = 30_000
 
   /** DeepL: 요청당 text 최대 50 */
 
@@ -79,7 +80,15 @@ object NrmDeepLClient {
 
     chunks.forEachIndexed { index, chunk ->
 
-      if (index > 0) Thread.sleep(INTER_REQUEST_MS)
+      if (index > 0) {
+        NrmFileLogger.log("deepl", "native batch inter-request sleep ${INTER_REQUEST_MS}ms")
+        Thread.sleep(INTER_REQUEST_MS)
+      }
+
+      NrmFileLogger.log(
+          "deepl",
+          "native batch_start chunkIndex=$index chunkCount=${chunks.size} lineCount=${chunk.size}",
+      )
 
       val batch = translateOneBatch(key, chunk)
 
@@ -88,6 +97,11 @@ object NrmDeepLClient {
         throw DeepLException("DeepL 번역 결과 개수가 요청과 일치하지 않습니다.")
 
       }
+
+      NrmFileLogger.log(
+          "deepl",
+          "native batch_ok chunkIndex=$index api=${batch.apiUsed} out=${batch.texts.size}",
+      )
 
       merged.addAll(batch.texts)
       mergedSourceLangs.addAll(batch.sourceLangs)
@@ -108,7 +122,10 @@ object NrmDeepLClient {
 
     var current = ArrayList<String>()
 
-    var currentBytes = estimateJsonBytes(emptyList())
+    /** JSON 배열 기본 오버헤드 — estimateJsonBytes(emptyList()) 반환값과 동일 */
+    val BASE_BYTES = 96
+
+    var currentBytes = BASE_BYTES
 
 
 
@@ -120,7 +137,7 @@ object NrmDeepLClient {
 
         current = ArrayList()
 
-        currentBytes = estimateJsonBytes(emptyList())
+        currentBytes = BASE_BYTES
 
       }
 
@@ -146,7 +163,8 @@ object NrmDeepLClient {
 
       current.add(line)
 
-      currentBytes = estimateJsonBytes(current)
+      // O(1) 증분 추적 — 이전 코드는 estimateJsonBytes(current) 재계산으로 O(n²)이었음
+      currentBytes += addBytes
 
     }
 
@@ -297,6 +315,11 @@ object NrmDeepLClient {
           }
 
       return HttpResult(status, body)
+
+    } catch (e: java.net.SocketTimeoutException) {
+
+      // "시간이 초과" 포함 메시지 → JS 재시도 로직이 타임아웃으로 인식해 즉시 다음 transport로 전환
+      throw DeepLException("DeepL 번역 요청 시간이 초과되었습니다.")
 
     } finally {
 

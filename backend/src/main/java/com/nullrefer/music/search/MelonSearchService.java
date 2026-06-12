@@ -547,7 +547,11 @@ public class MelonSearchService {
   }
 
   private MelonAlbumDetailResult parseAlbumDetail(String html, String albumId) {
-    String name = cleanText(firstMatchGroup(html, Pattern.compile("class=\"song_name\"[\\s\\S]*?<strong[^>]*>[^<]*</strong>\\s*([^<]+)<", Pattern.CASE_INSENSITIVE)));
+    // [^<]* → [\\s\\S]*? : <strong><span class="none">앨범명</span></strong> 구조 대응
+    String name = cleanText(firstMatchGroup(html, Pattern.compile("class=\"song_name\"[\\s\\S]*?<strong[^>]*>[\\s\\S]*?</strong>\\s*([^<\\r\\n]+)", Pattern.CASE_INSENSITIVE)));
+    if (name.isEmpty()) {
+      name = cleanText(firstMatchGroup(html, Pattern.compile("property=\"og:title\"\\s+content=\"([^\"]+)\"", Pattern.CASE_INSENSITIVE)));
+    }
     String imageUrl = parseAlbumCoverFromDetailHtml(html);
     Matcher artistM =
         Pattern.compile(
@@ -644,7 +648,11 @@ public class MelonSearchService {
   }
 
   private MelonTrackDetailResult parseSongDetail(String html, String songId) {
-    String name = cleanText(firstMatchGroup(html, Pattern.compile("class=\"song_name\"[\\s\\S]*?<strong[^>]*>[^<]*</strong>\\s*([^<]+)<", Pattern.CASE_INSENSITIVE)));
+    // [^<]* → [\\s\\S]*? : <strong><span class="none">곡명</span></strong> 구조 대응
+    String name = cleanText(firstMatchGroup(html, Pattern.compile("class=\"song_name\"[\\s\\S]*?<strong[^>]*>[\\s\\S]*?</strong>\\s*([^<\\r\\n]+)", Pattern.CASE_INSENSITIVE)));
+    if (name.isEmpty()) {
+      name = cleanText(firstMatchGroup(html, Pattern.compile("property=\"og:title\"\\s+content=\"([^\"]+)\"", Pattern.CASE_INSENSITIVE)));
+    }
     String imageUrl = normalizeImg(firstMatchGroup(html, Pattern.compile("id=\"d_song_org\"[\\s\\S]*?<img[^>]+src=\"([^\"]+)\"", Pattern.CASE_INSENSITIVE)));
     Matcher artistM =
         Pattern.compile(

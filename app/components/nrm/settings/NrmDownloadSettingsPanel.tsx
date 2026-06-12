@@ -21,19 +21,23 @@ import {
   loadDownloadAudioQuality,
   loadDownloadFileNameFormat,
   loadDownloadMetadataMode,
+  loadLyricsOutputMode,
   loadWhisperModelPreference,
   NRM_AUDIO_EXTENSIONS,
   NRM_ENABLED_AUDIO_EXTENSIONS,
   NRM_DOWNLOAD_FILENAME_FORMATS,
   NRM_DOWNLOAD_METADATA_MODES,
+  NRM_LYRICS_OUTPUT_MODES,
   saveWhisperModelPreference,
   saveDownloadAudioExtension,
   saveDownloadAudioQuality,
   saveDownloadFileNameFormat,
   saveDownloadMetadataMode,
+  saveLyricsOutputMode,
   type NrmAudioExtension,
   type NrmDownloadFileNameFormat,
   type NrmDownloadMetadataMode,
+  type NrmLyricsOutputMode,
   type NrmWhisperModelPreference,
 } from '@/lib/nrmDownloadSettings';
 import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModelPicker';
@@ -54,7 +58,8 @@ export type NrmDownloadSettingsSection =
   | 'quality'
   | 'filename'
   | 'metadata'
-  | 'lyricsEmbed';
+  | 'lyricsEmbed'
+  | 'lyricsOutput';
 
 const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   path: '다운로드 경로 설정',
@@ -63,6 +68,7 @@ const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   filename: '파일명 설정',
   metadata: '메타데이터 설정',
   lyricsEmbed: 'AI 가사 추출 엔진 설정',
+  lyricsOutput: '가사 저장 방식 설정',
 };
 
 type Props = {
@@ -86,6 +92,7 @@ export function NrmDownloadSettingsPanel({
   const [fileNameFormat, setFileNameFormat] =
     useState<NrmDownloadFileNameFormat>('artist-title');
   const [metadataMode, setMetadataMode] = useState<NrmDownloadMetadataMode>('manual');
+  const [lyricsOutputMode, setLyricsOutputMode] = useState<NrmLyricsOutputMode>('sidecar');
   const [whisperModelPreference, setWhisperModelPreference] =
     useState<NrmWhisperModelPreference>('whisper:large-v3-turbo');
 
@@ -125,6 +132,15 @@ export function NrmDownloadSettingsPanel({
       void loadDownloadMetadataMode()
         .then((mode) => {
           setMetadataMode(mode);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'lyricsOutput') {
+      void loadLyricsOutputMode()
+        .then((mode) => {
+          setLyricsOutputMode(mode);
           setLoaded(true);
         })
         .catch(() => setLoaded(true));
@@ -197,6 +213,11 @@ export function NrmDownloadSettingsPanel({
     void saveDownloadMetadataMode(mode);
   }, []);
 
+  const selectLyricsOutputMode = useCallback((mode: NrmLyricsOutputMode) => {
+    setLyricsOutputMode(mode);
+    void saveLyricsOutputMode(mode);
+  }, []);
+
   const selectWhisperModelPreference = useCallback((preference: NrmWhisperModelPreference) => {
     setWhisperModelPreference(preference);
     void saveWhisperModelPreference(preference);
@@ -230,47 +251,49 @@ export function NrmDownloadSettingsPanel({
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <View style={styles.extRow}>
-              {NRM_AUDIO_EXTENSIONS.map((ext) => {
-                const active = extension === ext;
-                const enabled = (NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(ext);
-                return (
-                  <Pressable
-                    key={ext}
-                    onPress={() => selectExtension(ext)}
-                    disabled={!enabled}
-                    style={({ pressed }) => [
-                      styles.extChip,
-                      {
-                        borderColor: active
-                          ? nrmTokens.color.primary
-                          : 'rgba(128,128,128,0.35)',
-                        backgroundColor: active
-                          ? 'rgba(0,102,204,0.12)'
-                          : 'transparent',
-                        opacity: enabled ? 1 : 0.4,
-                      },
-                      pressed && enabled && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active, disabled: !enabled }}>
-                    <Text
-                      style={[
-                        styles.extChipLabel,
-                        {
-                          color: active
-                            ? nrmTokens.color.primary
-                            : enabled
-                              ? titleColor
-                              : bodyColor,
-                        },
-                      ]}>
-                      {ext}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <>
+              <View
+                style={styles.extSegmentBar}
+                accessibilityRole="radiogroup"
+                accessibilityLabel="오디오 확장자">
+                {(NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).map((ext, idx) => {
+                  const active = extension === ext;
+                  return (
+                    <Pressable
+                      key={ext}
+                      onPress={() => selectExtension(ext as NrmAudioExtension)}
+                      style={({ pressed }) => [
+                        styles.extSegmentCell,
+                        idx > 0 && styles.extSegmentDivider,
+                        active && styles.extSegmentCellActive,
+                        pressed && !active && styles.extSegmentCellPressed,
+                      ]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: active }}>
+                      <Text
+                        style={[
+                          styles.extSegmentLabel,
+                          { color: active ? '#ffffff' : bodyColor },
+                          active && styles.extSegmentLabelActive,
+                        ]}>
+                        {ext.slice(1).toUpperCase()}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.extDisabledRow}>
+                {(NRM_AUDIO_EXTENSIONS as readonly string[])
+                  .filter((e) => !(NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(e))
+                  .map((ext) => (
+                    <View key={ext} style={styles.extDisabledTag}>
+                      <Text style={[styles.extDisabledTagLabel, { color: bodyColor }]}>
+                        {ext.slice(1).toUpperCase()}
+                      </Text>
+                    </View>
+                  ))}
+              </View>
+            </>
           )}
         </View>
       ) : null}
@@ -370,6 +393,56 @@ export function NrmDownloadSettingsPanel({
                     ) : (
                       <View style={styles.formatRowSpacer} />
                     )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {section === 'lyricsOutput' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <View style={styles.formatCol}>
+              {NRM_LYRICS_OUTPUT_MODES.map((opt) => {
+                const active = lyricsOutputMode === opt.id;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => selectLyricsOutputMode(opt.id)}
+                    style={({ pressed }) => [
+                      styles.formatRow,
+                      {
+                        borderColor: active
+                          ? nrmTokens.color.primary
+                          : 'rgba(128,128,128,0.28)',
+                        backgroundColor: active
+                          ? 'rgba(0,102,204,0.08)'
+                          : 'transparent',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: active }}>
+                    {active ? (
+                      <Ionicons
+                        name="radio-button-on"
+                        size={18}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : (
+                      <View style={styles.formatRowSpacer} />
+                    )}
+                    <Text
+                      style={[
+                        styles.formatRowLabel,
+                        { color: active ? nrmTokens.color.primary : titleColor },
+                      ]}>
+                      {opt.label}
+                    </Text>
                   </Pressable>
                 );
               })}
@@ -534,23 +607,53 @@ const styles = StyleSheet.create({
     gap: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
   },
-  extRow: {
+  extSegmentBar: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: nrmTokens.space.xs,
+    borderRadius: nrmTokens.radius.md,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(128,128,128,0.10)',
   },
-  extChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: nrmTokens.radius.pill,
-    borderWidth: PANEL_INPUT_BORDER,
-    minHeight: 36,
+  extSegmentCell: {
+    flex: 1,
+    height: 48,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  extChipLabel: {
-    fontSize: nrmTokens.font.caption,
+  extSegmentDivider: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(128,128,128,0.30)',
+  },
+  extSegmentCellActive: {
+    backgroundColor: nrmTokens.color.primary,
+  },
+  extSegmentCellPressed: {
+    backgroundColor: 'rgba(128,128,128,0.18)',
+  },
+  extSegmentLabel: {
+    fontSize: nrmTokens.font.body,
     fontWeight: '600',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 0.4,
+  },
+  extSegmentLabelActive: {
+    fontWeight: '700',
+  },
+  extDisabledRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: nrmTokens.space.xxs,
+    marginTop: nrmTokens.space.xxs,
+  },
+  extDisabledTag: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: nrmTokens.radius.xs,
+    backgroundColor: 'rgba(128,128,128,0.07)',
+    opacity: 0.45,
+  },
+  extDisabledTagLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '500',
+    letterSpacing: 0.3,
   },
   pickBtn: {
     flexDirection: 'row',

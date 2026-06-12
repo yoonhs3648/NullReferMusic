@@ -97,18 +97,39 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun transcribeToLrc(audioPath: String, modelPreference: String?, promise: Promise) {
+    // 제출 시점 설정을 공유 상태에 기록 — 이후 updateModelPreference가 불리기 전까지
+    // 대기 중인 작업들이 이 값을 실행 시점에 읽는다
+    if (!modelPreference.isNullOrBlank()) {
+      WhisperActiveModel.setPreference(modelPreference)
+    }
     val label = File(audioPath.trim()).name
     WhisperTranscribeQueue.submit(label) { queueDepthAtStart ->
       transcribeToLrcBlocking(audioPath, modelPreference, promise, queueDepthAtStart)
     }
   }
 
+  /**
+   * JS 설정 화면에서 모델을 변경할 때 호출. 이미 큐에 적재된 미실행 작업들이
+   * 다음 실행 시점에 새 모델을 사용하도록 공유 상태를 갱신한다.
+   */
+  @ReactMethod
+  fun updateModelPreference(pref: String?) {
+    if (!pref.isNullOrBlank()) {
+      WhisperActiveModel.setPreference(pref)
+      NrmFileLogger.log("whisper", "updateModelPreference pref=$pref")
+    }
+  }
+
   private fun transcribeToLrcBlocking(
       audioPath: String,
-      modelPreference: String?,
+      submitTimePref: String?,
       promise: Promise,
       queueDepthAtStart: Int = 1,
   ) {
+    // 실행 시점에 최신 모델 설정을 읽는다.
+    // 사용자가 설정에서 모델을 바꾸고 updateModelPreference를 호출했다면
+    // 대기 중이던 이 작업도 새 모델을 사용하게 된다.
+    val modelPreference = WhisperActiveModel.getPreference() ?: submitTimePref
     val perf =
         if (NrmWhisperPerfLog.ENABLED) {
           NrmWhisperPerfLog.session("transcribeToLrc")
@@ -190,6 +211,10 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         val whisperOut = runWhisper(paths, wav, outPrefix, queueDepthAtStart)
         val whisperMs = SystemClock.elapsedRealtime() - whisperT0
         perf?.mark("whisper", "durationMs=$whisperMs exit=${whisperOut.exitCode}")
+
+        // 쿨다운 기간 동안 OS 페이지 캐시에 모델을 사전 적재.
+        // 다음 작업이 동일 모델을 사용할 경우 로드 시간을 단축한다.
+        WhisperActiveModel.scheduleWarmup(paths.modelPath)
         NrmWhisperPerfLog.logParsedSummary(whisperOut.parsed, whisperMs, wavDur)
 
         val lrcFile = File(outPrefix.absolutePath + ".lrc")
@@ -309,17 +334,11 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       outPrefix: File,
       queueDepthAtStart: Int,
   ): WhisperRunResult {
-    val baseThreadCount = NrmWhisperPerfLog.resolveThreadCount(queueDepthAtStart)
-    val beam = NrmWhisperLrcParams.resolveBeam(queueDepthAtStart)
     val modelFile = File(paths.modelPath).name
-    val lowRam = NrmWhisperDevicePolicy.preferQuantizedGgml(reactApplicationContext)
-    val isLargeV3 = modelFile.contains("large-v3", ignoreCase = true)
-    val threadCount =
-        if (lowRam && isLargeV3) {
-          baseThreadCount.coerceAtMost(4)
-        } else {
-          baseThreadCount
-        }
+    // 모델명을 전달해 모델 tier별 최적 스레드 수를 결정한다.
+    // RAM 크기는 GGML 스레드 수와 무관하므로 lowRam 조건은 제거됨.
+    val threadCount = NrmWhisperPerfLog.resolveThreadCount(modelFile, queueDepthAtStart)
+    val beam = NrmWhisperLrcParams.resolveBeam(queueDepthAtStart)
     NrmFileLogger.log(
         "whisper",
         "runWhisper model=$modelFile threads=$threadCount bs=${beam.size} bo=${beam.bestOf} nth=${NrmWhisperLrcParams.NO_SPEECH_THRESHOLD} lpt=${NrmWhisperLrcParams.LOGPROB_THRESHOLD} queueDepth=$queueDepthAtStart wavBytes=${wav.length()}",

@@ -43,13 +43,15 @@ export function chunkLrcLinesForDeepL(lines: string[]): string[][] {
   if (lines.length === 0) return [];
   const chunks: string[][] = [];
   let current: string[] = [];
-  let currentBytes = estimateTranslateJsonBytes([]);
+  /** JSON 배열 기본 오버헤드(96 bytes) — estimateTranslateJsonBytes([]) 반환값과 동일 */
+  const BASE_BYTES = 96;
+  let currentBytes = BASE_BYTES;
 
   const flush = () => {
     if (current.length > 0) {
       chunks.push(current);
       current = [];
-      currentBytes = estimateTranslateJsonBytes([]);
+      currentBytes = BASE_BYTES;
     }
   };
 
@@ -64,7 +66,8 @@ export function chunkLrcLinesForDeepL(lines: string[]): string[][] {
       flush();
     }
     current.push(line);
-    currentBytes = estimateTranslateJsonBytes(current);
+    // O(1) 증분 추적 — 이전 코드는 estimateTranslateJsonBytes(current) 재계산으로 O(n²)이었음
+    currentBytes += addBytes;
   }
   flush();
   return chunks;
