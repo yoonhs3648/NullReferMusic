@@ -1,7 +1,7 @@
 {
   "name": "nullrefer-music-app",
   "main": "index",
-  "version": "1.7.18",
+  "version": "1.7.19",
   "scripts": {
     "start": "expo start --lan",
     "start:plain": "expo start",

@@ -4,6 +4,11 @@
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
+import { NativeModules } from 'react-native';
+
+type NrmAudioMetaNative = {
+  concatFiles?: (parts: string[], dest: string) => Promise<void>;
+};
 
 export type NrmDecipherResult = { n?: string; sig?: string };
 
@@ -58,6 +63,12 @@ function base64ToUint8Array(b64: string): Uint8Array {
 }
 
 async function mergePartUris(partUris: string[], destUri: string): Promise<void> {
+  const mod = NativeModules.NrmAudioMetadata as NrmAudioMetaNative | undefined;
+  if (mod?.concatFiles) {
+    await mod.concatFiles(partUris, destUri);
+    return;
+  }
+  // JS base64 폴백 (네이티브 모듈 미사용 환경)
   const arrays = await Promise.all(
     partUris.map((uri) =>
       FileSystem.readAsStringAsync(uri, { encoding: EncodingType.Base64 }).then(

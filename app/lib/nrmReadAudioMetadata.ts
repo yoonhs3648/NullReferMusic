@@ -14,3 +14,7 @@ export async function readAudioFileMetadata(
     coverUrl: '',
   });
 }
+
+export function invalidateAudioMetadataCache(_audioUri?: string): void {
+  /* 웹 환경 — no-op */
+}

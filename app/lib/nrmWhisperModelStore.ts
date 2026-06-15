@@ -28,7 +28,7 @@ export function useWhisperModelStatuses(active: boolean) {
     void refresh();
     const poll = setInterval(() => {
       void refresh();
-    }, 2000);
+    }, 5000);
     return () => clearInterval(poll);
   }, [active, refresh]);
 

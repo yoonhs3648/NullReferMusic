@@ -163,6 +163,34 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }.start()
   }
 
+  /**
+   * 여러 파트 파일을 메모리에 올리지 않고 스트리밍으로 순서대로 이어붙인다.
+   * JS base64 병합 대신 사용해 UI 프리즈를 방지한다.
+   */
+  @ReactMethod
+  fun concatFiles(parts: com.facebook.react.bridge.ReadableArray, dest: String, promise: Promise) {
+    Thread {
+      try {
+        val destFile = File(dest)
+        destFile.parentFile?.mkdirs()
+        java.io.FileOutputStream(destFile).use { out ->
+          for (i in 0 until parts.size()) {
+            val partPath = parts.getString(i) ?: continue
+            val partFile = File(partPath)
+            if (!partFile.isFile) throw Exception("파트 파일이 없습니다: $partPath")
+            partFile.inputStream().use { it.copyTo(out) }
+          }
+        }
+        for (i in 0 until parts.size()) {
+          try { File(parts.getString(i) ?: continue).delete() } catch (_: Exception) {}
+        }
+        promise.resolve(null)
+      } catch (e: Exception) {
+        promise.reject("E_CONCAT", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
+
   /** 저장된 오디오 ID3/컨테이너 메타 + 임베디드 커버 읽기 (ffmpeg -i 파싱) */
   @ReactMethod
   fun readMetadata(inputPath: String, promise: Promise) {

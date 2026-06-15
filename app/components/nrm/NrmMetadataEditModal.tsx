@@ -499,7 +499,7 @@ export function NrmMetadataEditModal({
     void refreshGate();
     const poll = setInterval(() => {
       void refreshGate();
-    }, 2000);
+    }, 5000);
 
     return () => {
       cancelled = true;
@@ -544,37 +544,50 @@ export function NrmMetadataEditModal({
     }
   }, [lyricsMode, translationOptionEnabled]);
 
+  const conflictDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!visible || !item || !artist.trim() || !title.trim()) {
+      if (conflictDebounceRef.current) {
+        clearTimeout(conflictDebounceRef.current);
+        conflictDebounceRef.current = null;
+      }
       setNameConflict(false);
       return;
     }
     let cancelled = false;
-    void (async () => {
-      if (Platform.OS === 'web') {
-        if (!cancelled) setNameConflict(false);
-        return;
-      }
-      try {
-        const { hasConflictingFileStemInDownloadDir } = await import(
-          '@/lib/nrmPersistDownload.native'
-        );
-        const hasConflict = await hasConflictingFileStemInDownloadDir(preview);
-        const exclude = (excludeFileStem ?? '').trim().toLowerCase();
-        const previewStem = preview.replace(/\.[^.]+$/, '').trim().toLowerCase();
-        const conflict =
-          hasConflict && (!exclude || previewStem !== exclude);
-        if (!cancelled) {
-          setNameConflict(conflict);
+    if (conflictDebounceRef.current) clearTimeout(conflictDebounceRef.current);
+    conflictDebounceRef.current = setTimeout(() => {
+      if (cancelled) return;
+      void (async () => {
+        if (Platform.OS === 'web') {
+          if (!cancelled) setNameConflict(false);
+          return;
         }
-      } catch {
-        if (!cancelled) {
-          setNameConflict(false);
+        try {
+          const { hasConflictingFileStemInDownloadDir } = await import(
+            '@/lib/nrmPersistDownload.native'
+          );
+          const hasConflict = await hasConflictingFileStemInDownloadDir(preview);
+          const exclude = (excludeFileStem ?? '').trim().toLowerCase();
+          const previewStem = preview.replace(/\.[^.]+$/, '').trim().toLowerCase();
+          const conflict =
+            hasConflict && (!exclude || previewStem !== exclude);
+          if (!cancelled) {
+            setNameConflict(conflict);
+          }
+        } catch {
+          if (!cancelled) {
+            setNameConflict(false);
+          }
         }
-      }
-    })();
+      })();
+    }, 400);
     return () => {
       cancelled = true;
+      if (conflictDebounceRef.current) {
+        clearTimeout(conflictDebounceRef.current);
+        conflictDebounceRef.current = null;
+      }
     };
   }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
 

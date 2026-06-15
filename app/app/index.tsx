@@ -892,7 +892,10 @@ export default function HomeScreen() {
               showYoutubeOverlay && { backgroundColor: rootBackground },
             ]}
             pointerEvents={showYoutubeOverlay ? 'none' : 'auto'}>
-            {renderFeaturePanel(mainView)}
+            {/* 오버레이 활성 시 차트 컨텐츠를 숨겨 로고 중복 방지 */}
+            <View style={showYoutubeOverlay ? styles.hiddenContent : undefined}>
+              {renderFeaturePanel(mainView)}
+            </View>
           </View>
         ) : null}
 
@@ -1014,11 +1017,17 @@ const styles = StyleSheet.create({
 
   stackLayerFront: {
     zIndex: 1,
+    elevation: 2,
   },
 
   stackLayerBehind: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
+    elevation: 0,
+  },
+
+  hiddenContent: {
+    opacity: 0,
   },
 
   keyboardAvoid: {

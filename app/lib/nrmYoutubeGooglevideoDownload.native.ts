@@ -5,8 +5,52 @@
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
+import { NativeModules } from 'react-native';
 
 import { downloadMediaUrlViaWebView } from '@/lib/nrmYoutubeDecipherBridge';
+
+type NrmAudioMetaNative = {
+  concatFiles?: (parts: string[], dest: string) => Promise<void>;
+};
+
+/**
+ * 파트 파일들을 순서대로 병합.
+ * 네이티브 스트리밍 병합을 우선 사용하고, 없으면 JS base64 폴백.
+ */
+async function mergePartFilesNative(partUris: string[], destUri: string): Promise<void> {
+  const mod = NativeModules.NrmAudioMetadata as NrmAudioMetaNative | undefined;
+  if (mod?.concatFiles) {
+    await mod.concatFiles(partUris, destUri);
+    return;
+  }
+  await mergePartFilesBase64Fallback(partUris, destUri);
+}
+
+async function mergePartFilesBase64Fallback(
+  partUris: string[],
+  destUri: string,
+): Promise<void> {
+  const arrays = await Promise.all(
+    partUris.map((uri) =>
+      FileSystem.readAsStringAsync(uri, { encoding: EncodingType.Base64 }).then(
+        base64ToUint8Array,
+      ),
+    ),
+  );
+  const total = arrays.reduce((n, a) => n + a.length, 0);
+  const merged = new Uint8Array(total);
+  let o = 0;
+  for (const a of arrays) {
+    merged.set(a, o);
+    o += a.length;
+  }
+  await FileSystem.writeAsStringAsync(destUri, uint8ToBase64(merged), {
+    encoding: EncodingType.Base64,
+  });
+  for (const uri of partUris) {
+    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+  }
+}
 
 /** youtubei `Constants.STREAM_HEADERS` + UA (프리셋 순으로 시도) */
 const STREAM_HEADER_PRESETS: Record<string, string>[] = [
@@ -59,31 +103,6 @@ function base64ToUint8Array(b64: string): Uint8Array {
   return u8;
 }
 
-async function mergePartFiles(
-  partUris: string[],
-  destUri: string,
-): Promise<void> {
-  const arrays = await Promise.all(
-    partUris.map((uri) =>
-      FileSystem.readAsStringAsync(uri, { encoding: EncodingType.Base64 }).then(
-        base64ToUint8Array,
-      ),
-    ),
-  );
-  const total = arrays.reduce((n, a) => n + a.length, 0);
-  const merged = new Uint8Array(total);
-  let o = 0;
-  for (const a of arrays) {
-    merged.set(a, o);
-    o += a.length;
-  }
-  await FileSystem.writeAsStringAsync(destUri, uint8ToBase64(merged), {
-    encoding: EncodingType.Base64,
-  });
-  for (const uri of partUris) {
-    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
-  }
-}
 
 function throwNon2xx(status: number): never {
   throw new Error(
@@ -144,12 +163,12 @@ async function downloadSingleOrChunked(
 
     if (partUris.length === 1) {
       try {
-        await FileSystem.moveAsync({ from: partUris[0], to: destUri });
+        await FileSystem.moveAsync({ from: partUris[0]!, to: destUri });
       } catch {
-        await mergePartFiles(partUris, destUri);
+        await mergePartFilesNative(partUris, destUri);
       }
     } else {
-      await mergePartFiles(partUris, destUri);
+      await mergePartFilesNative(partUris, destUri);
     }
   } catch (e) {
     for (const p of partUris) {

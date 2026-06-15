@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type ViewToken,
 } from 'react-native';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
@@ -30,9 +31,12 @@ import {
 } from '@/lib/nrmTrackListIndex';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
 import {
+  invalidateListCoverDiskCache,
+  prefetchInitialTrackCovers,
   trackListCoverKey,
   useTrackListCoverMap,
 } from '@/lib/nrmTrackListCoverLoader';
+import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 import { hasAnyWhisperModelOnDevice } from '@/lib/nrmWhisperModelNative';
 import type { NrmWhisperLyricsUiMode } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
@@ -69,6 +73,26 @@ const EMPTY_METADATA_FIELDS: Omit<NrmAudioFileMetadata, 'artist' | 'title'> = {
   coverUrl: '',
 };
 
+function isDownloadTrackItem(item: unknown): item is NrmDownloadTrackItem {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    'audioUri' in item &&
+    'fileName' in item
+  );
+}
+
+function tracksFromViewTokens(
+  viewableItems: ViewToken[],
+): NrmDownloadTrackItem[] {
+  const out: NrmDownloadTrackItem[] = [];
+  for (const entry of viewableItems) {
+    if (entry.isViewable && isDownloadTrackItem(entry.item)) {
+      out.push(entry.item);
+    }
+  }
+  return out;
+}
 function TrackRowCoverArt({
   coverKey,
   coverUrl,
@@ -159,12 +183,52 @@ export function NrmTrackMetadataSettingsHome({
     [filteredTracks],
   );
 
-  const coverByKey = useTrackListCoverMap(tracks, listGeneration);
+  const { coverByKey, requestCovers } = useTrackListCoverMap(listGeneration);
+  const requestCoversRef = useRef(requestCovers);
+  requestCoversRef.current = requestCovers;
 
   const searchFlatData = useMemo(
     () => sortTracksForList(filteredTracks),
     [filteredTracks],
   );
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 15,
+    minimumViewTime: 80,
+  }).current;
+
+  const onSectionViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const visible = tracksFromViewTokens(viewableItems);
+      if (visible.length > 0) requestCoversRef.current(visible);
+    },
+    [],
+  );
+
+  const onSearchViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const visible = tracksFromViewTokens(viewableItems);
+      if (visible.length > 0) requestCoversRef.current(visible);
+    },
+    [],
+  );
+
+  /** 목록 로드 직후 상단 일부만 선로드 (전체 일괄 로드 방지) */
+  useEffect(() => {
+    if (loading || searchOpen || tracks.length === 0) return;
+    prefetchInitialTrackCovers(tracks, requestCovers);
+  }, [loading, listGeneration, requestCovers, searchOpen, tracks]);
+
+  /** 검색 결과 — 캐시에 없는 항목만 비동기 요청 (디바운스) */
+  useEffect(() => {
+    if (!searchOpen) return;
+    const t = setTimeout(() => {
+      if (searchFlatData.length > 0) {
+        requestCovers(searchFlatData);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [requestCovers, searchFlatData, searchOpen]);
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const closeSearch = useCallback(() => {
@@ -226,6 +290,10 @@ export function NrmTrackMetadataSettingsHome({
       void (async () => {
         savingTracksRef.current.add(trackKey);
         try {
+          // 저장 전에 캐시 무효화 (저장 후 새 데이터를 읽도록)
+          invalidateAudioMetadataCache(track.audioUri);
+          await invalidateListCoverDiskCache(trackListCoverKey(track));
+
           const newLyricsRaw = metadata.lyrics;
           let newLyricsMode: NrmWhisperLyricsUiMode = 'unset';
           if (newLyricsRaw) {
@@ -356,6 +424,8 @@ export function NrmTrackMetadataSettingsHome({
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            viewabilityConfig={viewabilityConfig}
+            onViewableItemsChanged={onSearchViewableItemsChanged}
           />
         ) : (
           <SectionList
@@ -375,6 +445,8 @@ export function NrmTrackMetadataSettingsHome({
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             stickySectionHeadersEnabled
+            viewabilityConfig={viewabilityConfig}
+            onViewableItemsChanged={onSectionViewableItemsChanged}
             onScrollToIndexFailed={() => {
               sectionListRef.current?.scrollToLocation({
                 sectionIndex: 0,

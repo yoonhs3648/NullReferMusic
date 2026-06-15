@@ -1,10 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
 
+/**
+ * 특정 트랙의 커버 디스크 캐시를 삭제한다.
+ * 메타데이터 저장 후 호출해 stale 커버 이미지를 방지한다.
+ */
+export async function invalidateListCoverDiskCache(coverKey: string): Promise<void> {
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) return;
+  const dest = `${cacheRoot}nrm-list-cover-${hashCoverKey(coverKey)}.jpg`;
+  await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
+  coverResultCache.delete(coverKey);
+  loadingKeys.delete(coverKey);
+}
+
 const CONCURRENCY = 4;
+const INITIAL_PREFETCH_COUNT = 12;
 
 export function trackListCoverKey(track: Pick<NrmDownloadTrackItem, 'audioUri' | 'fileName'>): string {
   return `${track.audioUri.trim()}\0${track.fileName.trim()}`;
@@ -18,6 +32,18 @@ function hashCoverKey(key: string): string {
   return (hash >>> 0).toString(16);
 }
 
+/** 세션 내 커버 URL 캐시 (listGeneration 갱신 시 초기화) */
+const coverResultCache = new Map<string, string>();
+const loadingKeys = new Set<string>();
+
+type CoverQueueJob = {
+  track: NrmDownloadTrackItem;
+  generation: number;
+};
+
+let coverQueue: CoverQueueJob[] = [];
+let coverQueueRunning = false;
+
 /**
  * 병렬 readMetadata가 같은 cover 임시 경로를 공유하거나 Image URI 캐시가 섞이지 않도록
  * 트랙별 전용 캐시 파일로 복사한다.
@@ -25,7 +51,6 @@ function hashCoverKey(key: string): string {
 async function isolateListCoverFile(
   coverKey: string,
   sourceUrl: string,
-  listGeneration: number,
 ): Promise<string> {
   const trimmed = sourceUrl.trim();
   if (!trimmed) return '';
@@ -33,7 +58,7 @@ async function isolateListCoverFile(
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) return trimmed;
 
-  const dest = `${cacheRoot}nrm-list-cover-${listGeneration}-${hashCoverKey(coverKey)}.jpg`;
+  const dest = `${cacheRoot}nrm-list-cover-${hashCoverKey(coverKey)}.jpg`;
 
   try {
     const existing = await FileSystem.getInfoAsync(dest);
@@ -67,81 +92,149 @@ async function isolateListCoverFile(
   return trimmed;
 }
 
-async function mapWithConcurrency<T>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
+async function loadOneCover(
+  track: NrmDownloadTrackItem,
+  generation: number,
+  generationRef: { current: number },
+  onResult: (key: string, url: string) => void,
 ): Promise<void> {
-  let index = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length || 1) }, async () => {
-    while (index < items.length) {
-      const i = index++;
-      await fn(items[i]!);
+  const key = trackListCoverKey(track);
+  try {
+    const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
+    if (generationRef.current !== generation) return;
+    const rawUrl = meta.coverUrl?.trim() ?? '';
+    const url = rawUrl ? await isolateListCoverFile(key, rawUrl) : '';
+    if (generationRef.current !== generation) return;
+    coverResultCache.set(key, url);
+    onResult(key, url);
+  } catch {
+    if (generationRef.current !== generation) return;
+    coverResultCache.set(key, '');
+    onResult(key, '');
+  } finally {
+    loadingKeys.delete(key);
+  }
+}
+
+async function drainCoverQueue(
+  generationRef: { current: number },
+  onResult: (key: string, url: string) => void,
+): Promise<void> {
+  if (coverQueueRunning) return;
+  coverQueueRunning = true;
+  try {
+    while (coverQueue.length > 0) {
+      const batch: CoverQueueJob[] = [];
+      while (batch.length < CONCURRENCY && coverQueue.length > 0) {
+        const job = coverQueue.shift()!;
+        if (job.generation !== generationRef.current) continue;
+        const key = trackListCoverKey(job.track);
+        if (coverResultCache.has(key)) {
+          loadingKeys.delete(key);
+          continue;
+        }
+        batch.push(job);
+      }
+      if (batch.length === 0) continue;
+      await Promise.all(
+        batch.map((job) =>
+          loadOneCover(job.track, job.generation, generationRef, onResult),
+        ),
+      );
     }
-  });
-  await Promise.all(workers);
+  } finally {
+    coverQueueRunning = false;
+    if (coverQueue.length > 0) {
+      void drainCoverQueue(generationRef, onResult);
+    }
+  }
+}
+
+function cacheToRecord(): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [k, v] of coverResultCache) {
+    next[k] = v;
+  }
+  return next;
 }
 
 /**
- * 다운로드 트랙 목록용 임베디드 커버 URL (트랙별 1회 read, 동시성 제한).
- * FlatList 행마다 async read 하면 셀 재활용 시 잘못된 커ver가 보일 수 있어 상위에서 일괄 로드한다.
+ * 트랙 목록 커버를 **요청 시에만** 비동기 로드한다.
+ * - 스크롤로 보이는 행 · 검색 결과 등 `requestCovers`로 넘긴 트랙만 큐에 쌓음
+ * - 이미 캐시된 트랙은 재요청하지 않음
  *
- * @param listGeneration reload()마다 +1 — 저장·목록 갱신 후 커ver 캐시 무효화
+ * @param listGeneration reload()마다 +1 — 저장·목록 갱신 후 커버 캐시 무효화
  */
-export function useTrackListCoverMap(
-  tracks: NrmDownloadTrackItem[],
-  listGeneration: number,
-): Record<string, string> {
-  const [coverByKey, setCoverByKey] = useState<Record<string, string>>({});
+export function useTrackListCoverMap(listGeneration: number): {
+  coverByKey: Record<string, string>;
+  requestCovers: (tracks: NrmDownloadTrackItem[]) => void;
+} {
+  const [coverByKey, setCoverByKey] = useState<Record<string, string>>(cacheToRecord);
   const generationRef = useRef(0);
   const lastListGenerationRef = useRef(listGeneration);
 
+  const applyCoverResult = useCallback((key: string, url: string) => {
+    setCoverByKey((prev) => {
+      if (prev[key] === url) return prev;
+      return { ...prev, [key]: url };
+    });
+  }, []);
+
   useEffect(() => {
-    const generation = ++generationRef.current;
     const bustCache = listGeneration !== lastListGenerationRef.current;
+    if (!bustCache) return;
     lastListGenerationRef.current = listGeneration;
+    generationRef.current += 1;
+    coverResultCache.clear();
+    loadingKeys.clear();
+    coverQueue = [];
+    setCoverByKey({});
+  }, [listGeneration]);
 
-    if (bustCache) {
-      setCoverByKey({});
-    } else {
-      const wanted = new Set(tracks.map(trackListCoverKey));
-      setCoverByKey((prev) => {
-        const next: Record<string, string> = {};
-        for (const key of wanted) {
-          if (prev[key]) next[key] = prev[key];
-        }
-        return next;
-      });
-    }
+  const requestCovers = useCallback(
+    (tracks: NrmDownloadTrackItem[]) => {
+      if (tracks.length === 0) return;
+      const generation = generationRef.current;
+      let queued = false;
 
-    if (tracks.length === 0) return;
-
-    void (async () => {
-      await mapWithConcurrency(tracks, CONCURRENCY, async (track) => {
-        if (generationRef.current !== generation) return;
+      for (const track of tracks) {
         const key = trackListCoverKey(track);
-        try {
-          const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
-          if (generationRef.current !== generation) return;
-          const rawUrl = meta.coverUrl?.trim() ?? '';
-          const url = rawUrl
-            ? await isolateListCoverFile(key, rawUrl, listGeneration)
-            : '';
-          if (generationRef.current !== generation) return;
-          setCoverByKey((prev) => {
-            if (prev[key] === url) return prev;
-            return { ...prev, [key]: url };
-          });
-        } catch {
-          if (generationRef.current !== generation) return;
-          setCoverByKey((prev) => {
-            if (prev[key] === '') return prev;
-            return { ...prev, [key]: '' };
-          });
-        }
-      });
-    })();
-  }, [tracks, listGeneration]);
+        if (coverResultCache.has(key) || loadingKeys.has(key)) continue;
+        loadingKeys.add(key);
+        coverQueue.push({ track, generation });
+        queued = true;
+      }
 
-  return coverByKey;
+      if (queued) {
+        void drainCoverQueue(generationRef, applyCoverResult);
+      } else {
+        // 캐시에만 있고 state에 아직 없는 키 동기화
+        setCoverByKey((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const track of tracks) {
+            const key = trackListCoverKey(track);
+            const cached = coverResultCache.get(key);
+            if (cached !== undefined && prev[key] !== cached) {
+              next[key] = cached;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      }
+    },
+    [applyCoverResult],
+  );
+
+  return { coverByKey, requestCovers };
+}
+
+/** 목록 최초 진입 시 상단 N개만 선로드 */
+export function prefetchInitialTrackCovers(
+  tracks: NrmDownloadTrackItem[],
+  requestCovers: (tracks: NrmDownloadTrackItem[]) => void,
+): void {
+  if (tracks.length === 0) return;
+  requestCovers(tracks.slice(0, INITIAL_PREFETCH_COUNT));
 }

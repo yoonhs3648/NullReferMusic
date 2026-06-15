@@ -6,6 +6,26 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { normalizeDownloadMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { isBogusEmbeddedAudioTitle } from '@/lib/nrmAudioMetadataTitle';
 
+/** 트랙별 메타데이터 인메모리 캐시 (audioUri\0fileName → 결과) */
+const metadataCache = new Map<string, NrmAudioFileMetadata>();
+
+/**
+ * 지정 URI 또는 전체 메타데이터 캐시 무효화.
+ * 트랙 저장 후 호출해 stale 데이터를 방지한다.
+ */
+export function invalidateAudioMetadataCache(audioUri?: string): void {
+  if (audioUri) {
+    const prefix = `${audioUri}\0`;
+    for (const k of metadataCache.keys()) {
+      if (k.startsWith(prefix)) {
+        metadataCache.delete(k);
+      }
+    }
+  } else {
+    metadataCache.clear();
+  }
+}
+
 type NativeReadResult = {
   title?: string;
   artist?: string;
@@ -59,6 +79,10 @@ export async function readAudioFileMetadata(
   audioUri: string,
   fileName: string,
 ): Promise<NrmAudioFileMetadata> {
+  const cacheKey = `${audioUri}\0${fileName}`;
+  const cached = metadataCache.get(cacheKey);
+  if (cached) return cached;
+
   if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     return normalizeDownloadMetadata({
       artist: '',
@@ -108,5 +132,7 @@ export async function readAudioFileMetadata(
   if (localUri.includes('/cache/') || localUri.includes('cache%2F')) {
     await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
   }
+
+  metadataCache.set(cacheKey, meta);
   return meta;
 }

@@ -349,10 +349,15 @@ export function NrmYoutubeHome({
     nextCursor,
   ]);
 
+  const showScrollTopRef = useRef(false);
   const onResultsScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = e.nativeEvent.contentOffset.y;
-      setShowScrollTop(y >= YOUTUBE_SEARCH_SCROLL_TOP_THRESHOLD);
+      const shouldShow = y >= YOUTUBE_SEARCH_SCROLL_TOP_THRESHOLD;
+      if (shouldShow !== showScrollTopRef.current) {
+        showScrollTopRef.current = shouldShow;
+        setShowScrollTop(shouldShow);
+      }
     },
     [],
   );
@@ -1004,7 +1009,7 @@ export function NrmYoutubeHome({
             onEndReached={() => void loadMore()}
             onEndReachedThreshold={0.35}
             onScroll={onResultsScroll}
-            scrollEventThrottle={16}
+            scrollEventThrottle={200}
             keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             nestedScrollEnabled
