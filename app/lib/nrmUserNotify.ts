@@ -4,6 +4,8 @@ export type NotifyPayload = {
 
 export type ConfirmPayload = {
   message: string;
+  /** message 앞에 강조 색으로 표시할 문구 (예: "가수 - 곡제목") */
+  highlight?: string;
   cancelLabel: string;
   confirmLabel: string;
   resolve: (confirmed: boolean) => void;
@@ -46,7 +48,7 @@ export function notifyUser(message: string): void {
 /** 예/아니오 확인 오버레이(NrmNotifyHost). 리스너가 없으면 `false`. */
 export function confirmUser(
   message: string,
-  options?: { cancelLabel?: string; confirmLabel?: string },
+  options?: { cancelLabel?: string; confirmLabel?: string; highlight?: string },
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const listener = menuConfirmListener ?? confirmListener;
@@ -56,6 +58,7 @@ export function confirmUser(
     }
     listener({
       message: message.trim() || ' ',
+      highlight: options?.highlight?.trim() || undefined,
       cancelLabel: options?.cancelLabel ?? '아니요',
       confirmLabel: options?.confirmLabel ?? '네',
       resolve,

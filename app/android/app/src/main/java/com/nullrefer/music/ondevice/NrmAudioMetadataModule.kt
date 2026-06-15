@@ -554,15 +554,27 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     inputPath: String,
     audioFormat: String,
     audioQuality: Int,
+    vbrMode: String,
+    losslessMode: String,
     metadata: ReadableMap,
     promise: Promise,
   ) {
     Thread {
       val stageT0 = SystemClock.elapsedRealtime()
+      val encodeOptions =
+        AudioEncodeOptions(
+          quality = audioQuality.coerceIn(0, 9),
+          vbrMode = vbrMode.trim().ifBlank { "vbr_best" },
+          losslessMode = losslessMode.trim().ifBlank { "smart" },
+        )
       NrmStageLog.log(
         "ffmpeg",
         "transcode_meta_start",
-        mapOf("input" to inputPath.take(120), "format" to audioFormat),
+        mapOf(
+          "input" to inputPath.take(120),
+          "format" to audioFormat,
+          "vbrMode" to encodeOptions.vbrMode,
+        ),
       )
       try {
         val srcPath = inputPath.removePrefix("file://")
@@ -574,15 +586,14 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
 
         val ctx = reactApplicationContext.applicationContext
         val fmt = audioFormat.trim().lowercase().ifBlank { "m4a" }
-        val quality = audioQuality.coerceIn(0, 9)
 
-        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src)
+        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src, encodeOptions)
 
         val paths =
           FfmpegBootstrap.ensure(ctx)
             ?: throw IllegalStateException("ffmpeg를 사용할 수 없습니다.")
 
-        val plan = FfmpegEncoderSupport.plan(ctx, fmt, quality)
+        val plan = FfmpegEncoderSupport.plan(ctx, fmt, encodeOptions)
         if (plan.fallbackReason != null) {
           throw Exception("TRANSCODE_FORMAT_UNAVAILABLE:$fmt")
         }

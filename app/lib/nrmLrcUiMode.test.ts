@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import {
   countDuplicateTimestampLyrics,
   detectLrcUiModeFromText,
+  detectLyricsUiModeFromStoredText,
   DUPLICATE_TS_TRANSLATION_THRESHOLD,
+  parseLyricsModeFromLrcText,
+  withNrmLyricsModeHeader,
 } from './nrmLrcUiMode';
+import { inferMelonLyricsUiModeFromContext } from './nrmMelonLyrics';
 
 function dualLineLrc(pairs: number): string {
   const lines: string[] = [];
@@ -56,5 +60,35 @@ const singleLines = Array.from(
   (_, i) => `[03:${String(i).padStart(2, '0')}.00] Only one line ${i}`,
 ).join('\n');
 assert.equal(detectLrcUiModeFromText(singleLines), 'configured');
+
+const melonTagged = withNrmLyricsModeHeader(dualLineLrc(DUPLICATE_TS_TRANSLATION_THRESHOLD), 'melon_translation');
+assert.equal(parseLyricsModeFromLrcText(melonTagged), 'melon_translation');
+assert.equal(detectLrcUiModeFromText(melonTagged), 'translation');
+
+const embeddedMelonTagged = withNrmLyricsModeHeader(
+  Array.from({ length: 20 }, (_, i) => `[03:${String(i).padStart(2, '0')}.00] Only one line ${i}`).join('\n'),
+  'melon',
+);
+assert.deepEqual(detectLyricsUiModeFromStoredText(embeddedMelonTagged), {
+  mode: 'melon',
+  lrcModeFromTag: 'melon',
+});
+assert.deepEqual(detectLyricsUiModeFromStoredText('__AUTO_FROM_MELON__:melon'), {
+  mode: 'melon',
+  lrcModeFromTag: null,
+});
+
+assert.equal(
+  inferMelonLyricsUiModeFromContext(
+    'translation',
+    '첫 줄\n둘째 줄',
+    'https://www.melon.com/song/detail.htm?songId=123',
+  ),
+  'melon_translation',
+);
+assert.equal(
+  inferMelonLyricsUiModeFromContext('configured', '가사\n두번째', 'https://example.com'),
+  'configured',
+);
 
 console.log('nrmLrcUiMode.test.ts: ok');

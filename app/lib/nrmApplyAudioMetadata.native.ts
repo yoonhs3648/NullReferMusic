@@ -20,6 +20,8 @@ type NativeAudioMetadata = {
     inputPath: string,
     audioFormat: string,
     audioQuality: number,
+    vbrMode: string,
+    losslessMode: string,
     metadata: NrmAudioFileMetadata,
   ) => Promise<{ path: string; coverEmbedded: boolean }>;
   /** 동기화 가사(LRC)를 오디오 파일 메타데이터로 임베드 (mp3: SYLT, m4a: ©lyr) */
@@ -76,8 +78,8 @@ export async function syncMediaStoreAudioTags(
  */
 export async function transcodeAndApplyMetadataForAudio(
   inputPath: string,
+  encode: import('@/lib/nrmDownloadSettings').NrmDownloadEncodeSettings,
   audioFormat: string,
-  audioQuality: number,
   metadata: NrmAudioFileMetadata,
 ): Promise<{ path: string; coverEmbedded: boolean }> {
   if (Platform.OS !== 'android') {
@@ -88,7 +90,14 @@ export async function transcodeAndApplyMetadataForAudio(
     throw new Error('NrmAudioMetadata.transcodeAndApplyMetadata를 사용할 수 없습니다.');
   }
   const src = inputPath.startsWith('file://') ? inputPath.slice(7) : inputPath;
-  const out = await mod.transcodeAndApplyMetadata(src, audioFormat, audioQuality, metadata);
+  const out = await mod.transcodeAndApplyMetadata(
+    src,
+    audioFormat,
+    encode.audioQuality,
+    encode.vbrMode,
+    encode.losslessMode,
+    metadata,
+  );
   const path = out?.path?.trim();
   if (!path) throw new Error('결합 변환 결과 경로가 비어 있습니다.');
   return {

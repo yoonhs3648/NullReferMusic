@@ -286,17 +286,18 @@ async function ensureAudioMatchesUserExtension(
     extensionFromLocalPath,
     assertLocalPathMatchesExtension,
   } = await import('@/lib/nrmDownloadSettings');
+  const { shouldSkipExtensionTranscode } = await import('@/lib/nrmDownloadEncodePolicy');
   const wantExt = encode.extension.slice(1).toLowerCase();
   const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
   const haveExt = extensionFromLocalPath(path);
-  if (haveExt === wantExt) {
+  if (shouldSkipExtensionTranscode(encode.losslessMode, haveExt, wantExt)) {
     return fileUri;
   }
 
   const { path: outPath } = await transcodeAudioOnDevice(
     path,
     extensionToYtDlpFormat(encode.extension),
-    encode.audioQuality,
+    encode,
   );
   const outUri = outPath.startsWith('file://') ? outPath : `file://${outPath}`;
   assertLocalPathMatchesExtension(outUri, encode.extension);

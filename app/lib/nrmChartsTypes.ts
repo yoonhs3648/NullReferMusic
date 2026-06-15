@@ -15,6 +15,16 @@ export type ChartTrackItem = {
   releaseDate: string;
 };
 
+/** 플랫폼 트랙 표시·확인 팝업용 `가수 - 제목` 라벨 */
+export function chartTrackDisplayLabel(
+  track: Pick<ChartTrackItem, 'artists' | 'title'>,
+): string {
+  const artist = (track.artists ?? '').trim();
+  const title = (track.title ?? '').trim();
+  if (artist && title) return `${artist} - ${title}`;
+  return artist || title || '';
+}
+
 export type SpotifyChartPayload = {
   platform: string;
   playlistId: string;

@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type ListRenderItemInfo,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -54,6 +55,7 @@ import {
 import { resolveDownloadFileName } from '@/lib/nrmResolveDownloadPayload';
 import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
+import { chartTrackDisplayLabel } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
@@ -189,6 +191,7 @@ export function NrmYoutubeHome({
   downloadMetadataAuth,
   fillHeight = false,
 }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
   const [query, setQuery] = useState(initialQuery ?? '');
   const [committedQuery, setCommittedQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -197,6 +200,8 @@ export function NrmYoutubeHome({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const initialQueryFiredRef = useRef(false);
+  const platformQueryRef = useRef((initialQuery ?? '').trim());
+  const metadataRetainChosenRef = useRef(false);
   const listRef = useRef<FlatList<YoutubeSearchItem>>(null);
   const loadMoreLockRef = useRef(false);
   const [results, setResults] = useState<YoutubeSearchItem[]>([]);
@@ -214,7 +219,7 @@ export function NrmYoutubeHome({
   const [lyricsTranslationFailedOpen, setLyricsTranslationFailedOpen] = useState(false);
   const [lyricsTranslationExhausted, setLyricsTranslationExhausted] = useState(false);
   const [chartContextActive, setChartContextActive] = useState(
-    !!chartDownloadTrack && !!initialQuery,
+    () => !!chartDownloadTrack,
   );
   const latestSearchTokenRef = useRef(0);
 
@@ -246,7 +251,6 @@ export function NrmYoutubeHome({
 
   const runSearchWithQuery = useCallback(
     async (q: string, token: number) => {
-      onSearchCommitted?.();
       setLoading(true);
       setLoadingMore(false);
       setPlayingId(null);
@@ -277,16 +281,21 @@ export function NrmYoutubeHome({
         setLoading(false);
       }
     },
-    [applySearchSuccess, onSearchCommitted],
+    [applySearchSuccess],
   );
 
   useEffect(() => {
     if (!initialQuery || initialQueryFiredRef.current) return;
     initialQueryFiredRef.current = true;
-    setChartContextActive(!!chartDownloadTrack);
+    platformQueryRef.current = initialQuery.trim();
+    metadataRetainChosenRef.current = false;
+    if (chartDownloadTrack) {
+      setChartContextActive(true);
+    }
     setQuery(initialQuery);
     const q = initialQuery.trim();
     if (!q) return;
+    onSearchCommitted?.();
     setCommittedQuery(q);
     const token = ++latestSearchTokenRef.current;
     void runSearchWithQuery(q, token);
@@ -295,19 +304,49 @@ export function NrmYoutubeHome({
   }, []);
 
   useEffect(() => {
-    if (!chartDownloadTrack || !initialQuery) {
+    if (!chartDownloadTrack) {
       setChartContextActive(false);
     }
-  }, [chartDownloadTrack, initialQuery]);
+  }, [chartDownloadTrack]);
+
+  const resolveChartMetadataOnSearch = useCallback(
+    async (q: string): Promise<void> => {
+      if (!chartDownloadTrack) {
+        setChartContextActive(false);
+        return;
+      }
+      const platformQ = platformQueryRef.current;
+      if (q === platformQ) {
+        if (metadataRetainChosenRef.current && !chartContextActive) {
+          return;
+        }
+        setChartContextActive(true);
+        return;
+      }
+      if (metadataRetainChosenRef.current) {
+        return;
+      }
+      const label = chartTrackDisplayLabel(chartDownloadTrack) || platformQ;
+      const keep = await confirmUser('의 메타데이터를 유지할까요?', {
+        highlight: label,
+        cancelLabel: '아니요',
+        confirmLabel: '네',
+      });
+      metadataRetainChosenRef.current = true;
+      setChartContextActive(keep);
+    },
+    [chartContextActive, chartDownloadTrack],
+  );
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
-    setChartContextActive(false);
+    onSearchCommitted?.();
     setCommittedQuery(q);
+    await resolveChartMetadataOnSearch(q);
     const token = ++latestSearchTokenRef.current;
     await runSearchWithQuery(q, token);
-  }, [query, runSearchWithQuery]);
+  }, [onSearchCommitted, query, resolveChartMetadataOnSearch, runSearchWithQuery]);
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || !hasMore || !nextCursor || !committedQuery.trim()) {
@@ -367,8 +406,10 @@ export function NrmYoutubeHome({
     setShowScrollTop(false);
   }, []);
 
-  const effectiveChartTrack = chartContextActive ? chartDownloadTrack : null;
-  const effectiveChartSource = chartContextActive ? chartDownloadSource : null;
+  const effectiveChartTrack =
+    chartContextActive && chartDownloadTrack ? chartDownloadTrack : null;
+  const effectiveChartSource =
+    chartContextActive && chartDownloadTrack ? chartDownloadSource : null;
 
   const metadataContext = useMemo(
     () => ({
@@ -792,7 +833,12 @@ export function NrmYoutubeHome({
   const bodyColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80;
   const rowBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const useResultList =
-    fillHeight || !isWelcome || results.length > 0 || loading || committedQuery.length > 0;
+    fillHeight ||
+    committedQuery.length > 0 ||
+    loading ||
+    loadingMore ||
+    results.length > 0;
+  const resultListMaxHeight = Math.min(windowHeight * 0.55, 520);
 
   const searchHeader = (
     <View style={styles.searchRowWrap}>
@@ -963,13 +1009,13 @@ export function NrmYoutubeHome({
         item={downloadModalItem}
         isDark={isDark}
         metadataSource={
-          effectiveChartSource === 'lastfm'
-            ? 'lastfm'
-            : effectiveChartSource === 'melon'
-              ? 'chart'
-              : effectiveChartTrack
-                ? 'chart'
-                : 'main'
+          !chartContextActive || !chartDownloadTrack
+            ? 'main'
+            : chartDownloadSource === 'melon'
+              ? 'melon'
+              : chartDownloadSource === 'lastfm'
+                ? 'lastfm'
+                : 'chart'
         }
         initialArtist={effectiveChartTrack?.artists}
         initialTitle={effectiveChartTrack?.title}
@@ -992,7 +1038,10 @@ export function NrmYoutubeHome({
         <>
           <FlatList
             ref={listRef}
-            style={styles.resultList}
+            style={[
+              styles.resultList,
+              !fillHeight && { maxHeight: resultListMaxHeight, flexGrow: 0 },
+            ]}
             contentContainerStyle={styles.resultListContent}
             data={results}
             keyExtractor={(item) => item.videoId}

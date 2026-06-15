@@ -100,12 +100,8 @@ export async function resolveWhisperLyricsInMetadata(
     });
     const translateT0 = Date.now();
     try {
-      const [{ getDeepLApiKey }, { translateLrcToKoreanWithDeepL }] = await Promise.all([
-        import('@/lib/nrmDeepLApiSettings'),
-        import('@/lib/nrmDeepLApiClient'),
-      ]);
-      const apiKey = await getDeepLApiKey();
-      const translated = await translateLrcToKoreanWithDeepL(lrc, apiKey);
+      const { translateLrcToKorean } = await import('@/lib/nrmTranslationClient');
+      const translated = await translateLrcToKorean(lrc);
       const elapsedMs = Date.now() - translateT0;
       if (translated.ok) {
         lrc = translated.lrc;

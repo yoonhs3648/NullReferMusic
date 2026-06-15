@@ -38,6 +38,8 @@ import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWee
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
+import { NrmTranslationSettingsPanel } from '@/components/nrm/settings/NrmTranslationSettingsPanel';
+import { NrmLibreTranslateInstallPanel } from '@/components/nrm/settings/NrmLibreTranslateInstallPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { hasLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
@@ -121,16 +123,20 @@ type Panel =
   | 'settings'
   | 'appSettings'
   | 'searchSettings'
+  | 'translationSettings'
   | 'screenSettings'
   | 'spotifyApiManage'
   | 'lastfmApiManage'
   | 'deeplApiManage'
+  | 'libretranslateInstall'
   | 'genreTagSettings'
   | 'weeklySnapshotSettings'
   | 'downloadManage'
   | 'downloadPathSettings'
   | 'downloadExtensionSettings'
   | 'downloadQualitySettings'
+  | 'downloadVbrSettings'
+  | 'downloadLosslessSettings'
   | 'downloadFilenameSettings'
   | 'downloadMetadataSettings'
   | 'downloadLyricsEmbedSettings'
@@ -469,6 +475,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'downloadPathSettings':
       case 'downloadExtensionSettings':
       case 'downloadQualitySettings':
+      case 'downloadVbrSettings':
+      case 'downloadLosslessSettings':
       case 'downloadFilenameSettings':
       case 'downloadMetadataSettings':
       case 'downloadLyricsEmbedSettings':
@@ -949,6 +957,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => setPanel('translationSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    번역 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => setPanel('screenSettings')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1039,6 +1062,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     번역기 API Key 관리
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('libretranslateInstall')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    번역기 설치
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1144,6 +1182,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
+            {panel === 'libretranslateInstall' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <Pressable
+                  onPress={() => setPanel('appSettings')}
+                  style={styles.backRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={nrmTokens.color.primary}
+                  />
+                  <Text style={styles.backText}>뒤로</Text>
+                </Pressable>
+                <Text style={[styles.panelTitle, { color: titleColor }]}>
+                  번역기 설치
+                </Text>
+                <NrmLibreTranslateInstallPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  active={panel === 'libretranslateInstall'}
+                />
+              </DrawerShell>
+            ) : null}
+
             {panel === 'downloadManage' ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -1202,6 +1268,36 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     비트레이트 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadVbrSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    VBR 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadLosslessSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    무손실 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1320,6 +1416,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
                   section="quality"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadVbrSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="vbr"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadLosslessSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="lossless"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={() => setPanel('downloadManage')}
@@ -1516,6 +1640,35 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     </Pressable>
                   );
                 })}
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'translationSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <Pressable
+                  onPress={() => setPanel('settings')}
+                  style={styles.backRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={nrmTokens.color.primary}
+                  />
+                  <Text style={styles.backText}>뒤로</Text>
+                </Pressable>
+                <Text style={[styles.panelTitle, { color: titleColor }]}>
+                  번역 설정
+                </Text>
+                <NrmTranslationSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  active={panel === 'translationSettings'}
+                />
               </DrawerShell>
             ) : null}
 

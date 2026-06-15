@@ -197,7 +197,11 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
             ),
         )
         val demuxT0 = SystemClock.elapsedRealtime()
-        val audioFile = AudioDemux.ensureAudioOnly(ctx, outFile)
+        val audioFile = AudioDemux.ensureAudioOnly(
+            ctx,
+            outFile,
+            AudioEncodeOptions(quality = quality),
+        )
         NrmStageLog.log(
             "ytdlp",
             "demux_ok",
@@ -244,17 +248,27 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     inputPath: String,
     audioFormat: String,
     audioQuality: Int,
+    vbrMode: String,
+    losslessMode: String,
     promise: Promise,
   ) {
     Thread {
       val stageT0 = SystemClock.elapsedRealtime()
+      val encodeOptions =
+        AudioEncodeOptions(
+          quality = audioQuality.coerceIn(0, 9),
+          vbrMode = vbrMode.trim().ifBlank { "vbr_best" },
+          losslessMode = losslessMode.trim().ifBlank { "smart" },
+        )
       NrmStageLog.log(
           "ffmpeg",
           "transcode_start",
           mapOf(
               "input" to inputPath.take(120),
               "format" to audioFormat,
-              "quality" to audioQuality,
+              "quality" to encodeOptions.quality,
+              "vbrMode" to encodeOptions.vbrMode,
+              "losslessMode" to encodeOptions.losslessMode,
           ),
       )
       try {
@@ -266,14 +280,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         }
         val ctx = reactApplicationContext.applicationContext
         val fmt = audioFormat.trim().ifBlank { "mp3" }
-        val quality = audioQuality.coerceIn(0, 9)
-        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src)
+        val audioSrc = AudioDemux.ensureAudioOnly(ctx, src, encodeOptions)
         val result =
           FfmpegTranscode.transcode(
             ctx,
             audioSrc,
             fmt,
-            quality,
+            encodeOptions,
           )
         val outFile = result.file
         if (result.effectiveFormat.lowercase() != fmt.lowercase()) {

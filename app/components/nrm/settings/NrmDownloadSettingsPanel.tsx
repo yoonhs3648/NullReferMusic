@@ -20,7 +20,9 @@ import {
   loadDownloadAudioExtension,
   loadDownloadAudioQuality,
   loadDownloadFileNameFormat,
+  loadDownloadLosslessMode,
   loadDownloadMetadataMode,
+  loadDownloadVbrMode,
   loadLyricsOutputMode,
   loadWhisperModelPreference,
   NRM_AUDIO_EXTENSIONS,
@@ -32,15 +34,25 @@ import {
   saveDownloadAudioExtension,
   saveDownloadAudioQuality,
   saveDownloadFileNameFormat,
+  saveDownloadLosslessMode,
   saveDownloadMetadataMode,
+  saveDownloadVbrMode,
   saveLyricsOutputMode,
   type NrmAudioExtension,
+  type NrmDownloadLosslessMode,
   type NrmDownloadFileNameFormat,
   type NrmDownloadMetadataMode,
+  type NrmDownloadVbrMode,
   type NrmLyricsOutputMode,
   type NrmWhisperModelPreference,
 } from '@/lib/nrmDownloadSettings';
 import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModelPicker';
+import { NrmDownloadEncodeOptionPicker } from '@/components/nrm/settings/NrmDownloadEncodeOptionPicker';
+import {
+  LOSSLESS_SETTING_OPTIONS,
+  VBR_SETTING_OPTIONS,
+} from '@/lib/nrmDownloadEncodeSettingsUi';
+import { NrmWhisperXAlignPicker } from '@/components/nrm/settings/NrmWhisperXAlignPicker';
 import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import {
   isStandaloneAndroid,
@@ -56,6 +68,8 @@ export type NrmDownloadSettingsSection =
   | 'path'
   | 'extension'
   | 'quality'
+  | 'vbr'
+  | 'lossless'
   | 'filename'
   | 'metadata'
   | 'lyricsEmbed'
@@ -65,6 +79,8 @@ const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   path: '다운로드 경로 설정',
   extension: '확장자 설정',
   quality: '비트레이트 설정',
+  vbr: 'VBR 설정',
+  lossless: '무손실 설정',
   filename: '파일명 설정',
   metadata: '메타데이터 설정',
   lyricsEmbed: 'AI 가사 추출 엔진 설정',
@@ -89,6 +105,8 @@ export function NrmDownloadSettingsPanel({
   const [loaded, setLoaded] = useState(false);
   const [extension, setExtension] = useState<NrmAudioExtension>('.mp3');
   const [audioQuality, setAudioQuality] = useState(0);
+  const [vbrMode, setVbrMode] = useState<NrmDownloadVbrMode>('vbr_best');
+  const [losslessMode, setLosslessMode] = useState<NrmDownloadLosslessMode>('smart');
   const [fileNameFormat, setFileNameFormat] =
     useState<NrmDownloadFileNameFormat>('artist-title');
   const [metadataMode, setMetadataMode] = useState<NrmDownloadMetadataMode>('manual');
@@ -175,12 +193,33 @@ export function NrmDownloadSettingsPanel({
       })();
       return;
     }
-    void loadDownloadAudioQuality()
-      .then((quality) => {
-        setAudioQuality(quality);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
+    if (section === 'vbr') {
+      void loadDownloadVbrMode()
+        .then((mode) => {
+          setVbrMode(mode);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'lossless') {
+      void loadDownloadLosslessMode()
+        .then((mode) => {
+          setLosslessMode(mode);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
+    if (section === 'quality') {
+      void loadDownloadAudioQuality()
+        .then((quality) => {
+          setAudioQuality(quality);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
+      return;
+    }
   }, [section]);
 
   const handlePickFolder = useCallback(async () => {
@@ -201,6 +240,16 @@ export function NrmDownloadSettingsPanel({
   const changeQuality = useCallback((q: number) => {
     setAudioQuality(q);
     void saveDownloadAudioQuality(q);
+  }, []);
+
+  const selectVbrMode = useCallback((mode: NrmDownloadVbrMode) => {
+    setVbrMode(mode);
+    void saveDownloadVbrMode(mode);
+  }, []);
+
+  const selectLosslessMode = useCallback((mode: NrmDownloadLosslessMode) => {
+    setLosslessMode(mode);
+    void saveDownloadLosslessMode(mode);
   }, []);
 
   const selectFileNameFormat = useCallback((format: NrmDownloadFileNameFormat) => {
@@ -418,24 +467,15 @@ export function NrmDownloadSettingsPanel({
                       {
                         borderColor: active
                           ? nrmTokens.color.primary
-                          : 'rgba(128,128,128,0.28)',
+                          : 'rgba(128,128,128,0.35)',
                         backgroundColor: active
-                          ? 'rgba(0,102,204,0.08)'
+                          ? 'rgba(0,102,204,0.12)'
                           : 'transparent',
                       },
                       pressed && styles.pressed,
                     ]}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: active }}>
-                    {active ? (
-                      <Ionicons
-                        name="radio-button-on"
-                        size={18}
-                        color={nrmTokens.color.primary}
-                      />
-                    ) : (
-                      <View style={styles.formatRowSpacer} />
-                    )}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
                     <Text
                       style={[
                         styles.formatRowLabel,
@@ -443,6 +483,15 @@ export function NrmDownloadSettingsPanel({
                       ]}>
                       {opt.label}
                     </Text>
+                    {active ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color={nrmTokens.color.primary}
+                      />
+                    ) : (
+                      <View style={styles.formatRowSpacer} />
+                    )}
                   </Pressable>
                 );
               })}
@@ -456,13 +505,23 @@ export function NrmDownloadSettingsPanel({
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <NrmWhisperModelPicker
-              value={whisperModelPreference}
-              onChange={selectWhisperModelPreference}
-              titleColor={titleColor}
-              bodyColor={bodyColor}
-              active
-            />
+            <>
+              <NrmWhisperXAlignPicker
+                titleColor={titleColor}
+                bodyColor={bodyColor}
+                active
+              />
+              <Text style={[styles.whisperSectionLabel, { color: bodyColor }]}>
+                Whisper 전사 모델
+              </Text>
+              <NrmWhisperModelPicker
+                value={whisperModelPreference}
+                onChange={selectWhisperModelPreference}
+                titleColor={titleColor}
+                bodyColor={bodyColor}
+                active
+              />
+            </>
           )}
         </View>
       ) : null}
@@ -482,7 +541,7 @@ export function NrmDownloadSettingsPanel({
           ) : null}
           <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
             비트레이트(Bit rate)는 오디오 파일이 1초 동안 담는 데이터 양(kbps)입니다.{'\n'}
-            비트레이트가 높을수록 음질이 좋지만 파일 용량은 커집니다.
+            VBR 설정이 «고정(CBR)»일 때 mp3·m4a 변환에 적용됩니다.
           </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
@@ -491,6 +550,56 @@ export function NrmDownloadSettingsPanel({
               value={audioQuality}
               onChange={changeQuality}
               titleColor={titleColor}
+            />
+          )}
+        </View>
+      ) : null}
+
+      {section === 'vbr' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {isStandaloneIos() ? (
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              VBR 설정은 Android APK 변환에만 적용됩니다.
+            </Text>
+          ) : null}
+          <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
+            VBR(가변 비트레이트)은 곡 구간마다 비트를 조절합니다. CBR 선택 시 비트레이트
+            설정의 kbps를 고정으로 사용합니다.
+          </Text>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <NrmDownloadEncodeOptionPicker
+              options={VBR_SETTING_OPTIONS}
+              value={vbrMode}
+              onChange={(id) => selectVbrMode(id as NrmDownloadVbrMode)}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+            />
+          )}
+        </View>
+      ) : null}
+
+      {section === 'lossless' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {isStandaloneIos() ? (
+            <Text style={[styles.platformNote, { color: bodyColor }]}>
+              무손실 설정은 Android APK 변환에만 적용됩니다.
+            </Text>
+          ) : null}
+          <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
+            YouTube 원본은 이미 손실 압축입니다. 이 설정은 불필요한 재압축을 줄이는
+            방식을 고릅니다.
+          </Text>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <NrmDownloadEncodeOptionPicker
+              options={LOSSLESS_SETTING_OPTIONS}
+              value={losslessMode}
+              onChange={(id) => selectLosslessMode(id as NrmDownloadLosslessMode)}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
             />
           )}
         </View>
@@ -758,6 +867,13 @@ const styles = StyleSheet.create({
   whisperTitle: {
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
+  },
+  whisperSectionLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    marginTop: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.xs,
+    opacity: 0.85,
   },
   whisperSubtitle: {
     fontSize: nrmTokens.font.caption,

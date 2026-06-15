@@ -7,20 +7,15 @@ import java.io.File
 object FfmpegTranscode {
   data class Result(
     val file: File,
-    /** 실제 출력 확장자 (요청과 동일해야 함) */
     val effectiveFormat: String,
     val fallbackReason: String? = null,
   )
 
-  /**
-   * @throws IllegalStateException ffmpeg 미준비
-   * @throws Exception ffmpeg exit != 0 또는 출력 없음
-   */
   fun transcode(
     context: Context,
     input: File,
     audioFormat: String,
-    audioQuality: Int,
+    options: AudioEncodeOptions,
   ): Result {
     val paths =
       FfmpegBootstrap.ensure(context)
@@ -28,21 +23,28 @@ object FfmpegTranscode {
 
     val requested = audioFormat.trim().ifBlank { "mp3" }.lowercase()
     if (requested == "mp3") {
-      return transcodeToMp3(context, paths, input, audioQuality)
+      return transcodeToMp3(context, paths, input, options)
     }
 
-    val plan = FfmpegEncoderSupport.plan(context, requested, audioQuality)
+    val plan = FfmpegEncoderSupport.plan(context, requested, options)
     if (plan.fallbackReason != null) {
       throw Exception("TRANSCODE_FORMAT_UNAVAILABLE:$requested")
     }
     return runFfmpegTranscode(paths, input, plan.outputExt, plan.codecArgs, requested, plan.fallbackReason)
   }
 
+  fun transcode(
+    context: Context,
+    input: File,
+    audioFormat: String,
+    audioQuality: Int,
+  ): Result = transcode(context, input, audioFormat, AudioEncodeOptions(quality = audioQuality))
+
   private fun transcodeToMp3(
     context: Context,
     paths: FfmpegBootstrap.FfmpegPaths,
     input: File,
-    audioQuality: Int,
+    options: AudioEncodeOptions,
   ): Result {
     val basePath =
       input.absolutePath.let { path ->
@@ -55,7 +57,7 @@ object FfmpegTranscode {
     }
 
     if (FfmpegEncoderSupport.canReencodeMp3(context)) {
-      val plan = FfmpegEncoderSupport.plan(context, "mp3", audioQuality)
+      val plan = FfmpegEncoderSupport.plan(context, "mp3", options)
       if (plan.outputExt == "mp3" && plan.fallbackReason == null) {
         return runFfmpegTranscode(paths, input, "mp3", plan.codecArgs, "mp3", null)
       }
@@ -65,10 +67,10 @@ object FfmpegTranscode {
       ShineBootstrap.ensure(context)
         ?: throw IllegalStateException("MP3 인코더(shineenc)를 사용할 수 없습니다.")
 
-    val kbps = FfmpegEncoderSupport.mp3BitrateKbps(audioQuality)
+    val kbps = AudioEncodeBitrate.cbrKbpsForOptions(options)
     NrmFileLogger.log(
       "ffmpeg-transcode",
-      "shineenc mp3 in=${input.absolutePath} out=${out.absolutePath} kbps=$kbps",
+      "shineenc mp3 in=${input.absolutePath} out=${out.absolutePath} kbps=$kbps vbr=${options.vbrMode}",
     )
     NrmMediaCpuPriority.runFfmpegPriority {
       ShineMp3Transcode.transcode(paths, shineCli, input, out, kbps)

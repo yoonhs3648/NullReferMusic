@@ -18,7 +18,7 @@ import { nrmChartTrackListStyles } from '@/components/nrm/charts/nrmChartTrackLi
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
-import { detectLrcUiModeFromText, lyricsUiModeToMetadataField } from '@/lib/nrmLrcUiMode';
+import { detectLyricsUiModeFromStoredText, lyricsUiModeToMetadataField } from '@/lib/nrmLrcUiMode';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
@@ -30,6 +30,7 @@ import {
   type TrackListSection,
 } from '@/lib/nrmTrackListIndex';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
+import { deleteDownloadTrack } from '@/lib/nrmDeleteDownloadTrack';
 import {
   invalidateListCoverDiskCache,
   prefetchInitialTrackCovers,
@@ -37,8 +38,14 @@ import {
   useTrackListCoverMap,
 } from '@/lib/nrmTrackListCoverLoader';
 import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
+import {
+  fetchMelonPlainLyricsFromWebsite,
+  inferMelonLyricsUiModeFromContext,
+  isMelonPlainLyricsText,
+  type NrmLyricsUiMode,
+} from '@/lib/nrmMelonLyrics';
+import { isWhisperXAlignModelInstalled } from '@/lib/nrmWhisperXAlignNative';
 import { hasAnyWhisperModelOnDevice } from '@/lib/nrmWhisperModelNative';
-import type { NrmWhisperLyricsUiMode } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchTypes';
@@ -130,7 +137,7 @@ export function NrmTrackMetadataSettingsHome({
   const [initialFields, setInitialFields] = useState<
     Omit<NrmAudioFileMetadata, 'artist' | 'title'>
   >(EMPTY_METADATA_FIELDS);
-  const [initialLyricsMode, setInitialLyricsMode] = useState<NrmWhisperLyricsUiMode>('unset');
+  const [initialLyricsMode, setInitialLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const savingTracksRef = useRef<Set<string>>(new Set());
 
   const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -245,20 +252,32 @@ export function NrmTrackMetadataSettingsHome({
     setInitialLyricsMode('unset');
     try {
       const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
-      let lyricsMode: NrmWhisperLyricsUiMode = 'unset';
+      let lyricsMode: NrmLyricsUiMode = 'unset';
+      let lrcModeFromTag: NrmLyricsUiMode | null = null;
       if (track.lrcUri) {
         try {
           const lrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
             encoding: EncodingType.UTF8,
           });
-          lyricsMode = detectLrcUiModeFromText(lrcText);
+          ({ mode: lyricsMode, lrcModeFromTag } = detectLyricsUiModeFromStoredText(lrcText));
         } catch {
           lyricsMode = 'configured';
         }
       } else if (meta.lyrics) {
-        // LRC 사이드카 없음 → 내장 가사로 모드 감지 (m4a ©lyr / mp3 SYLT)
-        lyricsMode = detectLrcUiModeFromText(meta.lyrics);
+        ({ mode: lyricsMode, lrcModeFromTag } = detectLyricsUiModeFromStoredText(meta.lyrics));
       }
+
+      let melonPlain = isMelonPlainLyricsText(meta.lyrics)
+        ? (meta.lyrics ?? '').trim()
+        : (meta.melonLyricsPlain ?? '').trim();
+      if (!melonPlain) {
+        melonPlain = await fetchMelonPlainLyricsFromWebsite(meta.website);
+      }
+
+      if (!lrcModeFromTag && lyricsMode !== 'unset') {
+        lyricsMode = inferMelonLyricsUiModeFromContext(lyricsMode, melonPlain, meta.website);
+      }
+
       setInitialLyricsMode(lyricsMode);
       const { artist, title } = resolveEditableArtistTitle(
         meta.artist,
@@ -271,6 +290,7 @@ export function NrmTrackMetadataSettingsHome({
       setInitialFields({
         ...rest,
         lyrics: lyricsUiModeToMetadataField(lyricsMode),
+        melonLyricsPlain: melonPlain || undefined,
       });
     } finally {
       setModalBusy(false);
@@ -295,19 +315,35 @@ export function NrmTrackMetadataSettingsHome({
           await invalidateListCoverDiskCache(trackListCoverKey(track));
 
           const newLyricsRaw = metadata.lyrics;
-          let newLyricsMode: NrmWhisperLyricsUiMode = 'unset';
+          let newLyricsMode: NrmLyricsUiMode = 'unset';
           if (newLyricsRaw) {
-            const { parseWhisperLyricsMode } = await import('@/lib/nrmWhisperLyrics');
-            newLyricsMode = parseWhisperLyricsMode(newLyricsRaw) ?? 'unset';
+            const { parseLyricsUiMode } = await import('@/lib/nrmMelonLyrics');
+            newLyricsMode = parseLyricsUiMode(newLyricsRaw);
           }
           let effectiveNewLyricsMode = newLyricsMode;
           const lyricsEditable =
             (track.extension === '.mp3' || track.extension === '.m4a') &&
             (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
           if (lyricsEditable) {
-            const whisperReady = await hasAnyWhisperModelOnDevice();
+            const [whisperReady, alignReady] = await Promise.all([
+              hasAnyWhisperModelOnDevice(),
+              isWhisperXAlignModelInstalled(),
+            ]);
             if (!whisperReady && newLyricsMode === 'unset' && lyricsModeAtOpen !== 'unset') {
-              effectiveNewLyricsMode = lyricsModeAtOpen;
+              if (
+                lyricsModeAtOpen === 'configured' ||
+                lyricsModeAtOpen === 'translation'
+              ) {
+                effectiveNewLyricsMode = lyricsModeAtOpen;
+              }
+            }
+            if (!alignReady && newLyricsMode === 'unset' && lyricsModeAtOpen !== 'unset') {
+              if (
+                lyricsModeAtOpen === 'melon' ||
+                lyricsModeAtOpen === 'melon_translation'
+              ) {
+                effectiveNewLyricsMode = lyricsModeAtOpen;
+              }
             }
           } else if (lyricsModeAtOpen !== 'unset') {
             effectiveNewLyricsMode = lyricsModeAtOpen;
@@ -330,6 +366,19 @@ export function NrmTrackMetadataSettingsHome({
     },
     [editTrack, initialLyricsMode, reload],
   );
+
+  const onDeleteTrack = useCallback(async () => {
+    if (!editTrack) return;
+    const track = editTrack;
+    try {
+      await deleteDownloadTrack(track);
+      await invalidateListCoverDiskCache(trackListCoverKey(track));
+      setEditTrack(null);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '파일 삭제에 실패했습니다.');
+    }
+  }, [editTrack, reload]);
 
   const renderTrackRow = useCallback(
     (item: NrmDownloadTrackItem) => {
@@ -469,6 +518,8 @@ export function NrmTrackMetadataSettingsHome({
         initialTitle={initialTitle}
         initialMetadataFields={initialFields}
         busy={modalBusy}
+        deleteFileName={editTrack?.fileName}
+        onDelete={editTrack ? onDeleteTrack : undefined}
         onClose={() => setEditTrack(null)}
         onConfirm={onSave}
       />

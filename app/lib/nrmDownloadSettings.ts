@@ -22,6 +22,8 @@ export const NRM_ENABLED_AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav'] as const;
 
 const STORAGE_EXT = 'nrm_download_audio_ext_v1';
 const STORAGE_QUALITY = 'nrm_download_audio_quality_v1';
+const STORAGE_VBR_MODE = 'nrm_download_vbr_mode_v1';
+const STORAGE_LOSSLESS_MODE = 'nrm_download_lossless_mode_v1';
 const STORAGE_FILENAME_FORMAT = 'nrm_download_filename_format_v1';
 const STORAGE_METADATA_MODE = 'nrm_download_metadata_mode_v1';
 const STORAGE_WHISPER_MODEL_PREFERENCE = 'nrm_download_whisper_model_preference_v1';
@@ -138,6 +140,113 @@ export function clampAudioQuality(n: number): number {
   return Math.min(9, Math.max(0, Math.round(n)));
 }
 
+/** MP3·M4A(AAC) 공통 CBR kbps — AudioEncodeBitrate.kt 와 동기화 */
+export const AUDIO_QUALITY_BITRATE_KBPS = [
+  320, 256, 224, 192, 160, 128, 112, 96, 80, 64,
+] as const;
+
+export function audioQualityBitrateKbps(quality: number): number {
+  return AUDIO_QUALITY_BITRATE_KBPS[clampAudioQuality(quality)];
+}
+
+/** VBR(가변 비트레이트) 모드 — 기본값 vbr_best(최고 품질) */
+export const NRM_DOWNLOAD_VBR_MODES = [
+  {
+    id: 'vbr_best',
+    label: '가변 · 최고',
+    description: '구간별로 비트를 조절해 같은 용량에서 음질을 최대화합니다.',
+    hint: '권장',
+  },
+  {
+    id: 'vbr_balanced',
+    label: '가변 · 균형',
+    description: '음질과 파일 크기의 균형을 맞춥니다.',
+  },
+  {
+    id: 'vbr_compact',
+    label: '가변 · 용량',
+    description: '용량을 줄이되 가청 범위 내 품질을 유지합니다.',
+  },
+  {
+    id: 'cbr',
+    label: '고정 (CBR)',
+    description: '비트레이트 설정의 kbps를 고정으로 사용합니다.',
+  },
+] as const;
+
+export type NrmDownloadVbrMode = (typeof NRM_DOWNLOAD_VBR_MODES)[number]['id'];
+const DEFAULT_VBR_MODE: NrmDownloadVbrMode = 'vbr_best';
+
+/** 무손실·재인코딩 정책 — 기본값 smart(원본 보존 우선) */
+export const NRM_DOWNLOAD_LOSSLESS_MODES = [
+  {
+    id: 'smart',
+    label: '스마트 보존',
+    description:
+      '확장자가 같으면 재인코딩하지 않고, 필요할 때만 변환해 품질 손실을 줄입니다.',
+    hint: '권장',
+  },
+  {
+    id: 'lossless_path',
+    label: '무손실 경유',
+    description:
+      '가능하면 스트림 복사·무손실 코덱을 우선하고, 손실 변환 시에도 최고 품질을 사용합니다.',
+  },
+  {
+    id: 'always_reencode',
+    label: '항상 재인코딩',
+    description: '설정한 확장자·비트레이트로 매번 새로 인코딩합니다.',
+  },
+] as const;
+
+export type NrmDownloadLosslessMode =
+  (typeof NRM_DOWNLOAD_LOSSLESS_MODES)[number]['id'];
+const DEFAULT_LOSSLESS_MODE: NrmDownloadLosslessMode = 'smart';
+
+export function isNrmDownloadVbrMode(v: string): v is NrmDownloadVbrMode {
+  return (NRM_DOWNLOAD_VBR_MODES as readonly { id: string }[]).some((m) => m.id === v);
+}
+
+export function isNrmDownloadLosslessMode(v: string): v is NrmDownloadLosslessMode {
+  return (NRM_DOWNLOAD_LOSSLESS_MODES as readonly { id: string }[]).some((m) => m.id === v);
+}
+
+export async function loadDownloadVbrMode(): Promise<NrmDownloadVbrMode> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_VBR_MODE);
+    if (raw && isNrmDownloadVbrMode(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_VBR_MODE;
+}
+
+export async function saveDownloadVbrMode(mode: NrmDownloadVbrMode): Promise<void> {
+  await AsyncStorage.setItem(
+    STORAGE_VBR_MODE,
+    isNrmDownloadVbrMode(mode) ? mode : DEFAULT_VBR_MODE,
+  );
+}
+
+export async function loadDownloadLosslessMode(): Promise<NrmDownloadLosslessMode> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_LOSSLESS_MODE);
+    if (raw && isNrmDownloadLosslessMode(raw)) return raw;
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LOSSLESS_MODE;
+}
+
+export async function saveDownloadLosslessMode(
+  mode: NrmDownloadLosslessMode,
+): Promise<void> {
+  await AsyncStorage.setItem(
+    STORAGE_LOSSLESS_MODE,
+    isNrmDownloadLosslessMode(mode) ? mode : DEFAULT_LOSSLESS_MODE,
+  );
+}
+
 export async function loadDownloadAudioExtension(): Promise<NrmAudioExtension> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_EXT);
@@ -220,14 +329,18 @@ export async function saveWhisperModelPreference(
 export type NrmDownloadEncodeSettings = {
   extension: NrmAudioExtension;
   audioQuality: number;
+  vbrMode: NrmDownloadVbrMode;
+  losslessMode: NrmDownloadLosslessMode;
 };
 
 export async function loadDownloadEncodeSettings(): Promise<NrmDownloadEncodeSettings> {
-  const [extension, audioQuality] = await Promise.all([
+  const [extension, audioQuality, vbrMode, losslessMode] = await Promise.all([
     loadDownloadAudioExtension(),
     loadDownloadAudioQuality(),
+    loadDownloadVbrMode(),
+    loadDownloadLosslessMode(),
   ]);
-  return { extension, audioQuality };
+  return { extension, audioQuality, vbrMode, losslessMode };
 }
 
 /** 파일명에 선택 확장자가 붙도록 보정 */

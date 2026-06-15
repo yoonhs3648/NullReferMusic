@@ -85,6 +85,13 @@ object ShineExec {
       throw Exception("${tag}_timeout")
     }
     val code = p.exitValue()
+    if (tag == "shine-probe" && code != 0) {
+      val lower = out.toString().lowercase()
+      if (lower.contains("usage:") || lower.contains("shineenc")) {
+        NrmFileLogger.log(tag, "probe ok exit=$code")
+        return code to out.toString()
+      }
+    }
     NrmFileLogger.logProcess(tag, argv, code, out.toString())
     return code to out.toString()
   }

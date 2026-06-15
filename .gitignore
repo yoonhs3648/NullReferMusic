@@ -34,6 +34,12 @@ library/whisper/*.zip
 library/whisper/_bin/
 library/whisper/_src_whisper_cpp/
 
+library/libretranslate/_vendor/
+library/libretranslate/_bin/
+
 # Whisper APK assets — ggml 모델만 제외 (CLI·libomp.so는 형상관리)
 app/android/app/src/main/assets/whisper/ggml-*.bin
+
+app/android/app/src/main/assets/libretranslate/nrm-argos-translate
+app/android/app/src/main/assets/libretranslate/*.so
 app/android/.gradle-home/

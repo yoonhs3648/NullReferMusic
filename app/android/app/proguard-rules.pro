@@ -11,4 +11,5 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Add any project specific keep options here:
+# ONNX Runtime (wav2vec2 CTC forced alignment)
+-keep class ai.onnxruntime.** { *; }

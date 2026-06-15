@@ -19,6 +19,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
   init {
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
+    WhisperXAlignModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
 
   override fun getName(): String = "NrmWhisper"
@@ -439,5 +440,84 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     }
     val parsed = NrmWhisperPerfLog.parseAndSummarize(fullOut)
     return WhisperRunResult(code, fullOut, parsed)
+  }
+
+  @ReactMethod
+  fun getAlignModelStatuses(promise: Promise) {
+    try {
+      val statuses = WhisperXAlignModelDownloader.listStatuses(reactApplicationContext)
+      val arr: WritableArray = Arguments.createArray()
+      for (s in statuses) {
+        val row: WritableMap = Arguments.createMap()
+        row.putString("modelId", s.modelId)
+        row.putBoolean("installed", s.installed)
+        row.putBoolean("downloading", s.downloading)
+        row.putInt("progress", s.progress)
+        arr.pushMap(row)
+      }
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject("E_ALIGN_STATUS", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun isAlignModelInstalled(promise: Promise) {
+    try {
+      promise.resolve(WhisperXAlignModelDownloader.isInstalled(reactApplicationContext))
+    } catch (e: Exception) {
+      promise.reject("E_ALIGN_STATUS", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun startAlignModelDownload(modelId: String?, promise: Promise) {
+    try {
+      val id = (modelId ?: "").trim()
+      if (id != WhisperXAlignModelCatalog.MODEL_ID) {
+        promise.reject("E_ARG", "invalid_align_model_id")
+        return
+      }
+      WhisperXAlignModelDownloader.startDownload(reactApplicationContext)
+      val ok = Arguments.createMap()
+      ok.putBoolean("started", true)
+      promise.resolve(ok)
+    } catch (e: Exception) {
+      promise.reject("E_ALIGN_DL", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun alignMelonLyricsToLrc(
+      audioPath: String,
+      lyricsPlain: String,
+      mode: String,
+      promise: Promise,
+  ) {
+    Thread {
+      val token = "whisperx-align:${System.currentTimeMillis()}"
+      NrmBackgroundWorkCoordinator.acquire(reactApplicationContext, token)
+      try {
+        val inFile = File(audioPath.trim())
+        if (!inFile.isFile) {
+          promise.reject("E_ARG", "오디오 파일이 없습니다.")
+          return@Thread
+        }
+        val lrc =
+            WhisperXAlignEngine.alignToLrc(
+                reactApplicationContext,
+                inFile,
+                lyricsPlain,
+                mode,
+            )
+        val ok = Arguments.createMap()
+        ok.putString("lrc", lrc)
+        promise.resolve(ok)
+      } catch (e: Exception) {
+        promise.reject("E_ALIGN", e.message ?: e.toString(), e)
+      } finally {
+        NrmBackgroundWorkCoordinator.release(reactApplicationContext, token)
+      }
+    }.start()
   }
 }

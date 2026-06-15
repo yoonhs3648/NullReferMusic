@@ -5,7 +5,6 @@ import java.io.File
 
 /** yt-dlp 등이 muxed(영상+오디오) 파일을 받았을 때 오디오 트랙만 분리합니다. */
 object AudioDemux {
-  // ffmpeg 8.x: Stream #0:0[0x1](und): Video: …
   private val videoStreamRe =
       Regex("""Stream\s+#\d+:\d+.*?:\s*Video:""", RegexOption.IGNORE_CASE)
 
@@ -21,11 +20,10 @@ object AudioDemux {
     return videoStreamRe.containsMatchIn(out)
   }
 
-  /**
-   * 영상 스트림이 있으면 m4a(aac copy)로 demux. 이미 오디오-only면 입력 그대로 반환.
-   * 실패 시 aac 재인코딩 폴백 — 다운로드 성공률 유지.
-   */
-  fun ensureAudioOnly(context: Context, input: File): File {
+  fun ensureAudioOnly(context: Context, input: File, audioQuality: Int = 0): File =
+    ensureAudioOnly(context, input, AudioEncodeOptions(quality = audioQuality))
+
+  fun ensureAudioOnly(context: Context, input: File, options: AudioEncodeOptions): File {
     val paths = FfmpegBootstrap.ensure(context) ?: return input
     if (!input.isFile) return input
 
@@ -65,22 +63,21 @@ object AudioDemux {
     } catch (copyErr: Exception) {
       NrmFileLogger.warn("audio-demux", "aac copy 실패 — aac 재인코딩: ${copyErr.message}")
       if (out.exists()) out.delete()
+      val aacArgs =
+          if (options.useCbr()) {
+            listOf("-codec:a", "aac", "-b:a", AudioEncodeBitrate.ffmpegBitrateArg(options.quality))
+          } else {
+            listOf(
+                "-codec:a",
+                "aac",
+                "-q:a",
+                AudioEncodeBitrate.aacVbrQ(options).toString(),
+            )
+          }
       FfmpegExec.runWithPaths(
           paths.binary,
           paths.libDir,
-          listOf(
-              "-y",
-              "-i",
-              input.absolutePath,
-              "-vn",
-              "-map",
-              "0:a:0",
-              "-codec:a",
-              "aac",
-              "-b:a",
-              "192k",
-              out.absolutePath,
-          ),
+          listOf("-y", "-i", input.absolutePath, "-vn", "-map", "0:a:0") + aacArgs + listOf(out.absolutePath),
           tag = "ffmpeg-demux-aac",
       )
     }

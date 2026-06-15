@@ -11,8 +11,6 @@ import {
 
   Platform,
 
-  ScrollView,
-
   StyleSheet,
   Text,
 
@@ -825,46 +823,25 @@ export default function HomeScreen() {
       />
     );
 
-    if (!youtubeBrowsing) {
-      return (
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoid}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          enabled>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={[
-              styles.scrollInner,
-              {
-                flexGrow: 1,
-                justifyContent: 'center',
-                paddingHorizontal: pad,
-                paddingBottom: nrmTokens.space.xl,
-                ...(Platform.OS === 'web' ? { minHeight: winH } : {}),
-              },
-            ]}
-            keyboardShouldPersistTaps="always"
-            keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
-            {...(Platform.OS === 'ios'
-              ? { contentInsetAdjustmentBehavior: 'never' as const }
-              : {})}>
-            <View style={styles.centerColumn}>
-              {logoBlock}
-              {youtubeHome}
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      );
-    }
-
     return (
       <KeyboardAvoidingView
-        style={[styles.keyboardAvoid, styles.youtubeBrowsingRoot]}
+        style={[
+          styles.keyboardAvoid,
+          youtubeBrowsing && styles.youtubeBrowsingRoot,
+        ]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         enabled>
-        <View style={[styles.centerColumn, styles.youtubeBrowsingColumn, { paddingHorizontal: pad }]}>
+        <View
+          style={[
+            styles.centerColumn,
+            youtubeBrowsing ? styles.youtubeBrowsingColumn : styles.youtubeWelcomeColumn,
+            { paddingHorizontal: pad },
+            !youtubeBrowsing && Platform.OS === 'web' ? { minHeight: winH } : null,
+          ]}>
           {logoBlock}
-          {youtubeHome}
+          <View style={youtubeBrowsing ? styles.youtubeHomeShell : undefined}>
+            {youtubeHome}
+          </View>
         </View>
       </KeyboardAvoidingView>
     );
@@ -893,7 +870,11 @@ export default function HomeScreen() {
             ]}
             pointerEvents={showYoutubeOverlay ? 'none' : 'auto'}>
             {/* 오버레이 활성 시 차트 컨텐츠를 숨겨 로고 중복 방지 */}
-            <View style={showYoutubeOverlay ? styles.hiddenContent : undefined}>
+            <View
+              style={[
+                styles.featurePanelFill,
+                showYoutubeOverlay ? styles.hiddenContent : undefined,
+              ]}>
               {renderFeaturePanel(mainView)}
             </View>
           </View>
@@ -1026,6 +1007,10 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
 
+  featurePanelFill: {
+    flex: 1,
+  },
+
   hiddenContent: {
     opacity: 0,
   },
@@ -1049,18 +1034,16 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
 
-  scroll: {
-
+  youtubeWelcomeColumn: {
     flex: 1,
-
+    justifyContent: 'center',
+    paddingBottom: nrmTokens.space.xl,
   },
 
-  scrollInner: {
-
-    alignItems: 'center',
-
+  youtubeHomeShell: {
+    flex: 1,
+    minHeight: 0,
     width: '100%',
-
   },
 
   centerColumn: {

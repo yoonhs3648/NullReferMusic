@@ -36,7 +36,6 @@ object FfmpegEncoderSupport {
         )
       val found = mutableSetOf<String>()
       for (line in output.lineSequence()) {
-        //  A....D aac                  (점·문자 6칸 플래그 + 공백 + 이름)
         val m = Regex("""^\s+(\S{6})\s+(\S+)""").find(line) ?: continue
         val flags = m.groupValues[1]
         if (!flags.startsWith("A")) continue
@@ -56,19 +55,37 @@ object FfmpegEncoderSupport {
     }
   }
 
-  fun plan(context: Context, fmt: String, quality: Int): TranscodePlan {
+  fun plan(context: Context, fmt: String, options: AudioEncodeOptions): TranscodePlan {
     val enc = encoders(context)
-    val q = quality.coerceIn(0, 9).toString()
+    val qStr = options.quality.coerceIn(0, 9).toString()
     return when (fmt.lowercase()) {
       "mp3" ->
         when {
+          enc.contains("libmp3lame") && !options.useCbr() ->
+            TranscodePlan(
+              "mp3",
+              listOf(
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                AudioEncodeBitrate.lameVbrQ(options).toString(),
+              ),
+            )
           enc.contains("libshine") ->
             TranscodePlan(
               "mp3",
-              listOf("-codec:a", "libshine", "-b:a", mp3BitrateK(quality)),
+              listOf(
+                "-codec:a",
+                "libshine",
+                "-b:a",
+                "${AudioEncodeBitrate.cbrKbpsForOptions(options)}k",
+              ),
             )
           enc.contains("libmp3lame") ->
-            TranscodePlan("mp3", listOf("-codec:a", "libmp3lame", "-q:a", q))
+            TranscodePlan(
+              "mp3",
+              listOf("-codec:a", "libmp3lame", "-b:a", AudioEncodeBitrate.ffmpegBitrateArg(options.quality)),
+            )
           else ->
             TranscodePlan(
               "m4a",
@@ -78,19 +95,43 @@ object FfmpegEncoderSupport {
         }
       "m4a", "aac" ->
         if (enc.contains("aac")) {
-          TranscodePlan("m4a", listOf("-codec:a", "aac", "-b:a", "192k"))
+          if (!options.useCbr()) {
+            TranscodePlan(
+              "m4a",
+              listOf(
+                "-codec:a",
+                "aac",
+                "-q:a",
+                AudioEncodeBitrate.aacVbrQ(options).toString(),
+              ),
+            )
+          } else {
+            TranscodePlan(
+              "m4a",
+              listOf(
+                "-codec:a",
+                "aac",
+                "-b:a",
+                AudioEncodeBitrate.ffmpegBitrateArg(options.quality),
+              ),
+            )
+          }
         } else {
           TranscodePlan("m4a", listOf("-codec:a", "copy"))
         }
       "opus" ->
         if (enc.contains("libopus")) {
-          TranscodePlan("opus", listOf("-codec:a", "libopus", "-b:a", "128k"))
+          if (!options.useCbr()) {
+            TranscodePlan("opus", listOf("-codec:a", "libopus", "-q:a", qStr))
+          } else {
+            TranscodePlan("opus", listOf("-codec:a", "libopus", "-b:a", "128k"))
+          }
         } else {
           TranscodePlan("m4a", listOf("-codec:a", "copy"), "opus_unavailable_m4a_remux")
         }
       "vorbis", "ogg" ->
         if (enc.contains("libvorbis")) {
-          TranscodePlan("ogg", listOf("-codec:a", "libvorbis", "-q:a", q))
+          TranscodePlan("ogg", listOf("-codec:a", "libvorbis", "-q:a", qStr))
         } else {
           TranscodePlan("m4a", listOf("-codec:a", "copy"), "vorbis_unavailable_m4a_remux")
         }
@@ -100,32 +141,18 @@ object FfmpegEncoderSupport {
         } else {
           TranscodePlan("m4a", listOf("-codec:a", "copy"), "flac_unavailable_m4a_remux")
         }
-      // 샘플레이트·채널 명시 → ffmpeg 추측 불필요, ShineMp3Transcode pcmFfmpegArgs 와 동일
       "wav" -> TranscodePlan("wav", listOf("-ar", "44100", "-ac", "2", "-codec:a", "pcm_s16le"))
       else -> TranscodePlan(fmt.lowercase(), listOf("-codec:a", "copy"))
     }
   }
 
-  /** 메타데이터 재래핑 시 mp3 재인코딩 가능 여부 */
+  fun plan(context: Context, fmt: String, quality: Int): TranscodePlan =
+    plan(context, fmt, AudioEncodeOptions(quality = quality))
+
   fun canReencodeMp3(context: Context): Boolean {
     val enc = encoders(context)
     return enc.contains("libshine") || enc.contains("libmp3lame")
   }
 
-  /** libshine / shineenc CBR kbps (quality 0=최고 … 9=최저) */
-  fun mp3BitrateKbps(quality: Int): Int =
-    when (quality.coerceIn(0, 9)) {
-      0 -> 320
-      1 -> 256
-      2 -> 224
-      3 -> 192
-      4 -> 160
-      5 -> 128
-      6 -> 112
-      7 -> 96
-      8 -> 80
-      else -> 64
-    }
-
-  private fun mp3BitrateK(quality: Int): String = "${mp3BitrateKbps(quality)}k"
+  fun mp3BitrateKbps(quality: Int): Int = AudioEncodeBitrate.kbpsForQuality(quality)
 }

@@ -1,4 +1,5 @@
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { parseMelonLyricsMode, type NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 
 /** Whisper large-v3 로컬 전사로 생성하는 자동 가사 (yt-dlp 자막 미사용) */
 export const AUTO_WHISPER_LYRICS_PREFIX = '__AUTO_FROM_WHISPER__';
@@ -46,17 +47,27 @@ export function buildAutoWhisperLyricsSentinel(mode: NrmWhisperLyricsMode): stri
   return `${AUTO_WHISPER_LYRICS_PREFIX}:${mode}`;
 }
 
-/** ffmpeg 단계용: Whisper sentinel 제거, 모드만 분리 */
+/** ffmpeg 단계용: Whisper/Melon sentinel 제거, 모드만 분리 */
 export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
   ffmpegMetadata: NrmAudioFileMetadata;
   whisperMode: NrmWhisperLyricsMode | null;
+  melonMode: NrmMelonLyricsMode | null;
+  melonLyricsPlain: string | null;
 } {
   const whisperMode = parseWhisperLyricsMode(meta.lyrics);
+  const melonMode = parseMelonLyricsMode(meta.lyrics);
   const ffmpegMetadata = { ...meta };
-  if (whisperMode) {
+  if (whisperMode || melonMode) {
     delete ffmpegMetadata.lyrics;
   }
-  return { ffmpegMetadata, whisperMode };
+  delete ffmpegMetadata.melonLyricsPlain;
+  const plain = (meta.melonLyricsPlain ?? '').trim();
+  return {
+    ffmpegMetadata,
+    whisperMode,
+    melonMode,
+    melonLyricsPlain: plain || null,
+  };
 }
 
 export type WhisperSegment = {

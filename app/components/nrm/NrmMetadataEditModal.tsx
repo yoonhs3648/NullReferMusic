@@ -28,20 +28,27 @@ import {
 } from '@/lib/nrmYoutubeDownloadMeta';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 import {
-  buildAutoWhisperLyricsSentinel,
-  parseWhisperLyricsMode,
-  type NrmWhisperLyricsUiMode,
-} from '@/lib/nrmWhisperLyrics';
+  buildLyricsSentinel,
+  isMelonLyricsUiMode,
+  isMelonPlainLyricsText,
+  parseLyricsUiMode,
+  type NrmLyricsUiMode,
+} from '@/lib/nrmMelonLyrics';
 import { isWhisperModelInstalled } from '@/lib/nrmWhisperModelNative';
+import { isWhisperXAlignModelInstalled } from '@/lib/nrmWhisperXAlignNative';
 import { loadWhisperModelPreference } from '@/lib/nrmDownloadSettings';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
+import {
+  NrmUserNotifyOverlay,
+} from '@/components/nrm/NrmUserNotifyOverlay';
+import type { ConfirmPayload } from '@/lib/nrmUserNotify';
 
 export type NrmMetadataEditModalProps = {
   visible: boolean;
   item: YoutubeSearchItem | null;
   isDark: boolean;
-  metadataSource?: 'chart' | 'main' | 'lastfm' | 'spotify';
+  metadataSource?: 'chart' | 'main' | 'lastfm' | 'spotify' | 'melon';
   initialArtist?: string;
   initialTitle?: string;
   /**
@@ -57,16 +64,22 @@ export type NrmMetadataEditModalProps = {
   excludeFileStem?: string;
   /** trackEdit: 트랙 확장자 고정 (.mp3 등) */
   fixedExtension?: string;
+  /** trackEdit: 삭제 확인에 표시할 실제 파일명 */
+  deleteFileName?: string;
+  /** trackEdit: 확인 후 물리 파일 삭제 */
+  onDelete?: () => void | Promise<void>;
   onClose: () => void;
   onConfirm: (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => void;
 };
 
 const GENRE_MANUAL_VALUE = '__manual__';
 
-const LYRICS_MODE_OPTIONS: { value: NrmWhisperLyricsUiMode; label: string; disabled?: boolean }[] = [
+const LYRICS_MODE_OPTIONS: { value: NrmLyricsUiMode; label: string; disabled?: boolean }[] = [
   { value: 'unset', label: '설정안함' },
-  { value: 'configured', label: '설정' },
-  { value: 'translation', label: '번역지원' },
+  { value: 'configured', label: '가사' },
+  { value: 'translation', label: '가사 + 번역' },
+  { value: 'melon', label: '멜론 가사' },
+  { value: 'melon_translation', label: '멜론 가사 + 번역' },
 ];
 
 const WEB_SCROLL_CLASS = 'nrm-scroll-web';
@@ -282,6 +295,8 @@ export function NrmMetadataEditModal({
   purpose = 'download',
   excludeFileStem,
   fixedExtension,
+  deleteFileName,
+  onDelete,
   onClose,
   onConfirm,
 }: NrmMetadataEditModalProps) {
@@ -300,7 +315,9 @@ export function NrmMetadataEditModal({
   const [trackNumber, setTrackNumber] = useState('');
   const [discNumber, setDiscNumber] = useState('');
   const [composer, setComposer] = useState('');
-  const [lyricsMode, setLyricsMode] = useState<NrmWhisperLyricsUiMode>('unset');
+  const [lyricsMode, setLyricsMode] = useState<NrmLyricsUiMode>('unset');
+  const [melonPlainLyrics, setMelonPlainLyrics] = useState('');
+  const [whisperXAlignMissing, setWhisperXAlignMissing] = useState(false);
   const [translationOptionEnabled, setTranslationOptionEnabled] = useState(true);
   const [translationOptionHint, setTranslationOptionHint] = useState('');
   const [bpm, setBpm] = useState('');
@@ -343,13 +360,11 @@ export function NrmMetadataEditModal({
 
     let nextArtist = '';
     let nextTitle = '';
-    if (
-      (purpose === 'trackEdit' ||
-        metadataSource === 'chart' ||
-        metadataSource === 'lastfm' ||
-        metadataSource === 'spotify') &&
-      (initialArtist != null || initialTitle != null)
-    ) {
+    const usePlatformSeedFields =
+      purpose === 'trackEdit' ||
+      (metadataSource !== 'main' &&
+        (initialArtist != null || initialTitle != null));
+    if (usePlatformSeedFields) {
       nextArtist = (initialArtist ?? '').trim();
       nextTitle = (initialTitle ?? '').trim();
     } else {
@@ -367,8 +382,11 @@ export function NrmMetadataEditModal({
     setDiscNumber(normalizeString(m?.discNumber));
     setComposer(normalizeString(m?.composer));
     const rawLyrics = normalizeString(m?.lyrics);
-    const parsed = parseWhisperLyricsMode(rawLyrics);
-    setLyricsMode(parsed ?? 'unset');
+    const plainFromField = normalizeString(m?.melonLyricsPlain);
+    setMelonPlainLyrics(
+      isMelonPlainLyricsText(rawLyrics) ? rawLyrics : plainFromField,
+    );
+    setLyricsMode(parseLyricsUiMode(rawLyrics));
     setBpm(normalizeString(m?.bpm));
     setCopyright(normalizeString(m?.copyright));
     setWebsite(normalizeString(m?.website));
@@ -396,6 +414,10 @@ export function NrmMetadataEditModal({
     );
   }, [fixedExtension, item, visible]);
 
+  useEffect(() => {
+    if (!visible) setDeleteConfirm(null);
+  }, [visible]);
+
   const genreOptions = useMemo(() => {
     const fromSettings = genreCategoryNames.map((name) => ({ value: name, label: name }));
     return [{ value: GENRE_MANUAL_VALUE, label: '직접입력' }, ...fromSettings];
@@ -412,7 +434,10 @@ export function NrmMetadataEditModal({
     return buildAudioFileName(artist, title, extension, fileNameFormat);
   }, [artist, title, extension, fileNameFormat]);
 
-  const blocked = busy;
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<ConfirmPayload | null>(null);
+
+  const blocked = busy || deleting;
   const canSubmit =
     !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
   const canSubmitWithConflict = canSubmit && !nameConflict;
@@ -465,10 +490,18 @@ export function NrmMetadataEditModal({
   const whisperLyricsLocked =
     whisperChecksEnabled && (whisperGateLoading || whisperModelMissing);
 
+  const melonLyricsAvailable =
+    melonPlainLyrics.trim().length > 0 &&
+    (purpose === 'trackEdit' || metadataSource === 'melon');
+
+  const melonLyricsLocked =
+    whisperChecksEnabled && (whisperGateLoading || whisperXAlignMissing);
+
   useEffect(() => {
     if (!visible || lyricsUnsupported) {
       setWhisperModelMissing(false);
       setWhisperGateLoading(false);
+      setWhisperXAlignMissing(false);
       return;
     }
     const checkApk = isStandaloneAndroid();
@@ -476,6 +509,7 @@ export function NrmMetadataEditModal({
     if (!checkApk && !checkWeb) {
       setWhisperModelMissing(false);
       setWhisperGateLoading(false);
+      setWhisperXAlignMissing(false);
       return;
     }
     let cancelled = false;
@@ -487,11 +521,22 @@ export function NrmMetadataEditModal({
         setWhisperGateLoading(true);
       }
       const pref = await loadWhisperModelPreference();
-      const has = await isWhisperModelInstalled(pref);
+      const [hasWhisper, hasAlign] = await Promise.all([
+        isWhisperModelInstalled(pref),
+        isWhisperXAlignModelInstalled(),
+      ]);
       if (cancelled) return;
-      setWhisperModelMissing(!has);
-      if (!has) {
-        setLyricsMode('unset');
+      setWhisperModelMissing(!hasWhisper);
+      setWhisperXAlignMissing(!hasAlign);
+      if (!hasWhisper) {
+        setLyricsMode((m) =>
+          m === 'configured' || m === 'translation' ? 'unset' : m,
+        );
+      }
+      if (!hasAlign) {
+        setLyricsMode((m) =>
+          m === 'melon' || m === 'melon_translation' ? 'unset' : m,
+        );
       }
       setWhisperGateLoading(false);
     };
@@ -510,27 +555,11 @@ export function NrmMetadataEditModal({
     if (!visible || lyricsUnsupported) return;
     let cancelled = false;
     void (async () => {
-      const [{ getDeepLApiKey }, { fetchDeepLUsage, isDeepLExhausted }] = await Promise.all([
-        import('@/lib/nrmDeepLApiSettings'),
-        import('@/lib/nrmDeepLApiClient'),
-      ]);
-      const key = await getDeepLApiKey();
-      if (!key) {
-        if (!cancelled) {
-          setTranslationOptionEnabled(false);
-          setTranslationOptionHint('DeepL API 토큰 등록 시 사용 가능합니다.');
-        }
-        return;
-      }
-      const usage = await fetchDeepLUsage(key);
+      const { resolveTranslationOptionGate } = await import('@/lib/nrmTranslationClient');
+      const gate = await resolveTranslationOptionGate();
       if (!cancelled) {
-        if (usage.ok && isDeepLExhausted(usage.usage)) {
-          setTranslationOptionEnabled(false);
-          setTranslationOptionHint('DeepL 월 사용량이 초과되어 비활성화되었습니다.');
-        } else {
-          setTranslationOptionEnabled(true);
-          setTranslationOptionHint('');
-        }
+        setTranslationOptionEnabled(gate.enabled);
+        setTranslationOptionHint(gate.hint);
       }
     })();
     return () => {
@@ -539,7 +568,7 @@ export function NrmMetadataEditModal({
   }, [lyricsUnsupported, visible]);
 
   useEffect(() => {
-    if (!translationOptionEnabled && lyricsMode === 'translation') {
+    if (!translationOptionEnabled && (lyricsMode === 'translation' || lyricsMode === 'melon_translation')) {
       setLyricsMode('unset');
     }
   }, [lyricsMode, translationOptionEnabled]);
@@ -594,27 +623,64 @@ export function NrmMetadataEditModal({
   const lyricsOptions = useMemo(
     () =>
       LYRICS_MODE_OPTIONS.map((opt) => {
-        if (opt.value !== 'translation') {
-          return { ...opt, disabled: false as const };
+        if (opt.value === 'translation') {
+          const disabled = !translationOptionEnabled;
+          const hint =
+            disabled && translationOptionHint ? translationOptionHint : undefined;
+          return { ...opt, disabled, hint };
         }
-        const disabled = !translationOptionEnabled;
-        const hint =
-          disabled && translationOptionHint ? translationOptionHint : undefined;
-        return {
-          ...opt,
-          disabled,
-          hint,
-        };
+        if (opt.value === 'melon_translation') {
+          const disabled =
+            melonLyricsLocked ||
+            !melonLyricsAvailable ||
+            !translationOptionEnabled;
+          let hint: string | undefined;
+          if (disabled) {
+            if (!translationOptionEnabled && translationOptionHint) {
+              hint = translationOptionHint;
+            } else if (melonLyricsLocked) {
+              hint = 'WhisperX Forced Alignment 모델 설치 필요';
+            } else {
+              hint = '멜론 가사 데이터 없음';
+            }
+          }
+          return { ...opt, disabled, hint };
+        }
+        if (opt.value === 'configured') {
+          return { ...opt, disabled: whisperLyricsLocked };
+        }
+        if (opt.value === 'melon') {
+          const disabled = melonLyricsLocked || !melonLyricsAvailable;
+          const hint = disabled
+            ? melonLyricsLocked
+              ? 'WhisperX Forced Alignment 모델 설치 필요'
+              : '멜론 가사 데이터 없음'
+            : undefined;
+          return { ...opt, disabled, hint };
+        }
+        return { ...opt, disabled: false as const };
       }),
-    [translationOptionEnabled, translationOptionHint],
+    [
+      melonLyricsAvailable,
+      melonLyricsLocked,
+      translationOptionEnabled,
+      translationOptionHint,
+      whisperLyricsLocked,
+    ],
   );
 
-  function resolveLyricsForSubmit(): string | undefined {
-    if (lyricsUnsupported || whisperLyricsLocked) return undefined;
-    if (lyricsMode === 'unset') {
-      return undefined;
+  function resolveLyricsForSubmit(): Pick<NrmAudioFileMetadata, 'lyrics' | 'melonLyricsPlain'> {
+    if (lyricsUnsupported) return {};
+    if (lyricsMode === 'unset') return {};
+    if (isMelonLyricsUiMode(lyricsMode)) {
+      if (melonLyricsLocked || !melonPlainLyrics.trim()) return {};
+      return {
+        lyrics: buildLyricsSentinel(lyricsMode),
+        melonLyricsPlain: melonPlainLyrics.trim(),
+      };
     }
-    return buildAutoWhisperLyricsSentinel(lyricsMode);
+    if (whisperLyricsLocked) return {};
+    return { lyrics: buildLyricsSentinel(lyricsMode) };
   }
 
   return (
@@ -622,10 +688,20 @@ export function NrmMetadataEditModal({
       visible={visible && !!item}
       transparent
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        if (deleteConfirm) {
+          deleteConfirm.resolve(false);
+          setDeleteConfirm(null);
+          return;
+        }
+        onClose();
+      }}
       statusBarTranslucent>
       <View style={styles.wrap}>
-        <Pressable style={[StyleSheet.absoluteFill, styles.dim]} onPress={onClose} />
+        <Pressable
+          style={[StyleSheet.absoluteFill, styles.dim]}
+          onPress={deleteConfirm ? undefined : onClose}
+        />
         <View
           style={[
             styles.card,
@@ -781,13 +857,13 @@ export function NrmMetadataEditModal({
                 ) : (
                   <MetadataInlineSelect
                     label="가사"
-                    value={whisperLyricsLocked ? 'unset' : lyricsMode}
+                    value={lyricsMode}
                     options={lyricsOptions}
-                    onChange={(v) => setLyricsMode(v as NrmWhisperLyricsUiMode)}
+                    onChange={(v) => setLyricsMode(v as NrmLyricsUiMode)}
                     isDark={isDark}
                     titleColor={titleColor}
                     bodyColor={bodyColor}
-                    disabled={busy || whisperLyricsLocked}
+                    disabled={busy}
                     hideSheetTitle
                     scrollClassName={scrollClassName}
                     scrollStyle={scrollInlineStyle}
@@ -902,15 +978,62 @@ export function NrmMetadataEditModal({
             </Text>
           ) : null}
 
-          <View style={styles.actions}>
+          <View style={styles.footerRow}>
+            {purpose === 'trackEdit' && onDelete ? (
+              <Pressable
+                onPress={() => {
+                  if (blocked || deleteConfirm) return;
+                  const name = deleteFileName?.trim() || preview;
+                  setDeleteConfirm({
+                    message: `${name}을 삭제할까요?`,
+                    cancelLabel: '취소',
+                    confirmLabel: '삭제',
+                    resolve: (confirmed) => {
+                      setDeleteConfirm(null);
+                      if (!confirmed) return;
+                      setDeleting(true);
+                      void (async () => {
+                        try {
+                          await onDelete();
+                        } finally {
+                          setDeleting(false);
+                        }
+                      })();
+                    },
+                  });
+                }}
+                disabled={blocked}
+                style={({ pressed }) => [
+                  styles.btnDelete,
+                  {
+                    borderColor: isDark ? 'rgba(248,113,113,0.45)' : 'rgba(220,38,38,0.35)',
+                  },
+                  blocked && styles.btnDisabled,
+                  pressed && !blocked && styles.pressed,
+                ]}>
+                {deleting ? (
+                  <ActivityIndicator size="small" color={isDark ? '#fca5a5' : '#dc2626'} />
+                ) : (
+                  <Text style={[styles.btnDeleteLabel, { color: isDark ? '#fca5a5' : '#dc2626' }]}>
+                    삭제
+                  </Text>
+                )}
+              </Pressable>
+            ) : (
+              <View />
+            )}
+
+            <View style={styles.actions}>
             <Pressable
               onPress={onClose}
+              disabled={blocked}
               style={({ pressed }) => [
                 styles.btnSecondary,
                 {
                   borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
                 },
-                pressed && styles.pressed,
+                blocked && styles.btnDisabled,
+                pressed && !blocked && styles.pressed,
               ]}>
               <Text style={{ color: titleColor }}>취소</Text>
             </Pressable>
@@ -918,6 +1041,7 @@ export function NrmMetadataEditModal({
             <Pressable
               onPress={() => {
                 if (!item || !canSubmitWithConflict) return;
+                const lyricsPayload = resolveLyricsForSubmit();
                 const metadata: NrmAudioFileMetadata = {
                   artist: artist.trim(),
                   title: title.trim(),
@@ -929,7 +1053,8 @@ export function NrmMetadataEditModal({
                   trackNumber: trackNumber.trim() || undefined,
                   discNumber: discNumber.trim() || undefined,
                   composer: composer.trim() || undefined,
-                  lyrics: resolveLyricsForSubmit(),
+                  lyrics: lyricsPayload.lyrics,
+                  melonLyricsPlain: lyricsPayload.melonLyricsPlain,
                   bpm: bpm.trim() || undefined,
                   copyright: copyright.trim() || undefined,
                   website: website.trim() || undefined,
@@ -952,8 +1077,22 @@ export function NrmMetadataEditModal({
               ]}>
               <Text style={styles.btnPrimaryLabel}>{confirmLabel}</Text>
             </Pressable>
+            </View>
           </View>
         </View>
+
+        {deleteConfirm ? (
+          <View style={styles.confirmHost} pointerEvents="box-none">
+            <NrmUserNotifyOverlay
+              overlay={{ kind: 'confirm', payload: deleteConfirm }}
+              isDark={isDark}
+              onClose={() => {
+                deleteConfirm.resolve(false);
+                setDeleteConfirm(null);
+              }}
+            />
+          </View>
+        ) : null}
       </View>
     </Modal>
   );
@@ -965,6 +1104,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: nrmTokens.space.lg,
+  },
+  confirmHost: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 300,
+    elevation: 300,
   },
   dim: { backgroundColor: 'rgba(0,0,0,0.45)' },
   card: {
@@ -1128,11 +1272,30 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.caption,
     marginBottom: nrmTokens.space.md,
   },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: nrmTokens.space.sm,
+  },
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: nrmTokens.space.sm,
     justifyContent: 'flex-end',
+  },
+  btnDelete: {
+    paddingVertical: 11,
+    paddingHorizontal: 18,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: 1,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnDeleteLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
   },
   btnSecondary: {
     paddingVertical: 11,

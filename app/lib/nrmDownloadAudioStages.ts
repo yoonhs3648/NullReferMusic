@@ -13,6 +13,7 @@ import {
   normalizeDownloadMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { shouldSkipExtensionTranscode } from '@/lib/nrmDownloadEncodePolicy';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import {
@@ -45,13 +46,13 @@ export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string
   const path = uri.startsWith('file://') ? uri.slice(7) : uri;
   const wantExt = encode.extension.slice(1).toLowerCase();
   const haveExt = extensionFromLocalPath(path);
-  if (haveExt === wantExt) return uri;
+  if (shouldSkipExtensionTranscode(encode.losslessMode, haveExt, wantExt)) return uri;
 
   const t0 = Date.now();
   const { path: outPath, format, fallbackReason } = await transcodeAudioOnDevice(
     path,
     extensionToYtDlpFormat(encode.extension),
-    encode.audioQuality,
+    encode,
   );
   const effective = (format ?? extensionFromLocalPath(outPath) ?? '').toLowerCase();
   if (fallbackReason) {

@@ -9,7 +9,10 @@ import {
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
-import { clampAudioQuality } from '@/lib/nrmDownloadSettings';
+import {
+  audioQualityBitrateKbps,
+  clampAudioQuality,
+} from '@/lib/nrmDownloadSettings';
 
 const STEPS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 const TICK_W = 28;
@@ -64,9 +67,13 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
 
   const fillWidth = trackWidth > 0 ? (q / 9) * trackWidth : 0;
   const thumbLeft = trackWidth > 0 ? (q / 9) * trackWidth - 11 : 0;
+  const kbps = audioQualityBitrateKbps(q);
 
   return (
     <View style={styles.wrap}>
+      <Text style={[styles.kbpsHint, { color: titleColor }]}>
+        CBR 모드 기준 mp3 · m4a {kbps} kbps
+      </Text>
       <View
         style={[styles.sliderColumn, trackWidth > 0 ? { width: trackWidth } : null]}
         onLayout={onLayout}>
@@ -138,6 +145,12 @@ const styles = StyleSheet.create({
     paddingTop: nrmTokens.space.xxs,
     paddingBottom: nrmTokens.space.xxs,
     alignItems: 'stretch',
+  },
+  kbpsHint: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    marginBottom: nrmTokens.space.xs,
+    opacity: 0.88,
   },
   sliderColumn: {
     alignSelf: 'stretch',

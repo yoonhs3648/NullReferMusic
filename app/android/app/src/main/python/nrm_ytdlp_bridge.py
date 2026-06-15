@@ -249,12 +249,49 @@ def _ffmpeg_env(ffmpeg_location):
     return env
 
 
-def _audio_codec_args(fmt, quality):
+def _bitrate_kbps(quality):
+    """AudioEncodeBitrate.kt / nrmAudioEncodeBitrate.ts 와 동일 눈금."""
+    try:
+        q = int(str(quality if quality is not None else "0").strip() or "0")
+    except (TypeError, ValueError):
+        q = 0
+    q = max(0, min(9, q))
+    return (320, 256, 224, 192, 160, 128, 112, 96, 80, 64)[q]
+
+
+def _vbr_tier(vbr_mode):
+    mode = (vbr_mode or "vbr_best").strip().lower()
+    if mode == "vbr_compact":
+        return 2
+    if mode == "vbr_balanced":
+        return 1
+    if mode == "cbr":
+        return -1
+    return 0
+
+
+def _aac_vbr_q(quality, vbr_mode):
+    tier = _vbr_tier(vbr_mode)
+    if tier < 0:
+        q = max(0, min(9, int(str(quality or "0").strip() or "0")))
+        return (1, 2, 3, 4, 5, 6, 6, 7, 7, 8)[q]
+    if tier == 2:
+        return 6
+    if tier == 1:
+        return 4
+    return 1
+
+
+def _audio_codec_args(fmt, quality, vbr_mode="vbr_best"):
     q = str(quality if quality is not None else "0").strip() or "0"
+    kbps = _bitrate_kbps(quality)
+    mode = (vbr_mode or "vbr_best").strip().lower()
     if fmt == "mp3":
-        return ["-codec:a", "libshine", "-b:a", "128k"]
+        return ["-codec:a", "libshine", "-b:a", f"{kbps}k"]
     if fmt in ("m4a", "aac"):
-        return ["-codec:a", "aac", "-b:a", "192k"]
+        if mode != "cbr":
+            return ["-codec:a", "aac", "-q:a", str(_aac_vbr_q(quality, vbr_mode))]
+        return ["-codec:a", "aac", "-b:a", f"{kbps}k"]
     if fmt == "opus":
         return ["-codec:a", "libopus", "-b:a", "128k"]
     if fmt in ("vorbis", "ogg"):

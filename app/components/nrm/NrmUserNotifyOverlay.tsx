@@ -24,6 +24,7 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
   const cardBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const msgColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
+  const highlightColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
   const isConfirm = overlay.kind === 'confirm';
 
   return (
@@ -42,9 +43,18 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
         style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}
         accessibilityViewIsModal>
         <NrmLogo compact tone={isDark ? 'dark' : 'light'} />
-        <Text style={[styles.message, { color: msgColor }]}>
-          {overlay.payload.message}
-        </Text>
+        {isConfirm && overlay.kind === 'confirm' && overlay.payload.highlight ? (
+          <Text style={[styles.message, { color: msgColor }]}>
+            <Text style={[styles.messageHighlight, { color: highlightColor }]}>
+              {overlay.payload.highlight}
+            </Text>
+            {overlay.payload.message}
+          </Text>
+        ) : (
+          <Text style={[styles.message, { color: msgColor }]}>
+            {overlay.payload.message}
+          </Text>
+        )}
         {isConfirm && overlay.kind === 'confirm' ? (
           <View style={styles.confirmRow}>
             <Pressable
@@ -118,6 +128,9 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     fontWeight: '400',
     letterSpacing: -0.37,
+  },
+  messageHighlight: {
+    fontWeight: '700',
   },
   cta: {
     marginTop: nrmTokens.space.xl,

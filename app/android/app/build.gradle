@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 84
-        versionName "1.7.19"
+        versionCode 91
+        versionName "1.8.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -265,4 +265,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
 }

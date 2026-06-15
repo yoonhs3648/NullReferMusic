@@ -5,6 +5,7 @@ export type NrmDownloadStageProcess =
   | 'innertube'
   | 'ffmpeg'
   | 'whisper'
+  | 'whisperx-align'
   | 'translate'
   | 'persist'
   | 'pipeline';

@@ -3,6 +3,8 @@ import { NativeModules, Platform } from 'react-native';
 export type OnDeviceDownloadOptions = {
   audioFormat: string;
   audioQuality: number;
+  vbrMode?: string;
+  losslessMode?: string;
 };
 
 type NativeOnDevice = {
@@ -16,6 +18,8 @@ type NativeOnDevice = {
     inputPath: string,
     audioFormat: string,
     audioQuality: number,
+    vbrMode: string,
+    losslessMode: string,
   ) => Promise<{ path: string; format?: string; fallbackReason?: string }>;
   getAudioStreamUrl: (videoId: string) => Promise<string>;
   copyFileToSaf: (
@@ -97,18 +101,24 @@ export async function copyLocalFileToExistingSaf(
   await mod.copyFileToExistingSaf(src, dest);
 }
 
-/** Android: 캐시 파일을 사용자 설정 확장자(yt-dlp 포맷명)로 변환 */
+/** Android: 캐시 파일을 사용자 설정 확장자로 ffmpeg 변환 */
 export async function transcodeAudioOnDevice(
   inputPath: string,
   audioFormat: string,
-  audioQuality: number,
+  encode: import('@/lib/nrmDownloadSettings').NrmDownloadEncodeSettings,
 ): Promise<{ path: string; format?: string; fallbackReason?: string }> {
   const mod = NativeModules.NrmOnDeviceDownload as NativeOnDevice | undefined;
   if (!mod?.transcodeAudio) {
     throw new Error('NrmOnDeviceDownload.transcodeAudio unavailable');
   }
   const src = inputPath.startsWith('file://') ? inputPath.slice(7) : inputPath;
-  return mod.transcodeAudio(src, audioFormat, audioQuality);
+  return mod.transcodeAudio(
+    src,
+    audioFormat,
+    encode.audioQuality,
+    encode.vbrMode,
+    encode.losslessMode,
+  );
 }
 
 export async function getAudioStreamUrlOnDevice(

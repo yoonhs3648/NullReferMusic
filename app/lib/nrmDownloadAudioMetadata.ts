@@ -1,6 +1,7 @@
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import type { NrmAudioExtension } from '@/lib/nrmDownloadSettings';
+import { parseMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 import { parseWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 /** 오디오 파일에 쓸 ID3/컨테이너 메타데이터 (빈 문자열 = 태그 미설정) */
@@ -21,6 +22,11 @@ export type NrmAudioFileMetadata = {
   composer?: string;
   /** ffmpeg: lyrics */
   lyrics?: string;
+  /**
+   * 다운로드 파이프라인 전용 — 멜론 원문 가사(plain).
+   * ffmpeg/파일 태그에는 기록하지 않는다.
+   */
+  melonLyricsPlain?: string;
   /** ffmpeg: bpm */
   bpm?: string;
   /** ffmpeg: copyright */
@@ -60,6 +66,7 @@ export function normalizeDownloadMetadata(
     discNumber: trimOpt(meta.discNumber),
     composer: trimOpt(meta.composer),
     lyrics: trimOpt(meta.lyrics),
+    melonLyricsPlain: trimOpt(meta.melonLyricsPlain),
     bpm: trimOpt(meta.bpm),
     copyright: trimOpt(meta.copyright),
     website: trimOpt(meta.website),
@@ -73,6 +80,7 @@ export function normalizeDownloadMetadata(
     'discNumber',
     'composer',
     'lyrics',
+    'melonLyricsPlain',
     'bpm',
     'copyright',
     'website',
@@ -93,7 +101,10 @@ export function metadataForAudioExtension(
   if (extension !== '.m4a') return meta;
   // m4a: Whisper sentinel(__AUTO_FROM_WHISPER__:...)은 보존해야 splitMetadataForDownloadStages가 whisperMode를 추출할 수 있음
   // 실제 가사 텍스트(sentinel이 아닌 경우)만 제거 (m4a 메타에 직접 embed하지 않음)
-  if (parseWhisperLyricsMode(meta.lyrics) !== null) {
+  if (
+    parseWhisperLyricsMode(meta.lyrics) !== null ||
+    parseMelonLyricsMode(meta.lyrics) !== null
+  ) {
     return meta;
   }
   const { lyrics: _lyrics, ...rest } = meta;
@@ -170,7 +181,11 @@ export function metadataNeedsPostProcess(
   meta: NrmAudioFileMetadata | undefined,
 ): meta is NrmAudioFileMetadata {
   if (!meta) return false;
-  return hasEmbeddableAudioMetadata(meta) || !!parseWhisperLyricsMode(meta.lyrics);
+  return (
+    hasEmbeddableAudioMetadata(meta) ||
+    !!parseWhisperLyricsMode(meta.lyrics) ||
+    !!parseMelonLyricsMode(meta.lyrics)
+  );
 }
 
 export function hasEmbeddableAudioMetadata(meta: NrmAudioFileMetadata): boolean {

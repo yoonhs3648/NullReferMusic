@@ -91,17 +91,11 @@ export async function transcribeWhisperLrc(
     });
     const translateT0 = Date.now();
     try {
-      const [{ getDeepLApiKey }, { translateLrcToKoreanWithDeepL }] = await Promise.all([
-        import('@/lib/nrmDeepLApiSettings'),
-        import('@/lib/nrmDeepLApiClient'),
-      ]);
-      const apiKey = await getDeepLApiKey();
+      const { translateLrcToKorean } = await import('@/lib/nrmTranslationClient');
       logNrmDev('lyrics.translate', {
-        event: 'deepl_key_loaded',
-        hasApiKey: apiKey.trim().length > 0,
-        apiKeyLen: apiKey.trim().length,
+        event: 'translate_key_loaded',
       });
-      const translated = await translateLrcToKoreanWithDeepL(lrc, apiKey);
+      const translated = await translateLrcToKorean(lrc);
       if (translated.ok) {
         lrc = translated.lrc;
         logDownloadStage('translate', 'deepl_ok', {
