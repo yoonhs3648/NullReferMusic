@@ -7,15 +7,22 @@ import { Platform } from 'react-native';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { YoutubeSearchOutcome } from '@/lib/youtubeSearchTypes';
 
-export async function searchYoutubeOnDevice(
+export async function searchYoutubePageOnDevice(
   query: string,
+  cursor: string | null = null,
 ): Promise<YoutubeSearchOutcome> {
   if (Platform.OS === 'web') {
     const m = await import('./nrmInnertubeYoutube.web');
-    return m.searchYoutubeOnDevice(query);
+    return m.searchYoutubePageOnDevice(query, cursor);
   }
   const m = await import('./nrmInnertubeYoutube.native');
-  return m.searchYoutubeOnDevice(query);
+  return m.searchYoutubePageOnDevice(query, cursor);
+}
+
+export async function searchYoutubeOnDevice(
+  query: string,
+): Promise<YoutubeSearchOutcome> {
+  return searchYoutubePageOnDevice(query, null);
 }
 
 export async function getInnertube() {

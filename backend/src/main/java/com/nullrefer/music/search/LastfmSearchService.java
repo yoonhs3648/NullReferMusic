@@ -15,12 +15,15 @@ import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistDetailResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistSearchHit;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistSearchResult;
+import com.nullrefer.music.search.LastfmSearchDtos.LastfmAlbumSearchPage;
+import com.nullrefer.music.search.LastfmSearchDtos.LastfmArtistSearchPage;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmSimilarArtistDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTagDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackCoverResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackDetailResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackInfoDto;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchHit;
+import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchPage;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSearchResult;
 import com.nullrefer.music.search.LastfmSearchDtos.LastfmTrackSummaryDto;
 import java.net.URI;
@@ -43,19 +46,27 @@ public class LastfmSearchService {
   private final ObjectMapper objectMapper;
   private final RestClient restClient = RestClient.create();
 
+  private static final int SEARCH_PAGE_SIZE = 20;
+
   public LastfmSearchService(LastfmChartService lastfmChartService, ObjectMapper objectMapper) {
     this.lastfmChartService = lastfmChartService;
     this.objectMapper = objectMapper;
   }
 
   public LastfmArtistSearchResult searchArtists(String apiKey, String query) {
+    return new LastfmArtistSearchResult(searchArtistsPage(apiKey, query, null).artists());
+  }
+
+  public LastfmArtistSearchPage searchArtistsPage(String apiKey, String query, String cursor) {
     String q = requireQuery(query);
+    int page = parsePage(cursor);
     JsonNode root =
         lastfmGet(
             baseBuilder(apiKey)
                 .queryParam("method", "artist.search")
                 .queryParam("artist", q)
-                .queryParam("limit", 20));
+                .queryParam("limit", SEARCH_PAGE_SIZE)
+                .queryParam("page", page));
     List<LastfmArtistSearchHit> hits = new ArrayList<>();
     for (JsonNode node : arrayOrSingle(root.path("results").path("artistmatches").path("artist"))) {
       hits.add(
@@ -66,7 +77,8 @@ public class LastfmSearchService {
               pickImage(node.path("image")),
               parseLong(node.path("listeners").asText("0"))));
     }
-    return new LastfmArtistSearchResult(List.copyOf(hits));
+    long total = parseLong(root.path("results").path("opensearch:totalResults").asText("0"));
+    return new LastfmArtistSearchPage(hits, nextPageCursor(page, hits.size(), total));
   }
 
   public LastfmArtistDetailResult fetchArtistDetail(
@@ -156,13 +168,19 @@ public class LastfmSearchService {
   }
 
   public LastfmAlbumSearchResult searchAlbums(String apiKey, String query) {
+    return new LastfmAlbumSearchResult(searchAlbumsPage(apiKey, query, null).albums());
+  }
+
+  public LastfmAlbumSearchPage searchAlbumsPage(String apiKey, String query, String cursor) {
     String q = requireQuery(query);
+    int page = parsePage(cursor);
     JsonNode root =
         lastfmGet(
             baseBuilder(apiKey)
                 .queryParam("method", "album.search")
                 .queryParam("album", q)
-                .queryParam("limit", 20));
+                .queryParam("limit", SEARCH_PAGE_SIZE)
+                .queryParam("page", page));
     List<LastfmAlbumSearchHit> hits = new ArrayList<>();
     for (JsonNode node : arrayOrSingle(root.path("results").path("albummatches").path("album"))) {
       hits.add(
@@ -173,7 +191,8 @@ public class LastfmSearchService {
               node.path("url").asText(""),
               pickImage(node.path("image"))));
     }
-    return new LastfmAlbumSearchResult(List.copyOf(hits));
+    long total = parseLong(root.path("results").path("opensearch:totalResults").asText("0"));
+    return new LastfmAlbumSearchPage(hits, nextPageCursor(page, hits.size(), total));
   }
 
   public LastfmAlbumDetailResult fetchAlbumDetail(String apiKey, String artist, String album) {
@@ -222,13 +241,19 @@ public class LastfmSearchService {
   }
 
   public LastfmTrackSearchResult searchTracks(String apiKey, String query) {
+    return new LastfmTrackSearchResult(searchTracksPage(apiKey, query, null).tracks());
+  }
+
+  public LastfmTrackSearchPage searchTracksPage(String apiKey, String query, String cursor) {
     String q = requireQuery(query);
+    int page = parsePage(cursor);
     JsonNode root =
         lastfmGet(
             baseBuilder(apiKey)
                 .queryParam("method", "track.search")
                 .queryParam("track", q)
-                .queryParam("limit", 20));
+                .queryParam("limit", SEARCH_PAGE_SIZE)
+                .queryParam("page", page));
     List<LastfmTrackSearchHit> hits = new ArrayList<>();
     for (JsonNode node : arrayOrSingle(root.path("results").path("trackmatches").path("track"))) {
       hits.add(
@@ -239,7 +264,8 @@ public class LastfmSearchService {
               node.path("url").asText(""),
               pickImage(node.path("image"))));
     }
-    return new LastfmTrackSearchResult(List.copyOf(hits));
+    long total = parseLong(root.path("results").path("opensearch:totalResults").asText("0"));
+    return new LastfmTrackSearchPage(hits, nextPageCursor(page, hits.size(), total));
   }
 
   /** 검색 리스트 아티스트 사진 — artist.getInfo 1회, artist.image 만 반환 */
@@ -446,6 +472,31 @@ public class LastfmSearchService {
       throw new IllegalStateException("lastfm_search_query_required");
     }
     return query.trim();
+  }
+
+  private static int parsePage(String cursor) {
+    if (cursor == null || cursor.isBlank()) {
+      return 1;
+    }
+    try {
+      int page = Integer.parseInt(cursor.trim());
+      return page > 0 ? page : 1;
+    } catch (NumberFormatException e) {
+      return 1;
+    }
+  }
+
+  private static String nextPageCursor(int page, int itemCount, long totalResults) {
+    if (itemCount <= 0) {
+      return null;
+    }
+    if (totalResults > 0 && (long) page * SEARCH_PAGE_SIZE >= totalResults) {
+      return null;
+    }
+    if (itemCount < SEARCH_PAGE_SIZE) {
+      return null;
+    }
+    return String.valueOf(page + 1);
   }
 
   private static String requireName(String name) {

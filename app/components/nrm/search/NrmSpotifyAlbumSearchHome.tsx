@@ -1,15 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import {
   formatSpotifyDuration,
   NrmSpotifyCoverImage,
@@ -19,7 +20,7 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   fetchSpotifyAlbumDetail,
-  searchSpotifyAlbums,
+  searchSpotifyAlbumsPage,
 } from '@/lib/nrmSpotifySearchClient';
 import type {
   SpotifyAlbumDetail,
@@ -28,6 +29,7 @@ import type {
 import { NrmSpotifySearchErrorView } from '@/components/nrm/search/NrmSpotifySearchErrorView';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import { splitSpotifySearchFailure } from '@/lib/nrmSpotifySearchUi';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import { nrmSearchEmptyQuery, nrmSearchNoResults } from '@/lib/nrmSearchStrings';
 
 type Props = {
@@ -35,6 +37,14 @@ type Props = {
   paddingHorizontal: number;
   onBackToHome: () => void;
 };
+
+function mergeSpotifyAlbumHits(
+  prev: SpotifyAlbumSearchHit[],
+  next: SpotifyAlbumSearchHit[],
+): SpotifyAlbumSearchHit[] {
+  const seen = new Set(prev.map((h) => h.id));
+  return [...prev, ...next.filter((h) => !seen.has(h.id))];
+}
 
 export function NrmSpotifyAlbumSearchHome({
   isDark,
@@ -48,12 +58,18 @@ export function NrmSpotifyAlbumSearchHome({
   const [query, setQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [heroError, setHeroError] = useState<ChartErrorCode | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [hits, setHits] = useState<SpotifyAlbumSearchHit[]>([]);
   const [detail, setDetail] = useState<SpotifyAlbumDetail | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const reqRef = useRef(0);
+  const loadMoreLockRef = useRef(false);
+  const listRef = useRef<FlatList<SpotifyAlbumSearchHit>>(null);
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -65,10 +81,13 @@ export function NrmSpotifyAlbumSearchHome({
     setHasSearched(true);
     const req = ++reqRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setHeroError(null);
     setInlineError(null);
     setDetail(null);
-    const out = await searchSpotifyAlbums(q);
+    setNextCursor(null);
+    setHasMore(false);
+    const out = await searchSpotifyAlbumsPage(q, null);
     if (req !== reqRef.current) return;
     setLoading(false);
     if (!out.ok) {
@@ -78,11 +97,43 @@ export function NrmSpotifyAlbumSearchHome({
       setInlineError(err.inlineError);
       return;
     }
-    setHits(out.data.albums ?? []);
-    if ((out.data.albums ?? []).length === 0) {
+    const albums = out.data.albums ?? [];
+    const cursor = out.data.nextCursor ?? null;
+    setHits(albums);
+    setNextCursor(cursor);
+    setHasMore(!!cursor);
+    if (albums.length === 0) {
       setInlineError(nrmSearchNoResults);
     }
   }, [query]);
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    const q = query.trim();
+    if (!q) return;
+    if (loadMoreLockRef.current) return;
+    loadMoreLockRef.current = true;
+    setLoadingMore(true);
+    const req = reqRef.current;
+    const out = await searchSpotifyAlbumsPage(q, nextCursor);
+    if (req !== reqRef.current) {
+      loadMoreLockRef.current = false;
+      return;
+    }
+    if (!out.ok) {
+      setLoadingMore(false);
+      setHasMore(false);
+      loadMoreLockRef.current = false;
+      return;
+    }
+    const next = out.data.albums ?? [];
+    const cursor = out.data.nextCursor ?? null;
+    setHits((prev) => mergeSpotifyAlbumHits(prev, next));
+    setNextCursor(cursor);
+    setHasMore(!!cursor);
+    setLoadingMore(false);
+    loadMoreLockRef.current = false;
+  }, [query, loading, loadingMore, hasMore, nextCursor]);
 
   const initialCentered =
     !hasSearched &&
@@ -110,15 +161,8 @@ export function NrmSpotifyAlbumSearchHome({
     setDetail(out.data);
   }, []);
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[
-        styles.scrollInner,
-        { paddingHorizontal },
-        initialCentered && styles.scrollInnerInitialCentered,
-      ]}
-      keyboardShouldPersistTaps="handled">
+  const renderListHeader = () => (
+    <View style={styles.listHeaderWrap}>
       <NrmFeatureScreenLogoHeader
         isDark={isDark}
         onPressHome={onBackToHome}
@@ -135,7 +179,9 @@ export function NrmSpotifyAlbumSearchHome({
         loading={loading}
         compact={initialCentered}
       />
-      {loading ? <ActivityIndicator color={nrmTokens.color.primary} /> : null}
+      {loading ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
       <NrmSpotifySearchErrorView
         errorCode={heroError}
         isDark={isDark}
@@ -144,26 +190,17 @@ export function NrmSpotifyAlbumSearchHome({
       {inlineError ? (
         <Text style={[styles.error, { color: bodyColor }]}>{inlineError}</Text>
       ) : null}
-      {!heroError
-        ? hits.map((hit) => (
-        <Pressable
-          key={hit.id}
-          onPress={() => void openDetail(hit)}
-          style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
-          <NrmSpotifyCoverImage imageUrl={hit.imageUrl} size={56} />
-          <View style={styles.rowMeta}>
-            <Text style={[styles.rowTitle, { color: titleColor }]} numberOfLines={1}>
-              {hit.name}
-            </Text>
-            <Text style={[styles.rowSub, { color: bodyColor }]} numberOfLines={1}>
-              {hit.artists}
-              {hit.releaseDate ? ` · ${hit.releaseDate}` : ''}
-            </Text>
-          </View>
-        </Pressable>
-          ))
-        : null}
-      {detailLoading ? <ActivityIndicator color={nrmTokens.color.primary} /> : null}
+    </View>
+  );
+
+  const renderListFooter = () => (
+    <>
+      {loadingMore ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
+      {detailLoading ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
       {!heroError && detail ? (
         <View style={styles.detail}>
           <View style={styles.detailCover}>
@@ -187,18 +224,67 @@ export function NrmSpotifyAlbumSearchHome({
           ))}
         </View>
       ) : null}
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <View style={styles.listRoot}>
+      <FlatList
+        ref={listRef}
+        data={!heroError ? hits : []}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item: hit }) => (
+          <Pressable
+            onPress={() => void openDetail(hit)}
+            style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
+            <NrmSpotifyCoverImage imageUrl={hit.imageUrl} size={56} />
+            <View style={styles.rowMeta}>
+              <Text style={[styles.rowTitle, { color: titleColor }]} numberOfLines={1}>
+                {hit.name}
+              </Text>
+              <Text style={[styles.rowSub, { color: bodyColor }]} numberOfLines={1}>
+                {hit.artists}
+                {hit.releaseDate ? ` · ${hit.releaseDate}` : ''}
+              </Text>
+            </View>
+          </Pressable>
+        )}
+        ListHeaderComponent={renderListHeader}
+        ListFooterComponent={renderListFooter}
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.35}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollInner,
+          { paddingHorizontal },
+          initialCentered && styles.scrollInnerInitialCentered,
+        ]}
+      />
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1 },
+  listHeaderWrap: { width: '100%' },
   scroll: { flex: 1 },
   scrollInner: { paddingBottom: nrmTokens.space.xxl },
   scrollInnerInitialCentered: {
     flexGrow: 1,
     justifyContent: 'center',
   },
-  logoWrap: { marginBottom: nrmTokens.space.md },
+  loader: { marginVertical: nrmTokens.space.md },
   error: { marginBottom: nrmTokens.space.md },
   row: {
     flexDirection: 'row',

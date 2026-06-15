@@ -16,6 +16,13 @@ export function getInnertube(): Promise<never> {
   );
 }
 
+export async function searchYoutubePageOnDevice(
+  _query: string,
+  _cursor: string | null,
+): Promise<YoutubeSearchOutcome> {
+  return searchYoutubeOnDevice(_query);
+}
+
 export async function searchYoutubeOnDevice(
   query: string,
 ): Promise<YoutubeSearchOutcome> {

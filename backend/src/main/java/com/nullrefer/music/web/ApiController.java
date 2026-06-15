@@ -23,6 +23,7 @@ import com.nullrefer.music.download.YtDlpDownloadService;
 import com.nullrefer.music.download.YtDlpDownloadService.DownloadOutcome;
 import com.nullrefer.music.config.NrmSettings;
 import com.nullrefer.music.youtube.YoutubeSearchHit;
+import com.nullrefer.music.youtube.YoutubeSearchPage;
 import com.nullrefer.music.youtube.YoutubeSearchService;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -604,6 +605,7 @@ public class ApiController {
   @GetMapping("/api/search/lastfm/artist")
   public ResponseEntity<?> lastfmSearchArtist(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -615,7 +617,7 @@ public class ApiController {
     return lastfmSearchWithKey(
         apiKeyHeader,
         authorization,
-        key -> lastfmSearchService.searchArtists(key, query));
+        key -> lastfmSearchService.searchArtistsPage(key, query, cursor));
   }
 
   @GetMapping("/api/search/lastfm/artist/detail")
@@ -639,6 +641,7 @@ public class ApiController {
   @GetMapping("/api/search/lastfm/album")
   public ResponseEntity<?> lastfmSearchAlbum(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -650,7 +653,7 @@ public class ApiController {
     return lastfmSearchWithKey(
         apiKeyHeader,
         authorization,
-        key -> lastfmSearchService.searchAlbums(key, query));
+        key -> lastfmSearchService.searchAlbumsPage(key, query, cursor));
   }
 
   @GetMapping("/api/search/lastfm/album/detail")
@@ -674,6 +677,7 @@ public class ApiController {
   @GetMapping("/api/search/lastfm/track")
   public ResponseEntity<?> lastfmSearchTrack(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -685,7 +689,7 @@ public class ApiController {
     return lastfmSearchWithKey(
         apiKeyHeader,
         authorization,
-        key -> lastfmSearchService.searchTracks(key, query));
+        key -> lastfmSearchService.searchTracksPage(key, query, cursor));
   }
 
   @GetMapping("/api/search/lastfm/track/detail")
@@ -708,9 +712,11 @@ public class ApiController {
   }
 
   @GetMapping("/api/search/melon/artist")
-  public ResponseEntity<?> melonSearchArtist(@RequestParam("q") String query) {
+  public ResponseEntity<?> melonSearchArtist(
+      @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor) {
     try {
-      return ResponseEntity.ok(melonSearchService.searchArtists(query));
+      return ResponseEntity.ok(melonSearchService.searchArtistsPage(query, cursor));
     } catch (IllegalArgumentException e) {
       return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
     } catch (IllegalStateException e) {
@@ -732,9 +738,11 @@ public class ApiController {
   }
 
   @GetMapping("/api/search/melon/album")
-  public ResponseEntity<?> melonSearchAlbum(@RequestParam("q") String query) {
+  public ResponseEntity<?> melonSearchAlbum(
+      @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor) {
     try {
-      return ResponseEntity.ok(melonSearchService.searchAlbums(query));
+      return ResponseEntity.ok(melonSearchService.searchAlbumsPage(query, cursor));
     } catch (IllegalArgumentException e) {
       return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
     } catch (IllegalStateException e) {
@@ -754,9 +762,11 @@ public class ApiController {
   }
 
   @GetMapping("/api/search/melon/track")
-  public ResponseEntity<?> melonSearchTrack(@RequestParam("q") String query) {
+  public ResponseEntity<?> melonSearchTrack(
+      @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor) {
     try {
-      return ResponseEntity.ok(melonSearchService.searchTracks(query));
+      return ResponseEntity.ok(melonSearchService.searchTracksPage(query, cursor));
     } catch (IllegalArgumentException e) {
       return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
     } catch (IllegalStateException e) {
@@ -778,6 +788,7 @@ public class ApiController {
   @GetMapping("/api/search/spotify/artist")
   public ResponseEntity<?> spotifySearchArtist(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -795,7 +806,7 @@ public class ApiController {
         clientIdHeader,
         clientSecretHeader,
         (clientId, clientSecret, bearer) ->
-            spotifySearchService.searchArtists(clientId, clientSecret, bearer, query));
+            spotifySearchService.searchArtistsPage(clientId, clientSecret, bearer, query, cursor));
   }
 
   @GetMapping("/api/search/spotify/artist/detail")
@@ -824,6 +835,7 @@ public class ApiController {
   @GetMapping("/api/search/spotify/album")
   public ResponseEntity<?> spotifySearchAlbum(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -841,7 +853,7 @@ public class ApiController {
         clientIdHeader,
         clientSecretHeader,
         (clientId, clientSecret, bearer) ->
-            spotifySearchService.searchAlbums(clientId, clientSecret, bearer, query));
+            spotifySearchService.searchAlbumsPage(clientId, clientSecret, bearer, query, cursor));
   }
 
   @GetMapping("/api/search/spotify/album/detail")
@@ -870,6 +882,7 @@ public class ApiController {
   @GetMapping("/api/search/spotify/track")
   public ResponseEntity<?> spotifySearchTrack(
       @RequestParam("q") String query,
+      @RequestParam(value = "cursor", required = false) String cursor,
       @org.springframework.web.bind.annotation.RequestHeader(
               value = HttpHeaders.AUTHORIZATION,
               required = false)
@@ -887,7 +900,7 @@ public class ApiController {
         clientIdHeader,
         clientSecretHeader,
         (clientId, clientSecret, bearer) ->
-            spotifySearchService.searchTracks(clientId, clientSecret, bearer, query));
+            spotifySearchService.searchTracksPage(clientId, clientSecret, bearer, query, cursor));
   }
 
   @GetMapping("/api/search/spotify/track/detail")
@@ -1059,13 +1072,19 @@ public class ApiController {
   }
 
   @GetMapping({"/api/youtube/search", "/youtube/search"})
-  public ResponseEntity<?> youtubeSearch(@RequestParam(value = "q", required = false) String q) {
+  public ResponseEntity<?> youtubeSearch(
+      @RequestParam(value = "q", required = false) String q,
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "limit", defaultValue = "20") int limit) {
     if (q == null || q.isBlank()) {
       return ResponseEntity.badRequest().body(Map.of("error", "empty_query"));
     }
     try {
-      List<YoutubeSearchHit> hits = youtubeSearchService.search(q.trim());
-      return ResponseEntity.ok(hits);
+      YoutubeSearchPage page = youtubeSearchService.searchPage(q.trim(), cursor, limit);
+      return ResponseEntity.ok(
+          Map.of(
+              "items", page.items(),
+              "nextCursor", page.nextCursor() != null ? page.nextCursor() : ""));
     } catch (IllegalStateException e) {
       String code = e.getMessage() != null ? e.getMessage() : "youtube_error";
       if ("youtube_api_key_missing".equals(code)) {

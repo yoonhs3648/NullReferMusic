@@ -104,3 +104,18 @@ export type SpotifyTrackDetail = {
 export type SpotifySearchOutcome<T> =
   | { ok: true; data: T }
   | { ok: false; errorCode: ChartErrorCode; message: string };
+
+export type SpotifyArtistSearchPage = {
+  artists: SpotifyArtistSearchHit[];
+  nextCursor: string | null;
+};
+
+export type SpotifyAlbumSearchPage = {
+  albums: SpotifyAlbumSearchHit[];
+  nextCursor: string | null;
+};
+
+export type SpotifyTrackSearchPage = {
+  tracks: SpotifyTrackSearchHit[];
+  nextCursor: string | null;
+};

@@ -1,15 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import {
   formatSpotifyCount,
   formatSpotifyDuration,
@@ -20,7 +21,7 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   fetchSpotifyArtistDetail,
-  searchSpotifyArtists,
+  searchSpotifyArtistsPage,
 } from '@/lib/nrmSpotifySearchClient';
 import type {
   SpotifyArtistDetail,
@@ -29,6 +30,7 @@ import type {
 import { NrmSpotifySearchErrorView } from '@/components/nrm/search/NrmSpotifySearchErrorView';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import { splitSpotifySearchFailure } from '@/lib/nrmSpotifySearchUi';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import { nrmSearchEmptyQuery, nrmSearchNoResults } from '@/lib/nrmSearchStrings';
 
 type Props = {
@@ -36,6 +38,14 @@ type Props = {
   paddingHorizontal: number;
   onBackToHome: () => void;
 };
+
+function mergeSpotifyArtistHits(
+  prev: SpotifyArtistSearchHit[],
+  next: SpotifyArtistSearchHit[],
+): SpotifyArtistSearchHit[] {
+  const seen = new Set(prev.map((h) => h.id));
+  return [...prev, ...next.filter((h) => !seen.has(h.id))];
+}
 
 export function NrmSpotifyArtistSearchHome({
   isDark,
@@ -49,12 +59,18 @@ export function NrmSpotifyArtistSearchHome({
   const [query, setQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [heroError, setHeroError] = useState<ChartErrorCode | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [hits, setHits] = useState<SpotifyArtistSearchHit[]>([]);
   const [detail, setDetail] = useState<SpotifyArtistDetail | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const reqRef = useRef(0);
+  const loadMoreLockRef = useRef(false);
+  const listRef = useRef<FlatList<SpotifyArtistSearchHit>>(null);
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -66,10 +82,13 @@ export function NrmSpotifyArtistSearchHome({
     setHasSearched(true);
     const req = ++reqRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setHeroError(null);
     setInlineError(null);
     setDetail(null);
-    const out = await searchSpotifyArtists(q);
+    setNextCursor(null);
+    setHasMore(false);
+    const out = await searchSpotifyArtistsPage(q, null);
     if (req !== reqRef.current) return;
     setLoading(false);
     if (!out.ok) {
@@ -79,11 +98,43 @@ export function NrmSpotifyArtistSearchHome({
       setInlineError(err.inlineError);
       return;
     }
-    setHits(out.data.artists ?? []);
-    if ((out.data.artists ?? []).length === 0) {
+    const artists = out.data.artists ?? [];
+    const cursor = out.data.nextCursor ?? null;
+    setHits(artists);
+    setNextCursor(cursor);
+    setHasMore(!!cursor);
+    if (artists.length === 0) {
       setInlineError(nrmSearchNoResults);
     }
   }, [query]);
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    const q = query.trim();
+    if (!q) return;
+    if (loadMoreLockRef.current) return;
+    loadMoreLockRef.current = true;
+    setLoadingMore(true);
+    const req = reqRef.current;
+    const out = await searchSpotifyArtistsPage(q, nextCursor);
+    if (req !== reqRef.current) {
+      loadMoreLockRef.current = false;
+      return;
+    }
+    if (!out.ok) {
+      setLoadingMore(false);
+      setHasMore(false);
+      loadMoreLockRef.current = false;
+      return;
+    }
+    const next = out.data.artists ?? [];
+    const cursor = out.data.nextCursor ?? null;
+    setHits((prev) => mergeSpotifyArtistHits(prev, next));
+    setNextCursor(cursor);
+    setHasMore(!!cursor);
+    setLoadingMore(false);
+    loadMoreLockRef.current = false;
+  }, [query, loading, loadingMore, hasMore, nextCursor]);
 
   const initialCentered =
     !hasSearched &&
@@ -111,15 +162,8 @@ export function NrmSpotifyArtistSearchHome({
     setDetail(out.data);
   }, []);
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[
-        styles.scrollInner,
-        { paddingHorizontal },
-        initialCentered && styles.scrollInnerInitialCentered,
-      ]}
-      keyboardShouldPersistTaps="handled">
+  const renderListHeader = () => (
+    <View style={styles.listHeaderWrap}>
       <NrmFeatureScreenLogoHeader
         isDark={isDark}
         onPressHome={onBackToHome}
@@ -136,7 +180,9 @@ export function NrmSpotifyArtistSearchHome({
         loading={loading}
         compact={initialCentered}
       />
-      {loading ? <ActivityIndicator color={nrmTokens.color.primary} /> : null}
+      {loading ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
       <NrmSpotifySearchErrorView
         errorCode={heroError}
         isDark={isDark}
@@ -145,25 +191,17 @@ export function NrmSpotifyArtistSearchHome({
       {inlineError ? (
         <Text style={[styles.error, { color: bodyColor }]}>{inlineError}</Text>
       ) : null}
-      {!heroError
-        ? hits.map((hit) => (
-        <Pressable
-          key={hit.id}
-          onPress={() => void openDetail(hit)}
-          style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
-          <NrmSpotifyCoverImage imageUrl={hit.imageUrl} size={56} />
-          <View style={styles.rowMeta}>
-            <Text style={[styles.rowTitle, { color: titleColor }]} numberOfLines={1}>
-              {hit.name}
-            </Text>
-            <Text style={[styles.rowSub, { color: bodyColor }]}>
-              팔로워 {formatSpotifyCount(hit.followers)}
-            </Text>
-          </View>
-        </Pressable>
-          ))
-        : null}
-      {detailLoading ? <ActivityIndicator color={nrmTokens.color.primary} /> : null}
+    </View>
+  );
+
+  const renderListFooter = () => (
+    <>
+      {loadingMore ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
+      {detailLoading ? (
+        <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+      ) : null}
       {!heroError && detail ? (
         <View style={styles.detail}>
           <View style={styles.detailCover}>
@@ -199,18 +237,66 @@ export function NrmSpotifyArtistSearchHome({
           ))}
         </View>
       ) : null}
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <View style={styles.listRoot}>
+      <FlatList
+        ref={listRef}
+        data={!heroError ? hits : []}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item: hit }) => (
+          <Pressable
+            onPress={() => void openDetail(hit)}
+            style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
+            <NrmSpotifyCoverImage imageUrl={hit.imageUrl} size={56} />
+            <View style={styles.rowMeta}>
+              <Text style={[styles.rowTitle, { color: titleColor }]} numberOfLines={1}>
+                {hit.name}
+              </Text>
+              <Text style={[styles.rowSub, { color: bodyColor }]}>
+                팔로워 {formatSpotifyCount(hit.followers)}
+              </Text>
+            </View>
+          </Pressable>
+        )}
+        ListHeaderComponent={renderListHeader}
+        ListFooterComponent={renderListFooter}
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.35}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollInner,
+          { paddingHorizontal },
+          initialCentered && styles.scrollInnerInitialCentered,
+        ]}
+      />
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1 },
+  listHeaderWrap: { width: '100%' },
   scroll: { flex: 1 },
   scrollInner: { paddingBottom: nrmTokens.space.xxl },
   scrollInnerInitialCentered: {
     flexGrow: 1,
     justifyContent: 'center',
   },
-  logoWrap: { marginBottom: nrmTokens.space.md },
+  loader: { marginVertical: nrmTokens.space.md },
   error: { marginBottom: nrmTokens.space.md },
   row: {
     flexDirection: 'row',

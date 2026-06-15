@@ -9,7 +9,7 @@
  * iOS: 앱 Documents > NullReferenceMusic/ 폴더.
  *
  * ⚠ SAF로 생성된 content:// URI에는 copyAsync가 0바이트 문제를 일으킬 수 있어
- *   readAsStringAsync(base64) + writeAsStringAsync(base64) 로 씁니다.
+ *   오디오·LRC는 네이티브 스트리밍 복사(copyFileToSaf / copyFileToExistingSaf)만 사용합니다.
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
@@ -18,7 +18,10 @@ import { Alert, Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { hasEmbeddableAudioMetadata } from '@/lib/nrmDownloadAudioMetadata';
-import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
+import {
+  copyLocalFileToExistingSaf,
+  copyLocalFileToSaf,
+} from '@/lib/onDeviceDownload';
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
@@ -29,6 +32,7 @@ import {
   loadStoredSafGrant,
   requestNewSafDirUri,
 } from '@/lib/nrmDownloadSafGrant';
+import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 
 const NRM_FOLDER = 'NullReferenceMusic';
 
@@ -45,7 +49,7 @@ function toNativeLocalFileUri(uriOrPath: string): string {
   return `file://${trimmed}`;
 }
 
-/** SAF tree에 LRC 텍스트 저장 (MP3 저장과 동일한 createFileAsync 경로 우선) */
+/** SAF tree에 LRC 텍스트 저장 (UTF-8 직접 쓰기 → 실패 시 네이티브 스트리밍 복사) */
 async function writeLrcTextToSafTree(
   dirUri: string,
   lrcName: string,
@@ -62,19 +66,18 @@ async function writeLrcTextToSafTree(
       return lrcDest;
     }
   } catch {
-    /* UTF-8 직접 쓰기 실패 → base64 경로 */
+    /* UTF-8 직접 쓰기 실패 → 네이티브 스트리밍 */
   }
-  await writeToBinarySafUri(
-    await (async () => {
-      const cacheRoot = FileSystem.cacheDirectory;
-      if (!cacheRoot) throw new Error('캐시 없음');
-      const temp = `${cacheRoot}nrm-lrc-saf-${Date.now()}.lrc`;
-      await FileSystem.writeAsStringAsync(temp, body);
-      return temp;
-    })(),
-    lrcDest,
-  );
-  return lrcDest;
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) throw new Error('캐시 없음');
+  const temp = `${cacheRoot}nrm-lrc-saf-${Date.now()}.lrc`;
+  await FileSystem.writeAsStringAsync(temp, body);
+  try {
+    await copyLocalFileToExistingSaf(temp, lrcDest);
+    return lrcDest;
+  } finally {
+    await FileSystem.deleteAsync(temp, { idempotent: true }).catch(() => {});
+  }
 }
 
 async function copyLrcSidecarToSaf(
@@ -84,13 +87,7 @@ async function copyLrcSidecarToSaf(
 ): Promise<string> {
   const lrcName = fileName.replace(/\.[^.]+$/, '.lrc');
   const lrcSrc = toNativeLocalFileUri(sidecarLrcUri);
-  try {
-    return await copyLocalFileToSaf(lrcSrc, dirUri, lrcName, LRC_SAF_MIME);
-  } catch {
-    const lrcDest = await StorageAccessFramework.createFileAsync(dirUri, lrcName, LRC_SAF_MIME);
-    await writeToBinarySafUri(lrcSrc, lrcDest);
-    return lrcDest;
-  }
+  return copyLocalFileToSaf(lrcSrc, dirUri, lrcName, LRC_SAF_MIME);
 }
 
 export const NRM_DOWNLOAD_PUBLIC_FOLDER_NAME = NRM_FOLDER;
@@ -127,30 +124,35 @@ function mimeFromExt(ext: string): string {
 
 // ── Android SAF ───────────────────────────────────────────────────────────────
 
-/**
- * SAF content:// URI에 파일을 씁니다.
- * copyAsync 는 SAF 목적지에서 0바이트 문제가 발생하므로
- * base64 read → write 방식을 사용합니다.
- */
-async function writeToBinarySafUri(sourceUri: string, destUri: string): Promise<void> {
-  try {
-    await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-    const info = await FileSystem.getInfoAsync(destUri);
-    if (info.exists && 'size' in info && (info.size ?? 0) > 0) {
-      return;
-    }
-  } catch {
-    /* copyAsync가 SAF에서 0바이트가 되는 기기 → base64 폴백 */
-  }
-  const b64 = await FileSystem.readAsStringAsync(sourceUri, { encoding: 'base64' });
-  await FileSystem.writeAsStringAsync(destUri, b64, { encoding: 'base64' });
+const SAF_COPY_MAX_ATTEMPTS = 4;
+const SAF_COPY_RETRY_DELAY_MS = 120;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * SAF로 저장된 파일을 Android MediaStore에 등록합니다.
- * 등록 후 Samsung My Files 등 파일 탐색기에서 즉시 보입니다.
- * 실패해도 파일 자체는 정상 저장되어 있으므로 무시합니다.
+ * SAF content:// URI에 로컬 파일을 네이티브 스트리밍으로 복사합니다.
+ * JS base64 로드는 UI 프리즈를 유발하므로 사용하지 않습니다.
  */
+async function copyLocalFileToSafDocument(
+  sourceUri: string,
+  destUri: string,
+): Promise<void> {
+  await nrmYieldToEventLoop();
+  await copyLocalFileToExistingSaf(sourceUri, destUri);
+}
+
+/**
+ * SAF로 저장된 파일을 Android MediaStore에 등록합니다 (백그라운드, UI 비블로킹).
+ */
+function scheduleMediaStoreScan(
+  safDocUri: string,
+  metadata?: NrmAudioFileMetadata,
+): void {
+  void triggerMediaStoreScan(safDocUri, metadata).catch(() => {});
+}
+
 async function triggerMediaStoreScan(
   safDocUri: string,
   metadata?: NrmAudioFileMetadata,
@@ -197,11 +199,13 @@ async function copyAudioToSafWithRetry(
   dirUri: string,
   fileName: string,
   mimeType: string,
-): Promise<{ destUri: string; via: 'native' | 'base64'; persistMs: number }> {
+): Promise<{ destUri: string; via: 'native' | 'native_existing'; persistMs: number }> {
   const srcPath = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
   const t0 = Date.now();
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= SAF_COPY_MAX_ATTEMPTS; attempt++) {
     try {
+      await nrmYieldToEventLoop();
       const destUri = await copyLocalFileToSaf(srcPath, dirUri, fileName, mimeType);
       const persistMs = Date.now() - t0;
       logDownloadStage('persist', 'saf_copy_ok', {
@@ -212,23 +216,36 @@ async function copyAudioToSafWithRetry(
       });
       return { destUri, via: 'native', persistMs };
     } catch (e) {
+      lastErr = e;
       logNrmRunError('download.persist', e, {
         event: 'saf_copy_retry',
         attempt,
         fileName,
       });
-      if (attempt < 2) continue;
+      if (attempt < SAF_COPY_MAX_ATTEMPTS) {
+        await sleepMs(SAF_COPY_RETRY_DELAY_MS * attempt);
+      }
     }
   }
+  await nrmYieldToEventLoop();
   const destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
-  await writeToBinarySafUri(sourceUri, destUri);
+  try {
+    await copyLocalFileToSafDocument(srcPath, destUri);
+  } catch (e) {
+    logNrmRunError('download.persist', e, {
+      event: 'saf_copy_existing_fail',
+      fileName,
+      prior: lastErr instanceof Error ? lastErr.message : String(lastErr ?? ''),
+    });
+    throw e;
+  }
   const persistMs = Date.now() - t0;
   logDownloadStage('persist', 'saf_copy_ok', {
-    via: 'base64',
+    via: 'native_existing',
     persistMs,
     fileName,
   });
-  return { destUri, via: 'base64', persistMs };
+  return { destUri, via: 'native_existing', persistMs };
 }
 
 /**
@@ -260,8 +277,8 @@ async function saveViaSaf(
 
   const { destUri } = await copyAudioToSafWithRetry(sourceUri, dirUri, fileName, mimeType);
 
-  // MediaStore 등록 → Samsung My Files·뮤직 앱 인덱스
-  await triggerMediaStoreScan(destUri, metadata);
+  // MediaStore 등록 — 파일 저장과 분리(백그라운드). Samsung My Files·뮤직 앱 인덱스
+  scheduleMediaStoreScan(destUri, metadata);
 
   if (sidecarLrcUri) {
     await copyLrcSidecarToSaf(dirUri, fileName, sidecarLrcUri);
@@ -576,7 +593,7 @@ export async function persistLrcForSavedAudio(
         } catch (e2) {
           logLrcPersist(
             'persist_retry',
-            { audioFileName: location.fileName, method: 'expo_saf_binary' },
+            { audioFileName: location.fileName, method: 'native_existing' },
             e2,
           );
           lrcDest = await StorageAccessFramework.createFileAsync(
@@ -584,7 +601,7 @@ export async function persistLrcForSavedAudio(
             lrcName,
             LRC_SAF_MIME,
           );
-          await writeToBinarySafUri(tempLrcUri, lrcDest);
+          await copyLocalFileToSafDocument(tempLrcUri, lrcDest);
         }
       }
     } else {
@@ -652,6 +669,7 @@ export async function persistLocalAudioFile(
     (await FileSystem.getInfoAsync(lrcUri).then((x) => !!x.exists).catch(() => false));
   const lrcToPersist = sidecarExists ? lrcUri : undefined;
   try {
+    await nrmYieldToEventLoop();
     if (Platform.OS === 'ios') {
       const docRoot = FileSystem.documentDirectory;
       if (!docRoot) throw new Error('이 기기에서 문서 저장 공간을 사용할 수 없습니다.');

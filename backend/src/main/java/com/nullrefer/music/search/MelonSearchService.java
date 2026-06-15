@@ -5,7 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumDetailResult;
 import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumInfoDto;
 import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumSearchHit;
+import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumSearchPage;
 import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumSearchResult;
+import com.nullrefer.music.search.MelonSearchDtos.MelonArtistSearchPage;
+import com.nullrefer.music.search.MelonSearchDtos.MelonTrackSearchPage;
 import com.nullrefer.music.search.MelonSearchDtos.MelonAlbumTrackDto;
 import com.nullrefer.music.search.MelonSearchDtos.MelonArtistDetailResult;
 import com.nullrefer.music.search.MelonSearchDtos.MelonArtistInfoDto;
@@ -43,7 +46,9 @@ public class MelonSearchService {
 
   private static final Logger log = LoggerFactory.getLogger(MelonSearchService.class);
   private static final String BASE = "https://www.melon.com";
-  private static final int SEARCH_LIMIT = 30;
+  private static final int ARTIST_SEARCH_PAGE_SIZE = 20;
+  private static final int ALBUM_SEARCH_PAGE_SIZE = 21;
+  private static final int SONG_SEARCH_PAGE_SIZE = 50;
   private static final int ARTIST_POPULAR_TRACK_LIMIT = 15;
   private static final int ARTIST_POPULAR_ALBUM_LIMIT = 12;
   private static final int BIO_PREVIEW_MAX = 480;
@@ -74,21 +79,45 @@ public class MelonSearchService {
   }
 
   public MelonArtistSearchResult searchArtists(String query) {
+    MelonArtistSearchPage page = searchArtistsPage(query, null);
+    return new MelonArtistSearchResult(page.artists());
+  }
+
+  public MelonArtistSearchPage searchArtistsPage(String query, String cursor) {
     String q = requireQuery(query);
-    String html = fetchHtml(BASE + "/search/artist/index.htm?q=" + encode(q));
-    return new MelonArtistSearchResult(parseArtistSearch(html));
+    int startIndex = parseStartIndex(cursor);
+    String referer = artistSearchUrl(q, 1);
+    String html = fetchHtml(artistSearchUrl(q, startIndex), referer);
+    List<MelonArtistSearchHit> hits = parseArtistSearch(html, ARTIST_SEARCH_PAGE_SIZE);
+    return new MelonArtistSearchPage(hits, nextCursor(startIndex, hits.size(), ARTIST_SEARCH_PAGE_SIZE));
   }
 
   public MelonAlbumSearchResult searchAlbums(String query) {
+    MelonAlbumSearchPage page = searchAlbumsPage(query, null);
+    return new MelonAlbumSearchResult(page.albums());
+  }
+
+  public MelonAlbumSearchPage searchAlbumsPage(String query, String cursor) {
     String q = requireQuery(query);
-    String html = fetchHtml(BASE + "/search/album/index.htm?q=" + encode(q));
-    return new MelonAlbumSearchResult(parseAlbumSearch(html));
+    int startIndex = parseStartIndex(cursor);
+    String referer = albumSearchUrl(q, 1);
+    String html = fetchHtml(albumSearchUrl(q, startIndex), referer);
+    List<MelonAlbumSearchHit> hits = parseAlbumSearch(html, ALBUM_SEARCH_PAGE_SIZE);
+    return new MelonAlbumSearchPage(hits, nextCursor(startIndex, hits.size(), ALBUM_SEARCH_PAGE_SIZE));
   }
 
   public MelonTrackSearchResult searchTracks(String query) {
+    MelonTrackSearchPage page = searchTracksPage(query, null);
+    return new MelonTrackSearchResult(page.tracks());
+  }
+
+  public MelonTrackSearchPage searchTracksPage(String query, String cursor) {
     String q = requireQuery(query);
-    String html = fetchHtml(BASE + "/search/song/index.htm?q=" + encode(q));
-    return new MelonTrackSearchResult(parseSongSearch(html));
+    int startIndex = parseStartIndex(cursor);
+    String referer = songSearchUrl(q, 1);
+    String html = fetchHtml(songSearchUrl(q, startIndex), referer);
+    List<MelonTrackSearchHit> hits = parseSongSearch(html, SONG_SEARCH_PAGE_SIZE);
+    return new MelonTrackSearchPage(hits, nextCursor(startIndex, hits.size(), SONG_SEARCH_PAGE_SIZE));
   }
 
   public MelonArtistDetailResult fetchArtistDetail(String artistId, String artistName) {
@@ -150,8 +179,17 @@ public class MelonSearchService {
   }
 
   private String fetchHtml(String url) {
+    return fetchHtml(url, BASE + "/");
+  }
+
+  private String fetchHtml(String url, String referer) {
     try {
-      return restClient.get().uri(URI.create(url)).retrieve().body(String.class);
+      return restClient
+          .get()
+          .uri(URI.create(url))
+          .header(HttpHeaders.REFERER, referer)
+          .retrieve()
+          .body(String.class);
     } catch (RestClientResponseException e) {
       log.warn("Melon search fetch failed {} status={}", url, e.getStatusCode().value());
       throw new IllegalStateException("melon_fetch_failed");
@@ -159,6 +197,42 @@ public class MelonSearchService {
       log.warn("Melon search fetch error {}: {}", url, e.toString());
       throw new IllegalStateException("melon_fetch_failed");
     }
+  }
+
+  private static int parseStartIndex(String cursor) {
+    if (cursor == null || cursor.isBlank()) {
+      return 1;
+    }
+    try {
+      int n = Integer.parseInt(cursor.trim());
+      return n > 0 ? n : 1;
+    } catch (NumberFormatException e) {
+      return 1;
+    }
+  }
+
+  private static String nextCursor(int startIndex, int itemCount, int pageSize) {
+    return itemCount >= pageSize ? String.valueOf(startIndex + pageSize) : null;
+  }
+
+  private static String artistSearchUrl(String query, int startIndex) {
+    String q = encode(query);
+    if (startIndex <= 1) {
+      return BASE + "/search/artist/index.htm?q=" + q;
+    }
+    return BASE + "/search/artist/listArtists.htm?q=" + q + "&startIndex=" + startIndex;
+  }
+
+  private static String albumSearchUrl(String query, int startIndex) {
+    String q = encode(query);
+    String base = BASE + "/search/album/index.htm?q=" + q;
+    return startIndex <= 1 ? base : base + "&startIndex=" + startIndex;
+  }
+
+  private static String songSearchUrl(String query, int startIndex) {
+    String q = encode(query);
+    String base = BASE + "/search/song/index.htm?q=" + q;
+    return startIndex <= 1 ? base : base + "&startIndex=" + startIndex;
   }
 
   private long fetchFanCount(String artistId, String referer) {
@@ -178,13 +252,17 @@ public class MelonSearchService {
   }
 
   private List<MelonArtistSearchHit> parseArtistSearch(String html) {
+    return parseArtistSearch(html, ARTIST_SEARCH_PAGE_SIZE);
+  }
+
+  private List<MelonArtistSearchHit> parseArtistSearch(String html, int limit) {
     List<MelonArtistSearchHit> hits = new ArrayList<>();
     if (html == null || html.isBlank()) {
       return hits;
     }
     java.util.Set<String> seen = new java.util.HashSet<>();
     String[] parts = ARTIST_BLOCK.split(html);
-    for (int i = 1; i < parts.length && hits.size() < SEARCH_LIMIT; i++) {
+    for (int i = 1; i < parts.length && hits.size() < limit; i++) {
       String chunk = parts[i];
       String artistId =
           firstMatch(chunk, Pattern.compile("name=\"artistId\"\\s+value=\"(\\d+)\""));
@@ -217,22 +295,35 @@ public class MelonSearchService {
   }
 
   private static String parseArtistSearchName(String chunk) {
-    Matcher dt =
-        Pattern.compile(
-                "<dt>[\\s\\S]*?<a[^>]*class=\"ellipsis\"[^>]*title=\"([^\"]+?)\\s*-\\s*페이지 이동\"[^>]*>([\\s\\S]*?)</a>",
-                Pattern.CASE_INSENSITIVE)
-            .matcher(chunk);
-    if (dt.find()) {
-      String fromTitle = cleanText(dt.group(1));
-      if (!fromTitle.isBlank()) {
-        return fromTitle;
+    String dtBlock =
+        firstMatchGroup(chunk, Pattern.compile("<dt>[\\s\\S]*?</dt>", Pattern.CASE_INSENSITIVE));
+    if (!dtBlock.isBlank()) {
+      Matcher anchor =
+          Pattern.compile(
+                  "<a[^>]*class=\"ellipsis\"[^>]*>([\\s\\S]*?)</a>",
+                  Pattern.CASE_INSENSITIVE)
+              .matcher(dtBlock);
+      if (anchor.find()) {
+        String anchorTag = anchor.group(0);
+        String inner = anchor.group(1);
+        Matcher title = Pattern.compile("title=\"([^\"]*)\"", Pattern.CASE_INSENSITIVE).matcher(anchorTag);
+        if (title.find()) {
+          String fromTitle = stripMelonPageMoveSuffix(cleanText(title.group(1)));
+          if (!fromTitle.isBlank()) {
+            return fromTitle;
+          }
+        }
+        String fromInner = cleanText(inner.replaceAll("<[^>]+>", ""));
+        if (!fromInner.isBlank()) {
+          return fromInner;
+        }
       }
-      return cleanText(dt.group(2).replaceAll("<[^>]+>", ""));
     }
     return cleanText(
         firstMatchGroup(
             chunk,
-            Pattern.compile("class=\"ellipsis\"[^>]*>([^<]+)</a>\\s*</dt>", Pattern.CASE_INSENSITIVE)));
+            Pattern.compile(
+                "class=\"ellipsis\"[^>]*>([\\s\\S]*?)</a>\\s*</dt>", Pattern.CASE_INSENSITIVE)));
   }
 
   private static String parseArtistSearchGenre(String chunk) {
@@ -288,12 +379,16 @@ public class MelonSearchService {
   }
 
   private List<MelonAlbumSearchHit> parseAlbumSearch(String html) {
+    return parseAlbumSearch(html, ALBUM_SEARCH_PAGE_SIZE);
+  }
+
+  private List<MelonAlbumSearchHit> parseAlbumSearch(String html, int limit) {
     List<MelonAlbumSearchHit> hits = new ArrayList<>();
     if (html == null || html.isBlank()) {
       return hits;
     }
     String[] parts = ALBUM_BLOCK.split(html);
-    for (int i = 1; i < parts.length && hits.size() < SEARCH_LIMIT; i++) {
+    for (int i = 1; i < parts.length && hits.size() < limit; i++) {
       String chunk = parts[i];
       String albumId = firstMatch(chunk, GO_ALBUM);
       if (albumId == null) {
@@ -353,12 +448,16 @@ public class MelonSearchService {
   }
 
   private List<MelonTrackSearchHit> parseSongSearch(String html) {
+    return parseSongSearch(html, SONG_SEARCH_PAGE_SIZE);
+  }
+
+  private List<MelonTrackSearchHit> parseSongSearch(String html, int limit) {
     List<MelonTrackSearchHit> hits = new ArrayList<>();
     if (html == null || html.isBlank()) {
       return hits;
     }
     String[] parts = SONG_ROW.split(html);
-    for (int i = 1; i < parts.length && hits.size() < SEARCH_LIMIT; i++) {
+    for (int i = 1; i < parts.length && hits.size() < limit; i++) {
       String chunk = "<tr" + parts[i];
       if (!chunk.contains("input_check")) {
         continue;

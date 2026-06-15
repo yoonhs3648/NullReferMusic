@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import {
   formatLastfmCount,
   formatLastfmDuration,
@@ -32,10 +34,11 @@ import {
   fetchLastfmAlbumDetail,
   fetchLastfmArtistDetail,
   fetchLastfmTrackDetail,
-  searchLastfmAlbums,
-  searchLastfmArtists,
-  searchLastfmTracks,
+  searchLastfmAlbumsPage,
+  searchLastfmArtistsPage,
+  searchLastfmTracksPage,
 } from '@/lib/nrmLastfmSearchClient';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import {
   isLastfmSearchAuthErrorCode,
@@ -71,6 +74,9 @@ type ListFrame = {
   hits: LastfmArtistSearchHit[] | LastfmAlbumSearchHit[] | LastfmTrackSearchHit[];
   searched: boolean;
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  nextCursor: string | null;
   error: string | null;
   errorCode?: LastfmSearchErrorCode | null;
 };
@@ -161,8 +167,42 @@ function emptyListFrame(kind: LastfmSearchKind): ListFrame {
     hits: [],
     searched: false,
     loading: false,
+    loadingMore: false,
+    hasMore: false,
+    nextCursor: null,
     error: null,
   };
+}
+
+function mergeLastfmArtistHits(
+  prev: LastfmArtistSearchHit[],
+  next: LastfmArtistSearchHit[],
+): LastfmArtistSearchHit[] {
+  const seen = new Set(prev.map((h) => `${h.name}|${h.mbid || h.url}`));
+  return [...prev, ...next.filter((h) => !seen.has(`${h.name}|${h.mbid || h.url}`))];
+}
+
+function mergeLastfmAlbumHits(
+  prev: LastfmAlbumSearchHit[],
+  next: LastfmAlbumSearchHit[],
+): LastfmAlbumSearchHit[] {
+  const seen = new Set(
+    prev.map((h) => (h.mbid ? `${h.name}|${h.mbid}` : `${h.name}|${h.artist}`)),
+  );
+  return [
+    ...prev,
+    ...next.filter(
+      (h) => !seen.has(h.mbid ? `${h.name}|${h.mbid}` : `${h.name}|${h.artist}`),
+    ),
+  ];
+}
+
+function mergeLastfmTrackHits(
+  prev: LastfmTrackSearchHit[],
+  next: LastfmTrackSearchHit[],
+): LastfmTrackSearchHit[] {
+  const seen = new Set(prev.map((h) => `${h.name}|${h.artist}`));
+  return [...prev, ...next.filter((h) => !seen.has(`${h.name}|${h.artist}`))];
 }
 
 function listKindFromFrame(frame: ListFrame): LastfmSearchKind {
@@ -195,6 +235,11 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         : [emptyListFrame(initialKind)],
     );
     const reqRef = useRef(0);
+    const loadMoreLockRef = useRef(false);
+    const listRef = useRef<
+      FlatList<LastfmArtistSearchHit | LastfmAlbumSearchHit | LastfmTrackSearchHit>
+    >(null);
+    const [showScrollTop, setShowScrollTop] = useState(false);
 
     useEffect(() => {
       if (restoredState?.stack?.length) {
@@ -326,17 +371,21 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         updateTop({
           query: q,
           loading: true,
+          loadingMore: false,
           error: null,
+          errorCode: null,
           searched: true,
+          nextCursor: null,
+          hasMore: false,
         } as Partial<ListFrame>);
 
         let out;
         if (frame.type === 'artist-list') {
-          out = await withAuth(() => searchLastfmArtists(q));
+          out = await withAuth(() => searchLastfmArtistsPage(q, null));
         } else if (frame.type === 'album-list') {
-          out = await withAuth(() => searchLastfmAlbums(q));
+          out = await withAuth(() => searchLastfmAlbumsPage(q, null));
         } else {
-          out = await withAuth(() => searchLastfmTracks(q));
+          out = await withAuth(() => searchLastfmTracksPage(q, null));
         }
         if (req !== reqRef.current) return;
 
@@ -352,20 +401,108 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
         }
 
         let hits: ListFrame['hits'] = [];
+        let nextCursor: string | null = null;
         if (frame.type === 'artist-list' && 'artists' in out.data) {
           hits = out.data.artists ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         } else if (frame.type === 'album-list' && 'albums' in out.data) {
           hits = out.data.albums ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         } else if (frame.type === 'track-list' && 'tracks' in out.data) {
           hits = out.data.tracks ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         }
 
         updateTop({
           loading: false,
           hits,
+          nextCursor,
+          hasMore: !!nextCursor,
           error: hits.length === 0 ? nrmSearchNoResults : null,
           errorCode: null,
         } as Partial<ListFrame>);
+      },
+      [updateTop, withAuth],
+    );
+
+    const loadMoreList = useCallback(
+      async (frame: ListFrame) => {
+        if (
+          frame.loading ||
+          frame.loadingMore ||
+          !frame.hasMore ||
+          !frame.nextCursor ||
+          !frame.query.trim()
+        ) {
+          return;
+        }
+        if (loadMoreLockRef.current) return;
+        loadMoreLockRef.current = true;
+        updateTop({ loadingMore: true } as Partial<ListFrame>);
+        const req = reqRef.current;
+        const q = frame.query.trim();
+
+        let out;
+        if (frame.type === 'artist-list') {
+          out = await withAuth(() => searchLastfmArtistsPage(q, frame.nextCursor));
+        } else if (frame.type === 'album-list') {
+          out = await withAuth(() => searchLastfmAlbumsPage(q, frame.nextCursor));
+        } else {
+          out = await withAuth(() => searchLastfmTracksPage(q, frame.nextCursor));
+        }
+        if (req !== reqRef.current) {
+          loadMoreLockRef.current = false;
+          return;
+        }
+
+        if (!out.ok) {
+          updateTop({ loadingMore: false, hasMore: false } as Partial<ListFrame>);
+          loadMoreLockRef.current = false;
+          return;
+        }
+
+        setStack((s) => {
+          const cur = s[s.length - 1];
+          if (
+            cur.type !== 'artist-list' &&
+            cur.type !== 'album-list' &&
+            cur.type !== 'track-list'
+          ) {
+            return s;
+          }
+          const list = cur as ListFrame;
+          let merged: ListFrame['hits'] = list.hits;
+          let nextCursor: string | null = null;
+          if (list.type === 'artist-list' && 'artists' in out.data) {
+            merged = mergeLastfmArtistHits(
+              list.hits as LastfmArtistSearchHit[],
+              out.data.artists ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          } else if (list.type === 'album-list' && 'albums' in out.data) {
+            merged = mergeLastfmAlbumHits(
+              list.hits as LastfmAlbumSearchHit[],
+              out.data.albums ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          } else if (list.type === 'track-list' && 'tracks' in out.data) {
+            merged = mergeLastfmTrackHits(
+              list.hits as LastfmTrackSearchHit[],
+              out.data.tracks ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          }
+          const next = [...s];
+          next[next.length - 1] = {
+            ...list,
+            hits: merged,
+            nextCursor,
+            hasMore: !!nextCursor,
+            loadingMore: false,
+          };
+          return next;
+        });
+        loadMoreLockRef.current = false;
       },
       [updateTop, withAuth],
     );
@@ -514,7 +651,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       [onNavigateYoutube],
     );
 
-    const renderList = (frame: ListFrame) => {
+    const renderListHeader = (frame: ListFrame) => {
       const kind = listKindFromFrame(frame);
       const placeholder =
         kind === 'artist'
@@ -524,7 +661,12 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
             : '곡 이름';
 
       return (
-        <>
+        <View style={styles.listHeaderWrap}>
+          <NrmFeatureScreenLogoHeader
+            isDark={isDark}
+            onPressHome={onBackToHome}
+            compact={!initialListCentered}
+          />
           <NrmLastfmSearchBar
             value={frame.query}
             onChangeText={(t) => updateTop({ query: t } as Partial<ListFrame>)}
@@ -548,90 +690,84 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
             <Text style={[styles.error, { color: bodyColor }]}>{frame.error}</Text>
           ) : null}
           {frame.hits.length > 0 && !frame.errorCode ? (
-            <>
-              <NrmLastfmSectionTitle title="검색 결과" color={titleColor} />
-              {frame.type === 'artist-list'
-                ? (frame.hits as LastfmArtistSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.name}-${hit.mbid || hit.url}`}
-                      onPress={() => void openArtistDetail(hit)}
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage uri={resolveArtistImageUrl(hit)} size={52} />
-                      <View style={styles.hitMeta}>
-                        <Text
-                          style={[styles.hitTitle, { color: titleColor }]}
-                          numberOfLines={1}>
-                          {hit.name}
-                        </Text>
-                        <Text style={[styles.hitSub, { color: bodyColor }]}>
-                          청취자 {formatLastfmCount(hit.listeners)}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-              {frame.type === 'album-list'
-                ? (frame.hits as LastfmAlbumSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.artist}-${hit.name}-${hit.mbid || hit.url}`}
-                      onPress={() => void openAlbumDetail(hit.artist, hit.name)}
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
-                      <View style={styles.hitMeta}>
-                        <Text
-                          style={[styles.hitTitle, { color: titleColor }]}
-                          numberOfLines={1}>
-                          {hit.name}
-                        </Text>
-                        <Text
-                          style={[styles.hitSub, { color: bodyColor }]}
-                          numberOfLines={1}>
-                          {hit.artist}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-              {frame.type === 'track-list'
-                ? (frame.hits as LastfmTrackSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.artist}-${hit.name}-${hit.url}`}
-                      onPress={() =>
-                        void openTrackDetail(hit.artist, hit.name, hit)
-                      }
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage
-                        uri={resolveTrackCoverUrl(hit)}
-                        size={52}
-                      />
-                      <View style={styles.hitMeta}>
-                        <Text
-                          style={[styles.hitTitle, { color: titleColor }]}
-                          numberOfLines={1}>
-                          {hit.name}
-                        </Text>
-                        <Text
-                          style={[styles.hitSub, { color: bodyColor }]}
-                          numberOfLines={1}>
-                          {hit.artist}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-            </>
+            <NrmLastfmSectionTitle title="검색 결과" color={titleColor} />
           ) : null}
-        </>
+        </View>
       );
+    };
+
+    const renderListHitRow = (
+      frame: ListFrame,
+      hit: LastfmArtistSearchHit | LastfmAlbumSearchHit | LastfmTrackSearchHit,
+    ) => {
+      if (frame.type === 'artist-list') {
+        const artist = hit as LastfmArtistSearchHit;
+        return (
+          <Pressable
+            onPress={() => void openArtistDetail(artist)}
+            style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+            <NrmLastfmCoverImage uri={resolveArtistImageUrl(artist)} size={52} />
+            <View style={styles.hitMeta}>
+              <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+                {artist.name}
+              </Text>
+              <Text style={[styles.hitSub, { color: bodyColor }]}>
+                청취자 {formatLastfmCount(artist.listeners)}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      }
+      if (frame.type === 'album-list') {
+        const album = hit as LastfmAlbumSearchHit;
+        return (
+          <Pressable
+            onPress={() => void openAlbumDetail(album.artist, album.name)}
+            style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+            <NrmLastfmCoverImage uri={album.imageUrl} size={52} />
+            <View style={styles.hitMeta}>
+              <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+                {album.name}
+              </Text>
+              <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
+                {album.artist}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      }
+      const track = hit as LastfmTrackSearchHit;
+      return (
+        <Pressable
+          onPress={() => void openTrackDetail(track.artist, track.name, track)}
+          style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+          <NrmLastfmCoverImage uri={resolveTrackCoverUrl(track)} size={52} />
+          <View style={styles.hitMeta}>
+            <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+              {track.name}
+            </Text>
+            <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
+              {track.artist}
+            </Text>
+          </View>
+        </Pressable>
+      );
+    };
+
+    const listKeyExtractor = (
+      frame: ListFrame,
+      hit: LastfmArtistSearchHit | LastfmAlbumSearchHit | LastfmTrackSearchHit,
+    ) => {
+      if (frame.type === 'artist-list') {
+        const artist = hit as LastfmArtistSearchHit;
+        return `${artist.name}-${artist.mbid || artist.url}`;
+      }
+      if (frame.type === 'album-list') {
+        const album = hit as LastfmAlbumSearchHit;
+        return `${album.artist}-${album.name}-${album.mbid || album.url}`;
+      }
+      const track = hit as LastfmTrackSearchHit;
+      return `${track.artist}-${track.name}-${track.url}`;
     };
 
     const renderArtistDetail = (frame: ArtistDetailFrame) => {
@@ -966,26 +1102,58 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       );
     };
 
+    if (isTopList) {
+      const listFrame = top as ListFrame;
+      return (
+        <View style={styles.listRoot}>
+          <FlatList
+            ref={listRef}
+            data={listFrame.hits}
+            keyExtractor={(item) => listKeyExtractor(listFrame, item)}
+            renderItem={({ item }) => renderListHitRow(listFrame, item)}
+            ListHeaderComponent={renderListHeader(listFrame)}
+            ListFooterComponent={
+              listFrame.loadingMore ? (
+                <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+              ) : null
+            }
+            onEndReached={() => void loadMoreList(listFrame)}
+            onEndReachedThreshold={0.35}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+            }}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollInner,
+              { paddingHorizontal },
+              initialListCentered && styles.scrollInnerInitialCentered,
+            ]}
+          />
+          <NrmScrollToTopFab
+            visible={showScrollTop}
+            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            isDark={isDark}
+          />
+        </View>
+      );
+    }
+
     return (
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollInner,
           { paddingHorizontal },
-          initialListCentered && styles.scrollInnerInitialCentered,
         ]}
         keyboardShouldPersistTaps="handled">
         <NrmFeatureScreenLogoHeader
           isDark={isDark}
           onPressHome={onBackToHome}
-          compact={!initialListCentered}
+          compact
         />
-
-        {top.type === 'artist-list' ||
-        top.type === 'album-list' ||
-        top.type === 'track-list'
-          ? renderList(top)
-          : null}
         {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
         {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
         {top.type === 'track-detail' ? renderTrackDetail(top) : null}
@@ -995,6 +1163,8 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
 );
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1 },
+  listHeaderWrap: { width: '100%' },
   scroll: { flex: 1 },
   scrollInner: {
     paddingBottom: nrmTokens.space.xxl,

@@ -20,14 +20,18 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun log(tag: String, level: String, message: String) {
     if (!NrmFileLogger.isUserLoggingEnabled()) return
-    NrmFileLogger.init(reactApplicationContext.applicationContext)
+    val ctx = reactApplicationContext.applicationContext
     val safeTag = tag.trim().ifBlank { "js" }
     val safeMsg = message.trim()
-    when (level.trim().lowercase()) {
-      "error", "e" -> NrmFileLogger.error(safeTag, safeMsg)
-      "warn", "w" -> NrmFileLogger.warn(safeTag, safeMsg)
-      else -> NrmFileLogger.log(safeTag, safeMsg)
-    }
+    val safeLevel = level.trim().lowercase()
+    Thread {
+      NrmFileLogger.init(ctx)
+      when (safeLevel) {
+        "error", "e" -> NrmFileLogger.error(safeTag, safeMsg)
+        "warn", "w" -> NrmFileLogger.warn(safeTag, safeMsg)
+        else -> NrmFileLogger.log(safeTag, safeMsg)
+      }
+    }.start()
   }
 
   @ReactMethod

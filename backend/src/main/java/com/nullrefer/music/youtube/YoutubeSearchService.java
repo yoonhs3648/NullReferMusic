@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,11 +22,16 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class YoutubeSearchService {
 
   private static final Logger log = LoggerFactory.getLogger(YoutubeSearchService.class);
+  private static final int DEFAULT_PAGE_SIZE = 20;
+  private static final int YTDLP_PREFETCH_SIZE = 50;
+  private static final String YTDLP_CURSOR_PREFIX = "o:";
 
   private final NrmSettings settings;
   private final NrmPaths paths;
   private final ObjectMapper objectMapper;
   private final RestClient restClient = RestClient.create();
+  private final ConcurrentHashMap<String, List<YoutubeSearchHit>> ytDlpCache =
+      new ConcurrentHashMap<>();
 
   public YoutubeSearchService(NrmSettings settings, NrmPaths paths, ObjectMapper objectMapper) {
     this.settings = settings;
@@ -33,23 +39,35 @@ public class YoutubeSearchService {
     this.objectMapper = objectMapper;
   }
 
+  /** @deprecated 첫 페이지만 — {@link #searchPage(String, String, int)} 사용 */
   public List<YoutubeSearchHit> search(String query) {
+    return searchPage(query, null, DEFAULT_PAGE_SIZE).items();
+  }
+
+  public YoutubeSearchPage searchPage(String query, String cursor, int limit) {
+    int pageSize = Math.min(Math.max(limit, 1), 50);
     String key = settings.getYoutubeApiKey();
     if (key == null || key.isBlank()) {
-      return searchWithYtDlp(query);
+      return searchPageWithYtDlp(query, cursor, pageSize);
     }
+    return searchPageWithApi(query, cursor, pageSize, key);
+  }
 
-    String uri =
+  private YoutubeSearchPage searchPageWithApi(
+      String query, String pageToken, int pageSize, String key) {
+    UriComponentsBuilder builder =
         UriComponentsBuilder.fromUriString("https://www.googleapis.com/youtube/v3/search")
             .queryParam("part", "snippet")
             .queryParam("type", "video")
             .queryParam("videoCategoryId", "10")
             .queryParam("videoEmbeddable", "true")
-            .queryParam("maxResults", "15")
+            .queryParam("maxResults", String.valueOf(pageSize))
             .queryParam("q", query)
-            .queryParam("key", key)
-            .build(true)
-            .toUriString();
+            .queryParam("key", key);
+    if (pageToken != null && !pageToken.isBlank()) {
+      builder.queryParam("pageToken", pageToken);
+    }
+    String uri = builder.build(true).toUriString();
 
     String body =
         restClient
@@ -59,7 +77,7 @@ public class YoutubeSearchService {
             .body(String.class);
 
     if (body == null || body.isBlank()) {
-      return List.of();
+      return new YoutubeSearchPage(List.of(), null);
     }
 
     try {
@@ -70,26 +88,18 @@ public class YoutubeSearchService {
       }
       JsonNode items = root.path("items");
       if (!items.isArray()) {
-        return List.of();
+        return new YoutubeSearchPage(List.of(), null);
       }
       List<YoutubeSearchHit> out = new ArrayList<>();
       for (JsonNode item : items) {
-        String videoId = item.path("id").path("videoId").asText("");
-        if (videoId.isEmpty()) {
-          continue;
+        YoutubeSearchHit hit = parseApiItem(item);
+        if (hit != null) {
+          out.add(hit);
         }
-        JsonNode sn = item.path("snippet");
-        String title = sn.path("title").asText("");
-        String channelTitle = sn.path("channelTitle").asText("");
-        JsonNode thumbs = sn.path("thumbnails");
-        String thumb =
-            firstNonEmpty(
-                thumbs.path("medium").path("url").asText(""),
-                thumbs.path("high").path("url").asText(""),
-                thumbs.path("default").path("url").asText(""));
-        out.add(new YoutubeSearchHit(videoId, title, channelTitle, thumb));
       }
-      return out;
+      String nextToken = root.path("nextPageToken").asText("");
+      String next = nextToken.isBlank() ? null : nextToken;
+      return new YoutubeSearchPage(out, next);
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
@@ -98,7 +108,44 @@ public class YoutubeSearchService {
     }
   }
 
-  private List<YoutubeSearchHit> searchWithYtDlp(String query) {
+  private static YoutubeSearchHit parseApiItem(JsonNode item) {
+    String videoId = item.path("id").path("videoId").asText("");
+    if (videoId.isEmpty()) {
+      return null;
+    }
+    JsonNode sn = item.path("snippet");
+    String title = sn.path("title").asText("");
+    String channelTitle = sn.path("channelTitle").asText("");
+    JsonNode thumbs = sn.path("thumbnails");
+    String thumb =
+        firstNonEmpty(
+            thumbs.path("medium").path("url").asText(""),
+            thumbs.path("high").path("url").asText(""),
+            thumbs.path("default").path("url").asText(""));
+    return new YoutubeSearchHit(videoId, title, channelTitle, thumb);
+  }
+
+  private YoutubeSearchPage searchPageWithYtDlp(String query, String cursor, int pageSize) {
+    int offset = 0;
+    if (cursor != null && cursor.startsWith(YTDLP_CURSOR_PREFIX)) {
+      try {
+        offset = Integer.parseInt(cursor.substring(YTDLP_CURSOR_PREFIX.length()));
+      } catch (NumberFormatException e) {
+        offset = 0;
+      }
+    }
+    List<YoutubeSearchHit> all =
+        ytDlpCache.computeIfAbsent(query, q -> searchWithYtDlpFull(q, YTDLP_PREFETCH_SIZE));
+    if (offset >= all.size()) {
+      return new YoutubeSearchPage(List.of(), null);
+    }
+    int end = Math.min(offset + pageSize, all.size());
+    List<YoutubeSearchHit> slice = all.subList(offset, end);
+    String next = end < all.size() ? YTDLP_CURSOR_PREFIX + end : null;
+    return new YoutubeSearchPage(new ArrayList<>(slice), next);
+  }
+
+  private List<YoutubeSearchHit> searchWithYtDlpFull(String query, int prefetchSize) {
     if (!Files.isRegularFile(paths.getYtDlpPath())) {
       throw new IllegalStateException("youtube_api_key_missing");
     }
@@ -107,7 +154,7 @@ public class YoutubeSearchService {
     cmd.add("--dump-single-json");
     cmd.add("--skip-download");
     cmd.add("--flat-playlist");
-    cmd.add("ytsearch15:" + query);
+    cmd.add("ytsearch" + prefetchSize + ":" + query);
     ProcessBuilder pb = new ProcessBuilder(cmd);
     pb.directory(paths.getRepoRoot().toFile());
     pb.redirectErrorStream(true);
@@ -135,7 +182,8 @@ public class YoutubeSearchService {
           continue;
         }
         String title = e.path("title").asText("");
-        String channelTitle = firstNonEmpty(e.path("channel").asText(""), e.path("uploader").asText(""), "");
+        String channelTitle =
+            firstNonEmpty(e.path("channel").asText(""), e.path("uploader").asText(""), "");
         String thumb =
             firstNonEmpty(
                 e.path("thumbnail").asText(""),

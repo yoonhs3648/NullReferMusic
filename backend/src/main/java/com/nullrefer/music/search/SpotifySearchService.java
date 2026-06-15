@@ -14,6 +14,9 @@ import com.nullrefer.music.search.SpotifySearchDtos.SpotifyArtistDetail;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyArtistInfo;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyArtistSearchHit;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyArtistSearchResult;
+import com.nullrefer.music.search.SpotifySearchDtos.SpotifyAlbumSearchPage;
+import com.nullrefer.music.search.SpotifySearchDtos.SpotifyArtistSearchPage;
+import com.nullrefer.music.search.SpotifySearchDtos.SpotifyTrackSearchPage;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyTrackDetail;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyTrackInfo;
 import com.nullrefer.music.search.SpotifySearchDtos.SpotifyTrackSearchHit;
@@ -52,9 +55,21 @@ public class SpotifySearchService {
 
   public SpotifyArtistSearchResult searchArtists(
       String clientIdOverride, String clientSecretOverride, String bearerOverride, String query) {
+    return new SpotifyArtistSearchResult(
+        searchArtistsPage(clientIdOverride, clientSecretOverride, bearerOverride, query, null)
+            .artists());
+  }
+
+  public SpotifyArtistSearchPage searchArtistsPage(
+      String clientIdOverride,
+      String clientSecretOverride,
+      String bearerOverride,
+      String query,
+      String cursor) {
     String q = requireQuery(query);
+    int offset = parseOffset(cursor);
     String token = resolveAccessToken(clientIdOverride, clientSecretOverride, bearerOverride);
-    JsonNode root = search(token, q, "artist");
+    JsonNode root = search(token, q, "artist", SEARCH_LIMIT, offset);
     List<SpotifyArtistSearchHit> hits = new ArrayList<>();
     for (JsonNode node : root.path("artists").path("items")) {
       hits.add(
@@ -65,7 +80,7 @@ public class SpotifySearchService {
               node.path("external_urls").path("spotify").asText(""),
               node.path("followers").path("total").asLong(0)));
     }
-    return new SpotifyArtistSearchResult(List.copyOf(hits));
+    return new SpotifyArtistSearchPage(hits, nextOffsetCursor(offset, hits.size()));
   }
 
   public SpotifyArtistDetail fetchArtistDetail(
@@ -128,9 +143,21 @@ public class SpotifySearchService {
 
   public SpotifyAlbumSearchResult searchAlbums(
       String clientIdOverride, String clientSecretOverride, String bearerOverride, String query) {
+    return new SpotifyAlbumSearchResult(
+        searchAlbumsPage(clientIdOverride, clientSecretOverride, bearerOverride, query, null)
+            .albums());
+  }
+
+  public SpotifyAlbumSearchPage searchAlbumsPage(
+      String clientIdOverride,
+      String clientSecretOverride,
+      String bearerOverride,
+      String query,
+      String cursor) {
     String q = requireQuery(query);
+    int offset = parseOffset(cursor);
     String token = resolveAccessToken(clientIdOverride, clientSecretOverride, bearerOverride);
-    JsonNode root = search(token, q, "album");
+    JsonNode root = search(token, q, "album", SEARCH_LIMIT, offset);
     List<SpotifyAlbumSearchHit> hits = new ArrayList<>();
     for (JsonNode node : root.path("albums").path("items")) {
       hits.add(
@@ -142,7 +169,7 @@ public class SpotifySearchService {
               node.path("external_urls").path("spotify").asText(""),
               node.path("release_date").asText("")));
     }
-    return new SpotifyAlbumSearchResult(List.copyOf(hits));
+    return new SpotifyAlbumSearchPage(hits, nextOffsetCursor(offset, hits.size()));
   }
 
   public SpotifyAlbumDetail fetchAlbumDetail(
@@ -184,9 +211,21 @@ public class SpotifySearchService {
 
   public SpotifyTrackSearchResult searchTracks(
       String clientIdOverride, String clientSecretOverride, String bearerOverride, String query) {
+    return new SpotifyTrackSearchResult(
+        searchTracksPage(clientIdOverride, clientSecretOverride, bearerOverride, query, null)
+            .tracks());
+  }
+
+  public SpotifyTrackSearchPage searchTracksPage(
+      String clientIdOverride,
+      String clientSecretOverride,
+      String bearerOverride,
+      String query,
+      String cursor) {
     String q = requireQuery(query);
+    int offset = parseOffset(cursor);
     String token = resolveAccessToken(clientIdOverride, clientSecretOverride, bearerOverride);
-    JsonNode root = search(token, q, "track");
+    JsonNode root = search(token, q, "track", SEARCH_LIMIT, offset);
     List<SpotifyTrackSearchHit> hits = new ArrayList<>();
     for (JsonNode node : root.path("tracks").path("items")) {
       hits.add(
@@ -199,7 +238,7 @@ public class SpotifySearchService {
               node.path("album").path("name").asText(""),
               node.path("duration_ms").asInt(0)));
     }
-    return new SpotifyTrackSearchResult(List.copyOf(hits));
+    return new SpotifyTrackSearchPage(hits, nextOffsetCursor(offset, hits.size()));
   }
 
   public SpotifyTrackDetail fetchTrackDetail(
@@ -232,16 +271,40 @@ public class SpotifySearchService {
   }
 
   private JsonNode search(String token, String query, String type) {
+    return search(token, query, type, SEARCH_LIMIT, 0);
+  }
+
+  private JsonNode search(String token, String query, String type, int limit, int offset) {
     URI uri =
         UriComponentsBuilder.fromUriString(SPOTIFY_API + "/search")
             .queryParam("q", query)
             .queryParam("type", type)
-            .queryParam("limit", SEARCH_LIMIT)
+            .queryParam("limit", limit)
+            .queryParam("offset", offset)
             .queryParam("market", DEFAULT_MARKET)
             .build()
             .encode()
             .toUri();
     return spotifyGet(uri, token);
+  }
+
+  private static int parseOffset(String cursor) {
+    if (cursor == null || cursor.isBlank()) {
+      return 0;
+    }
+    try {
+      int offset = Integer.parseInt(cursor.trim());
+      return Math.max(0, offset);
+    } catch (NumberFormatException e) {
+      return 0;
+    }
+  }
+
+  private static String nextOffsetCursor(int offset, int itemCount) {
+    if (itemCount < SEARCH_LIMIT) {
+      return null;
+    }
+    return String.valueOf(offset + itemCount);
   }
 
   private SpotifyTrackSummary mapTrackSummary(JsonNode track) {

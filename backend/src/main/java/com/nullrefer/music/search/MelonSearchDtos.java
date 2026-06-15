@@ -17,6 +17,12 @@ public final class MelonSearchDtos {
 
   public record MelonArtistSearchResult(List<MelonArtistSearchHit> artists) {}
 
+  public record MelonArtistSearchPage(List<MelonArtistSearchHit> artists, String nextCursor) {}
+
+  public record MelonAlbumSearchPage(List<MelonAlbumSearchHit> albums, String nextCursor) {}
+
+  public record MelonTrackSearchPage(List<MelonTrackSearchHit> tracks, String nextCursor) {}
+
   public record MelonAlbumSearchHit(
       String albumId,
       String name,

@@ -127,3 +127,18 @@ export type LastfmSearchErrorCode =
 export type LastfmSearchOutcome<T> =
   | { ok: true; data: T }
   | { ok: false; errorCode: LastfmSearchErrorCode; message: string };
+
+export type LastfmArtistSearchPage = {
+  artists: LastfmArtistSearchHit[];
+  nextCursor: string | null;
+};
+
+export type LastfmAlbumSearchPage = {
+  albums: LastfmAlbumSearchHit[];
+  nextCursor: string | null;
+};
+
+export type LastfmTrackSearchPage = {
+  tracks: LastfmTrackSearchHit[];
+  nextCursor: string | null;
+};

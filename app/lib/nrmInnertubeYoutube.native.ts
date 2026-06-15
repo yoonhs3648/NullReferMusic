@@ -120,8 +120,31 @@ function thumbnailUrl(thumbnails: { url?: string }[]): string {
   return hi?.url ?? '';
 }
 
-export async function searchYoutubeOnDevice(
+function extractVideosFromSearch(search: { results: Iterable<unknown> }): YoutubeSearchItem[] {
+  const items: YoutubeSearchItem[] = [];
+  for (const node of walkNodes(search.results as Iterable<WalkNode>)) {
+    if (!node.is(YTNodes.Video)) continue;
+    const v = node.as(YTNodes.Video) as InstanceType<typeof YTNodes.Video>;
+    const title = v.title?.text?.trim() ?? '';
+    if (!v.video_id || !title) continue;
+    items.push({
+      videoId: v.video_id,
+      title,
+      channelTitle: v.author?.name?.trim() ?? '',
+      thumbnailUrl: thumbnailUrl(v.thumbnails ?? []),
+    });
+  }
+  return items;
+}
+
+type InnertubeSearchFeed = Awaited<ReturnType<Innertube['search']>>;
+
+let innertubeSearchSeq = 0;
+const innertubeSearchSessions = new Map<string, InnertubeSearchFeed>();
+
+export async function searchYoutubePageOnDevice(
   query: string,
+  cursor: string | null = null,
 ): Promise<YoutubeSearchOutcome> {
   const q = query.trim();
   if (!q.length) {
@@ -132,27 +155,42 @@ export async function searchYoutubeOnDevice(
     };
   }
   try {
+    if (cursor) {
+      const session = innertubeSearchSessions.get(cursor);
+      if (!session) {
+        return {
+          ok: false,
+          userMessage: nrmYoutubeSearchOnDeviceErrorMessage,
+          dev: { where: 'innertube.session_missing', cursor },
+        };
+      }
+      const next = await session.getContinuation();
+      innertubeSearchSessions.set(cursor, next);
+      const items = extractVideosFromSearch(next);
+      const hasMore = next.has_continuation;
+      if (!hasMore) {
+        innertubeSearchSessions.delete(cursor);
+      }
+      return { ok: true, items, nextCursor: hasMore ? cursor : null };
+    }
+
+    innertubeSearchSessions.clear();
     const yt = await getInnertube();
     const search = await yt.search(q, { type: 'video' });
-    const items: YoutubeSearchItem[] = [];
-    for (const node of walkNodes(search.results as Iterable<WalkNode>)) {
-      if (!node.is(YTNodes.Video)) continue;
-      const v = node.as(YTNodes.Video) as InstanceType<typeof YTNodes.Video>;
-      const title = v.title?.text?.trim() ?? '';
-      if (!v.video_id || !title) continue;
-      items.push({
-        videoId: v.video_id,
-        title,
-        channelTitle: v.author?.name?.trim() ?? '',
-        thumbnailUrl: thumbnailUrl(v.thumbnails ?? []),
-      });
-      if (items.length >= 25) break;
+    const items = extractVideosFromSearch(search);
+    let nextCursor: string | null = null;
+    if (search.has_continuation) {
+      innertubeSearchSeq += 1;
+      const id = `inn-${innertubeSearchSeq}`;
+      innertubeSearchSessions.set(id, search);
+      nextCursor = id;
     }
-    return { ok: true, items };
+    return { ok: true, items, nextCursor };
   } catch (e) {
     const cause = e instanceof Error ? e.message : String(e);
     logNrmRunError('innertube.search', e, {
       querySample: q.slice(0, 120),
+      cursor: cursor ?? null,
     });
     return {
       ok: false,
@@ -160,6 +198,12 @@ export async function searchYoutubeOnDevice(
       dev: { where: 'innertube.search', cause },
     };
   }
+}
+
+export async function searchYoutubeOnDevice(
+  query: string,
+): Promise<YoutubeSearchOutcome> {
+  return searchYoutubePageOnDevice(query, null);
 }
 
 function extensionFromMime(mime: string): string {

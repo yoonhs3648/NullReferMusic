@@ -17,12 +17,16 @@ import {
 import type {
   SpotifyAlbumDetail,
   SpotifyAlbumSearchHit,
+  SpotifyAlbumSearchPage,
   SpotifyArtistDetail,
   SpotifyArtistSearchHit,
+  SpotifyArtistSearchPage,
   SpotifySearchOutcome,
   SpotifyTrackDetail,
   SpotifyTrackSearchHit,
+  SpotifyTrackSearchPage,
 } from '@/lib/nrmSpotifySearchTypes';
+import { NRM_SEARCH_PAGE_SIZE } from '@/lib/nrmSearchPageSize';
 import { pickSpotifyCoverUrl } from '@/lib/nrmCoverArtUrl';
 
 const SPOTIFY_API = 'https://api.spotify.com/v1';
@@ -192,6 +196,76 @@ function mapTrackHit(node: Record<string, unknown>): SpotifyTrackSearchHit {
   };
 }
 
+function parseSpotifyOffset(cursor: string | null): number {
+  const n = parseInt(cursor ?? '0', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function spotifyNextOffsetCursor(offset: number, count: number): string | null {
+  if (count < NRM_SEARCH_PAGE_SIZE) return null;
+  return String(offset + count);
+}
+
+function spotifySearchQueryPath(
+  kind: 'artist' | 'album' | 'track',
+  query: string,
+  cursor: string | null,
+): string {
+  const q = encodeURIComponent(query.trim());
+  const cursorQ = cursor?.trim() ? `&cursor=${encodeURIComponent(cursor.trim())}` : '';
+  return `/${kind}?q=${q}${cursorQ}`;
+}
+
+function mapSpotifyArtistPage(root: Record<string, unknown>, offset: number): SpotifyArtistSearchPage {
+  const items =
+    (root.artists as { items?: Record<string, unknown>[] } | undefined)?.items ?? [];
+  const artists = items.map(mapArtistHit);
+  return { artists, nextCursor: spotifyNextOffsetCursor(offset, artists.length) };
+}
+
+function mapSpotifyAlbumPage(root: Record<string, unknown>, offset: number): SpotifyAlbumSearchPage {
+  const items =
+    (root.albums as { items?: Record<string, unknown>[] } | undefined)?.items ?? [];
+  const albums = items.map(mapAlbumHit);
+  return { albums, nextCursor: spotifyNextOffsetCursor(offset, albums.length) };
+}
+
+function mapSpotifyTrackPage(root: Record<string, unknown>, offset: number): SpotifyTrackSearchPage {
+  const items =
+    (root.tracks as { items?: Record<string, unknown>[] } | undefined)?.items ?? [];
+  const tracks = items.map(mapTrackHit);
+  return { tracks, nextCursor: spotifyNextOffsetCursor(offset, tracks.length) };
+}
+
+export async function searchSpotifyArtistsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<SpotifySearchOutcome<SpotifyArtistSearchPage>> {
+  const offset = parseSpotifyOffset(cursor);
+  if (isStandaloneApp()) {
+    const auth = await buildSpotifyChartAuthHeaders('official');
+    if ('error' in auth) return fail('not_configured');
+    const q = encodeURIComponent(query.trim());
+    const out = await spotifyApiGet<Record<string, unknown>>(
+      `/search?type=artist&q=${q}&limit=${NRM_SEARCH_PAGE_SIZE}&offset=${offset}&market=${MARKET}`,
+      auth.headers,
+    );
+    if (!out.ok) return out;
+    return { ok: true, data: mapSpotifyArtistPage(out.data, offset) };
+  }
+  const out = await fetchSpotifySearchWithRetry<SpotifyArtistSearchPage>(
+    spotifySearchQueryPath('artist', query, cursor),
+  );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      artists: out.data.artists ?? [],
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
+}
+
 export async function searchSpotifyArtists(
   query: string,
 ): Promise<SpotifySearchOutcome<{ artists: SpotifyArtistSearchHit[] }>> {
@@ -290,6 +364,35 @@ export async function fetchSpotifyArtistDetail(
   return fetchSpotifySearchWithRetry(`/artist/detail?id=${enc}`);
 }
 
+export async function searchSpotifyAlbumsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<SpotifySearchOutcome<SpotifyAlbumSearchPage>> {
+  const offset = parseSpotifyOffset(cursor);
+  if (isStandaloneApp()) {
+    const auth = await buildSpotifyChartAuthHeaders('official');
+    if ('error' in auth) return fail('not_configured');
+    const q = encodeURIComponent(query.trim());
+    const out = await spotifyApiGet<Record<string, unknown>>(
+      `/search?type=album&q=${q}&limit=${NRM_SEARCH_PAGE_SIZE}&offset=${offset}&market=${MARKET}`,
+      auth.headers,
+    );
+    if (!out.ok) return out;
+    return { ok: true, data: mapSpotifyAlbumPage(out.data, offset) };
+  }
+  const out = await fetchSpotifySearchWithRetry<SpotifyAlbumSearchPage>(
+    spotifySearchQueryPath('album', query, cursor),
+  );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      albums: out.data.albums ?? [],
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
+}
+
 export async function searchSpotifyAlbums(
   query: string,
 ): Promise<SpotifySearchOutcome<{ albums: SpotifyAlbumSearchHit[] }>> {
@@ -358,6 +461,35 @@ export async function fetchSpotifyAlbumDetail(
     };
   }
   return fetchSpotifySearchWithRetry(`/album/detail?id=${enc}`);
+}
+
+export async function searchSpotifyTracksPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<SpotifySearchOutcome<SpotifyTrackSearchPage>> {
+  const offset = parseSpotifyOffset(cursor);
+  if (isStandaloneApp()) {
+    const auth = await buildSpotifyChartAuthHeaders('official');
+    if ('error' in auth) return fail('not_configured');
+    const q = encodeURIComponent(query.trim());
+    const out = await spotifyApiGet<Record<string, unknown>>(
+      `/search?type=track&q=${q}&limit=${NRM_SEARCH_PAGE_SIZE}&offset=${offset}&market=${MARKET}`,
+      auth.headers,
+    );
+    if (!out.ok) return out;
+    return { ok: true, data: mapSpotifyTrackPage(out.data, offset) };
+  }
+  const out = await fetchSpotifySearchWithRetry<SpotifyTrackSearchPage>(
+    spotifySearchQueryPath('track', query, cursor),
+  );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      tracks: out.data.tracks ?? [],
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
 }
 
 export async function searchSpotifyTracks(

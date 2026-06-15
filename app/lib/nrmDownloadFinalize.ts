@@ -28,6 +28,7 @@ import {
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
+import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 import {
   transcribeWhisperLrc,
   type WhisperLrcStageResult,
@@ -61,6 +62,7 @@ function whisperWarningFromResult(
 
 /** 웹 백엔드와 동일 — ffmpeg in-place 변환과 Whisper 전사가 같은 파일을 두지 않음 */
 async function copyAudioForWhisperParallel(sourceUri: string): Promise<string> {
+  await nrmYieldToEventLoop();
   const src = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
   const extMatch = src.match(/\.([a-z0-9]+)(?:\?|$)/i);
   const ext = extMatch ? `.${extMatch[1]}` : '.audio';
@@ -178,85 +180,16 @@ async function finalizeNativeParallel(
   const usesCombinedPath =
     Platform.OS === 'android' && willTranscodeNonMp3 && hasCombinableMetadata;
 
-  // ── 오디오 태스크 + Whisper 소스 설정 ────────────────────────────────────────
-  let whisperSourceUri: string;
-  let audioTask: Promise<{
-    savedLabel: string;
-    location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation;
-  }>;
-
-  if (usesCombinedPath) {
-    // 결합 경로: Whisper 소스를 변환 전 원본(소파일)에서 복사 (WAV 등 대형 출력 전)
-    whisperSourceUri = extractionUri;
-    if (whisperMode) {
-      try {
-        const wCopy = await copyAudioForWhisperParallel(extractionUri);
-        temps.add(wCopy);
-        whisperSourceUri = wCopy;
-      } catch {
-        // fallback: extractionUri 사용 (트랜스코드 후 삭제될 수 있으나 Whisper가 먼저 읽음)
-      }
-    }
-
-    // 단일 ffmpeg 패스: transcode + metadata
-    let combinedUri: string;
+  // ── Whisper 소스 준비 (transcode·persist와 병렬 시작) ───────────────────────
+  let whisperSourceUri = extractionUri;
+  if (whisperMode) {
     try {
-      const { transcodeAndApplyMetadataForAudio } = await import(
-        '@/lib/nrmApplyAudioMetadata.native'
-      );
-      const combinedResult = await transcodeAndApplyMetadataForAudio(
-        srcFsPath,
-        extensionToYtDlpFormat(encode.extension),
-        encode.audioQuality,
-        normalizedForCombined!,
-      );
-      combinedUri = combinedResult.path;
-      logDownloadStage('ffmpeg', 'combined_transcode_meta_ok', {
-        format: wantExt,
-        coverEmbedded: combinedResult.coverEmbedded,
-      });
-    } catch (combinedErr) {
-      logNrmRunError('download.combined.ffmpeg', combinedErr, { format: wantExt });
-      // 폴백: 기존 분리 패스
-      combinedUri = await applyFfmpegTranscodeStage(extractionUri);
-      combinedUri = await applyFfmpegMetadataStage(combinedUri, embedMetadata);
+      const wCopy = await copyAudioForWhisperParallel(extractionUri);
+      temps.add(wCopy);
+      whisperSourceUri = wCopy;
+    } catch {
+      whisperSourceUri = extractionUri;
     }
-    temps.add(combinedUri);
-
-    audioTask = (async () => {
-      const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
-      const saved = await persistAudioToDestination(combinedUri, safeName, embedMetadata);
-      options?.onAudioPersisted?.(saved.savedLabel);
-      return saved;
-    })();
-  } else {
-    // 기존 경로: 별도 transcode + metadata
-    const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
-    if (transcodedUri !== extractionUri) {
-      temps.add(transcodedUri);
-    }
-
-    whisperSourceUri = transcodedUri;
-    if (whisperMode) {
-      try {
-        whisperSourceUri = await copyAudioForWhisperParallel(transcodedUri);
-        temps.add(whisperSourceUri);
-      } catch {
-        whisperSourceUri = transcodedUri;
-      }
-    }
-
-    audioTask = applyFfmpegMetadataStage(transcodedUri, embedMetadata).then(
-      async (processedUri) => {
-        if (processedUri !== transcodedUri) {
-          temps.add(processedUri);
-        }
-        const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
-        const saved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
-        options?.onAudioPersisted?.(saved.savedLabel);
-        return saved;
-      },
-    );
   }
 
   const whisperTask: Promise<WhisperLrcStageResult | null> = whisperMode
@@ -293,6 +226,62 @@ async function finalizeNativeParallel(
         }
       })()
     : Promise.resolve(null);
+
+  // ── 오디오 태스크 (ffmpeg·persist — Whisper와 병렬) ─────────────────────────
+  let audioTask: Promise<{
+    savedLabel: string;
+    location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation;
+  }>;
+
+  if (usesCombinedPath) {
+    audioTask = (async () => {
+      await nrmYieldToEventLoop();
+      let combinedUri: string;
+      try {
+        const { transcodeAndApplyMetadataForAudio } = await import(
+          '@/lib/nrmApplyAudioMetadata.native'
+        );
+        const combinedResult = await transcodeAndApplyMetadataForAudio(
+          srcFsPath,
+          extensionToYtDlpFormat(encode.extension),
+          encode.audioQuality,
+          normalizedForCombined!,
+        );
+        combinedUri = combinedResult.path;
+        logDownloadStage('ffmpeg', 'combined_transcode_meta_ok', {
+          format: wantExt,
+          coverEmbedded: combinedResult.coverEmbedded,
+        });
+      } catch (combinedErr) {
+        logNrmRunError('download.combined.ffmpeg', combinedErr, { format: wantExt });
+        combinedUri = await applyFfmpegTranscodeStage(extractionUri);
+        combinedUri = await applyFfmpegMetadataStage(combinedUri, embedMetadata);
+      }
+      temps.add(combinedUri);
+      await nrmYieldToEventLoop();
+      const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
+      const saved = await persistAudioToDestination(combinedUri, safeName, embedMetadata);
+      options?.onAudioPersisted?.(saved.savedLabel);
+      return saved;
+    })();
+  } else {
+    audioTask = (async () => {
+      await nrmYieldToEventLoop();
+      const transcodedUri = await applyFfmpegTranscodeStage(extractionUri);
+      if (transcodedUri !== extractionUri) {
+        temps.add(transcodedUri);
+      }
+      const processedUri = await applyFfmpegMetadataStage(transcodedUri, embedMetadata);
+      if (processedUri !== transcodedUri) {
+        temps.add(processedUri);
+      }
+      await nrmYieldToEventLoop();
+      const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
+      const saved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
+      options?.onAudioPersisted?.(saved.savedLabel);
+      return saved;
+    })();
+  }
 
   let audioSaved: { savedLabel: string; location: import('@/lib/nrmPersistDownload.native').PersistedAudioLocation };
   try {

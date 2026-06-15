@@ -3,7 +3,7 @@ import type { ExpoConfig } from 'expo/config';
 const config: ExpoConfig = {
   name: 'NullReferenceMusic',
   slug: 'nullrefer-music',
-  version: '1.7.17',
+  version: '1.7.18',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',

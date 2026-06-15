@@ -15,7 +15,10 @@ import { isMelonPlaceholderCoverUrl, normalizeCoverArtUrl } from '@/lib/nrmCover
 import { decodeHtmlEntities } from '@/lib/nrmHtmlText';
 
 export const MELON_BASE = 'https://www.melon.com';
-export const MELON_SEARCH_LIMIT = 30;
+/** 멜론 검색 1페이지당 항목 수 (아티스트 listArtists.htm 기준) */
+export const MELON_ARTIST_SEARCH_PAGE_SIZE = 20;
+export const MELON_ALBUM_SEARCH_PAGE_SIZE = 21;
+export const MELON_SONG_SEARCH_PAGE_SIZE = 50;
 export const MELON_SIMILAR_LIMIT = 12;
 export const MELON_ARTIST_POPULAR_TRACK_LIMIT = 15;
 export const MELON_ARTIST_POPULAR_ALBUM_LIMIT = 12;
@@ -80,17 +83,26 @@ function normalizeImg(src: string): string {
   return isMelonPlaceholderCoverUrl(out) ? '' : out;
 }
 
+function parseEllipsisAnchorInDt(chunk: string): { title: string; innerHtml: string } | null {
+  const dtBlock = chunk.match(/<dt>[\s\S]*?<\/dt>/i)?.[0] ?? '';
+  if (!dtBlock) return null;
+  const anchorMatch = dtBlock.match(/<a[^>]*class="ellipsis"[^>]*>([\s\S]*?)<\/a>/i);
+  if (!anchorMatch) return null;
+  const anchorTag = anchorMatch[0];
+  const titleRaw = anchorTag.match(/title="([^"]*)"/i)?.[1] ?? '';
+  return { title: titleRaw, innerHtml: anchorMatch[1] ?? '' };
+}
+
 function parseArtistSearchName(chunk: string): string {
-  const dtMatch = chunk.match(
-    /<dt>[\s\S]*?<a[^>]*class="ellipsis"[^>]*title="([^"]+?)\s*-\s*페이지 이동"[^>]*>([\s\S]*?)<\/a>/i,
-  );
-  if (dtMatch) {
-    const fromTitle = cleanText(dtMatch[1]!);
+  const anchor = parseEllipsisAnchorInDt(chunk);
+  if (anchor) {
+    const fromTitle = stripMelonPageMoveSuffix(cleanText(anchor.title));
     if (fromTitle) return fromTitle;
-    return cleanText(dtMatch[2]!.replace(/<[^>]+>/g, ''));
+    const fromInner = cleanText(anchor.innerHtml.replace(/<[^>]+>/g, ''));
+    if (fromInner) return fromInner;
   }
-  const fallback = chunk.match(/class="ellipsis"[^>]*>([^<]+)<\/a>\s*<\/dt>/i);
-  return cleanText(fallback?.[1] ?? '');
+  const fallback = chunk.match(/class="ellipsis"[^>]*>([\s\S]*?)<\/a>\s*<\/dt>/i);
+  return cleanText(fallback?.[1]?.replace(/<[^>]+>/g, '') ?? '');
 }
 
 function parseArtistSearchGenre(chunk: string): string {
@@ -249,11 +261,14 @@ function parseArtistLinks(html: string): MelonExternalLink[] {
   return links;
 }
 
-export function parseMelonArtistSearchHtml(html: string): MelonArtistSearchHit[] {
+export function parseMelonArtistSearchHtml(
+  html: string,
+  limit = MELON_ARTIST_SEARCH_PAGE_SIZE,
+): MelonArtistSearchHit[] {
   const parts = html.split(ARTIST_BLOCK_SPLIT);
   const hits: MelonArtistSearchHit[] = [];
   const seen = new Set<string>();
-  for (let i = 1; i < parts.length && hits.length < MELON_SEARCH_LIMIT; i++) {
+  for (let i = 1; i < parts.length && hits.length < limit; i++) {
     const chunk = parts[i]!;
     const artistId =
       firstMatch(chunk, HIDDEN_ARTIST_ID_RE) ?? firstMatch(chunk, GO_ARTIST_RE);
@@ -276,20 +291,26 @@ export function parseMelonArtistSearchHtml(html: string): MelonArtistSearchHit[]
   return hits;
 }
 
-export function parseMelonAlbumSearchHtml(html: string): MelonAlbumSearchHit[] {
+export function parseMelonAlbumSearchHtml(
+  html: string,
+  limit = MELON_ALBUM_SEARCH_PAGE_SIZE,
+): MelonAlbumSearchHit[] {
   const parts = html.split(ALBUM_BLOCK_SPLIT);
   const hits: MelonAlbumSearchHit[] = [];
-  for (let i = 1; i < parts.length && hits.length < MELON_SEARCH_LIMIT; i++) {
+  for (let i = 1; i < parts.length && hits.length < limit; i++) {
     const hit = parseMelonAlbumBlockChunk(parts[i]!);
     if (hit) hits.push(hit);
   }
   return hits;
 }
 
-export function parseMelonSongSearchHtml(html: string): MelonTrackSearchHit[] {
+export function parseMelonSongSearchHtml(
+  html: string,
+  limit = MELON_SONG_SEARCH_PAGE_SIZE,
+): MelonTrackSearchHit[] {
   const parts = html.split(SONG_ROW_SPLIT);
   const hits: MelonTrackSearchHit[] = [];
-  for (let i = 1; i < parts.length && hits.length < MELON_SEARCH_LIMIT; i++) {
+  for (let i = 1; i < parts.length && hits.length < limit; i++) {
     const chunk = `<tr${parts[i]}`;
     if (!chunk.includes('input_check')) continue;
     const songId =
@@ -624,29 +645,32 @@ function parseMelonSimilarTrackRows(tbody: string): MelonTrackSummary[] {
 function parseMelonAlbumBlockChunk(chunk: string): MelonAlbumSearchHit | null {
   const albumId = firstMatch(chunk, GO_ALBUM_RE);
   if (!albumId) return null;
-  const nameMatch = chunk.match(
-    /<dt>[\s\S]*?<a[^>]*class="ellipsis"[^>]*title="([^"]+?)\s*-\s*페이지 이동"[^>]*>([\s\S]*?)<\/a>/i,
-  );
-  const nameFallback = chunk.match(
-    /<dt>[\s\S]*?<a[^>]*class="ellipsis"[^>]*title="([^"]+)[^"]*"[^>]*>([\s\S]*?)<\/a>/i,
-  );
-  const rawName = cleanText(
-    nameMatch?.[1] || nameMatch?.[2] || nameFallback?.[1] || nameFallback?.[2] || '',
-  );
+  const anchor = parseEllipsisAnchorInDt(chunk);
+  let rawName = '';
+  if (anchor) {
+    rawName =
+      stripMelonPageMoveSuffix(cleanText(anchor.title)) ||
+      cleanText(anchor.innerHtml.replace(/<[^>]+>/g, ''));
+  }
+  if (!rawName) {
+    const nameFallback = chunk.match(
+      /<dt>[\s\S]*?<a[^>]*class="ellipsis"[^>]*>([\s\S]*?)<\/a>/i,
+    );
+    rawName = cleanText(nameFallback?.[1]?.replace(/<[^>]+>/g, '') ?? '');
+  }
   const name = stripMelonPageMoveSuffix(rawName);
   if (!name) return null;
   const artistMatch = chunk.match(
-    /class="atistname"[\s\S]*?goArtistDetail\(['"]?(\d+)['"]?\)[^>]*title="([^"]+?)\s*-\s*페이지 이동"[^>]*>([^<]*)<\/a>/i,
+    /class="atistname"[\s\S]*?goArtistDetail\(['"]?(\d+)['"]?\)[^>]*title="([^"]*?)"[^>]*>([\s\S]*?)<\/a>/i,
   );
   const artistFallback = chunk.match(
-    /class="atistname"[\s\S]*?goArtistDetail\(['"]?(\d+)['"]?\)[^>]*title="([^"]+)[^"]*"[^>]*>([^<]*)<\/a>/i,
+    /class="atistname"[\s\S]*?goArtistDetail\(['"]?(\d+)['"]?\)[^>]*>([\s\S]*?)<\/a>/i,
   );
   const artistId = artistMatch?.[1] ?? artistFallback?.[1] ?? firstMatch(chunk, GO_ARTIST_RE) ?? '';
   const artist = cleanMelonLinkLabel(
     artistMatch?.[2] ||
-      artistMatch?.[3] ||
-      artistFallback?.[2] ||
-      artistFallback?.[3] ||
+      cleanText(artistMatch?.[3]?.replace(/<[^>]+>/g, '') ?? '') ||
+      cleanText(artistFallback?.[2]?.replace(/<[^>]+>/g, '') ?? '') ||
       '',
   );
   const releaseDate = cleanText(firstMatch(chunk, /class="cnt_view">([^<]+)</) ?? '');
@@ -747,16 +771,54 @@ export function encodeMelonQuery(query: string): string {
   return encodeURIComponent(query.trim());
 }
 
-export function melonArtistSearchUrl(query: string): string {
-  return `${MELON_BASE}/search/artist/index.htm?q=${encodeMelonQuery(query)}`;
+export function melonArtistSearchUrl(query: string, startIndex = 1): string {
+  const q = encodeMelonQuery(query);
+  if (startIndex <= 1) {
+    return `${MELON_BASE}/search/artist/index.htm?q=${q}`;
+  }
+  return `${MELON_BASE}/search/artist/listArtists.htm?q=${q}&startIndex=${startIndex}`;
 }
 
-export function melonAlbumSearchUrl(query: string): string {
-  return `${MELON_BASE}/search/album/index.htm?q=${encodeMelonQuery(query)}`;
+export function melonAlbumSearchUrl(query: string, startIndex = 1): string {
+  const q = encodeMelonQuery(query);
+  const base = `${MELON_BASE}/search/album/index.htm?q=${q}`;
+  return startIndex <= 1 ? base : `${base}&startIndex=${startIndex}`;
 }
 
-export function melonSongSearchUrl(query: string): string {
-  return `${MELON_BASE}/search/song/index.htm?q=${encodeMelonQuery(query)}`;
+export function melonSongSearchUrl(query: string, startIndex = 1): string {
+  const q = encodeMelonQuery(query);
+  const base = `${MELON_BASE}/search/song/index.htm?q=${q}`;
+  return startIndex <= 1 ? base : `${base}&startIndex=${startIndex}`;
+}
+
+export function melonArtistSearchNextCursor(
+  startIndex: number,
+  itemCount: number,
+  pageSize = MELON_ARTIST_SEARCH_PAGE_SIZE,
+): string | null {
+  return itemCount >= pageSize ? String(startIndex + pageSize) : null;
+}
+
+export function melonAlbumSearchNextCursor(
+  startIndex: number,
+  itemCount: number,
+  pageSize = MELON_ALBUM_SEARCH_PAGE_SIZE,
+): string | null {
+  return itemCount >= pageSize ? String(startIndex + pageSize) : null;
+}
+
+export function melonSongSearchNextCursor(
+  startIndex: number,
+  itemCount: number,
+  pageSize = MELON_SONG_SEARCH_PAGE_SIZE,
+): string | null {
+  return itemCount >= pageSize ? String(startIndex + pageSize) : null;
+}
+
+export function parseMelonSearchStartIndex(cursor: string | null | undefined): number {
+  if (!cursor?.trim()) return 1;
+  const n = parseInt(cursor, 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 export function melonArtistDetailUrl(artistId: string): string {

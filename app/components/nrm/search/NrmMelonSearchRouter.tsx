@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Linking,
   Pressable,
   ScrollView,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import {
   formatLastfmCount,
   NrmLastfmCoverImage,
@@ -30,10 +32,11 @@ import {
   fetchMelonAlbumDetail,
   fetchMelonArtistDetail,
   fetchMelonTrackDetail,
-  searchMelonAlbums,
-  searchMelonArtists,
-  searchMelonTracks,
+  searchMelonAlbumsPage,
+  searchMelonArtistsPage,
+  searchMelonTracksPage,
 } from '@/lib/nrmMelonSearchClient';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import type {
   MelonAlbumDetail,
   MelonAlbumSearchHit,
@@ -57,6 +60,9 @@ type ListFrame = {
   hits: MelonArtistSearchHit[] | MelonAlbumSearchHit[] | MelonTrackSearchHit[];
   searched: boolean;
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  nextCursor: string | null;
   error: string | null;
 };
 
@@ -143,8 +149,35 @@ function emptyListFrame(kind: MelonSearchKind): ListFrame {
     hits: [],
     searched: false,
     loading: false,
+    loadingMore: false,
+    hasMore: false,
+    nextCursor: null,
     error: null,
   };
+}
+
+function mergeMelonArtistHits(
+  prev: MelonArtistSearchHit[],
+  next: MelonArtistSearchHit[],
+): MelonArtistSearchHit[] {
+  const seen = new Set(prev.map((h) => h.artistId));
+  return [...prev, ...next.filter((h) => !seen.has(h.artistId))];
+}
+
+function mergeMelonAlbumHits(
+  prev: MelonAlbumSearchHit[],
+  next: MelonAlbumSearchHit[],
+): MelonAlbumSearchHit[] {
+  const seen = new Set(prev.map((h) => h.albumId));
+  return [...prev, ...next.filter((h) => !seen.has(h.albumId))];
+}
+
+function mergeMelonTrackHits(
+  prev: MelonTrackSearchHit[],
+  next: MelonTrackSearchHit[],
+): MelonTrackSearchHit[] {
+  const seen = new Set(prev.map((h) => h.songId));
+  return [...prev, ...next.filter((h) => !seen.has(h.songId))];
 }
 
 function MelonMetaGrid({
@@ -199,6 +232,9 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       restoredState?.stack?.length ? restoredState.stack : [emptyListFrame(initialKind)],
     );
     const reqRef = useRef(0);
+    const loadMoreLockRef = useRef(false);
+    const listRef = useRef<FlatList<MelonArtistSearchHit | MelonAlbumSearchHit | MelonTrackSearchHit>>(null);
+    const [showScrollTop, setShowScrollTop] = useState(false);
 
     useEffect(() => {
       if (restoredState?.stack?.length) {
@@ -257,15 +293,22 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
           return;
         }
         const req = ++reqRef.current;
-        updateTop({ loading: true, error: null, searched: true } as Partial<ListFrame>);
+        updateTop({
+          loading: true,
+          loadingMore: false,
+          error: null,
+          searched: true,
+          nextCursor: null,
+          hasMore: false,
+        } as Partial<ListFrame>);
 
         let out;
         if (frame.type === 'artist-list') {
-          out = await searchMelonArtists(q);
+          out = await searchMelonArtistsPage(q, null);
         } else if (frame.type === 'album-list') {
-          out = await searchMelonAlbums(q);
+          out = await searchMelonAlbumsPage(q, null);
         } else {
-          out = await searchMelonTracks(q);
+          out = await searchMelonTracksPage(q, null);
         }
         if (req !== reqRef.current) return;
 
@@ -279,19 +322,107 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
         }
 
         let hits: ListFrame['hits'] = [];
+        let nextCursor: string | null = null;
         if (frame.type === 'artist-list' && 'artists' in out.data) {
           hits = out.data.artists ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         } else if (frame.type === 'album-list' && 'albums' in out.data) {
           hits = out.data.albums ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         } else if (frame.type === 'track-list' && 'tracks' in out.data) {
           hits = out.data.tracks ?? [];
+          nextCursor = out.data.nextCursor ?? null;
         }
 
         updateTop({
           loading: false,
           hits,
+          nextCursor,
+          hasMore: !!nextCursor,
           error: hits.length === 0 ? nrmSearchNoResults : null,
         } as Partial<ListFrame>);
+      },
+      [updateTop],
+    );
+
+    const loadMoreList = useCallback(
+      async (frame: ListFrame) => {
+        if (
+          frame.loading ||
+          frame.loadingMore ||
+          !frame.hasMore ||
+          !frame.nextCursor ||
+          !frame.query.trim()
+        ) {
+          return;
+        }
+        if (loadMoreLockRef.current) return;
+        loadMoreLockRef.current = true;
+        updateTop({ loadingMore: true } as Partial<ListFrame>);
+        const req = reqRef.current;
+        const q = frame.query.trim();
+
+        let out;
+        if (frame.type === 'artist-list') {
+          out = await searchMelonArtistsPage(q, frame.nextCursor);
+        } else if (frame.type === 'album-list') {
+          out = await searchMelonAlbumsPage(q, frame.nextCursor);
+        } else {
+          out = await searchMelonTracksPage(q, frame.nextCursor);
+        }
+        if (req !== reqRef.current) {
+          loadMoreLockRef.current = false;
+          return;
+        }
+
+        if (!out.ok) {
+          updateTop({ loadingMore: false, hasMore: false } as Partial<ListFrame>);
+          loadMoreLockRef.current = false;
+          return;
+        }
+
+        setStack((s) => {
+          const cur = s[s.length - 1];
+          if (
+            cur.type !== 'artist-list' &&
+            cur.type !== 'album-list' &&
+            cur.type !== 'track-list'
+          ) {
+            return s;
+          }
+          const list = cur as ListFrame;
+          let merged: ListFrame['hits'] = list.hits;
+          let nextCursor: string | null = null;
+          if (list.type === 'artist-list' && 'artists' in out.data) {
+            merged = mergeMelonArtistHits(
+              list.hits as MelonArtistSearchHit[],
+              out.data.artists ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          } else if (list.type === 'album-list' && 'albums' in out.data) {
+            merged = mergeMelonAlbumHits(
+              list.hits as MelonAlbumSearchHit[],
+              out.data.albums ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          } else if (list.type === 'track-list' && 'tracks' in out.data) {
+            merged = mergeMelonTrackHits(
+              list.hits as MelonTrackSearchHit[],
+              out.data.tracks ?? [],
+            );
+            nextCursor = out.data.nextCursor ?? null;
+          }
+          const next = [...s];
+          next[next.length - 1] = {
+            ...list,
+            hits: merged,
+            nextCursor,
+            hasMore: !!nextCursor,
+            loadingMore: false,
+          };
+          return next;
+        });
+        loadMoreLockRef.current = false;
       },
       [updateTop],
     );
@@ -404,7 +535,7 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       [onNavigateYoutube],
     );
 
-    const renderList = (frame: ListFrame) => {
+    const renderListHeader = (frame: ListFrame) => {
       const placeholder =
         frame.type === 'artist-list'
           ? '아티스트 이름'
@@ -413,11 +544,16 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
             : '곡 이름';
 
       return (
-        <>
+        <View style={styles.listHeaderWrap}>
+          <NrmFeatureScreenLogoHeader
+            isDark={isDark}
+            onPressHome={onBackToHome}
+            compact={!initialListCentered}
+          />
           <NrmLastfmSearchBar
             value={frame.query}
             onChangeText={(t) => updateTop({ query: t } as Partial<ListFrame>)}
-            onSubmit={() => void runListSearch(frame)}
+            onSubmit={() => void runListSearch({ ...frame, query: frame.query })}
             placeholder={placeholder}
             titleColor={titleColor}
             bodyColor={bodyColor}
@@ -432,81 +568,83 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
             <Text style={[styles.error, { color: bodyColor }]}>{frame.error}</Text>
           ) : null}
           {frame.hits.length > 0 && !frame.error ? (
-            <>
-              <NrmLastfmSectionTitle title="검색 결과" color={titleColor} />
-              {frame.type === 'artist-list'
-                ? (frame.hits as MelonArtistSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.artistId}-${hit.name}`}
-                      onPress={() => void openArtistDetail(hit)}
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
-                      <View style={styles.hitMeta}>
-                        <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
-                          {hit.name}
-                        </Text>
-                        <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
-                          {hit.fanCount > 0
-                            ? `팬 ${formatLastfmCount(hit.fanCount)}`
-                            : hit.genre || hit.profile || 'Melon'}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-              {frame.type === 'album-list'
-                ? (frame.hits as MelonAlbumSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.albumId}-${hit.name}`}
-                      onPress={() => void openAlbumDetail(hit.albumId, hit.artist, hit.name)}
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
-                      <View style={styles.hitMeta}>
-                        <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
-                          {hit.albumKind ? `[${hit.albumKind}] ` : ''}
-                          {hit.name}
-                        </Text>
-                        <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
-                          {hit.artist}
-                          {hit.releaseDate ? ` · ${hit.releaseDate}` : ''}
-                          {hit.trackCount > 0 ? ` · ${hit.trackCount}곡` : ''}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-              {frame.type === 'track-list'
-                ? (frame.hits as MelonTrackSearchHit[]).map((hit) => (
-                    <Pressable
-                      key={`${hit.songId}-${hit.name}`}
-                      onPress={() => void openTrackDetail(hit.songId, hit.artist, hit.name, hit)}
-                      style={({ pressed }) => [
-                        styles.hitRow,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <NrmLastfmCoverImage uri={hit.imageUrl} size={52} />
-                      <View style={styles.hitMeta}>
-                        <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
-                          {hit.name}
-                        </Text>
-                        <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
-                          {hit.artist}
-                          {hit.album ? ` · ${hit.album}` : ''}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))
-                : null}
-            </>
+            <NrmLastfmSectionTitle title="검색 결과" color={titleColor} />
           ) : null}
-        </>
+        </View>
       );
+    };
+
+    const renderListHitRow = (
+      frame: ListFrame,
+      hit: MelonArtistSearchHit | MelonAlbumSearchHit | MelonTrackSearchHit,
+    ) => {
+      if (frame.type === 'artist-list') {
+        const artist = hit as MelonArtistSearchHit;
+        return (
+          <Pressable
+            onPress={() => void openArtistDetail(artist)}
+            style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+            <NrmLastfmCoverImage uri={artist.imageUrl} size={52} />
+            <View style={styles.hitMeta}>
+              <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+                {artist.name}
+              </Text>
+              <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
+                {artist.fanCount > 0
+                  ? `팬 ${formatLastfmCount(artist.fanCount)}`
+                  : artist.genre || artist.profile || 'Melon'}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      }
+      if (frame.type === 'album-list') {
+        const album = hit as MelonAlbumSearchHit;
+        return (
+          <Pressable
+            onPress={() => void openAlbumDetail(album.albumId, album.artist, album.name)}
+            style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+            <NrmLastfmCoverImage uri={album.imageUrl} size={52} />
+            <View style={styles.hitMeta}>
+              <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+                {album.albumKind ? `[${album.albumKind}] ` : ''}
+                {album.name}
+              </Text>
+              <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
+                {album.artist}
+                {album.releaseDate ? ` · ${album.releaseDate}` : ''}
+                {album.trackCount > 0 ? ` · ${album.trackCount}곡` : ''}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      }
+      const track = hit as MelonTrackSearchHit;
+      return (
+        <Pressable
+          onPress={() => void openTrackDetail(track.songId, track.artist, track.name, track)}
+          style={({ pressed }) => [styles.hitRow, pressed && { backgroundColor: rowHover }]}>
+          <NrmLastfmCoverImage uri={track.imageUrl} size={52} />
+          <View style={styles.hitMeta}>
+            <Text style={[styles.hitTitle, { color: titleColor }]} numberOfLines={1}>
+              {track.name}
+            </Text>
+            <Text style={[styles.hitSub, { color: bodyColor }]} numberOfLines={1}>
+              {track.artist}
+              {track.album ? ` · ${track.album}` : ''}
+            </Text>
+          </View>
+        </Pressable>
+      );
+    };
+
+    const listKeyExtractor = (
+      frame: ListFrame,
+      hit: MelonArtistSearchHit | MelonAlbumSearchHit | MelonTrackSearchHit,
+    ) => {
+      if (frame.type === 'artist-list') return (hit as MelonArtistSearchHit).artistId;
+      if (frame.type === 'album-list') return (hit as MelonAlbumSearchHit).albumId;
+      return (hit as MelonTrackSearchHit).songId;
     };
 
     const renderArtistDetail = (frame: ArtistDetailFrame) => {
@@ -969,25 +1107,58 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       );
     };
 
+    if (isTopList) {
+      const listFrame = top as ListFrame;
+      return (
+        <View style={styles.listRoot}>
+          <FlatList
+            ref={listRef}
+            data={listFrame.hits}
+            keyExtractor={(item) => listKeyExtractor(listFrame, item)}
+            renderItem={({ item }) => renderListHitRow(listFrame, item)}
+            ListHeaderComponent={renderListHeader(listFrame)}
+            ListFooterComponent={
+              listFrame.loadingMore ? (
+                <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
+              ) : null
+            }
+            onEndReached={() => void loadMoreList(listFrame)}
+            onEndReachedThreshold={0.35}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+            }}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled"
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollInner,
+              { paddingHorizontal },
+              initialListCentered && styles.scrollInnerInitialCentered,
+            ]}
+          />
+          <NrmScrollToTopFab
+            visible={showScrollTop}
+            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            isDark={isDark}
+          />
+        </View>
+      );
+    }
+
     return (
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollInner,
           { paddingHorizontal },
-          initialListCentered && styles.scrollInnerInitialCentered,
         ]}
         keyboardShouldPersistTaps="handled">
         <NrmFeatureScreenLogoHeader
           isDark={isDark}
           onPressHome={onBackToHome}
-          compact={!initialListCentered}
+          compact
         />
-        {top.type === 'artist-list' ||
-        top.type === 'album-list' ||
-        top.type === 'track-list'
-          ? renderList(top)
-          : null}
         {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
         {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
         {top.type === 'track-detail' ? renderTrackDetail(top) : null}
@@ -997,6 +1168,8 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
 );
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1 },
+  listHeaderWrap: { width: '100%' },
   scroll: { flex: 1 },
   scrollInner: {
     paddingBottom: nrmTokens.space.xxl,

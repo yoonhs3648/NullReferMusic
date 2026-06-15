@@ -39,14 +39,12 @@ import {
   NrmLastfmSearchRouter,
   type LastfmSearchKind,
   type LastfmSearchNavHandle,
-  type LastfmSearchRouterState,
   type LastfmYoutubeNavigateParams,
 } from '@/components/nrm/search/NrmLastfmSearchRouter';
 import {
   NrmMelonSearchRouter,
   type MelonSearchKind,
   type MelonSearchNavHandle,
-  type MelonSearchRouterState,
   type MelonYoutubeNavigateParams,
 } from '@/components/nrm/search/NrmMelonSearchRouter';
 import { melonFieldsToChartTrack } from '@/lib/nrmMelonDownloadMetadata';
@@ -99,19 +97,11 @@ type MainView =
   | 'melonSearchAlbum'
   | 'melonSearchTrack';
 
-type ChartView = Exclude<
-  MainView,
-  | 'youtube'
-  | 'spotifySearchArtist'
-  | 'spotifySearchAlbum'
-  | 'spotifySearchTrack'
-  | 'lastfmSearchArtist'
-  | 'lastfmSearchAlbum'
-  | 'lastfmSearchTrack'
-  | 'melonSearchArtist'
-  | 'melonSearchAlbum'
-  | 'melonSearchTrack'
->;
+type YoutubeOverlayState = {
+  searchQuery: string;
+  downloadTrack: ChartTrackItem | null;
+  downloadSource: 'chart' | 'lastfm' | 'melon' | null;
+};
 
 async function formatYoutubeDisplayQuery(artist?: string | null, title?: string | null): Promise<string> {
   const a = (artist ?? '').trim();
@@ -151,26 +141,10 @@ export default function HomeScreen() {
   const easterOpacity = useRef(new Animated.Value(0)).current;
   const logoTapCountRef = useRef(0);
   const easterHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 차트 아이템 클릭으로 youtube 검색 화면으로 왔을 때 복귀할 차트 뷰 */
-  const [chartReturnView, setChartReturnView] = useState<ChartView | null>(null);
-  /** 차트 아이템 클릭으로 전달된 초기 검색 쿼리 */
-  const [chartSearchQuery, setChartSearchQuery] = useState<string | undefined>(undefined);
-  const [chartDownloadTrack, setChartDownloadTrack] =
-    useState<ChartTrackItem | null>(null);
-  const [chartDownloadSource, setChartDownloadSource] = useState<
-    'chart' | 'lastfm' | 'melon' | null
-  >(null);
-  /** Last.fm 검색 → 유튜브 복귀용 */
-  const [searchReturnView, setSearchReturnView] = useState<MainView | null>(null);
-  const [lastfmNavSnapshot, setLastfmNavSnapshot] =
-    useState<LastfmSearchRouterState | null>(null);
-  const [lastfmNavRestore, setLastfmNavRestore] =
-    useState<LastfmSearchRouterState | null>(null);
+  /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
+  const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
+  const ytOverlayHistoryActiveRef = useRef(false);
   const lastfmNavRef = useRef<LastfmSearchNavHandle>(null);
-  const [melonNavSnapshot, setMelonNavSnapshot] =
-    useState<MelonSearchRouterState | null>(null);
-  const [melonNavRestore, setMelonNavRestore] =
-    useState<MelonSearchRouterState | null>(null);
   const melonNavRef = useRef<MelonSearchNavHandle>(null);
   const [chartsBearerModalOpen, setChartsBearerModalOpen] = useState(false);
   const [chartsBearerModalExpired, setChartsBearerModalExpired] = useState(false);
@@ -229,39 +203,54 @@ export default function HomeScreen() {
   const isFullScreenFeature =
     isChartsView || isSpotifySearchView || isLastfmSearchView || isMelonSearchView;
 
+  const showYoutubeOverlay = youtubeOverlay !== null;
+  const showFeatureFullScreen = isFullScreenFeature;
+  const showYoutubeHome = mainView === 'youtube' && !showFeatureFullScreen;
 
-
-  const resetToYoutubeHome = useCallback(() => {
-
-    setMainView('youtube');
-
-    setLayoutPhase('welcome');
-
+  const openYoutubeOverlay = useCallback((payload: YoutubeOverlayState) => {
+    setYoutubeOverlay(payload);
+    setLayoutPhase('browsing');
     setHomeEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
-    setSearchReturnView(null);
-    setLastfmNavRestore(null);
-    setMelonNavRestore(null);
-
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.history.pushState({ nrmYoutubeOverlay: true }, '');
+      ytOverlayHistoryActiveRef.current = true;
+    }
   }, []);
 
-  /** 차트 아이템 클릭: 유튜브 검색으로 이동하고 이전 차트 뷰를 저장 */
+  const dismissYoutubeOverlay = useCallback((fromPopstate = false) => {
+    setYoutubeOverlay(null);
+    if (
+      Platform.OS === 'web' &&
+      !fromPopstate &&
+      ytOverlayHistoryActiveRef.current &&
+      typeof window !== 'undefined'
+    ) {
+      ytOverlayHistoryActiveRef.current = false;
+      window.history.back();
+    } else {
+      ytOverlayHistoryActiveRef.current = false;
+    }
+  }, []);
+
+  const resetToYoutubeHome = useCallback(() => {
+    dismissYoutubeOverlay();
+    setMainView('youtube');
+    setLayoutPhase('welcome');
+    setHomeEpoch((v) => v + 1);
+  }, [dismissYoutubeOverlay]);
+
+  /** 차트·검색 트랙 클릭: 유튜브 오버레이 (원 플랫폼 화면은 마운트 유지) */
   const navigateToSearchFromChart = useCallback(
     async (item: ChartTrackItem, source: 'chart' | 'lastfm' | 'melon' = 'chart') => {
       const q = await formatYoutubeDisplayQuery(item.artists, item.title);
       if (!q) return;
-      setChartReturnView(mainView as ChartView);
-      setChartSearchQuery(q);
-      setChartDownloadTrack(item);
-      setChartDownloadSource(source);
-      setMainView('youtube');
-      setLayoutPhase('browsing');
-      setHomeEpoch((v) => v + 1);
+      openYoutubeOverlay({
+        searchQuery: q,
+        downloadTrack: item,
+        downloadSource: source,
+      });
     },
-    [mainView],
+    [openYoutubeOverlay],
   );
 
 
@@ -302,84 +291,77 @@ export default function HomeScreen() {
 
 
   const openAppleMusicCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('appleMusicCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyChartsOfficial = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('spotifyChartsOfficial');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyChartsCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('spotifyChartsCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openLastfmCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('lastfmCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openMelonCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('melonCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openPeriodLastfmCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('periodLastfmCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openPeriodSpotifyCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('periodSpotifyCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openGenreCharts = useCallback(() => {
+    setYoutubeOverlay(null);
     setMainView('genreCharts');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyArtistSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
+    setYoutubeOverlay(null);
     setMainView('spotifySearchArtist');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyAlbumSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
+    setYoutubeOverlay(null);
     setMainView('spotifySearchAlbum');
     setLayoutPhase('browsing');
   }, []);
 
   const openSpotifyTrackSearch = useCallback(() => {
     setSearchViewEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
+    setYoutubeOverlay(null);
     setMainView('spotifySearchTrack');
     setLayoutPhase('browsing');
   }, []);
 
   const openLastfmSearch = useCallback((kind: LastfmSearchKind) => {
     setSearchViewEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
-    setLastfmNavRestore(null);
-    setLastfmNavSnapshot(null);
-    setSearchReturnView(null);
+    setYoutubeOverlay(null);
     const view: MainView =
       kind === 'artist'
         ? 'lastfmSearchArtist'
@@ -409,11 +391,9 @@ export default function HomeScreen() {
       const title = params.title.trim();
       if (!artist && !title) return;
       const displayQ = await formatYoutubeDisplayQuery(artist, title);
-      setSearchReturnView(mainView);
-      setLastfmNavSnapshot(lastfmNavRef.current?.captureState() ?? null);
-      setChartSearchQuery(displayQ);
-      setChartDownloadTrack(
-        lastfmFieldsToChartTrack({
+      openYoutubeOverlay({
+        searchQuery: displayQ,
+        downloadTrack: lastfmFieldsToChartTrack({
           artist,
           title,
           mbid: params.mbid,
@@ -422,13 +402,10 @@ export default function HomeScreen() {
           releaseDate: params.releaseDate,
           imageUrl: params.imageUrl,
         }),
-      );
-      setChartDownloadSource('lastfm');
-      setMainView('youtube');
-      setLayoutPhase('browsing');
-      setHomeEpoch((v) => v + 1);
+        downloadSource: 'lastfm',
+      });
     },
-    [mainView],
+    [openYoutubeOverlay],
   );
 
   const openChartsSessionSettings = useCallback(() => {
@@ -460,13 +437,7 @@ export default function HomeScreen() {
 
   const openMelonSearch = useCallback((kind: MelonSearchKind) => {
     setSearchViewEpoch((v) => v + 1);
-    setChartReturnView(null);
-    setChartSearchQuery(undefined);
-    setChartDownloadTrack(null);
-    setChartDownloadSource(null);
-    setMelonNavRestore(null);
-    setMelonNavSnapshot(null);
-    setSearchReturnView(null);
+    setYoutubeOverlay(null);
     const view: MainView =
       kind === 'artist'
         ? 'melonSearchArtist'
@@ -496,11 +467,9 @@ export default function HomeScreen() {
       const title = params.title.trim();
       if (!artist && !title) return;
       const displayQ = await formatYoutubeDisplayQuery(artist, title);
-      setSearchReturnView(mainView);
-      setMelonNavSnapshot(melonNavRef.current?.captureState() ?? null);
-      setChartSearchQuery(displayQ);
-      setChartDownloadTrack(
-        melonFieldsToChartTrack({
+      openYoutubeOverlay({
+        searchQuery: displayQ,
+        downloadTrack: melonFieldsToChartTrack({
           artist,
           title,
           songId: params.songId,
@@ -509,13 +478,10 @@ export default function HomeScreen() {
           releaseDate: params.releaseDate,
           imageUrl: params.imageUrl,
         }),
-      );
-      setChartDownloadSource('melon');
-      setMainView('youtube');
-      setLayoutPhase('browsing');
-      setHomeEpoch((v) => v + 1);
+        downloadSource: 'melon',
+      });
     },
-    [mainView],
+    [openYoutubeOverlay],
   );
 
   const openLastfmTokenSettings = useCallback(() => {
@@ -602,10 +568,27 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onPopState = () => {
+      if (youtubeOverlay) {
+        ytOverlayHistoryActiveRef.current = false;
+        setYoutubeOverlay(null);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [youtubeOverlay]);
+
+  useEffect(() => {
 
     if (Platform.OS !== 'android') return;
 
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+
+      if (youtubeOverlay) {
+        dismissYoutubeOverlay();
+        return true;
+      }
 
       if (isLastfmSearchView) {
         if (lastfmNavRef.current?.goBack()) return true;
@@ -624,36 +607,6 @@ export default function HomeScreen() {
         return true;
       }
 
-      // Last.fm / Melon 검색 → 유튜브 복귀
-      if (mainView === 'youtube' && searchReturnView) {
-        const isMelonReturn = searchReturnView.startsWith('melonSearch');
-        setMainView(searchReturnView);
-        setLayoutPhase('browsing');
-        setChartSearchQuery(undefined);
-        setChartDownloadTrack(null);
-        setChartDownloadSource(null);
-        setSearchReturnView(null);
-        if (isMelonReturn) {
-          setMelonNavSnapshot(null);
-          setMelonNavRestore(melonNavSnapshot);
-        } else {
-          setLastfmNavSnapshot(null);
-          setLastfmNavRestore(lastfmNavSnapshot);
-        }
-        return true;
-      }
-
-      // 차트에서 검색으로 이동했다면 뒤로가기 시 해당 차트로 복귀
-      if (mainView === 'youtube' && chartReturnView) {
-        setMainView(chartReturnView);
-        setLayoutPhase('browsing');
-        setChartReturnView(null);
-        setChartSearchQuery(undefined);
-        setChartDownloadTrack(null);
-        setChartDownloadSource(null);
-        return true;
-      }
-
       if (layoutPhase !== 'welcome') {
 
         resetToYoutubeHome();
@@ -669,31 +622,253 @@ export default function HomeScreen() {
     return () => sub.remove();
 
   }, [
+    dismissYoutubeOverlay,
     isFullScreenFeature,
     isLastfmSearchView,
     isMelonSearchView,
     layoutPhase,
     resetToYoutubeHome,
-    mainView,
-    chartReturnView,
-    searchReturnView,
-    lastfmNavSnapshot,
-    melonNavSnapshot,
+    youtubeOverlay,
   ]);
 
-  useEffect(() => {
-    if (isLastfmSearchView && lastfmNavRestore) {
-      const id = setTimeout(() => setLastfmNavRestore(null), 0);
-      return () => clearTimeout(id);
-    }
-  }, [isLastfmSearchView, lastfmNavRestore]);
 
-  useEffect(() => {
-    if (isMelonSearchView && melonNavRestore) {
-      const id = setTimeout(() => setMelonNavRestore(null), 0);
-      return () => clearTimeout(id);
+
+  const renderFeaturePanel = (view: MainView) => {
+    switch (view) {
+      case 'appleMusicCharts':
+        return (
+          <NrmAppleMusicChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+          />
+        );
+      case 'spotifyChartsOfficial':
+        return (
+          <NrmSpotifyChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            chartSource="official"
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+          />
+        );
+      case 'spotifyChartsCharts':
+        return (
+          <NrmSpotifyChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            chartSource="charts"
+            onBackToHome={resetToYoutubeHome}
+            onOpenChartsSession={openChartsSessionSettings}
+            onRenewChartsBearer={renewChartsBearerViaWebView}
+            onShowBearerExpired={showChartsBearerExpiredOverlay}
+            onTrackPress={navigateToSearchFromChart}
+          />
+        );
+      case 'lastfmCharts':
+        return (
+          <NrmLastfmChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
+            lastfmAuth={lastfmAuthHandlers}
+          />
+        );
+      case 'melonCharts':
+        return (
+          <NrmMelonChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'melon')}
+          />
+        );
+      case 'periodLastfmCharts':
+        return (
+          <NrmPeriodChartsHome
+            platform="lastfm"
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
+            lastfmAuth={lastfmAuthHandlers}
+          />
+        );
+      case 'periodSpotifyCharts':
+        return (
+          <NrmPeriodChartsHome
+            platform="spotify"
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={navigateToSearchFromChart}
+            onOpenChartsSession={openChartsSessionSettings}
+            onRenewChartsBearer={renewChartsBearerViaWebView}
+            onShowBearerExpired={showChartsBearerExpiredOverlay}
+          />
+        );
+      case 'genreCharts':
+        return (
+          <NrmMelonGenreChartsHome
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onTrackPress={(item) => navigateToSearchFromChart(item, 'melon')}
+          />
+        );
+      case 'spotifySearchArtist':
+        return (
+          <NrmSpotifyArtistSearchHome
+            key={`spotify-artist-${searchViewEpoch}`}
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+          />
+        );
+      case 'spotifySearchAlbum':
+        return (
+          <NrmSpotifyAlbumSearchHome
+            key={`spotify-album-${searchViewEpoch}`}
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+          />
+        );
+      case 'spotifySearchTrack':
+        return (
+          <NrmSpotifyTrackSearchHome
+            key={`spotify-track-${searchViewEpoch}`}
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+          />
+        );
+      case 'lastfmSearchArtist':
+      case 'lastfmSearchAlbum':
+      case 'lastfmSearchTrack':
+        return (
+          <NrmLastfmSearchRouter
+            key={`lastfm-${view}-${searchViewEpoch}`}
+            ref={lastfmNavRef}
+            initialKind={
+              view === 'lastfmSearchArtist'
+                ? 'artist'
+                : view === 'lastfmSearchAlbum'
+                  ? 'album'
+                  : 'track'
+            }
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onNavigateYoutube={navigateToYoutubeFromLastfm}
+            lastfmAuth={lastfmAuthHandlers}
+          />
+        );
+      case 'melonSearchArtist':
+      case 'melonSearchAlbum':
+      case 'melonSearchTrack':
+        return (
+          <NrmMelonSearchRouter
+            key={`melon-${view}-${searchViewEpoch}`}
+            ref={melonNavRef}
+            initialKind={
+              view === 'melonSearchArtist'
+                ? 'artist'
+                : view === 'melonSearchAlbum'
+                  ? 'album'
+                  : 'track'
+            }
+            isDark={isDark}
+            paddingHorizontal={pad}
+            onBackToHome={resetToYoutubeHome}
+            onNavigateYoutube={navigateToYoutubeFromMelon}
+          />
+        );
+      default:
+        return null;
     }
-  }, [isMelonSearchView, melonNavRestore]);
+  };
+
+  const renderYoutubePanel = (overlay: YoutubeOverlayState | null) => {
+    const youtubeBrowsing = !!overlay || layoutPhase === 'browsing';
+
+    const logoBlock = (
+      <View
+        style={[
+          styles.logoWrap,
+          isWelcome && !overlay
+            ? styles.logoWrapWelcome
+            : [styles.logoWrapBrowsing, { paddingTop: logoPadTop }],
+        ]}>
+        <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onMainLogoPress} />
+      </View>
+    );
+
+    const youtubeHome = (
+      <NrmYoutubeHome
+        key={homeEpoch}
+        isDark={isDark}
+        phase={overlay ? 'browsing' : layoutPhase}
+        fillHeight={youtubeBrowsing}
+        onSearchCommitted={() => setLayoutPhase('browsing')}
+        initialQuery={overlay?.searchQuery}
+        chartDownloadTrack={overlay?.downloadTrack ?? null}
+        chartDownloadSource={overlay?.downloadSource ?? null}
+        downloadMetadataAuth={{
+          ...lastfmAuthHandlers,
+          onOpenSpotifyTokenSettings: () =>
+            menuRef.current?.openSpotifyTokenSettings(),
+        }}
+      />
+    );
+
+    if (!youtubeBrowsing) {
+      return (
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[
+              styles.scrollInner,
+              {
+                flexGrow: 1,
+                justifyContent: 'center',
+                paddingHorizontal: pad,
+                paddingBottom: nrmTokens.space.xl,
+                ...(Platform.OS === 'web' ? { minHeight: winH } : {}),
+              },
+            ]}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
+            {...(Platform.OS === 'ios'
+              ? { contentInsetAdjustmentBehavior: 'never' as const }
+              : {})}>
+            <View style={styles.centerColumn}>
+              {logoBlock}
+              {youtubeHome}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      );
+    }
+
+    return (
+      <KeyboardAvoidingView
+        style={[styles.keyboardAvoid, styles.youtubeBrowsingRoot]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled>
+        <View style={[styles.centerColumn, styles.youtubeBrowsingColumn, { paddingHorizontal: pad }]}>
+          {logoBlock}
+          {youtubeHome}
+        </View>
+      </KeyboardAvoidingView>
+    );
+  };
 
 
 
@@ -709,236 +884,25 @@ export default function HomeScreen() {
 
         edges={['top', 'bottom']}>
 
-        {isAppleMusicCharts ? (
-          <NrmAppleMusicChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={navigateToSearchFromChart}
-          />
-        ) : isSpotifyChartsOfficial ? (
-          <NrmSpotifyChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            chartSource="official"
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={navigateToSearchFromChart}
-          />
-        ) : isSpotifyChartsCharts ? (
-          <NrmSpotifyChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            chartSource="charts"
-            onBackToHome={resetToYoutubeHome}
-            onOpenChartsSession={openChartsSessionSettings}
-            onRenewChartsBearer={renewChartsBearerViaWebView}
-            onShowBearerExpired={showChartsBearerExpiredOverlay}
-            onTrackPress={navigateToSearchFromChart}
-          />
-        ) : isLastfmCharts ? (
-          <NrmLastfmChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
-            lastfmAuth={lastfmAuthHandlers}
-          />
-        ) : isMelonCharts ? (
-          <NrmMelonChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={(item) => navigateToSearchFromChart(item, 'melon')}
-          />
-        ) : isPeriodLastfmCharts ? (
-          <NrmPeriodChartsHome
-            platform="lastfm"
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={(item) => navigateToSearchFromChart(item, 'lastfm')}
-            lastfmAuth={lastfmAuthHandlers}
-          />
-        ) : isPeriodSpotifyCharts ? (
-          <NrmPeriodChartsHome
-            platform="spotify"
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={navigateToSearchFromChart}
-            onOpenChartsSession={openChartsSessionSettings}
-            onRenewChartsBearer={renewChartsBearerViaWebView}
-            onShowBearerExpired={showChartsBearerExpiredOverlay}
-          />
-        ) : isGenreCharts ? (
-          <NrmMelonGenreChartsHome
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onTrackPress={(item) => navigateToSearchFromChart(item, 'melon')}
-          />
-        ) : isSpotifySearchArtist ? (
-          <NrmSpotifyArtistSearchHome
-            key={`spotify-artist-${searchViewEpoch}`}
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-          />
-        ) : isSpotifySearchAlbum ? (
-          <NrmSpotifyAlbumSearchHome
-            key={`spotify-album-${searchViewEpoch}`}
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-          />
-        ) : isSpotifySearchTrack ? (
-          <NrmSpotifyTrackSearchHome
-            key={`spotify-track-${searchViewEpoch}`}
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-          />
-        ) : isLastfmSearchView ? (
-          <NrmLastfmSearchRouter
-            key={`lastfm-${mainView}-${searchViewEpoch}`}
-            ref={lastfmNavRef}
-            initialKind={
-              isLastfmSearchArtist
-                ? 'artist'
-                : isLastfmSearchAlbum
-                  ? 'album'
-                  : 'track'
-            }
-            restoredState={lastfmNavRestore}
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onNavigateYoutube={navigateToYoutubeFromLastfm}
-            lastfmAuth={lastfmAuthHandlers}
-          />
-        ) : isMelonSearchView ? (
-          <NrmMelonSearchRouter
-            key={`melon-${mainView}-${searchViewEpoch}`}
-            ref={melonNavRef}
-            initialKind={
-              isMelonSearchArtist
-                ? 'artist'
-                : isMelonSearchAlbum
-                  ? 'album'
-                  : 'track'
-            }
-            restoredState={melonNavRestore}
-            isDark={isDark}
-            paddingHorizontal={pad}
-            onBackToHome={resetToYoutubeHome}
-            onNavigateYoutube={navigateToYoutubeFromMelon}
-          />
-        ) : (
+        {showFeatureFullScreen ? (
+          <View
+            style={[
+              styles.stackLayer,
+              showYoutubeOverlay && styles.stackLayerBehind,
+              showYoutubeOverlay && { backgroundColor: rootBackground },
+            ]}
+            pointerEvents={showYoutubeOverlay ? 'none' : 'auto'}>
+            {renderFeaturePanel(mainView)}
+          </View>
+        ) : null}
 
-          <KeyboardAvoidingView
-
-            style={styles.keyboardAvoid}
-
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-
-            enabled>
-
-            <ScrollView
-
-              style={styles.scroll}
-
-              contentContainerStyle={[
-
-                styles.scrollInner,
-
-                {
-
-                  flexGrow: 1,
-
-                  justifyContent: isWelcome ? 'center' : 'flex-start',
-
-                  paddingHorizontal: pad,
-
-                  paddingBottom: nrmTokens.space.xl,
-
-                  ...(Platform.OS === 'web' && isWelcome
-
-                    ? { minHeight: winH }
-
-                    : {}),
-
-                },
-
-              ]}
-
-              keyboardShouldPersistTaps="always"
-
-              keyboardDismissMode={
-
-                Platform.OS === 'ios' ? 'on-drag' : 'none'
-
-              }
-
-              {...(Platform.OS === 'ios'
-
-                ? { contentInsetAdjustmentBehavior: 'never' as const }
-
-                : {})}>
-
-              <View style={styles.centerColumn}>
-
-                <View
-
-                  style={[
-
-                    styles.logoWrap,
-
-                    isWelcome
-
-                      ? styles.logoWrapWelcome
-
-                      : [styles.logoWrapBrowsing, { paddingTop: logoPadTop }],
-
-                  ]}>
-
-                  <NrmLogo
-
-                    tone={isDark ? 'dark' : 'light'}
-
-                    onPress={onMainLogoPress}
-
-                  />
-
-                </View>
-
-                <NrmYoutubeHome
-
-                  key={homeEpoch}
-
-                  isDark={isDark}
-
-                  phase={layoutPhase}
-
-                  onSearchCommitted={() => setLayoutPhase('browsing')}
-
-                  initialQuery={chartSearchQuery}
-                  chartDownloadTrack={chartDownloadTrack}
-                  chartDownloadSource={chartDownloadSource}
-                  downloadMetadataAuth={{
-                    ...lastfmAuthHandlers,
-                    onOpenSpotifyTokenSettings: () =>
-                      menuRef.current?.openSpotifyTokenSettings(),
-                  }}
-
-                />
-
-              </View>
-
-            </ScrollView>
-
-          </KeyboardAvoidingView>
-
-        )}
+        {showYoutubeOverlay ? (
+          <View style={[styles.stackLayer, styles.stackLayerFront, { backgroundColor: rootBackground }]}>
+            {renderYoutubePanel(youtubeOverlay)}
+          </View>
+        ) : showYoutubeHome ? (
+          renderYoutubePanel(null)
+        ) : null}
 
         <NrmAppMenu
           ref={menuRef}
@@ -1044,10 +1008,36 @@ const styles = StyleSheet.create({
 
   },
 
+  stackLayer: {
+    flex: 1,
+  },
+
+  stackLayerFront: {
+    zIndex: 1,
+  },
+
+  stackLayerBehind: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
+
   keyboardAvoid: {
 
     flex: 1,
 
+  },
+
+  youtubeBrowsingRoot: {
+    flex: 1,
+    minHeight: 0,
+  },
+
+  youtubeBrowsingColumn: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    maxWidth: nrmTokens.layout.maxContentWidth,
+    alignSelf: 'center',
   },
 
   scroll: {

@@ -8,25 +8,31 @@ import {
 import type {
   MelonAlbumDetail,
   MelonAlbumSearchHit,
+  MelonAlbumSearchPage,
   MelonArtistDetail,
   MelonArtistSearchHit,
+  MelonArtistSearchPage,
   MelonSearchErrorCode,
   MelonSearchOutcome,
   MelonTrackDetail,
   MelonTrackSearchHit,
+  MelonTrackSearchPage,
 } from '@/lib/nrmMelonSearchTypes';
 import {
   applyArtistFanCount,
   melonAlbumDetailUrl,
+  melonAlbumSearchNextCursor,
   melonAlbumSearchUrl,
   melonArtistAlbumUrl,
   melonArtistDetailUrl,
   melonArtistPopularAlbumsUrl,
   melonArtistPopularSongsUrl,
+  melonArtistSearchNextCursor,
   melonArtistSearchUrl,
   melonArtistSongUrl,
   melonFanCountUrl,
   melonSongDetailUrl,
+  melonSongSearchNextCursor,
   melonSongSearchUrl,
   parseMelonAlbumDetailHtml,
   parseMelonAlbumSearchHtml,
@@ -35,9 +41,13 @@ import {
   parseMelonArtistPopularSongsHtml,
   parseMelonArtistSearchHtml,
   parseMelonFanCountJson,
+  parseMelonSearchStartIndex,
   parseMelonSongDetailHtml,
   parseMelonSongSearchHtml,
+  MELON_ALBUM_SEARCH_PAGE_SIZE,
+  MELON_ARTIST_SEARCH_PAGE_SIZE,
   MELON_BASE,
+  MELON_SONG_SEARCH_PAGE_SIZE,
 } from '@/lib/nrmMelonSearchParse';
 import {
   enrichMelonAlbumDetail,
@@ -103,46 +113,100 @@ async function melonFetchText(url: string, referer: string): Promise<string | nu
   }
 }
 
-async function searchMelonArtistsDirect(
+async function searchMelonArtistsDirectPage(
   query: string,
-): Promise<MelonSearchOutcome<{ artists: MelonArtistSearchHit[] }>> {
+  cursor: string | null,
+): Promise<MelonSearchOutcome<MelonArtistSearchPage>> {
   const q = requireQuery(query);
   if (!q) {
     return { ok: false, errorCode: 'bad_request', message: messageForError('bad_request') };
   }
-  const html = await melonFetchHtml(melonArtistSearchUrl(q));
+  const startIndex = parseMelonSearchStartIndex(cursor);
+  const referer = melonArtistSearchUrl(q, 1);
+  const html = await melonFetchHtml(melonArtistSearchUrl(q, startIndex), referer);
   if (!html) {
     return { ok: false, errorCode: 'network', message: messageForError('network') };
   }
-  return { ok: true, data: { artists: parseMelonArtistSearchHtml(html) } };
+  const artists = parseMelonArtistSearchHtml(html, MELON_ARTIST_SEARCH_PAGE_SIZE);
+  return {
+    ok: true,
+    data: {
+      artists,
+      nextCursor: melonArtistSearchNextCursor(startIndex, artists.length),
+    },
+  };
+}
+
+async function searchMelonAlbumsDirectPage(
+  query: string,
+  cursor: string | null,
+): Promise<MelonSearchOutcome<MelonAlbumSearchPage>> {
+  const q = requireQuery(query);
+  if (!q) {
+    return { ok: false, errorCode: 'bad_request', message: messageForError('bad_request') };
+  }
+  const startIndex = parseMelonSearchStartIndex(cursor);
+  const referer = melonAlbumSearchUrl(q, 1);
+  const html = await melonFetchHtml(melonAlbumSearchUrl(q, startIndex), referer);
+  if (!html) {
+    return { ok: false, errorCode: 'network', message: messageForError('network') };
+  }
+  const albums = parseMelonAlbumSearchHtml(html, MELON_ALBUM_SEARCH_PAGE_SIZE);
+  return {
+    ok: true,
+    data: {
+      albums,
+      nextCursor: melonAlbumSearchNextCursor(startIndex, albums.length),
+    },
+  };
+}
+
+async function searchMelonTracksDirectPage(
+  query: string,
+  cursor: string | null,
+): Promise<MelonSearchOutcome<MelonTrackSearchPage>> {
+  const q = requireQuery(query);
+  if (!q) {
+    return { ok: false, errorCode: 'bad_request', message: messageForError('bad_request') };
+  }
+  const startIndex = parseMelonSearchStartIndex(cursor);
+  const referer = melonSongSearchUrl(q, 1);
+  const html = await melonFetchHtml(melonSongSearchUrl(q, startIndex), referer);
+  if (!html) {
+    return { ok: false, errorCode: 'network', message: messageForError('network') };
+  }
+  const tracks = parseMelonSongSearchHtml(html, MELON_SONG_SEARCH_PAGE_SIZE);
+  return {
+    ok: true,
+    data: {
+      tracks,
+      nextCursor: melonSongSearchNextCursor(startIndex, tracks.length),
+    },
+  };
+}
+
+async function searchMelonArtistsDirect(
+  query: string,
+): Promise<MelonSearchOutcome<{ artists: MelonArtistSearchHit[] }>> {
+  const out = await searchMelonArtistsDirectPage(query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { artists: out.data.artists } };
 }
 
 async function searchMelonAlbumsDirect(
   query: string,
 ): Promise<MelonSearchOutcome<{ albums: MelonAlbumSearchHit[] }>> {
-  const q = requireQuery(query);
-  if (!q) {
-    return { ok: false, errorCode: 'bad_request', message: messageForError('bad_request') };
-  }
-  const html = await melonFetchHtml(melonAlbumSearchUrl(q));
-  if (!html) {
-    return { ok: false, errorCode: 'network', message: messageForError('network') };
-  }
-  return { ok: true, data: { albums: parseMelonAlbumSearchHtml(html) } };
+  const out = await searchMelonAlbumsDirectPage(query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { albums: out.data.albums } };
 }
 
 async function searchMelonTracksDirect(
   query: string,
 ): Promise<MelonSearchOutcome<{ tracks: MelonTrackSearchHit[] }>> {
-  const q = requireQuery(query);
-  if (!q) {
-    return { ok: false, errorCode: 'bad_request', message: messageForError('bad_request') };
-  }
-  const html = await melonFetchHtml(melonSongSearchUrl(q));
-  if (!html) {
-    return { ok: false, errorCode: 'network', message: messageForError('network') };
-  }
-  return { ok: true, data: { tracks: parseMelonSongSearchHtml(html) } };
+  const out = await searchMelonTracksDirectPage(query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { tracks: out.data.tracks } };
 }
 
 async function fetchMelonArtistDetailDirect(
@@ -254,6 +318,73 @@ async function fetchMelonSearchBackend<T>(path: string): Promise<MelonSearchOutc
 
 function useDirect(): boolean {
   return isStandaloneApp();
+}
+
+function melonSearchPagePath(
+  kind: 'artist' | 'album' | 'track',
+  query: string,
+  cursor: string | null,
+): string {
+  const params = new URLSearchParams({ q: query.trim() });
+  if (cursor?.trim()) params.set('cursor', cursor.trim());
+  return `/api/search/melon/${kind}?${params.toString()}`;
+}
+
+export async function searchMelonArtistsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<MelonSearchOutcome<MelonArtistSearchPage>> {
+  const out = useDirect()
+    ? await searchMelonArtistsDirectPage(query, cursor)
+    : await fetchMelonSearchBackend<MelonArtistSearchPage>(
+        melonSearchPagePath('artist', query, cursor),
+      );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      artists: await enrichMelonArtistSearchHits(out.data.artists ?? []),
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
+}
+
+export async function searchMelonAlbumsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<MelonSearchOutcome<MelonAlbumSearchPage>> {
+  const out = useDirect()
+    ? await searchMelonAlbumsDirectPage(query, cursor)
+    : await fetchMelonSearchBackend<MelonAlbumSearchPage>(
+        melonSearchPagePath('album', query, cursor),
+      );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      albums: await enrichMelonAlbumSearchHits(out.data.albums ?? []),
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
+}
+
+export async function searchMelonTracksPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<MelonSearchOutcome<MelonTrackSearchPage>> {
+  const out = useDirect()
+    ? await searchMelonTracksDirectPage(query, cursor)
+    : await fetchMelonSearchBackend<MelonTrackSearchPage>(
+        melonSearchPagePath('track', query, cursor),
+      );
+  if (!out.ok) return out;
+  return {
+    ok: true,
+    data: {
+      tracks: await enrichMelonTrackSearchHits(out.data.tracks ?? []),
+      nextCursor: out.data.nextCursor ?? null,
+    },
+  };
 }
 
 export async function searchMelonArtists(

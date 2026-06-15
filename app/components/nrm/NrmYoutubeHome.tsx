@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   InteractionManager,
   Platform,
@@ -12,7 +13,12 @@ import {
   Text,
   TextInput,
   View,
+  type ListRenderItemInfo,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
+
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmRunError } from '@/lib/nrmDevLog';
@@ -51,7 +57,15 @@ import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
-import { searchYoutube, type YoutubeSearchItem } from '@/lib/youtubeSearchClient';
+import {
+  mergeYoutubeSearchItems,
+  searchYoutubePage,
+  type YoutubeSearchItem,
+} from '@/lib/youtubeSearchClient';
+import {
+  YOUTUBE_SEARCH_PAGE_SIZE,
+  YOUTUBE_SEARCH_SCROLL_TOP_THRESHOLD,
+} from '@/lib/nrmYoutubeSearchPageSize';
 
 import { NrmDownloadMetadataUnavailableOverlay } from '@/components/nrm/NrmDownloadMetadataUnavailableOverlay';
 import { NrmLyricsEmbedUnavailableOverlay } from '@/components/nrm/NrmLyricsEmbedUnavailableOverlay';
@@ -161,6 +175,8 @@ type Props = {
   chartDownloadTrack?: ChartTrackItem | null;
   chartDownloadSource?: 'chart' | 'lastfm' | 'melon' | null;
   downloadMetadataAuth: DownloadMetadataAuthHandlers;
+  /** browsing·오버레이: FlatList가 남은 높이를 채움 */
+  fillHeight?: boolean;
 };
 
 export function NrmYoutubeHome({
@@ -171,10 +187,18 @@ export function NrmYoutubeHome({
   chartDownloadTrack = null,
   chartDownloadSource = null,
   downloadMetadataAuth,
+  fillHeight = false,
 }: Props) {
   const [query, setQuery] = useState(initialQuery ?? '');
+  const [committedQuery, setCommittedQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const initialQueryFiredRef = useRef(false);
+  const listRef = useRef<FlatList<YoutubeSearchItem>>(null);
+  const loadMoreLockRef = useRef(false);
   const [results, setResults] = useState<YoutubeSearchItem[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [dlBusy, setDlBusy] = useState<Record<string, boolean>>({});
@@ -211,6 +235,51 @@ export function NrmYoutubeHome({
     borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
   };
 
+  const applySearchSuccess = useCallback(
+    (items: YoutubeSearchItem[], cursor: string | null, append: boolean) => {
+      setResults((prev) => (append ? mergeYoutubeSearchItems(prev, items) : items));
+      setNextCursor(cursor);
+      setHasMore(!!cursor);
+    },
+    [],
+  );
+
+  const runSearchWithQuery = useCallback(
+    async (q: string, token: number) => {
+      onSearchCommitted?.();
+      setLoading(true);
+      setLoadingMore(false);
+      setPlayingId(null);
+      setNextCursor(null);
+      setHasMore(false);
+      setShowScrollTop(false);
+      try {
+        const out = await searchYoutubePage(q, null, YOUTUBE_SEARCH_PAGE_SIZE);
+        if (token !== latestSearchTokenRef.current) return;
+        if (!out.ok) {
+          logNrmRunError('youtubeSearch.failed', out.userMessage, out.dev);
+          notifyUser(out.userMessage);
+          setResults([]);
+          return;
+        }
+        applySearchSuccess(out.items, out.nextCursor, false);
+      } catch (e) {
+        if (token !== latestSearchTokenRef.current) return;
+        logNrmRunError('youtubeSearch.unexpected', e);
+        notifyUser(
+          Platform.OS === 'web'
+            ? nrmYoutubeSearchBackendConnectionMessage
+            : nrmYoutubeSearchOnDeviceErrorMessage,
+        );
+        setResults([]);
+      } finally {
+        if (token !== latestSearchTokenRef.current) return;
+        setLoading(false);
+      }
+    },
+    [applySearchSuccess, onSearchCommitted],
+  );
+
   useEffect(() => {
     if (!initialQuery || initialQueryFiredRef.current) return;
     initialQueryFiredRef.current = true;
@@ -218,20 +287,9 @@ export function NrmYoutubeHome({
     setQuery(initialQuery);
     const q = initialQuery.trim();
     if (!q) return;
+    setCommittedQuery(q);
     const token = ++latestSearchTokenRef.current;
-    onSearchCommitted?.();
-    setLoading(true);
-    setPlayingId(null);
-    void searchYoutube(q).then((out) => {
-      if (token !== latestSearchTokenRef.current) return;
-      if (!out.ok) {
-        notifyUser(out.userMessage);
-        setResults([]);
-      } else {
-        setResults(out.items);
-      }
-      setLoading(false);
-    });
+    void runSearchWithQuery(q, token);
   // only run once on mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -246,34 +304,63 @@ export function NrmYoutubeHome({
     const q = query.trim();
     if (!q) return;
     setChartContextActive(false);
+    setCommittedQuery(q);
     const token = ++latestSearchTokenRef.current;
-    onSearchCommitted?.();
-    setLoading(true);
-    setPlayingId(null);
+    await runSearchWithQuery(q, token);
+  }, [query, runSearchWithQuery]);
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || !nextCursor || !committedQuery.trim()) {
+      return;
+    }
+    if (loadMoreLockRef.current) return;
+    loadMoreLockRef.current = true;
+    setLoadingMore(true);
+    const token = latestSearchTokenRef.current;
     try {
-      const out = await searchYoutube(q);
+      const out = await searchYoutubePage(
+        committedQuery,
+        nextCursor,
+        YOUTUBE_SEARCH_PAGE_SIZE,
+      );
       if (token !== latestSearchTokenRef.current) return;
       if (!out.ok) {
-        logNrmRunError('youtubeSearch.failed', out.userMessage, out.dev);
+        logNrmRunError('youtubeSearch.loadMore', out.userMessage, out.dev);
         notifyUser(out.userMessage);
-        setResults([]);
+        setHasMore(false);
         return;
       }
-      setResults(out.items);
+      applySearchSuccess(out.items, out.nextCursor, true);
     } catch (e) {
       if (token !== latestSearchTokenRef.current) return;
-      logNrmRunError('youtubeSearch.unexpected', e);
-      notifyUser(
-        Platform.OS === 'web'
-          ? nrmYoutubeSearchBackendConnectionMessage
-          : nrmYoutubeSearchOnDeviceErrorMessage,
-      );
-      setResults([]);
+      logNrmRunError('youtubeSearch.loadMoreUnexpected', e);
     } finally {
-      if (token !== latestSearchTokenRef.current) return;
-      setLoading(false);
+      if (token === latestSearchTokenRef.current) {
+        setLoadingMore(false);
+      }
+      loadMoreLockRef.current = false;
     }
-  }, [query, onSearchCommitted]);
+  }, [
+    applySearchSuccess,
+    committedQuery,
+    hasMore,
+    loading,
+    loadingMore,
+    nextCursor,
+  ]);
+
+  const onResultsScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      setShowScrollTop(y >= YOUTUBE_SEARCH_SCROLL_TOP_THRESHOLD);
+    },
+    [],
+  );
+
+  const scrollResultsToTop = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setShowScrollTop(false);
+  }, []);
 
   const effectiveChartTrack = chartContextActive ? chartDownloadTrack : null;
   const effectiveChartSource = chartContextActive ? chartDownloadSource : null;
@@ -501,13 +588,19 @@ export function NrmYoutubeHome({
               : undefined,
         });
         if (out.lyricsWarning === 'not_embedded') {
-          setLyricsEmbedUnavailableOpen(true);
+          InteractionManager.runAfterInteractions(() => {
+            setLyricsEmbedUnavailableOpen(true);
+          });
         } else if (out.lyricsWarning === 'translation_exhausted') {
-          setLyricsTranslationExhausted(true);
-          setLyricsTranslationFailedOpen(true);
+          InteractionManager.runAfterInteractions(() => {
+            setLyricsTranslationExhausted(true);
+            setLyricsTranslationFailedOpen(true);
+          });
         } else if (out.lyricsWarning === 'translation_failed') {
-          setLyricsTranslationExhausted(false);
-          setLyricsTranslationFailedOpen(true);
+          InteractionManager.runAfterInteractions(() => {
+            setLyricsTranslationExhausted(false);
+            setLyricsTranslationFailedOpen(true);
+          });
         }
       } catch (e) {
         if (Platform.OS !== 'web') {
@@ -589,6 +682,11 @@ export function NrmYoutubeHome({
 
       if (mode === 'manual') {
         setDlMetaBusy((m) => ({ ...m, [videoId]: true }));
+        setDlBusy((m) => {
+          const n = { ...m };
+          delete n[videoId];
+          return n;
+        });
         try {
           const cached = melonChartMetaCacheRef.current;
           const fields =
@@ -629,19 +727,42 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
-          // 알림은 completeDownloadAfterExtraction 내부에서 설정 로드 후 한 번만 발송
-          await completeDownloadAfterExtraction(videoId, fileName, metadata);
+          InteractionManager.runAfterInteractions(() => {
+            void (async () => {
+              try {
+                await completeDownloadAfterExtraction(videoId, fileName, metadata);
+              } catch {
+                /* notifyUser / overlays inside completeDownloadAfterExtraction */
+              } finally {
+                if (Platform.OS !== 'web') {
+                  nrmNotifyDownloadWorkEnded(videoId);
+                }
+                clearDownloadSession(videoId);
+              }
+            })();
+          });
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
           beginParallelExtraction(videoId);
-          // 알림은 completeDownloadAfterExtraction 내부에서 설정 로드 후 한 번만 발송
-          await completeDownloadAfterExtraction(videoId, fileName, undefined);
+          InteractionManager.runAfterInteractions(() => {
+            void (async () => {
+              try {
+                await completeDownloadAfterExtraction(videoId, fileName, undefined);
+              } catch {
+                /* notifyUser / overlays inside completeDownloadAfterExtraction */
+              } finally {
+                if (Platform.OS !== 'web') {
+                  nrmNotifyDownloadWorkEnded(videoId);
+                }
+                clearDownloadSession(videoId);
+              }
+            })();
+          });
         }
       } catch (e) {
         if (mode === 'auto') {
           handleMetadataPrefetchError(videoId, e);
         }
-      } finally {
         if (Platform.OS !== 'web') {
           nrmNotifyDownloadWorkEnded(videoId);
         }
@@ -664,11 +785,157 @@ export function NrmYoutubeHome({
   const isWelcome = phase === 'welcome';
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80;
+  const rowBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const useResultList =
+    fillHeight || !isWelcome || results.length > 0 || loading || committedQuery.length > 0;
+
+  const searchHeader = (
+    <View style={styles.searchRowWrap}>
+      <View style={styles.searchRow}>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={runSearch}
+          placeholder={nrmYoutubeSearchPlaceholder}
+          placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          editable
+          style={[styles.input, inputColors]}
+        />
+        <Pressable
+          onPress={runSearch}
+          disabled={query.trim().length === 0}
+          style={({ pressed }) => [
+            styles.searchBtn,
+            query.trim().length === 0 && styles.searchBtnDisabled,
+            pressed && !loading && styles.searchBtnPressed,
+          ]}>
+          {loading ? (
+            <ActivityIndicator color={nrmTokens.color.onPrimary} />
+          ) : (
+            <Text style={styles.searchBtnLabel}>검색</Text>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  const renderResultItem = ({ item }: ListRenderItemInfo<YoutubeSearchItem>) => {
+    const active = item.videoId === playingId;
+    const busy = !!dlBusy[item.videoId] || !!dlMetaBusy[item.videoId];
+    return (
+      <Fragment key={item.videoId}>
+        <View
+          style={[
+            styles.row,
+            { borderBottomColor: rowBorder },
+            active && styles.rowActive,
+          ]}>
+          <Pressable
+            onPress={() => {
+              setPlayingId(playingId === item.videoId ? null : item.videoId);
+            }}
+            style={({ pressed }) => [styles.rowMain, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="재생 영역 열기">
+            <View style={styles.thumb}>
+              {item.thumbnailUrl ? (
+                <Image
+                  source={{ uri: item.thumbnailUrl }}
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : null}
+            </View>
+            <View style={styles.rowText}>
+              <Text
+                style={[
+                  styles.title,
+                  { color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink },
+                ]}
+                numberOfLines={2}>
+                {item.title}
+              </Text>
+              <Text
+                style={[
+                  styles.channel,
+                  {
+                    color: isDark
+                      ? nrmTokens.color.bodyMuted
+                      : nrmTokens.color.inkMuted48,
+                  },
+                ]}
+                numberOfLines={1}>
+                {item.channelTitle}
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => void startDownloadForItem(item)}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.rowDownloadBtn,
+              {
+                borderColor: isDark
+                  ? nrmTokens.color.primaryOnDark
+                  : nrmTokens.color.primary,
+              },
+              busy && styles.rowDownloadBtnDisabled,
+              pressed && !busy && styles.rowDownloadBtnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="이 영상 오디오 다운로드">
+            {busy ? (
+              <ActivityIndicator
+                size="small"
+                color={
+                  isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary
+                }
+              />
+            ) : (
+              <Ionicons
+                name="download-outline"
+                size={22}
+                color={
+                  isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary
+                }
+              />
+            )}
+          </Pressable>
+        </View>
+        {active ? (
+          <View style={styles.embedBelow}>
+            <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
+            <Pressable
+              onPress={() => void startDownloadForItem(item)}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.embedDownloadBtn,
+                busy && styles.embedDownloadBtnDisabled,
+                pressed && !busy && styles.embedDownloadBtnPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="재생 중 영상 오디오 다운로드">
+              {busy ? (
+                <ActivityIndicator color={nrmTokens.color.onPrimary} size="small" />
+              ) : (
+                <Text style={styles.embedDownloadLabel}>
+                  {Platform.OS === 'web' ? '오디오 다운로드 (MP3)' : '오디오 다운로드'}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+      </Fragment>
+    );
+  };
 
   return (
     <View
       style={[
         styles.root,
+        fillHeight && styles.rootFill,
         !isWelcome && styles.block,
         !isWelcome && (isDark ? styles.blockDark : styles.blockLight),
       ]}>
@@ -716,168 +983,42 @@ export function NrmYoutubeHome({
         exhausted={lyricsTranslationExhausted}
         onClose={() => setLyricsTranslationFailedOpen(false)}
       />
-      <View style={styles.searchRowWrap}>
-        <View style={styles.searchRow}>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          onSubmitEditing={runSearch}
-          placeholder={nrmYoutubeSearchPlaceholder}
-          placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          editable
-          style={[styles.input, inputColors]}
-        />
-        <Pressable
-          onPress={runSearch}
-          disabled={query.trim().length === 0}
-          style={({ pressed }) => [
-            styles.searchBtn,
-            query.trim().length === 0 && styles.searchBtnDisabled,
-            pressed && !loading && styles.searchBtnPressed,
-          ]}>
-          {loading ? (
-            <ActivityIndicator color={nrmTokens.color.onPrimary} />
-          ) : (
-            <Text style={styles.searchBtnLabel}>검색</Text>
-          )}
-        </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.list}>
-        {results.map((item) => {
-          const active = item.videoId === playingId;
-          const rowBorder = isDark
-            ? nrmTokens.color.borderOnDark
-            : nrmTokens.color.hairline;
-          const busy = !!dlBusy[item.videoId] || !!dlMetaBusy[item.videoId];
-          return (
-            <Fragment key={item.videoId}>
-              <View
-                style={[
-                  styles.row,
-                  { borderBottomColor: rowBorder },
-                  active && styles.rowActive,
-                ]}>
-                <Pressable
-                  onPress={() => {
-                    setPlayingId(
-                      playingId === item.videoId ? null : item.videoId,
-                    );
-                  }}
-                  style={({ pressed }) => [
-                    styles.rowMain,
-                    pressed && styles.rowPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="재생 영역 열기">
-                  <View style={styles.thumb}>
-                    {item.thumbnailUrl ? (
-                      <Image
-                        source={{ uri: item.thumbnailUrl }}
-                        style={StyleSheet.absoluteFill}
-                      />
-                    ) : null}
-                  </View>
-                  <View style={styles.rowText}>
-                    <Text
-                      style={[
-                        styles.title,
-                        {
-                          color: isDark
-                            ? nrmTokens.color.bodyOnDark
-                            : nrmTokens.color.ink,
-                        },
-                      ]}
-                      numberOfLines={2}>
-                      {item.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.channel,
-                        {
-                          color: isDark
-                            ? nrmTokens.color.bodyMuted
-                            : nrmTokens.color.inkMuted48,
-                        },
-                      ]}
-                      numberOfLines={1}>
-                      {item.channelTitle}
-                    </Text>
-                  </View>
-                </Pressable>
-                <Pressable
-                  onPress={() => void startDownloadForItem(item)}
-                  disabled={busy}
-                  style={({ pressed }) => [
-                    styles.rowDownloadBtn,
-                    {
-                      borderColor: isDark
-                        ? nrmTokens.color.primaryOnDark
-                        : nrmTokens.color.primary,
-                    },
-                    busy && styles.rowDownloadBtnDisabled,
-                    pressed && !busy && styles.rowDownloadBtnPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="이 영상 오디오 다운로드">
-                  {busy ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={
-                        isDark
-                          ? nrmTokens.color.primaryOnDark
-                          : nrmTokens.color.primary
-                      }
-                    />
-                  ) : (
-                    <Ionicons
-                      name="download-outline"
-                      size={22}
-                      color={
-                        isDark
-                          ? nrmTokens.color.primaryOnDark
-                          : nrmTokens.color.primary
-                      }
-                    />
-                  )}
-                </Pressable>
-              </View>
-              {active ? (
-                <View style={styles.embedBelow}>
-                  <YoutubeEmbed videoId={item.videoId} isDark={isDark} />
-                  <Pressable
-                    onPress={() => void startDownloadForItem(item)}
-                    disabled={busy}
-                    style={({ pressed }) => [
-                      styles.embedDownloadBtn,
-                      busy && styles.embedDownloadBtnDisabled,
-                      pressed && !busy && styles.embedDownloadBtnPressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="재생 중 영상 오디오 다운로드">
-                    {busy ? (
-                      <ActivityIndicator
-                        color={nrmTokens.color.onPrimary}
-                        size="small"
-                      />
-                    ) : (
-                      <Text style={styles.embedDownloadLabel}>
-                        {Platform.OS === 'web'
-                          ? '오디오 다운로드 (MP3)'
-                          : '오디오 다운로드'}
-                      </Text>
-                    )}
-                  </Pressable>
-                </View>
-              ) : null}
-            </Fragment>
-          );
-        })}
-      </View>
+      {useResultList ? (
+        <>
+          <FlatList
+            ref={listRef}
+            style={styles.resultList}
+            contentContainerStyle={styles.resultListContent}
+            data={results}
+            keyExtractor={(item) => item.videoId}
+            renderItem={renderResultItem}
+            ListHeaderComponent={searchHeader}
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator
+                  style={styles.footerLoader}
+                  color={nrmTokens.color.primary}
+                />
+              ) : null
+            }
+            onEndReached={() => void loadMore()}
+            onEndReachedThreshold={0.35}
+            onScroll={onResultsScroll}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="always"
+            showsVerticalScrollIndicator={Platform.OS === 'web'}
+            nestedScrollEnabled
+          />
+          <NrmScrollToTopFab
+            visible={showScrollTop && results.length > 0}
+            onPress={scrollResultsToTop}
+            isDark={isDark}
+            bottomOffset={nrmTokens.space.xl + 56}
+          />
+        </>
+      ) : (
+        searchHeader
+      )}
     </View>
   );
 }
@@ -887,6 +1028,19 @@ const ROW_H = nrmTokens.layout.touchMin;
 const styles = StyleSheet.create({
   root: {
     width: '100%',
+  },
+  rootFill: {
+    flex: 1,
+    minHeight: 0,
+  },
+  resultList: {
+    flex: 1,
+  },
+  resultListContent: {
+    paddingBottom: nrmTokens.space.lg,
+  },
+  footerLoader: {
+    marginVertical: nrmTokens.space.md,
   },
   block: {
     width: '100%',
@@ -956,9 +1110,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontSize: nrmTokens.font.body,
     letterSpacing: -0.37,
-  },
-  list: {
-    paddingBottom: nrmTokens.space.lg,
   },
   embedBelow: {
     marginTop: nrmTokens.space.sm,

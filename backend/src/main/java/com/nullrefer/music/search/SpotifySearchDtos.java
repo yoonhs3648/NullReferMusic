@@ -11,6 +11,12 @@ public final class SpotifySearchDtos {
 
   public record SpotifyArtistSearchResult(List<SpotifyArtistSearchHit> artists) {}
 
+  public record SpotifyArtistSearchPage(List<SpotifyArtistSearchHit> artists, String nextCursor) {}
+
+  public record SpotifyAlbumSearchPage(List<SpotifyAlbumSearchHit> albums, String nextCursor) {}
+
+  public record SpotifyTrackSearchPage(List<SpotifyTrackSearchHit> tracks, String nextCursor) {}
+
   public record SpotifyArtistInfo(
       String id,
       String name,

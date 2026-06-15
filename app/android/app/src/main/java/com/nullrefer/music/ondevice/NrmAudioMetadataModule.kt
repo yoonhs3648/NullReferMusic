@@ -186,10 +186,10 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             )
         val out = Arguments.createMap()
         parseFfmpegProbeMetadata(probeOut, out)
-        // MP3: FFmpeg probe가 SYLT 바이너리 프레임을 텍스트로 출력하지 않으므로 직접 디코드
+        // MP3: FFmpeg probe가 SYLT/USLT 바이너리 프레임을 텍스트로 출력하지 않으므로 직접 디코드
         if (!out.hasKey("lyrics") && inFile.name.lowercase().endsWith(".mp3")) {
-          val syltLrc = readSyltLyricsFromMp3(inFile)
-          if (syltLrc != null) out.putString("lyrics", syltLrc)
+          val embeddedLrc = readEmbeddedLyricsFromMp3(inFile)
+          if (embeddedLrc != null) out.putString("lyrics", embeddedLrc)
         }
         val coverFile = extractEmbeddedCoverFile(paths, inFile)
         if (coverFile != null) {
@@ -905,7 +905,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   /**
    * 오디오 파일에 LRC 동기화 가사를 직접 임베드.
    * - m4a/mp4/aac: FFmpeg -metadata lyrics=<lrc> → ©lyr atom
-   * - mp3: SYLT ID3v2.3 프레임을 기존 ID3 태그에 삽입
+   * - mp3: USLT(LRC 텍스트) + SYLT(ID3 싱크) — Musicolet 등은 USLT의 LRC 구문으로 싱크 재생
    * audioUri: file:// 또는 content:// (SAF) URI
    */
   @ReactMethod
@@ -999,15 +999,69 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /** mp3: LRC → SYLT ID3v2.3 프레임 삽입 */
+  /** mp3: LRC → USLT(LRC 텍스트) + SYLT(바이너리 싱크) — Musicolet 등은 USLT의 LRC 구문을 읽음 */
   private fun embedLyricsMp3(file: File, lrc: String) {
-    val syltFrame = buildSyltFrame(lrc)
-    if (syltFrame.isEmpty()) return
-    insertOrReplaceSyltInMp3(file, syltFrame)
+    val trimmed = lrc.trim()
+    if (trimmed.isEmpty()) return
+    val id3Major = peekId3MajorVersion(file) ?: 3
+    val frames = mutableListOf<ByteArray>()
+    buildUsltFrame(trimmed, id3Major)?.let { frames += it }
+    buildSyltFrame(trimmed, id3Major)?.let { frames += it }
+    if (frames.isEmpty()) return
+    insertOrReplaceEmbeddedLyricsInMp3(file, frames, id3Major)
   }
 
-  /** LRC 텍스트 → SYLT ID3v2.3 프레임 바이너리 */
-  private fun buildSyltFrame(lrc: String): ByteArray {
+  private fun peekId3MajorVersion(file: File): Int? {
+    val header = ByteArray(4)
+    file.inputStream().use { input ->
+      if (input.read(header) < 4) return null
+    }
+    if (header[0] != 'I'.code.toByte() ||
+      header[1] != 'D'.code.toByte() ||
+      header[2] != '3'.code.toByte()
+    ) {
+      return null
+    }
+    return header[3].toInt() and 0xFF
+  }
+
+  /** LRC 텍스트 → USLT ID3 프레임 (플레이어 호환: LRC 타임스탬프 문자열 그대로) */
+  private fun buildUsltFrame(lrc: String, id3Major: Int): ByteArray? {
+    val trimmed = lrc.trim()
+    if (trimmed.isEmpty()) return null
+    val body = ByteArrayOutputStream().also { os ->
+      os.write(3) // UTF-8
+      os.write("eng".toByteArray())
+      os.write(0) // 빈 content descriptor
+      os.write(trimmed.toByteArray(Charsets.UTF_8))
+    }.toByteArray()
+    return wrapId3v2Frame("USLT", body, id3Major)
+  }
+
+  /** LRC 텍스트 → SYLT ID3 프레임 바이너리 (SYLT 지원 플레이어용) */
+  private fun buildSyltFrame(lrc: String, id3Major: Int): ByteArray? {
+    val entries = parseLrcTimedEntries(lrc)
+    if (entries.isEmpty()) return null
+
+    val body = ByteArrayOutputStream().also { os ->
+      os.write(3) // UTF-8
+      os.write("eng".toByteArray())
+      os.write(2) // 타임스탬프: ms (ID3 $02)
+      os.write(1) // 내용 유형: lyrics
+      os.write(0) // content descriptor null
+      for ((ms, text) in entries) {
+        os.write(text.toByteArray(Charsets.UTF_8))
+        os.write(0)
+        os.write((ms ushr 24) and 0xFF)
+        os.write((ms ushr 16) and 0xFF)
+        os.write((ms ushr 8) and 0xFF)
+        os.write(ms and 0xFF)
+      }
+    }.toByteArray()
+    return wrapId3v2Frame("SYLT", body, id3Major)
+  }
+
+  private fun parseLrcTimedEntries(lrc: String): List<Pair<Int, String>> {
     val pattern = Regex("""^\[(\d+):(\d+(?:[.,]\d+)?)\](.*)$""")
     val entries = mutableListOf<Pair<Int, String>>()
     for (line in lrc.lines()) {
@@ -1015,64 +1069,96 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       val minutes = m.groupValues[1].toInt()
       val seconds = m.groupValues[2].replace(',', '.').toDoubleOrNull() ?: continue
       val text = m.groupValues[3].trim()
-      val ms = (minutes * 60 * 1000 + seconds * 1000).toInt()
+      val ms = (minutes * 60_000 + seconds * 1000.0).toInt()
       entries += Pair(ms, text)
     }
-    if (entries.isEmpty()) return ByteArray(0)
+    return entries
+  }
 
-    val body = ByteArrayOutputStream().also { os ->
-      os.write(3)                          // 인코딩: UTF-8
-      os.write("eng".toByteArray())        // 언어 (3 bytes)
-      os.write(1)                          // 타임스탬프 형식: ms
-      os.write(1)                          // 내용 유형: lyrics
-      os.write(0)                          // 내용 설명자 null 종료자
-      for ((ms, text) in entries) {
-        os.write(text.toByteArray(Charsets.UTF_8))
-        os.write(0)                        // 텍스트 null 종료자
-        os.write((ms ushr 24) and 0xFF)
-        os.write((ms ushr 16) and 0xFF)
-        os.write((ms ushr 8) and 0xFF)
-        os.write(ms and 0xFF)
-      }
-    }.toByteArray()
-
+  private fun wrapId3v2Frame(frameId: String, body: ByteArray, id3Major: Int): ByteArray {
     return ByteArrayOutputStream().also { os ->
-      os.write("SYLT".toByteArray())
-      os.write((body.size ushr 24) and 0xFF)
-      os.write((body.size ushr 16) and 0xFF)
-      os.write((body.size ushr 8) and 0xFF)
-      os.write(body.size and 0xFF)
-      os.write(byteArrayOf(0, 0))          // 프레임 플래그
+      os.write(frameId.toByteArray())
+      if (id3Major >= 4) {
+        os.write(encodeId3SyncsafeInt(body.size))
+      } else {
+        os.write((body.size ushr 24) and 0xFF)
+        os.write((body.size ushr 16) and 0xFF)
+        os.write((body.size ushr 8) and 0xFF)
+        os.write(body.size and 0xFF)
+      }
+      os.write(byteArrayOf(0, 0))
       os.write(body)
     }.toByteArray()
+  }
+
+  /** MP3 USLT·SYLT 프레임 → LRC 텍스트 (USLT 우선 — Musicolet 등) */
+  private fun readEmbeddedLyricsFromMp3(file: File): String? {
+    readUsltLyricsFromMp3(file)?.let { return it }
+    return readSyltLyricsFromMp3(file)
+  }
+
+  private fun readUsltLyricsFromMp3(file: File): String? {
+    return try {
+      val bytes = file.readBytes()
+      val range = id3TagBodyRange(bytes) ?: return null
+      val (bodyStart, tagEnd) = range
+      val id3Major = bytes[3].toInt() and 0xFF
+      var pos = bodyStart
+      while (pos + 10 <= tagEnd) {
+        if (bytes[pos] == 0.toByte()) break
+        val frameId = String(bytes.sliceArray(pos until pos + 4))
+        val frameSize = readId3FrameSize(bytes, pos + 4, id3Major)
+        if (frameSize <= 0 || pos + 10 + frameSize > tagEnd) break
+        if (frameId == "USLT") {
+          val text = decodeUsltFrameBody(bytes.sliceArray(pos + 10 until pos + 10 + frameSize))
+          if (!text.isNullOrBlank()) return text.trim()
+        }
+        pos += 10 + frameSize
+      }
+      null
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun decodeUsltFrameBody(data: ByteArray): String? {
+    if (data.isEmpty()) return null
+    val encoding = data[0].toInt() and 0xFF
+    var pos = 4 // encoding + language(3)
+    if (encoding == 1 || encoding == 2) {
+      while (pos + 1 < data.size) {
+        if (data[pos] == 0.toByte() && data[pos + 1] == 0.toByte()) {
+          pos += 2
+          break
+        }
+        pos += 2
+      }
+      if (pos >= data.size) return null
+      return String(data.sliceArray(pos until data.size), Charsets.UTF_16LE)
+    }
+    while (pos < data.size) {
+      if (data[pos] == 0.toByte()) {
+        pos += 1
+        break
+      }
+      pos++
+    }
+    if (pos >= data.size) return null
+    return String(data.sliceArray(pos until data.size), Charsets.UTF_8)
   }
 
   /** MP3 SYLT 프레임 → LRC 텍스트 (없으면 null) */
   private fun readSyltLyricsFromMp3(file: File): String? {
     return try {
       val bytes = file.readBytes()
-      if (bytes.size < 10 ||
-        bytes[0] != 'I'.code.toByte() ||
-        bytes[1] != 'D'.code.toByte() ||
-        bytes[2] != '3'.code.toByte()
-      ) return null
+      val range = id3TagBodyRange(bytes) ?: return null
+      val (bodyStart, tagEnd) = range
       val id3Major = bytes[3].toInt() and 0xFF
-      if (id3Major < 3) return null
-      val tagBodySize = readId3SyncsafeInt(bytes, 6)
-      val tagEnd = 10 + tagBodySize
-      if (tagEnd > bytes.size) return null
-      var pos = 10
+      var pos = bodyStart
       while (pos + 10 <= tagEnd) {
         if (bytes[pos] == 0.toByte()) break
         val frameId = String(bytes.sliceArray(pos until pos + 4))
-        val frameSize = if (id3Major >= 4) {
-          readId3SyncsafeInt(bytes, pos + 4)
-        } else {
-          ((bytes[pos + 4].toInt() and 0xFF) shl 24) or
-            ((bytes[pos + 5].toInt() and 0xFF) shl 16) or
-            ((bytes[pos + 6].toInt() and 0xFF) shl 8) or
-            (bytes[pos + 7].toInt() and 0xFF)
-        }
+        val frameSize = readId3FrameSize(bytes, pos + 4, id3Major)
         if (frameSize <= 0 || pos + 10 + frameSize > tagEnd) break
         if (frameId == "SYLT") {
           val frameData = bytes.sliceArray(pos + 10 until pos + 10 + frameSize)
@@ -1134,41 +1220,92 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /** MP3 파일에서 기존 SYLT 프레임을 제거하고 새 SYLT 프레임을 삽입 */
-  private fun insertOrReplaceSyltInMp3(file: File, syltFrame: ByteArray) {
+  /** MP3 파일에서 기존 USLT·SYLT 프레임을 제거하고 새 프레임을 삽입 */
+  private fun insertOrReplaceEmbeddedLyricsInMp3(
+    file: File,
+    lyricFrames: List<ByteArray>,
+    preferredMajor: Int = 3,
+  ) {
     val bytes = file.readBytes()
+    val newFrameBytes = lyricFrames.fold(ByteArray(0)) { acc, frame -> acc + frame }
 
-    // ID3v2 헤더 없으면 새로 만들어 앞에 붙임
     if (bytes.size < 10 ||
       bytes[0] != 'I'.code.toByte() ||
       bytes[1] != 'D'.code.toByte() ||
       bytes[2] != '3'.code.toByte()
     ) {
-      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      file.writeBytes(buildMinimalId3v2Tag(newFrameBytes, preferredMajor) + bytes)
       return
     }
 
     val id3Major = bytes[3].toInt() and 0xFF
     if (id3Major < 3) {
-      // ID3v2.2는 SYLT 미지원 → 기존 태그를 유지하고 앞에 새 미니 태그 삽입
-      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      file.writeBytes(buildMinimalId3v2Tag(newFrameBytes, preferredMajor) + bytes)
       return
     }
 
-    val tagBodySize = readId3SyncsafeInt(bytes, 6)
-    val tagEnd = 10 + tagBodySize
+    val range = id3TagBodyRange(bytes)
+    if (range == null) {
+      file.writeBytes(buildMinimalId3v2Tag(newFrameBytes, preferredMajor) + bytes)
+      return
+    }
+    val (bodyStart, tagEnd) = range
     if (tagEnd > bytes.size) {
-      file.writeBytes(buildMinimalId3v2Tag(syltFrame) + bytes)
+      file.writeBytes(buildMinimalId3v2Tag(newFrameBytes, preferredMajor) + bytes)
       return
     }
 
-    val tagBody = bytes.sliceArray(10 until tagEnd)
-    val filtered = removeId3FramesFromBody(tagBody, setOf("SYLT"), usesSyncsafeFrameSize = id3Major >= 4)
-    val newTagBody = filtered + syltFrame
+    val tagBody = bytes.sliceArray(bodyStart until tagEnd)
+    val filtered =
+      removeId3FramesFromBody(
+        tagBody,
+        setOf("USLT", "SYLT"),
+        usesSyncsafeFrameSize = id3Major >= 4,
+      )
+    val newTagBody = filtered + newFrameBytes
 
     val newHeader = buildId3v2Header(id3Major, bytes[4], bytes[5], newTagBody.size)
     val audioData = bytes.sliceArray(tagEnd until bytes.size)
     file.writeBytes(newHeader + newTagBody + audioData)
+  }
+
+  /** @return tag body 시작·끝 오프셋 (extended header 건너뜀) */
+  private fun id3TagBodyRange(bytes: ByteArray): Pair<Int, Int>? {
+    if (bytes.size < 10 ||
+      bytes[0] != 'I'.code.toByte() ||
+      bytes[1] != 'D'.code.toByte() ||
+      bytes[2] != '3'.code.toByte()
+    ) {
+      return null
+    }
+    val id3Major = bytes[3].toInt() and 0xFF
+    if (id3Major < 3) return null
+    val flags = bytes[5].toInt() and 0xFF
+    var bodyStart = 10
+    if ((flags and 0x40) != 0 && bytes.size >= 14) {
+      val extSize =
+        if (id3Major >= 4) {
+          readId3SyncsafeInt(bytes, 10)
+        } else {
+          ((bytes[10].toInt() and 0xFF) shl 24) or
+            ((bytes[11].toInt() and 0xFF) shl 16) or
+            ((bytes[12].toInt() and 0xFF) shl 8) or
+            (bytes[13].toInt() and 0xFF)
+        }
+      bodyStart = 10 + extSize
+    }
+    val tagBodySize = readId3SyncsafeInt(bytes, 6)
+    val tagEnd = 10 + tagBodySize
+    if (bodyStart >= tagEnd || tagEnd > bytes.size) return null
+    return Pair(bodyStart, tagEnd)
+  }
+
+  private fun readId3FrameSize(bytes: ByteArray, offset: Int, id3Major: Int): Int {
+    if (id3Major >= 4) return readId3SyncsafeInt(bytes, offset)
+    return ((bytes[offset].toInt() and 0xFF) shl 24) or
+      ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
+      ((bytes[offset + 2].toInt() and 0xFF) shl 8) or
+      (bytes[offset + 3].toInt() and 0xFF)
   }
 
   private fun readId3SyncsafeInt(bytes: ByteArray, offset: Int): Int =
@@ -1192,8 +1329,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     return os.toByteArray()
   }
 
-  private fun buildMinimalId3v2Tag(frame: ByteArray): ByteArray =
-    buildId3v2Header(3, 0, 0, frame.size) + frame
+  private fun buildMinimalId3v2Tag(body: ByteArray, major: Int = 3): ByteArray =
+    buildId3v2Header(major, 0, 0, body.size) + body
 
   /**
    * ID3 태그 바디에서 지정 프레임 ID를 제거.

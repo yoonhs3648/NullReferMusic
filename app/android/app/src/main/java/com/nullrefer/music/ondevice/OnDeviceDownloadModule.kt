@@ -383,4 +383,51 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
       }
     }.start()
   }
+
+  /** 이미 createDocument 로 만든 SAF content URI에 로컬 파일을 스트리밍 복사 (JS base64 없음). */
+  @ReactMethod
+  fun copyFileToExistingSaf(
+    sourcePath: String,
+    destUri: String,
+    promise: Promise,
+  ) {
+    Thread {
+      try {
+        val srcPath = sourcePath.removePrefix("file://")
+        if (srcPath.startsWith("content:")) {
+          promise.reject(
+              "E_ARG",
+              "소스는 로컬 파일 경로여야 합니다 (content URI 불가): ${srcPath.take(96)}",
+          )
+          return@Thread
+        }
+        synchronized(safCopyLock) {
+          val src = File(srcPath)
+          if (!src.isFile) {
+            promise.reject("E_ARG", "소스 파일이 없습니다.")
+            return@Thread
+          }
+          val t0 = System.currentTimeMillis()
+          val srcBytes = src.length()
+          val uri = Uri.parse(destUri.trim())
+          val resolver = reactApplicationContext.contentResolver
+          resolver.openOutputStream(uri, "wt")?.use { out ->
+            src.inputStream().use { input -> input.copyTo(out) }
+          } ?: throw Exception("SAF에 쓸 수 없습니다.")
+          NrmFileLogger.log(
+              "saf",
+              "copyFileToExistingSaf OK bytes=$srcBytes ms=${System.currentTimeMillis() - t0}",
+          )
+          promise.resolve(null)
+        }
+      } catch (e: Exception) {
+        NrmFileLogger.error(
+            "saf",
+            "copyFileToExistingSaf 실패 src=${sourcePath.take(80)} dest=${destUri.take(80)}",
+            e,
+        )
+        promise.reject("E_SAF_COPY_EXISTING", e.message ?: e.toString(), e)
+      }
+    }.start()
+  }
 }

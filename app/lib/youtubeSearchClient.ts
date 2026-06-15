@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+import { YOUTUBE_SEARCH_PAGE_SIZE } from '@/lib/nrmYoutubeSearchPageSize';
 import {
   clearApiBaseUrlOverride,
   getDefaultApiBaseUrl,
@@ -53,28 +54,43 @@ function userMessageForServerError(
   return nrmYoutubeSearchBadResponseMessage;
 }
 
-function extractItems(parsed: unknown): YoutubeSearchItem[] | null {
+function normalizeNextCursor(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return v.length > 0 ? v : null;
+}
+
+function extractPage(parsed: unknown): { items: YoutubeSearchItem[]; nextCursor: string | null } | null {
   if (Array.isArray(parsed)) {
-    return parsed as YoutubeSearchItem[];
+    return { items: parsed as YoutubeSearchItem[], nextCursor: null };
   }
-  if (
-    parsed &&
-    typeof parsed === 'object' &&
-    Array.isArray((parsed as { items?: unknown }).items)
-  ) {
-    return (parsed as { items: YoutubeSearchItem[] }).items;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as { items?: unknown; nextCursor?: unknown };
+    if (Array.isArray(obj.items)) {
+      return {
+        items: obj.items as YoutubeSearchItem[],
+        nextCursor: normalizeNextCursor(obj.nextCursor),
+      };
+    }
   }
   return null;
 }
 
-async function youtubeSearchWithBase(
+async function youtubeSearchPageWithBase(
   q: string,
+  cursor: string | null,
+  limit: number,
   base: string,
 ): Promise<YoutubeSearchOutcome> {
   try {
-    const res = await nrmBackendFetch(
-      `${base}/api/youtube/search?q=${encodeURIComponent(q)}`,
-    );
+    const params = new URLSearchParams({
+      q,
+      limit: String(limit),
+    });
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+    const res = await nrmBackendFetch(`${base}/api/youtube/search?${params.toString()}`);
     const rawText = await res.text();
     if (!res.ok) {
       let code: string | undefined;
@@ -110,8 +126,8 @@ async function youtubeSearchWithBase(
         },
       };
     }
-    const items = extractItems(parsed);
-    if (!items) {
+    const page = extractPage(parsed);
+    if (!page) {
       return {
         ok: false,
         userMessage: nrmYoutubeSearchBadResponseMessage,
@@ -126,7 +142,7 @@ async function youtubeSearchWithBase(
         },
       };
     }
-    return { ok: true, items };
+    return { ok: true, items: page.items, nextCursor: page.nextCursor };
   } catch (e) {
     const cause = e instanceof Error ? e.message : String(e);
     return {
@@ -142,19 +158,27 @@ async function youtubeSearchWithBase(
   }
 }
 
-export async function searchYoutube(q: string): Promise<YoutubeSearchOutcome> {
+async function resolveQueryForApi(q: string): Promise<string> {
   const suffixMode = await getYoutubeSearchSuffixMode();
-  const queryForApi = buildYoutubeSearchQuery(q, suffixMode);
+  return buildYoutubeSearchQuery(q, suffixMode);
+}
+
+export async function searchYoutubePage(
+  q: string,
+  cursor: string | null = null,
+  limit = YOUTUBE_SEARCH_PAGE_SIZE,
+): Promise<YoutubeSearchOutcome> {
+  const queryForApi = await resolveQueryForApi(q);
 
   if (Platform.OS !== 'web' && !usesPcBackendInDev()) {
-    const { searchYoutubeOnDevice } = await import('@/lib/nrmInnertubeYoutube');
-    return searchYoutubeOnDevice(queryForApi);
+    const { searchYoutubePageOnDevice } = await import('@/lib/nrmInnertubeYoutube');
+    return searchYoutubePageOnDevice(queryForApi, cursor);
   }
 
   const resolved = await getResolvedApiBaseUrl();
   const def = getDefaultApiBaseUrl();
 
-  let out = await youtubeSearchWithBase(queryForApi, resolved);
+  let out = await youtubeSearchPageWithBase(queryForApi, cursor, limit, resolved);
 
   if (!out.ok && resolved !== def) {
     const retry =
@@ -163,7 +187,7 @@ export async function searchYoutube(q: string): Promise<YoutubeSearchOutcome> {
       out.dev.where === 'youtubeSearch.jsonParse' ||
       out.dev.where === 'youtubeSearch.notArray';
     if (retry) {
-      const second = await youtubeSearchWithBase(queryForApi, def);
+      const second = await youtubeSearchPageWithBase(queryForApi, cursor, limit, def);
       if (second.ok) {
         await clearApiBaseUrlOverride();
       }
@@ -172,4 +196,24 @@ export async function searchYoutube(q: string): Promise<YoutubeSearchOutcome> {
   }
 
   return out;
+}
+
+/** 첫 페이지만 (호환) */
+export async function searchYoutube(q: string): Promise<YoutubeSearchOutcome> {
+  return searchYoutubePage(q, null);
+}
+
+export function mergeYoutubeSearchItems(
+  prev: YoutubeSearchItem[],
+  next: YoutubeSearchItem[],
+): YoutubeSearchItem[] {
+  if (next.length === 0) return prev;
+  const seen = new Set(prev.map((v) => v.videoId));
+  const merged = [...prev];
+  for (const item of next) {
+    if (seen.has(item.videoId)) continue;
+    seen.add(item.videoId);
+    merged.push(item);
+  }
+  return merged;
 }

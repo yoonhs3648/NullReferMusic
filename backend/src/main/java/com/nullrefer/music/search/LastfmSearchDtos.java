@@ -15,6 +15,12 @@ public final class LastfmSearchDtos {
 
   public record LastfmArtistSearchResult(List<LastfmArtistSearchHit> artists) {}
 
+  public record LastfmArtistSearchPage(List<LastfmArtistSearchHit> artists, String nextCursor) {}
+
+  public record LastfmAlbumSearchPage(List<LastfmAlbumSearchHit> albums, String nextCursor) {}
+
+  public record LastfmTrackSearchPage(List<LastfmTrackSearchHit> tracks, String nextCursor) {}
+
   public record LastfmArtistInfoDto(
       String name,
       String mbid,

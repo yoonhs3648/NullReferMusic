@@ -155,3 +155,18 @@ export type MelonSearchErrorCode = 'network' | 'bad_request' | 'unknown';
 export type MelonSearchOutcome<T> =
   | { ok: true; data: T }
   | { ok: false; errorCode: MelonSearchErrorCode; message: string };
+
+export type MelonArtistSearchPage = {
+  artists: MelonArtistSearchHit[];
+  nextCursor: string | null;
+};
+
+export type MelonAlbumSearchPage = {
+  albums: MelonAlbumSearchHit[];
+  nextCursor: string | null;
+};
+
+export type MelonTrackSearchPage = {
+  tracks: MelonTrackSearchHit[];
+  nextCursor: string | null;
+};

@@ -19,14 +19,18 @@ import {
 import type {
   LastfmAlbumDetail,
   LastfmAlbumSearchHit,
+  LastfmAlbumSearchPage,
   LastfmArtistDetail,
   LastfmArtistSearchHit,
+  LastfmArtistSearchPage,
   LastfmSearchErrorCode,
   LastfmSearchOutcome,
   LastfmTag,
   LastfmTrackDetail,
   LastfmTrackSearchHit,
+  LastfmTrackSearchPage,
 } from '@/lib/nrmLastfmSearchTypes';
+import { NRM_SEARCH_PAGE_SIZE } from '@/lib/nrmSearchPageSize';
 
 function errorFromApi(code: string | undefined, httpStatus: number): LastfmSearchErrorCode {
   if (code === 'lastfm_not_configured') return 'not_configured';
@@ -110,14 +114,52 @@ function mapTags(tagNode: unknown): LastfmTag[] {
   });
 }
 
-async function searchLastfmArtistsDirect(
+function parseLastfmPage(cursor: string | null): number {
+  const n = parseInt(cursor ?? '1', 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function lastfmNextPageCursor(
+  page: number,
+  count: number,
+  total: number,
+): string | null {
+  if (count <= 0) return null;
+  if (total > 0 && page * NRM_SEARCH_PAGE_SIZE >= total) return null;
+  if (count < NRM_SEARCH_PAGE_SIZE) return null;
+  return String(page + 1);
+}
+
+function lastfmSearchPagePath(
+  kind: 'artist' | 'album' | 'track',
+  query: string,
+  cursor: string | null,
+): string {
+  const params = new URLSearchParams({ q: query.trim() });
+  if (cursor?.trim()) params.set('cursor', cursor.trim());
+  return `/api/search/lastfm/${kind}?${params.toString()}`;
+}
+
+async function searchLastfmArtistsDirectPage(
   apiKey: string,
   query: string,
-): Promise<LastfmSearchOutcome<{ artists: LastfmArtistSearchHit[] }>> {
-  const r = await lastfmGet({ api_key: apiKey, method: 'artist.search', artist: query, limit: '20' });
+  cursor: string | null,
+): Promise<LastfmSearchOutcome<LastfmArtistSearchPage>> {
+  const page = parseLastfmPage(cursor);
+  const r = await lastfmGet({
+    api_key: apiKey,
+    method: 'artist.search',
+    artist: query,
+    limit: String(NRM_SEARCH_PAGE_SIZE),
+    page: String(page),
+  });
   if (!r.ok) return r;
+  const results = r.data.results as Record<string, unknown>;
   const nodes = arrayOrSingle(
-    ((r.data.results as Record<string, unknown>)?.artistmatches as Record<string, unknown>)?.artist as Record<string, unknown> | Record<string, unknown>[] | undefined,
+    (results?.artistmatches as Record<string, unknown>)?.artist as
+      | Record<string, unknown>
+      | Record<string, unknown>[]
+      | undefined,
   );
   const artists: LastfmArtistSearchHit[] = nodes.map((n) => ({
     name: String(n.name ?? ''),
@@ -126,7 +168,20 @@ async function searchLastfmArtistsDirect(
     imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
     listeners: parseLong(n.listeners as string | undefined),
   }));
-  return { ok: true, data: { artists } };
+  const total = parseLong(String(results?.['opensearch:totalResults'] ?? '0'));
+  return {
+    ok: true,
+    data: { artists, nextCursor: lastfmNextPageCursor(page, artists.length, total) },
+  };
+}
+
+async function searchLastfmArtistsDirect(
+  apiKey: string,
+  query: string,
+): Promise<LastfmSearchOutcome<{ artists: LastfmArtistSearchHit[] }>> {
+  const out = await searchLastfmArtistsDirectPage(apiKey, query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { artists: out.data.artists } };
 }
 
 async function fetchLastfmArtistDetailDirect(
@@ -195,14 +250,25 @@ async function fetchLastfmArtistDetailDirect(
   return { ok: true, data: { info, similarArtists, topTracks, topAlbums, tags } };
 }
 
-async function searchLastfmAlbumsDirect(
+async function searchLastfmAlbumsDirectPage(
   apiKey: string,
   query: string,
-): Promise<LastfmSearchOutcome<{ albums: LastfmAlbumSearchHit[] }>> {
-  const r = await lastfmGet({ api_key: apiKey, method: 'album.search', album: query, limit: '20' });
+  cursor: string | null,
+): Promise<LastfmSearchOutcome<LastfmAlbumSearchPage>> {
+  const page = parseLastfmPage(cursor);
+  const r = await lastfmGet({
+    api_key: apiKey,
+    method: 'album.search',
+    album: query,
+    limit: String(NRM_SEARCH_PAGE_SIZE),
+    page: String(page),
+  });
   if (!r.ok) return r;
+  const results = r.data.results as Record<string, unknown>;
   const nodes = arrayOrSingle(
-    ((r.data.results as Record<string, unknown>)?.albummatches as Record<string, unknown>)?.album as Record<string, unknown>[] | undefined,
+    (results?.albummatches as Record<string, unknown>)?.album as
+      | Record<string, unknown>[]
+      | undefined,
   );
   const albums: LastfmAlbumSearchHit[] = nodes.map((n) => ({
     name: String(n.name ?? ''),
@@ -211,7 +277,20 @@ async function searchLastfmAlbumsDirect(
     url: String(n.url ?? ''),
     imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
   }));
-  return { ok: true, data: { albums } };
+  const total = parseLong(String(results?.['opensearch:totalResults'] ?? '0'));
+  return {
+    ok: true,
+    data: { albums, nextCursor: lastfmNextPageCursor(page, albums.length, total) },
+  };
+}
+
+async function searchLastfmAlbumsDirect(
+  apiKey: string,
+  query: string,
+): Promise<LastfmSearchOutcome<{ albums: LastfmAlbumSearchHit[] }>> {
+  const out = await searchLastfmAlbumsDirectPage(apiKey, query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { albums: out.data.albums } };
 }
 
 async function fetchLastfmAlbumDetailDirect(
@@ -254,14 +333,25 @@ async function fetchLastfmAlbumDetailDirect(
   return { ok: true, data: { info, tags } };
 }
 
-async function searchLastfmTracksDirect(
+async function searchLastfmTracksDirectPage(
   apiKey: string,
   query: string,
-): Promise<LastfmSearchOutcome<{ tracks: LastfmTrackSearchHit[] }>> {
-  const r = await lastfmGet({ api_key: apiKey, method: 'track.search', track: query, limit: '20' });
+  cursor: string | null,
+): Promise<LastfmSearchOutcome<LastfmTrackSearchPage>> {
+  const page = parseLastfmPage(cursor);
+  const r = await lastfmGet({
+    api_key: apiKey,
+    method: 'track.search',
+    track: query,
+    limit: String(NRM_SEARCH_PAGE_SIZE),
+    page: String(page),
+  });
   if (!r.ok) return r;
+  const results = r.data.results as Record<string, unknown>;
   const nodes = arrayOrSingle(
-    ((r.data.results as Record<string, unknown>)?.trackmatches as Record<string, unknown>)?.track as Record<string, unknown>[] | undefined,
+    (results?.trackmatches as Record<string, unknown>)?.track as
+      | Record<string, unknown>[]
+      | undefined,
   );
   const tracks: LastfmTrackSearchHit[] = nodes.map((n) => ({
     name: String(n.name ?? ''),
@@ -270,7 +360,20 @@ async function searchLastfmTracksDirect(
     url: String(n.url ?? ''),
     imageUrl: pickLastfmImage(n.image as { '#text'?: string; size?: string }[] | undefined),
   }));
-  return { ok: true, data: { tracks } };
+  const total = parseLong(String(results?.['opensearch:totalResults'] ?? '0'));
+  return {
+    ok: true,
+    data: { tracks, nextCursor: lastfmNextPageCursor(page, tracks.length, total) },
+  };
+}
+
+async function searchLastfmTracksDirect(
+  apiKey: string,
+  query: string,
+): Promise<LastfmSearchOutcome<{ tracks: LastfmTrackSearchHit[] }>> {
+  const out = await searchLastfmTracksDirectPage(apiKey, query, null);
+  if (!out.ok) return out;
+  return { ok: true, data: { tracks: out.data.tracks } };
 }
 
 function mapLastfmTrackInfo(
@@ -477,6 +580,42 @@ async function withLastfmDirectAuthRetry<T>(
 }
 
 // ─── Public exports ───────────────────────────────────────────────────────────
+
+export async function searchLastfmArtistsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<LastfmSearchOutcome<LastfmArtistSearchPage>> {
+  if (isStandaloneApp()) {
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmArtistsDirectPage(apiKey, query.trim(), cursor),
+    );
+  }
+  return fetchLastfmSearch(lastfmSearchPagePath('artist', query, cursor));
+}
+
+export async function searchLastfmAlbumsPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<LastfmSearchOutcome<LastfmAlbumSearchPage>> {
+  if (isStandaloneApp()) {
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmAlbumsDirectPage(apiKey, query.trim(), cursor),
+    );
+  }
+  return fetchLastfmSearch(lastfmSearchPagePath('album', query, cursor));
+}
+
+export async function searchLastfmTracksPage(
+  query: string,
+  cursor: string | null = null,
+): Promise<LastfmSearchOutcome<LastfmTrackSearchPage>> {
+  if (isStandaloneApp()) {
+    return withLastfmDirectAuthRetry((apiKey) =>
+      searchLastfmTracksDirectPage(apiKey, query.trim(), cursor),
+    );
+  }
+  return fetchLastfmSearch(lastfmSearchPagePath('track', query, cursor));
+}
 
 export async function searchLastfmArtists(
   query: string,
