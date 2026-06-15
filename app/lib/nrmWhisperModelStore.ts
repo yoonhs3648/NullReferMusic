@@ -40,6 +40,8 @@ export function useWhisperModelStatuses(active: boolean) {
   }, [active, refresh]);
 
   const downloadModel = useCallback(async (modelId: NrmWhisperModelId) => {
+    const { confirmLargeDownloadIfNotOnWifi } = await import('@/lib/nrmLargeDownloadGuard');
+    if (!(await confirmLargeDownloadIfNotOnWifi())) return;
     await startWhisperModelDownloadOnDevice(modelId);
     void refresh();
   }, [refresh]);

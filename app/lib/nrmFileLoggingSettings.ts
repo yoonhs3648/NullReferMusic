@@ -14,6 +14,10 @@ export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}nrm
 export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (raw === null) {
+      await AsyncStorage.setItem(STORAGE_KEY, 'false');
+      return false;
+    }
     return raw === 'true';
   } catch {
     return false;

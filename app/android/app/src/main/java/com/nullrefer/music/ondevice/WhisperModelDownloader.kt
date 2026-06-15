@@ -4,13 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -27,7 +23,6 @@ object WhisperModelDownloader {
       val progress: Int,
   )
 
-  private val executor = Executors.newCachedThreadPool()
   private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
   private val progressByModel = ConcurrentHashMap<String, Int>()
   private val lowRamWarnAtMsByModel = ConcurrentHashMap<String, Long>()
@@ -152,43 +147,51 @@ object WhisperModelDownloader {
     progressByModel[modelId] = 0
     emitProgress(modelId, 0)
     val appContext = context.applicationContext
-    notifContext = appContext
-    NrmBackgroundWorkCoordinator.acquire(appContext, "whisper-model:$modelId")
-    executor.execute {
-      var ok = false
-      try {
-        val order = WhisperModelCatalog.ggmlOrderForPreference(appContext, modelId)
-        if (NrmWhisperDevicePolicy.preferQuantizedGgml(appContext)) {
-          NrmFileLogger.log(
-              "whisper",
-              "startDownload preferQuantized modelId=$modelId order=${order.joinToString()}",
-          )
-        }
-        for (name in order) {
-          val dest = File(whisperDir(appContext), name)
-          val minBytes = WhisperModelCatalog.minBytesFor(name)
-          if (dest.isFile && dest.length() >= minBytes) {
-            ok = true
-            break
+    val jobId = "whisper-model:$modelId"
+    val label = WhisperModelCatalog.displayLabel(modelId)
+    val queued =
+        NrmModelInstallQueue.enqueue(appContext, jobId, "Whisper $label") {
+          notifContext = appContext
+          NrmBackgroundWorkCoordinator.acquire(appContext, jobId)
+          var ok = false
+          try {
+            val order = WhisperModelCatalog.ggmlOrderForPreference(appContext, modelId)
+            if (NrmWhisperDevicePolicy.preferQuantizedGgml(appContext)) {
+              NrmFileLogger.log(
+                  "whisper",
+                  "startDownload preferQuantized modelId=$modelId order=${order.joinToString()}",
+              )
+            }
+            for (name in order) {
+              val dest = File(whisperDir(appContext), name)
+              val minBytes = WhisperModelCatalog.minBytesFor(name)
+              if (dest.isFile && dest.length() >= minBytes) {
+                ok = true
+                break
+              }
+              if (downloadModel(appContext, modelId, name, dest, minBytes)) {
+                ok = true
+                break
+              }
+            }
+          } catch (e: Exception) {
+            Log.w(TAG, "startDownload failed $modelId: ${e.message}")
+            NrmFileLogger.error("whisper", "startDownload 실패 modelId=$modelId", e)
+          } finally {
+            flag.set(false)
+            activeDownloads.remove(modelId)
+            progressByModel.remove(modelId)
+            NrmBackgroundWorkCoordinator.release(appContext, jobId)
+            if (activeDownloads.isEmpty()) {
+              notifContext = null
+            }
+            emitComplete(modelId, ok)
           }
-          if (downloadModel(appContext, modelId, name, dest, minBytes)) {
-            ok = true
-            break
-          }
         }
-      } catch (e: Exception) {
-        Log.w(TAG, "startDownload failed $modelId: ${e.message}")
-        NrmFileLogger.error("whisper", "startDownload 실패 modelId=$modelId", e)
-      } finally {
-        flag.set(false)
-        activeDownloads.remove(modelId)
-        progressByModel.remove(modelId)
-        NrmBackgroundWorkCoordinator.release(appContext, "whisper-model:$modelId")
-        if (activeDownloads.isEmpty()) {
-          notifContext = null
-        }
-        emitComplete(modelId, ok)
-      }
+    if (!queued) {
+      flag.set(false)
+      activeDownloads.remove(modelId)
+      progressByModel.remove(modelId)
     }
   }
 
@@ -200,70 +203,30 @@ object WhisperModelDownloader {
       minBytes: Long,
   ): Boolean {
     val tmp = File(dest.parentFile, "$fileName.download")
-    return try {
-      if (dest.isFile && dest.length() >= minBytes) {
-        emitProgress(modelId, 100)
-        return true
-      }
-      if (tmp.isFile) tmp.delete()
-      val url = URL(HF_BASE + fileName + "?download=true")
-      Log.i(TAG, "download start: $fileName ($modelId)")
-      NrmFileLogger.log("whisper", "모델 다운로드 시작 file=$fileName modelId=$modelId")
-      val conn = url.openConnection() as HttpURLConnection
-      conn.connectTimeout = 30_000
-      conn.readTimeout = 600_000
-      conn.instanceFollowRedirects = true
-      conn.requestMethod = "GET"
-      conn.connect()
-      if (conn.responseCode !in 200..299) {
-        Log.w(TAG, "download http ${conn.responseCode} for $fileName")
-        NrmFileLogger.warn("whisper", "모델 HTTP ${conn.responseCode} file=$fileName")
-        return false
-      }
-      val total = conn.contentLengthLong.coerceAtLeast(0L)
-      var copied = 0L
-      var lastPct = -1
-      BufferedInputStream(conn.inputStream).use { input ->
-        FileOutputStream(tmp).use { output ->
-          val buffer = ByteArray(64 * 1024)
-          while (true) {
-            val read = input.read(buffer)
-            if (read <= 0) break
-            output.write(buffer, 0, read)
-            copied += read
-            if (total > 0) {
-              val pct = ((copied * 100) / total).toInt().coerceIn(0, 99)
-              if (pct != lastPct) {
-                lastPct = pct
-                progressByModel[modelId] = pct
-                emitProgress(modelId, pct)
-              }
-            }
-          }
-        }
-      }
-      conn.disconnect()
-      if (!tmp.isFile || tmp.length() < minBytes) {
-        tmp.delete()
-        Log.w(TAG, "download too small: $fileName")
-        NrmFileLogger.warn("whisper", "모델 파일 너무 작음 file=$fileName size=${tmp.length()}")
-        return false
-      }
-      if (dest.isFile) dest.delete()
-      if (!tmp.renameTo(dest)) {
-        tmp.copyTo(dest, overwrite = true)
-        tmp.delete()
-      }
-      emitProgress(modelId, 100)
+    Log.i(TAG, "download start: $fileName ($modelId)")
+    NrmFileLogger.log("whisper", "모델 다운로드 시작 file=$fileName modelId=$modelId")
+    val url = HF_BASE + fileName + "?download=true"
+    val ok =
+        NrmResilientHttpDownload.download(
+            context = context,
+            tag = "whisper",
+            urlStr = url,
+            tmp = tmp,
+            dest = dest,
+            minBytes = minBytes,
+            onProgress = { pct, _, _ ->
+              progressByModel[modelId] = pct
+              emitProgress(modelId, pct)
+            },
+        )
+    if (ok) {
       Log.i(TAG, "download ok: $fileName (${dest.length()} bytes)")
       NrmFileLogger.log("whisper", "모델 다운로드 완료 file=$fileName bytes=${dest.length()}")
-      true
-    } catch (e: Exception) {
-      Log.w(TAG, "download failed $fileName: ${e.message}")
-      NrmFileLogger.error("whisper", "모델 다운로드 실패 file=$fileName", e)
-      tmp.delete()
-      false
+    } else {
+      Log.w(TAG, "download failed: $fileName")
+      NrmFileLogger.warn("whisper", "모델 다운로드 실패 file=$fileName")
     }
+    return ok
   }
 
   private fun emitProgress(modelId: String, progress: Int) {

@@ -102,7 +102,9 @@ export function NrmWhisperXAlignPicker({ titleColor, bodyColor, active = true }:
             <Text style={[styles.downloadingBadge, { color: bodyColor }]}>
               받는 중 {progress}%
             </Text>
-          ) : null}
+          ) : (
+            <Text style={[styles.sizeBadge, { color: bodyColor }]}>{entry.sizeLabel}</Text>
+          )}
         </View>
         <View style={styles.metricsRow}>
           <View style={styles.metric}>
@@ -116,8 +118,7 @@ export function NrmWhisperXAlignPicker({ titleColor, bodyColor, active = true }:
           </View>
         </View>
         <Text style={[styles.desc, { color: bodyColor }]}>
-          멜론 가사(알려진 텍스트)를 wav2vec2 CTC forced alignment로 오디오에 맞춰 LRC
-          타임스탬프를 생성합니다. ONNX 모델·vocab 등 약 1.2GB를 기기에 받습니다.
+          플랫폼 메타데이터 가사를 싱크가사로 변환합니다
         </Text>
       </View>
       {!installed ? (
@@ -191,6 +192,7 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.success,
   },
   downloadingBadge: { fontSize: nrmTokens.font.caption, fontWeight: '600' },
+  sizeBadge: { fontSize: nrmTokens.font.caption, fontWeight: '600', opacity: 0.82 },
   metricsRow: { flexDirection: 'row', alignItems: 'center', gap: nrmTokens.space.md },
   metric: { flex: 1, gap: 2 },
   metricLabel: { fontSize: nrmTokens.font.caption, opacity: 0.72, fontWeight: '500' },

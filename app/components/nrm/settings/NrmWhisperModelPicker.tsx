@@ -125,7 +125,9 @@ export function NrmWhisperModelPicker({
                   <Text style={[styles.downloadingBadge, { color: bodyColor }]}>
                     받는 중 {progress}%
                   </Text>
-                ) : null}
+                ) : (
+                  <Text style={[styles.sizeBadge, { color: bodyColor }]}>{opt.sizeLabel}</Text>
+                )}
               </View>
               <View style={styles.metricsRow}>
                 <View style={styles.metric}>
@@ -234,6 +236,11 @@ const styles = StyleSheet.create({
   downloadingBadge: {
     fontSize: nrmTokens.font.caption,
     fontWeight: '600',
+  },
+  sizeBadge: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    opacity: 0.82,
   },
   metricsRow: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import {
 } from '@/lib/nrmDownloadAudioMetadata';
 import { fetchMelonAlbumDetail, fetchMelonTrackDetail } from '@/lib/nrmMelonSearchClient';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import { resolveEmbedGenre } from '@/lib/nrmGenreResolve';
 
 function mergeMeta(
   base: NrmAudioFileMetadata,
@@ -43,7 +44,8 @@ export async function enrichMelonDownloadMetadata(
   const base = buildMelonSeedAudioMetadata(seed, userArtist, userTitle);
   const songId = (seed.songId ?? '').trim();
   if (!songId) {
-    return base;
+    const genre = await resolveEmbedGenre({ rawGenre: seed.genre ?? base.genre });
+    return normalizeDownloadMetadata({ ...base, genre: genre || base.genre });
   }
 
   const trackR = await fetchMelonTrackDetail(songId);
@@ -81,5 +83,6 @@ export async function enrichMelonDownloadMetadata(
     }
   }
 
-  return normalizeDownloadMetadata(meta);
+  const genre = await resolveEmbedGenre({ rawGenre: meta.genre });
+  return normalizeDownloadMetadata({ ...meta, genre: genre || meta.genre });
 }

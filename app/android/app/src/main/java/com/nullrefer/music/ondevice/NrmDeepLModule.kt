@@ -47,9 +47,9 @@ class NrmDeepLModule(reactContext: ReactApplicationContext) :
           } catch (e: NrmDeepLClient.DeepLException) {
             NrmFileLogger.warn("deepl", "native translateTexts FAIL ${e.message}")
             promise.reject("E_DEEPL_HTTP", e.message, e)
-          } catch (e: Exception) {
-            NrmFileLogger.error("deepl", "native translateTexts ${e.message}")
-            promise.reject("E_DEEPL", e.message ?: e.toString(), e)
+          } catch (t: Throwable) {
+            NrmFileLogger.error("deepl", "native translateTexts fatal ${t.message}", t)
+            promise.reject("E_DEEPL", t.message ?: t.toString(), t as? Exception)
           }
         }
         .start()

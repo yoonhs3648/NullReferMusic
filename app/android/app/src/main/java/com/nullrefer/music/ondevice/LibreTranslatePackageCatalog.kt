@@ -20,6 +20,9 @@ object LibreTranslatePackageCatalog {
 
       val minBytes: Long,
 
+      /** HTTP Content-Length 미제공 시 진행률 계산용 (실측 ~121MB) */
+      val expectedBytes: Long,
+
       val required: Boolean,
 
   )
@@ -46,6 +49,8 @@ object LibreTranslatePackageCatalog {
               ),
 
           minBytes = 30_000_000L,
+
+          expectedBytes = 121_000_000L,
 
           required = true,
 

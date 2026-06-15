@@ -18,6 +18,10 @@ export type WhisperLrcStageResult = {
   lyricsTranslationFailed?: boolean;
   /** 번역 실패 원인이 DeepL 사용량 초과인 경우 true */
   lyricsTranslationExhausted?: boolean;
+  /** wav2vec2 CTC 멜론 가사 싱크 정렬 실패 */
+  lyricsMelonAlignFailed?: boolean;
+  /** 잔여 메모리 부족으로 멜론 CTC 중단 */
+  lyricsMelonMemoryInsufficient?: boolean;
   lrcFull?: string;
 };
 

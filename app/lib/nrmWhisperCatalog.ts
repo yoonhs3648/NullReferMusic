@@ -16,6 +16,8 @@ export type NrmWhisperModelCatalogEntry = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
+  /** 다운로드 전 표시용 대략 용량 (저사양 기기 q5 우선) */
+  sizeLabel: string;
   /** whisper.cpp ggml 파일 (품질: 비양자화 .bin 우선, 없으면 q5 폴백) */
   ggmlFiles: readonly string[];
   /** Hugging Face `ggerganov/whisper.cpp` 파일명 */
@@ -28,6 +30,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'large-v3-turbo',
     speedLabel: '빠름',
     qualityLabel: '높음',
+    sizeLabel: '~550 MB',
     ggmlFiles: ['ggml-large-v3-turbo.bin', 'ggml-large-v3-turbo-q5_0.bin'],
     minBytes: 300_000_000,
   },
@@ -36,6 +39,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'large-v3',
     speedLabel: '매우 느림',
     qualityLabel: '다국어처리 우수',
+    sizeLabel: '~1 GB',
     ggmlFiles: ['ggml-large-v3.bin', 'ggml-large-v3-q5_0.bin'],
     minBytes: 700_000_000,
   },
@@ -44,6 +48,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'medium',
     speedLabel: '보통',
     qualityLabel: '높음',
+    sizeLabel: '~500 MB',
     ggmlFiles: ['ggml-medium.bin', 'ggml-medium-q5_0.bin'],
     minBytes: 300_000_000,
   },
@@ -52,6 +57,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'small',
     speedLabel: '빠름',
     qualityLabel: '중간',
+    sizeLabel: '~180 MB',
     ggmlFiles: ['ggml-small.bin', 'ggml-small-q5_1.bin'],
     minBytes: 100_000_000,
   },
@@ -60,6 +66,7 @@ export const NRM_WHISPER_MODEL_CATALOG: readonly NrmWhisperModelCatalogEntry[] =
     label: 'base',
     speedLabel: '매우 빠름',
     qualityLabel: '낮음',
+    sizeLabel: '~60 MB',
     ggmlFiles: ['ggml-base.bin', 'ggml-base-q5_1.bin'],
     minBytes: 50_000_000,
   },

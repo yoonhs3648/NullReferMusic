@@ -293,7 +293,35 @@ export function resolveLyricsSidecarAction(
 
 }
 
+/**
+ * 트랙 편집 — 사이드카 LRC·내장 가사의 `[nrm:…]` 태그 또는 메타 sentinel로 저장 모드 복원.
+ * 사이드카 LRC가 있으면 우선한다.
+ */
+export function resolveStoredLyricsModeFromFlags(input: {
+  sidecarLrcText?: string;
+  metadataLyrics?: string;
+}): NrmLyricsUiMode {
+  const sidecar = (input.sidecarLrcText ?? '').trim();
+  if (sidecar) {
+    const tag = parseLyricsModeFromLrcText(sidecar);
+    if (tag) return tag;
+    const fromSentinel = parseLyricsUiMode(sidecar);
+    if (fromSentinel !== 'unset') return fromSentinel;
+    const body = detectLrcUiModeFromText(sidecar);
+    if (body !== 'unset') return body;
+  }
+  const meta = (input.metadataLyrics ?? '').trim();
+  if (!meta) return 'unset';
+  const tag = parseLyricsModeFromLrcText(meta);
+  if (tag) return tag;
+  const fromSentinel = parseLyricsUiMode(meta);
+  if (fromSentinel !== 'unset') return fromSentinel;
+  return detectLrcUiModeFromText(meta);
+}
 
+export function isWhisperLyricsFamily(mode: NrmLyricsUiMode): mode is NrmWhisperLyricsMode {
+  return mode === 'configured' || mode === 'translation';
+}
 
 export function lyricsUiModeToMetadataField(
 

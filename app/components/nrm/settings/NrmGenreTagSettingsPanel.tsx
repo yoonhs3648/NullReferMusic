@@ -145,7 +145,7 @@ export function NrmGenreTagSettingsPanel({
     }
     setSaving(true);
     try {
-      await saveNrmGenreTagCatalog({ version: 1, categories });
+      await saveNrmGenreTagCatalog({ version: 2, categories });
       notifyUser('장르·태그 설정을 저장했습니다.');
     } catch (e) {
       notifyUser(e instanceof Error ? e.message : '저장하지 못했습니다.');
@@ -186,10 +186,6 @@ export function NrmGenreTagSettingsPanel({
       <NrmMenuDrawerScroll contentContainerStyle={styles.scrollContent}>
         <MenuBackRow onPress={onBack} />
         <Text style={[styles.panelTitle, { color: titleColor }]}>장르 태그 설정</Text>
-        <Text style={[styles.lead, { color: bodyColor }]}>
-          Last.fm 장르별 차트는 아래 태그를 기준으로 조회합니다. 장르 종류마다 하나 이상의
-          태그가 있어야 저장할 수 있습니다.
-        </Text>
 
         {categories.map((cat) => {
           const expanded = expandedIds.has(cat.id);
@@ -227,7 +223,7 @@ export function NrmGenreTagSettingsPanel({
                   <TextInput
                     value={cat.name}
                     onChangeText={(name) => updateCategory(cat.id, { name })}
-                    placeholder="예: K-POP"
+                    placeholder="예: 발라드"
                     placeholderTextColor="rgba(128,128,128,0.65)"
                     style={[
                       styles.nameInput,

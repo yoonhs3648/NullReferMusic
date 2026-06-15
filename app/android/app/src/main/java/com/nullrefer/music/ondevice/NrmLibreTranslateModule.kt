@@ -95,8 +95,9 @@ class NrmLibreTranslateModule(reactContext: ReactApplicationContext) :
         for (l in batch.sourceLangs) langs.pushString(l)
         out.putArray("sourceLangs", langs)
         promise.resolve(out)
-      } catch (e: Exception) {
-        promise.reject("E_LIBRE_TRANSLATE", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("libretranslate", "translateTexts 실패", t)
+        promise.reject("E_LIBRE_TRANSLATE", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }

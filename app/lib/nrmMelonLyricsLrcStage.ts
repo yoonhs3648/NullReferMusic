@@ -35,12 +35,18 @@ export async function transcribeMelonLyricsLrc(
 
   const t0 = Date.now();
   let lrc = '';
+  let lyricsMelonAlignFailed = false;
+  let lyricsMelonMemoryInsufficient = false;
   try {
     const { alignMelonLyricsToLrcNative } = await import('@/lib/nrmWhisperXAlignNative');
-    lrc = normalizeWhisperLrc(await alignMelonLyricsToLrcNative(fileUri, plain, mode));
+    const aligned = await alignMelonLyricsToLrcNative(fileUri, plain, mode);
+    lrc = normalizeWhisperLrc(aligned.lrc);
+    lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
+    lyricsMelonAlignFailed = aligned.alignFailed && !lyricsMelonMemoryInsufficient;
   } catch (e) {
     logNrmRunError('whisperx-align', e, { mode, extension });
     lrc = '';
+    lyricsMelonAlignFailed = true;
   }
 
   logDownloadStage('whisperx-align', 'align_done', {
@@ -48,6 +54,8 @@ export async function transcribeMelonLyricsLrc(
     extension,
     elapsedMs: Date.now() - t0,
     lrcChars: lrc.trim().length,
+    alignFailed: lyricsMelonAlignFailed,
+    memoryInsufficient: lyricsMelonMemoryInsufficient,
   });
 
   let lyricsTranslationFailed = false;
@@ -106,6 +114,8 @@ export async function transcribeMelonLyricsLrc(
     return {
       lyricsRequested: true,
       lyricsEmbedded: false,
+      lyricsMelonMemoryInsufficient: lyricsMelonMemoryInsufficient || undefined,
+      lyricsMelonAlignFailed: lyricsMelonMemoryInsufficient ? undefined : true,
       lyricsTranslationFailed:
         mode === 'melon_translation' ? lyricsTranslationFailed : undefined,
       lyricsTranslationExhausted:

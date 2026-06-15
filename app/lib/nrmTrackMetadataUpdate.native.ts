@@ -28,6 +28,7 @@ import {
   nrmNotifyDownloadStarted,
 } from '@/lib/nrmMobileDownloadNotifications.native';
 import { loadLyricsOutputMode } from '@/lib/nrmDownloadSettings';
+import { notifyUser } from '@/lib/nrmUserNotify';
 
 const LRC_SAF_MIME = 'application/octet-stream';
 
@@ -348,12 +349,17 @@ export async function applyTrackMetadataUpdate(
       if (melon.lrcFull?.trim()) {
         await saveLrc(melon.lrcFull, lyricsAction.mode);
         nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
+      } else if (melon.lyricsMelonMemoryInsufficient) {
+        nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
       } else {
         nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        notifyUser('멜론가사 생성에 실패했습니다.');
       }
       await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
     } catch {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      notifyUser('가사 생성 중 오류가 발생했습니다.');
     }
     return;
   }
@@ -367,9 +373,11 @@ export async function applyTrackMetadataUpdate(
       nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
     } else {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      notifyUser('가사 생성에 실패했습니다. 오디오는 저장되어 있습니다.');
     }
     await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
   } catch {
     nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+    notifyUser('가사 생성 중 오류가 발생했습니다.');
   }
 }

@@ -24,7 +24,7 @@ import {
 
 export type PostProcessAudioResult = {
   fileUri: string;
-  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted';
+  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient';
 };
 
 /** Android: 확장자 변환만 (메타·Whisper 전에 호출해 실제 확장자 확정) */
@@ -127,9 +127,11 @@ export async function applyFfmpegMetadataStage(
 
 function whisperWarningFromResult(
   result: WhisperLrcStageResult,
-): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined {
+): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' | undefined {
   if (result.lyricsTranslationExhausted) return 'translation_exhausted';
   if (result.lyricsTranslationFailed) return 'translation_failed';
+  if (result.lyricsMelonMemoryInsufficient) return 'memory_insufficient';
+  if (result.lyricsMelonAlignFailed) return 'melon_align_failed';
   if (result.lyricsRequested && !result.lyricsEmbedded) return 'not_embedded';
   return undefined;
 }
@@ -147,7 +149,7 @@ export async function postProcessDownloadedAudio(
 
   uri = await applyFfmpegMetadataStage(uri, metadata);
 
-  let lyricsWarning: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined;
+  let lyricsWarning: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' | undefined;
   if (whisperMode) {
     const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.whisper', {

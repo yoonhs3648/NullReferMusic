@@ -149,16 +149,16 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           coverEmbedTemp.delete()
         }
         throw lastError ?: Exception("메타데이터 적용에 실패했습니다.")
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmStageLog.log(
             "ffmpeg",
             "meta_embed_fail",
             mapOf(
                 "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
-                "err" to (e.message ?: e.toString()).take(200),
+                "err" to (t.message ?: t.toString()).take(200),
             ),
         )
-        promise.reject("E_METADATA", e.message ?: e.toString(), e)
+        promise.reject("E_METADATA", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -185,8 +185,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           try { File(parts.getString(i) ?: continue).delete() } catch (_: Exception) {}
         }
         promise.resolve(null)
-      } catch (e: Exception) {
-        promise.reject("E_CONCAT", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        promise.reject("E_CONCAT", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -224,8 +224,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           out.putString("coverUrl", "file://${coverFile.absolutePath}")
         }
         promise.resolve(out)
-      } catch (e: Exception) {
-        promise.reject("E_READ_META", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        promise.reject("E_READ_META", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -268,8 +268,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           applyMediaStoreTagUpdate(uri, metadata)
         }
         promise.resolve(null)
-      } catch (e: Exception) {
-        promise.reject("E_MEDIA_SCAN", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        promise.reject("E_MEDIA_SCAN", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -282,8 +282,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         val uri = Uri.parse(mediaUriString.trim())
         applyMediaStoreTagUpdate(uri, metadata)
         promise.resolve(null)
-      } catch (e: Exception) {
-        promise.reject("E_MEDIA_STORE", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        promise.reject("E_MEDIA_STORE", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -666,16 +666,16 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         ok.putString("path", outFile.absolutePath)
         ok.putBoolean("coverEmbedded", coverEmbedded)
         promise.resolve(ok)
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmStageLog.log(
           "ffmpeg",
           "transcode_meta_fail",
           mapOf(
             "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
-            "err" to (e.message ?: e.toString()).take(200),
+            "err" to (t.message ?: t.toString()).take(200),
           ),
         )
-        promise.reject("E_TRANSCODE_META", e.message ?: e.toString(), e)
+        promise.reject("E_TRANSCODE_META", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -969,11 +969,11 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         } finally {
           if (isTemp) workFile.delete()
         }
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmStageLog.log("ffmpeg", "embed_synced_lyrics_fail", mapOf(
-          "ext" to extension, "err" to (e.message ?: e.toString()).take(200)
+          "ext" to extension, "err" to (t.message ?: t.toString()).take(200)
         ))
-        promise.reject("E_EMBED_LYRICS", "가사 임베드 실패: ${e.message}", e)
+        promise.reject("E_EMBED_LYRICS", "가사 임베드 실패: ${t.message}", t as? Exception)
       }
     }.start()
   }

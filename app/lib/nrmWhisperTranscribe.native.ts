@@ -42,10 +42,10 @@ export async function transcribeAudioToLrcNative(fileUri: string): Promise<strin
     return lrc;
   } catch (e) {
     logNrmRunError('download.whisper', e, {
-      event: 'native_transcribe_throw',
+      event: 'native_transcribe_fail',
       elapsedMs: Date.now() - t0,
       audioPath: audioPath.slice(-120),
     });
-    throw e;
+    return '';
   }
 }

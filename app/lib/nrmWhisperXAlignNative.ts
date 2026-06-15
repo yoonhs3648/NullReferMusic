@@ -27,7 +27,7 @@ type NrmWhisperNative = {
     audioPath: string,
     lyricsPlain: string,
     mode: 'melon' | 'melon_translation',
-  ) => Promise<{ lrc?: string }>;
+  ) => Promise<{ lrc?: string; alignFailed?: boolean; alignMemoryInsufficient?: boolean }>;
 };
 
 const mod = NativeModules.NrmWhisper as NrmWhisperNative | undefined;
@@ -100,15 +100,35 @@ export function subscribeWhisperXAlignDownloadEvents(
   return () => sub.remove();
 }
 
+export type MelonAlignNativeResult = {
+  lrc: string;
+  alignFailed: boolean;
+  alignMemoryInsufficient: boolean;
+};
+
 export async function alignMelonLyricsToLrcNative(
   audioPath: string,
   lyricsPlain: string,
   mode: 'melon' | 'melon_translation',
-): Promise<string> {
-  if (!mod?.alignMelonLyricsToLrc) return '';
+): Promise<MelonAlignNativeResult> {
+  if (!mod?.alignMelonLyricsToLrc) {
+    return { lrc: '', alignFailed: true, alignMemoryInsufficient: false };
+  }
   const fsPath = audioPath.startsWith('file://') ? audioPath.slice(7) : audioPath;
-  const result = await mod.alignMelonLyricsToLrc(fsPath, lyricsPlain, mode);
-  return (result.lrc ?? '').trim();
+  try {
+    const result = await mod.alignMelonLyricsToLrc(fsPath, lyricsPlain, mode);
+    const lrc = (result.lrc ?? '').trim();
+    const alignMemoryInsufficient = !!result.alignMemoryInsufficient;
+    return {
+      lrc,
+      alignFailed: alignMemoryInsufficient || !!result.alignFailed || !lrc,
+      alignMemoryInsufficient,
+    };
+  } catch (e) {
+    const { logNrmRunError } = await import('@/lib/nrmDevLog');
+    logNrmRunError('whisperx-align.native', e, { mode, audioPath: fsPath.slice(-120) });
+    return { lrc: '', alignFailed: true, alignMemoryInsufficient: false };
+  }
 }
 
 export function whisperXAlignDownloadCompleteMessage(): string {

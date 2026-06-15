@@ -21,9 +21,22 @@ object NrmBackgroundWorkCoordinator {
 
   fun hasDownloadTokens(): Boolean = tokens.any { it.startsWith("dl:") }
 
-  fun hasLyricsTokens(): Boolean = tokens.any { it.startsWith("whisper-lrc:") }
+  fun hasLyricsTokens(): Boolean =
+      tokens.any {
+        it.startsWith("whisper-lrc:") || it.startsWith("whisperx-align:")
+      }
 
-  fun hasModelTokens(): Boolean = tokens.any { it.startsWith("whisper-model:") }
+  fun hasBlockingExitWork(): Boolean = hasDownloadTokens() || hasLyricsTokens()
+
+  fun hasModelInstallTokens(): Boolean =
+      tokens.any {
+        it == "model-install-queue" ||
+            it.startsWith("whisper-model:") ||
+            it.startsWith("libretranslate-pack:") ||
+            it.startsWith("whisperx-align-model")
+      }
+
+  fun hasModelTokens(): Boolean = hasModelInstallTokens()
 
   fun acquire(context: Context, token: String) {
     val trimmed = token.trim()
@@ -95,6 +108,37 @@ object NrmBackgroundWorkCoordinator {
             "Whisper 모델 «$label» 다운로드 중"
           },
       )
+    }
+
+    val ltTokens = tokens.filter { it.startsWith("libretranslate-pack:") }.sorted()
+    for (token in ltTokens) {
+      val packageId = token.removePrefix("libretranslate-pack:").trim()
+      val label = LibreTranslatePackageCatalog.entryFor(packageId)?.label ?: packageId
+      val pct = LibreTranslatePackageDownloader.progressFor(packageId)
+      lines.add(
+          if (pct in 0..99) {
+            "오프라인 번역기 «$label» 다운로드 중 ($pct%)"
+          } else {
+            "오프라인 번역기 «$label» 다운로드 중"
+          },
+      )
+    }
+
+    if (tokens.any { it == "whisperx-align-model" }) {
+      val pct = WhisperXAlignModelDownloader.progressPercent()
+      lines.add(
+          if (pct in 0..99) {
+            "WhisperX 정렬 모델 다운로드 중 ($pct%)"
+          } else {
+            "WhisperX 정렬 모델 다운로드 중"
+          },
+      )
+    }
+
+    val waitCount = NrmModelInstallQueue.pendingCount()
+    val runningLabel = NrmModelInstallQueue.currentLabel()
+    if (waitCount > 1 && runningLabel != null) {
+      lines.add("모델 설치 대기 중 (${waitCount - 1}건)")
     }
 
     val dlCount = tokens.count { it.startsWith("dl:") }

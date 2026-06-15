@@ -30,7 +30,7 @@ export function useLibreTranslatePackageStatuses(active: boolean) {
     void refresh();
     const timer = setInterval(() => {
       void refresh();
-    }, 5000);
+    }, 1000);
     return () => clearInterval(timer);
   }, [active, refresh]);
 
@@ -40,6 +40,8 @@ export function useLibreTranslatePackageStatuses(active: boolean) {
   );
 
   const downloadPackage = useCallback(async (id: NrmLibreTranslatePackageId) => {
+    const { confirmLargeDownloadIfNotOnWifi } = await import('@/lib/nrmLargeDownloadGuard');
+    if (!(await confirmLargeDownloadIfNotOnWifi())) return;
     await startLibreTranslatePackageDownload(id);
     await refresh();
   }, [refresh]);

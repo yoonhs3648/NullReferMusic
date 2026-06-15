@@ -399,9 +399,6 @@ export function NrmDownloadSettingsPanel({
 
       {section === 'metadata' ? (
         <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
-          <Text style={[styles.platformNote, { color: bodyColor }]}>
-            다운로드 시 트랙 정보(메타데이터)를 어떻게 처리할지 선택합니다.
-          </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
@@ -506,6 +503,9 @@ export function NrmDownloadSettingsPanel({
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
             <>
+              <Text style={[styles.whisperSectionLabel, { color: bodyColor }]}>
+                WhisperX Forced Alignment
+              </Text>
               <NrmWhisperXAlignPicker
                 titleColor={titleColor}
                 bodyColor={bodyColor}
@@ -588,8 +588,7 @@ export function NrmDownloadSettingsPanel({
             </Text>
           ) : null}
           <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
-            YouTube 원본은 이미 손실 압축입니다. 이 설정은 불필요한 재압축을 줄이는
-            방식을 고릅니다.
+            불필요한 재압축을 줄이는 방식을 선택하세요.
           </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />

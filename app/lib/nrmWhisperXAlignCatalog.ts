@@ -15,6 +15,7 @@ export type NrmWhisperXAlignCatalogEntry = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
+  sizeLabel: string;
   assets: readonly NrmWhisperXAlignAssetSpec[];
 };
 
@@ -29,9 +30,10 @@ const ONNX_HF_BASE =
  */
 export const NRM_WHISPERX_ALIGN_CATALOG: NrmWhisperXAlignCatalogEntry = {
   id: NRM_WHISPERX_ALIGN_MODEL_ID,
-  label: 'WhisperX Forced Alignment (wav2vec2)',
+  label: 'wav2vec2',
   speedLabel: '느림',
   qualityLabel: '멜론 가사 CTC 정렬',
+  sizeLabel: '~1.2 GB',
   assets: [
     { fileName: 'vocab.json', url: `${KOREAN_HF_BASE}vocab.json`, minBytes: 1_000 },
     { fileName: 'config.json', url: `${KOREAN_HF_BASE}config.json`, minBytes: 500 },

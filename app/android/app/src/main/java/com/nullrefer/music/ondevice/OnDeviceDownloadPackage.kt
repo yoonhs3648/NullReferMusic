@@ -18,6 +18,7 @@ class OnDeviceDownloadPackage : ReactPackage {
         NrmProgressNotificationModule(reactContext),
         NrmDeepLModule(reactContext),
         NrmLibreTranslateModule(reactContext),
+        NrmNetworkModule(reactContext),
     )
   }
 

@@ -18,7 +18,10 @@ import { nrmChartTrackListStyles } from '@/components/nrm/charts/nrmChartTrackLi
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
-import { detectLyricsUiModeFromStoredText, lyricsUiModeToMetadataField } from '@/lib/nrmLrcUiMode';
+import {
+  lyricsUiModeToMetadataField,
+  resolveStoredLyricsModeFromFlags,
+} from '@/lib/nrmLrcUiMode';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
@@ -39,8 +42,8 @@ import {
 } from '@/lib/nrmTrackListCoverLoader';
 import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 import {
+  extractPlainLyricsFromLrcText,
   fetchMelonPlainLyricsFromWebsite,
-  inferMelonLyricsUiModeFromContext,
   isMelonPlainLyricsText,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
@@ -252,30 +255,30 @@ export function NrmTrackMetadataSettingsHome({
     setInitialLyricsMode('unset');
     try {
       const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
-      let lyricsMode: NrmLyricsUiMode = 'unset';
-      let lrcModeFromTag: NrmLyricsUiMode | null = null;
+      let lrcText = '';
       if (track.lrcUri) {
         try {
-          const lrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
+          lrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
             encoding: EncodingType.UTF8,
           });
-          ({ mode: lyricsMode, lrcModeFromTag } = detectLyricsUiModeFromStoredText(lrcText));
         } catch {
-          lyricsMode = 'configured';
+          /* 사이드카 읽기 실패 시 내장 가사로 복원 */
         }
-      } else if (meta.lyrics) {
-        ({ mode: lyricsMode, lrcModeFromTag } = detectLyricsUiModeFromStoredText(meta.lyrics));
       }
+
+      const lyricsMode = resolveStoredLyricsModeFromFlags({
+        sidecarLrcText: lrcText,
+        metadataLyrics: meta.lyrics,
+      });
 
       let melonPlain = isMelonPlainLyricsText(meta.lyrics)
         ? (meta.lyrics ?? '').trim()
         : (meta.melonLyricsPlain ?? '').trim();
+      if (!melonPlain && lrcText.trim()) {
+        melonPlain = extractPlainLyricsFromLrcText(lrcText);
+      }
       if (!melonPlain) {
         melonPlain = await fetchMelonPlainLyricsFromWebsite(meta.website);
-      }
-
-      if (!lrcModeFromTag && lyricsMode !== 'unset') {
-        lyricsMode = inferMelonLyricsUiModeFromContext(lyricsMode, melonPlain, meta.website);
       }
 
       setInitialLyricsMode(lyricsMode);
@@ -457,9 +460,7 @@ export function NrmTrackMetadataSettingsHome({
           />
         </View>
       ) : (
-        <Text style={[styles.hint, { color: bodyColor }]}>
-          다운로드 경로의 오디오를 탭하면 메타데이터를 편집할 수 있습니다.
-        </Text>
+        null
       )}
 
       <View style={styles.listArea}>
@@ -517,6 +518,7 @@ export function NrmTrackMetadataSettingsHome({
         initialArtist={initialArtist}
         initialTitle={initialTitle}
         initialMetadataFields={initialFields}
+        initialStoredLyricsMode={initialLyricsMode}
         busy={modalBusy}
         deleteFileName={editTrack?.fileName}
         onDelete={editTrack ? onDeleteTrack : undefined}

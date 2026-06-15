@@ -68,7 +68,7 @@ export async function finalizeAudioDownload(
   options?: FinalizeAudioDownloadOptions,
 ): Promise<{
   savedLabel: string;
-  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted';
+  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient';
 }> {
   const encode = await loadDownloadEncodeSettings();
   const normalized = metadata

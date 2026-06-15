@@ -8,6 +8,7 @@ export type NrmLibreTranslateCatalogEntry = {
   fileName: string;
   downloadUrls: string[];
   minBytes: number;
+  sizeLabel: string;
   required: boolean;
 };
 
@@ -23,6 +24,7 @@ export const NRM_LIBRETRANSLATE_PACKAGES: NrmLibreTranslateCatalogEntry[] = [
       'https://dweb.link/ipfs/QmWecr5i4tJNnokusm97rTUyQtUqNNPufGF7ake1hJVu6G',
     ],
     minBytes: 30_000_000,
+    sizeLabel: '~115 MB',
     required: true,
   },
 ];

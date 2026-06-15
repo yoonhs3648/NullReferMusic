@@ -7,7 +7,6 @@ import { isLibreTranslateOfflineReady } from '@/lib/nrmLibreTranslateModelNative
 import {
   listTranslationProviders,
   loadTranslationProvider,
-  NRM_TRANSLATION_PROVIDER_DESCRIPTIONS,
   NRM_TRANSLATION_PROVIDER_LABELS,
   saveTranslationProvider,
   type NrmTranslationProvider,
@@ -59,7 +58,7 @@ export function NrmTranslationSettingsPanel({
         const disabled = id === 'libretranslate' && !libreInstalled;
         const hint =
           id === 'libretranslate' && !libreInstalled
-            ? 'API 설정 → 번역기 설치에서 영어→한국어 팩을 설치해주세요.'
+            ? '앱 설정 → 오프라인 번역기 설치에서 영어→한국어 팩을 설치해주세요.'
             : undefined;
         return (
           <View key={id} style={styles.providerBlock}>
@@ -96,11 +95,6 @@ export function NrmTranslationSettingsPanel({
                 }
               />
             </Pressable>
-            {selected && !disabled ? (
-              <Text style={[styles.desc, { color: bodyColor }]}>
-                {NRM_TRANSLATION_PROVIDER_DESCRIPTIONS[id]}
-              </Text>
-            ) : null}
           </View>
         );
       })}
@@ -138,11 +132,5 @@ const styles = StyleSheet.create({
   optionHint: {
     fontSize: nrmTokens.font.caption,
     lineHeight: 18,
-  },
-  desc: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 18,
-    paddingHorizontal: nrmTokens.space.sm,
-    paddingBottom: nrmTokens.space.sm,
   },
 });

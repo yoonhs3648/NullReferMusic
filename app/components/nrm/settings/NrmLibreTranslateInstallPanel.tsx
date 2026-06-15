@@ -25,6 +25,27 @@ const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
 const showInstallUi = isLibreTranslateNativeAvailable() && isStandaloneAndroid();
 
+type DownloadDetail = {
+  step: 'downloading' | 'installing';
+  progress: number;
+};
+
+function formatDownloadStatus(detail: DownloadDetail | null, progress: number): string {
+  if (detail?.step === 'installing') return '설치 중…';
+  const pct = Math.min(100, Math.max(0, detail?.progress ?? progress));
+  return `받는 중 ${pct}%`;
+}
+
+function resolveDisplayProgress(
+  downloading: boolean,
+  detail: DownloadDetail | null,
+  polled: number,
+): number {
+  if (!downloading) return polled;
+  if (detail?.step === 'installing') return 100;
+  return Math.min(100, Math.max(0, detail?.progress ?? polled));
+}
+
 type Props = {
   titleColor: string;
   bodyColor: string;
@@ -36,10 +57,11 @@ export function NrmLibreTranslateInstallPanel({
   bodyColor,
   active = true,
 }: Props) {
-  const { ready, downloadPackage, statusFor } = useLibreTranslatePackageStatuses(
+  const { ready, downloadPackage, statusFor, refresh } = useLibreTranslatePackageStatuses(
     active && showInstallUi,
   );
   const [offlineReady, setOfflineReady] = useState(false);
+  const [downloadDetail, setDownloadDetail] = useState<DownloadDetail | null>(null);
 
   useEffect(() => {
     if (!showInstallUi || !active) return;
@@ -53,14 +75,23 @@ export function NrmLibreTranslateInstallPanel({
   useEffect(() => {
     if (!showInstallUi || !active) return;
     return subscribeLibreTranslatePackageDownloadEvents((ev) => {
+      if (ev.phase === 'progress') {
+        setDownloadDetail({
+          step: ev.step ?? 'downloading',
+          progress: ev.progress,
+        });
+        void refresh();
+      }
       if (ev.phase === 'complete') {
+        setDownloadDetail(null);
         notifyUser(libreTranslatePackageCompleteMessage(ev.packageId));
         void isLibreTranslateOfflineReady().then(setOfflineReady);
       } else if (ev.phase === 'failed') {
+        setDownloadDetail(null);
         notifyUser('언어 팩 다운로드 또는 설치에 실패했습니다. Wi‑Fi 연결을 확인한 뒤 다시 시도하세요.');
       }
     });
-  }, [active]);
+  }, [active, refresh]);
 
   if (!showInstallUi) {
     return (
@@ -97,7 +128,7 @@ export function NrmLibreTranslateInstallPanel({
           {offlineReady
             ? 'LibreTranslate 오프라인 번역 준비 완료'
             : statusFor('libretranslate:pack-en-ko')?.installed
-              ? '언어 팩은 설치됐지만 번역 엔진이 APK에 없습니다. scripts/Build-ArgosTranslate-Android.ps1 로 빌드한 뒤 앱을 다시 설치하세요.'
+              ? '언어 팩은 설치됐지만 번역 엔진(nrm-argos-translate)이 이 APK에 포함되어 있지 않습니다. 최신 앱을 다시 설치하거나, 개발 빌드라면 scripts/Build-ArgosTranslate-Android.ps1 실행 후 재빌드하세요.'
               : '영어→한국어 팩을 설치하면 오프라인 번역을 사용할 수 있습니다.'}
         </Text>
       </View>
@@ -112,6 +143,8 @@ export function NrmLibreTranslateInstallPanel({
           const installed = !!status?.installed;
           const downloading = !!status?.downloading;
           const progress = status?.progress ?? 0;
+          const displayProgress = resolveDisplayProgress(downloading, downloadDetail, progress);
+          const statusLabel = formatDownloadStatus(downloadDetail, displayProgress);
 
           return (
             <View
@@ -129,12 +162,6 @@ export function NrmLibreTranslateInstallPanel({
                   <View style={styles.titleBlock}>
                     <Text style={[styles.packName, { color: titleColor }]}>
                       {pack.label}
-                      {pack.required ? (
-                        <Text style={[styles.requiredMark, { color: nrmTokens.color.primary }]}>
-                          {' '}
-                          · 필수
-                        </Text>
-                      ) : null}
                     </Text>
                     {pack.description ? (
                       <Text style={[styles.packDesc, { color: bodyColor }]}>
@@ -148,9 +175,11 @@ export function NrmLibreTranslateInstallPanel({
                     </View>
                   ) : downloading ? (
                     <Text style={[styles.downloadingBadge, { color: bodyColor }]}>
-                      받는 중 {progress}%
+                      {statusLabel}
                     </Text>
-                  ) : null}
+                  ) : (
+                    <Text style={[styles.sizeBadge, { color: bodyColor }]}>{pack.sizeLabel}</Text>
+                  )}
                 </View>
               </View>
 
@@ -162,12 +191,12 @@ export function NrmLibreTranslateInstallPanel({
                         <View
                           style={[
                             styles.progressFill,
-                            { width: `${Math.max(progress, 4)}%` },
+                            { width: `${Math.max(displayProgress, displayProgress > 0 ? 4 : 0)}%` },
                           ]}
                         />
                       </View>
                       <Text style={[styles.downloadHint, { color: bodyColor }]}>
-                        다운로드 및 설치 중… {progress}%
+                        {statusLabel}
                       </Text>
                     </>
                   ) : (
@@ -255,10 +284,6 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
   },
-  requiredMark: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-  },
   packDesc: {
     fontSize: nrmTokens.font.caption,
     lineHeight: 18,
@@ -277,6 +302,11 @@ const styles = StyleSheet.create({
   downloadingBadge: {
     fontSize: nrmTokens.font.caption,
     fontWeight: '600',
+  },
+  sizeBadge: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    opacity: 0.82,
   },
   downloadBlock: {
     paddingHorizontal: nrmTokens.space.md,

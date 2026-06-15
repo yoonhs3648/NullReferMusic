@@ -4,13 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Argos .argosmodel 언어 팩 다운로드 + 설치 */
@@ -24,7 +19,6 @@ object LibreTranslatePackageDownloader {
       val progress: Int,
   )
 
-  private val executor = Executors.newCachedThreadPool()
   private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
   private val progressByPackage = ConcurrentHashMap<String, Int>()
   private val argosInstalled = ConcurrentHashMap<String, Boolean>()
@@ -48,7 +42,47 @@ object LibreTranslatePackageDownloader {
 
   fun isPackageFileReady(context: Context, entry: LibreTranslatePackageCatalog.Entry): Boolean {
     val file = packageFile(context, entry)
-    return file.isFile && file.length() >= entry.minBytes
+    return isValidArgosmodelFile(file, entry.minBytes)
+  }
+
+  private fun isValidArgosmodelFile(file: File, minBytes: Long): Boolean {
+    if (!file.isFile || file.length() < minBytes) return false
+    return ArgosPackageInstaller.isValidArgosmodelArchive(file)
+  }
+
+  /** 미완료 .download 및 손상된 .argosmodel 제거 (재시도·cold start 공용) */
+  fun removeStalePackages(context: Context): Int {
+    val dir = packagesDir(context)
+    var removed = 0
+    val children = dir.listFiles() ?: return 0
+    for (child in children) {
+      if (!child.isFile) continue
+      when {
+        child.name.endsWith(".download") -> {
+          if (child.delete()) {
+            removed++
+            NrmFileLogger.log("libretranslate", "stale_tmp_removed file=${child.name}")
+          }
+        }
+        child.name.endsWith(".argosmodel") -> {
+          val entry =
+              LibreTranslatePackageCatalog.ENTRIES.firstOrNull { it.fileName == child.name }
+          val minBytes = entry?.minBytes ?: 1L
+          if (!isValidArgosmodelFile(child, minBytes)) {
+            val bytes = child.length()
+            if (child.delete()) {
+              removed++
+              entry?.id?.let { argosInstalled.remove(it) }
+              NrmFileLogger.warn(
+                  "libretranslate",
+                  "stale_package_removed file=${child.name} bytes=$bytes",
+              )
+            }
+          }
+        }
+      }
+    }
+    return removed
   }
 
   fun isArgosPackageRegistered(context: Context, packageId: String): Boolean {
@@ -60,6 +94,26 @@ object LibreTranslatePackageDownloader {
       argosInstalled[packageId] = true
     }
     return ok
+  }
+
+  fun progressFor(packageId: String): Int = progressByPackage[packageId] ?: -1
+
+  fun hasActiveDownload(): Boolean {
+    return activeDownloads.values.any { it.get() }
+  }
+
+  /** 메모리 부족 시 진행 중 .download 임시 파일을 정리해 RAM·디스크 압력을 줄인다 */
+  fun trimInFlightDownloads(context: Context) {
+    val dir = packagesDir(context)
+    var removed = 0
+    for (child in dir.listFiles().orEmpty()) {
+      if (child.isFile && child.name.endsWith(".download") && child.delete()) {
+        removed++
+      }
+    }
+    if (removed > 0) {
+      NrmFileLogger.warn("libretranslate", "trim_inflight_downloads removed=$removed")
+    }
   }
 
   fun isOfflineReady(context: Context): Boolean {
@@ -97,6 +151,16 @@ object LibreTranslatePackageDownloader {
   fun startDownload(context: Context, packageId: String) {
     val entry = LibreTranslatePackageCatalog.entryFor(packageId) ?: return
     NrmFileLogger.log("libretranslate", "startDownload packageId=$packageId")
+    removeStalePackages(context)
+    val dest = packageFile(context, entry)
+    if (dest.isFile && !isValidArgosmodelFile(dest, entry.minBytes)) {
+      NrmFileLogger.warn(
+          "libretranslate",
+          "손상된 언어 팩 삭제 file=${entry.fileName} bytes=${dest.length()}",
+      )
+      dest.delete()
+      argosInstalled.remove(packageId)
+    }
     if (isArgosPackageRegistered(context, entry.id)) {
       emitComplete(packageId, true)
       return
@@ -108,32 +172,49 @@ object LibreTranslatePackageDownloader {
     progressByPackage[packageId] = 0
     emitProgress(packageId, 0)
     val appContext = context.applicationContext
-    notifContext = appContext
-    NrmBackgroundWorkCoordinator.acquire(appContext, "libretranslate-pack:$packageId")
-    executor.execute {
-      var ok = false
-      try {
-        val dest = packageFile(appContext, entry)
-        ok = downloadPackage(appContext, entry, dest)
-        if (ok) {
-          ok = ArgosPackageInstaller.installFromArgosmodel(appContext, dest.absolutePath)
-          if (ok) {
-            argosInstalled[packageId] = true
+    val jobId = "libretranslate-pack:$packageId"
+    val queued =
+        NrmModelInstallQueue.enqueue(appContext, jobId, "오프라인 번역기 ${entry.label}") {
+          notifContext = appContext
+          NrmBackgroundWorkCoordinator.acquire(appContext, jobId)
+          var ok = false
+          try {
+            val destFile = packageFile(appContext, entry)
+            ok = downloadPackage(appContext, entry, destFile)
+            if (ok) {
+              emitProgress(entry.id, 100, "installing")
+              ok = ArgosPackageInstaller.installFromArgosmodel(appContext, destFile.absolutePath)
+              if (ok) {
+                argosInstalled[packageId] = true
+              } else {
+                NrmFileLogger.warn(
+                    "libretranslate",
+                    "언어 팩 설치 실패 — 파일 삭제 후 재시도 필요 file=${entry.fileName}",
+                )
+                destFile.delete()
+                argosInstalled.remove(packageId)
+              }
+            } else {
+              NrmFileLogger.warn("libretranslate", "언어 팩 다운로드 실패 packageId=$packageId")
+            }
+          } catch (e: Exception) {
+            Log.w(TAG, "startDownload failed $packageId: ${e.message}")
+            NrmFileLogger.error("libretranslate", "startDownload 실패 packageId=$packageId", e)
+          } finally {
+            flag.set(false)
+            activeDownloads.remove(packageId)
+            progressByPackage.remove(packageId)
+            NrmBackgroundWorkCoordinator.release(appContext, jobId)
+            if (activeDownloads.isEmpty()) {
+              notifContext = null
+            }
+            emitComplete(packageId, ok)
           }
         }
-      } catch (e: Exception) {
-        Log.w(TAG, "startDownload failed $packageId: ${e.message}")
-        NrmFileLogger.error("libretranslate", "startDownload 실패 packageId=$packageId", e)
-      } finally {
-        flag.set(false)
-        activeDownloads.remove(packageId)
-        progressByPackage.remove(packageId)
-        NrmBackgroundWorkCoordinator.release(appContext, "libretranslate-pack:$packageId")
-        if (activeDownloads.isEmpty()) {
-          notifContext = null
-        }
-        emitComplete(packageId, ok)
-      }
+    if (!queued) {
+      flag.set(false)
+      activeDownloads.remove(packageId)
+      progressByPackage.remove(packageId)
     }
   }
 
@@ -143,13 +224,15 @@ object LibreTranslatePackageDownloader {
       dest: File,
   ): Boolean {
     val tmp = File(dest.parentFile, "${entry.fileName}.download")
-    if (dest.isFile && dest.length() >= entry.minBytes) {
+    if (isValidArgosmodelFile(dest, entry.minBytes)) {
       emitProgress(entry.id, 100)
       return true
     }
+    if (dest.isFile) dest.delete()
     if (tmp.isFile) tmp.delete()
-    for (urlStr in entry.downloadUrls) {
-      if (downloadPackageFromUrl(entry, dest, tmp, urlStr)) {
+    val urlCount = entry.downloadUrls.size
+    for ((urlIndex, urlStr) in entry.downloadUrls.withIndex()) {
+      if (downloadPackageFromUrl(context, entry, dest, tmp, urlStr, urlIndex + 1, urlCount)) {
         return true
       }
       if (tmp.isFile) tmp.delete()
@@ -158,88 +241,64 @@ object LibreTranslatePackageDownloader {
   }
 
   private fun downloadPackageFromUrl(
+      context: Context,
       entry: LibreTranslatePackageCatalog.Entry,
       dest: File,
       tmp: File,
       urlStr: String,
+      urlIndex: Int,
+      urlCount: Int,
   ): Boolean {
-    return try {
-      Log.i(TAG, "download start: ${entry.fileName} url=$urlStr")
-      NrmFileLogger.log("libretranslate", "언어 팩 다운로드 시작 file=${entry.fileName} url=$urlStr")
-      val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 30_000
-        readTimeout = 900_000
-        instanceFollowRedirects = true
-        requestMethod = "GET"
-        setRequestProperty("User-Agent", "NullReferenceMusic/1.0")
-        setRequestProperty("Accept", "*/*")
-      }
-      conn.connect()
-      if (conn.responseCode !in 200..299) {
-        NrmFileLogger.warn(
-            "libretranslate",
-            "언어 팩 HTTP ${conn.responseCode} file=${entry.fileName} url=$urlStr",
+    NrmFileLogger.log(
+        "libretranslate",
+        "언어 팩 다운로드 시작 file=${entry.fileName} url=$urlStr mirror=$urlIndex/$urlCount",
+    )
+    val ok =
+        NrmResilientHttpDownload.download(
+            context = context,
+            tag = "libretranslate",
+            urlStr = urlStr,
+            tmp = tmp,
+            dest = dest,
+            minBytes = entry.minBytes,
+            onProgress = { pct, _, _ ->
+              progressByPackage[entry.id] = pct
+              emitProgress(entry.id, pct, "downloading")
+            },
+            isValid = { file -> isValidArgosmodelFile(file, entry.minBytes) },
+            requestHeaders =
+                mapOf(
+                    "User-Agent" to "NullReferenceMusic/1.0",
+                    "Accept" to "*/*",
+                ),
+            readTimeoutMs = 900_000,
+            expectedBytes = entry.expectedBytes,
         )
-        conn.disconnect()
-        return false
-      }
-      val total = conn.contentLengthLong.coerceAtLeast(0L)
-      var copied = 0L
-      var lastPct = -1
-      BufferedInputStream(conn.inputStream).use { input ->
-        FileOutputStream(tmp).use { output ->
-          val buffer = ByteArray(64 * 1024)
-          while (true) {
-            val read = input.read(buffer)
-            if (read <= 0) break
-            output.write(buffer, 0, read)
-            copied += read
-            if (total > 0) {
-              val pct = ((copied * 100) / total).toInt().coerceIn(0, 99)
-              if (pct != lastPct) {
-                lastPct = pct
-                progressByPackage[entry.id] = pct
-                emitProgress(entry.id, pct)
-              }
-            }
-          }
-        }
-      }
-      conn.disconnect()
-      if (!tmp.isFile || tmp.length() < entry.minBytes) {
-        NrmFileLogger.warn(
-            "libretranslate",
-            "언어 팩 파일 너무 작음 file=${entry.fileName} bytes=${tmp.length()} url=$urlStr",
-        )
-        return false
-      }
-      if (dest.isFile) dest.delete()
-      if (!tmp.renameTo(dest)) {
-        tmp.copyTo(dest, overwrite = true)
-        tmp.delete()
-      }
-      emitProgress(entry.id, 100)
+    if (ok) {
       NrmFileLogger.log(
           "libretranslate",
           "언어 팩 다운로드 완료 file=${entry.fileName} bytes=${dest.length()} url=$urlStr",
       )
-      true
-    } catch (e: Exception) {
-      NrmFileLogger.error(
+    } else {
+      NrmFileLogger.warn(
           "libretranslate",
           "언어 팩 다운로드 실패 file=${entry.fileName} url=$urlStr",
-          e,
       )
-      false
     }
+    return ok
   }
 
-  private fun emitProgress(packageId: String, progress: Int) {
+  private fun emitProgress(
+      packageId: String,
+      progress: Int,
+      step: String = "downloading",
+  ) {
     val body =
         Arguments.createMap().apply {
           putString("packageId", packageId)
           putString("phase", "progress")
-          putInt("progress", progress)
+          putString("step", step)
+          putInt("progress", progress.coerceIn(0, 100))
         }
     eventEmitter?.invoke("LibreTranslatePackageDownload", body)
     notifContext?.let { NrmBackgroundWorkService.refreshNotification(it) }

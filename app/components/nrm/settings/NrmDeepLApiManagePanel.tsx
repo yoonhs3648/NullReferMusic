@@ -254,8 +254,7 @@ export function NrmDeepLApiManagePanel({
   return (
     <>
       <MenuBackRow onPress={() => void handleLeaveEditable('appSettings')} />
-      <Text style={[styles.panelTitle, { color: titleColor }]}>번역기 API Key 관리</Text>
-      <Text style={[styles.issueGuideLine, { color: bodyColor }]}>DeepL 번역기 API를 사용합니다.</Text>
+      <Text style={[styles.panelTitle, { color: titleColor }]}>deepL 번역기 API KEY 관리</Text>
       <Pressable onPress={() => setScreen('manage')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API Key 관리</Text></Pressable>
       <Pressable onPress={() => setScreen('issue')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API Key 발급</Text></Pressable>
       <Pressable onPress={() => setScreen('usage')} style={({ pressed }) => [styles.hubRow, styles.hubRowFixed, pressed && styles.hubRowPressed]}><Text style={[styles.hubRowTitleSm, { color: titleColor }]}>API 사용량 조회</Text></Pressable>

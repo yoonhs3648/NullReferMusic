@@ -6,6 +6,7 @@ import {
   detectLyricsUiModeFromStoredText,
   DUPLICATE_TS_TRANSLATION_THRESHOLD,
   parseLyricsModeFromLrcText,
+  resolveStoredLyricsModeFromFlags,
   withNrmLyricsModeHeader,
 } from './nrmLrcUiMode';
 import { inferMelonLyricsUiModeFromContext } from './nrmMelonLyrics';
@@ -77,6 +78,26 @@ assert.deepEqual(detectLyricsUiModeFromStoredText('__AUTO_FROM_MELON__:melon'), 
   mode: 'melon',
   lrcModeFromTag: null,
 });
+
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    sidecarLrcText: embeddedMelonTagged,
+    metadataLyrics: '__AUTO_FROM_WHISPER__:configured',
+  }),
+  'melon',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    metadataLyrics: '__AUTO_FROM_MELON__:melon_translation',
+  }),
+  'melon_translation',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    sidecarLrcText: singleLines,
+  }),
+  'configured',
+);
 
 assert.equal(
   inferMelonLyricsUiModeFromContext(

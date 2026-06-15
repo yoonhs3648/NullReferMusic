@@ -3,6 +3,7 @@ import { NativeModules, Platform } from 'react-native';
 type NrmBackgroundWorkNative = {
   acquire?: (token: string) => void;
   release?: (token: string) => void;
+  hasActiveDownloadOrLyricsWork?: () => Promise<boolean>;
 };
 
 const mod = NativeModules.NrmBackgroundWork as NrmBackgroundWorkNative | undefined;
@@ -32,5 +33,15 @@ export function nrmBackgroundWorkRelease(token: string): void {
     mod?.release?.(t);
   } catch {
     /* native unavailable */
+  }
+}
+
+/** Android — 오디오 다운로드 또는 가사 생성 작업이 진행 중인지 */
+export async function nrmHasActiveDownloadOrLyricsWork(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  try {
+    return !!(await mod?.hasActiveDownloadOrLyricsWork?.());
+  } catch {
+    return false;
   }
 }

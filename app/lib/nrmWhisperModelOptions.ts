@@ -6,6 +6,7 @@ export type NrmWhisperModelOption = {
   label: string;
   speedLabel: string;
   qualityLabel: string;
+  sizeLabel: string;
 };
 
 export const NRM_WHISPER_MODEL_OPTIONS: readonly NrmWhisperModelOption[] =
@@ -14,4 +15,5 @@ export const NRM_WHISPER_MODEL_OPTIONS: readonly NrmWhisperModelOption[] =
     label: e.label,
     speedLabel: e.speedLabel,
     qualityLabel: e.qualityLabel,
+    sizeLabel: e.sizeLabel,
   }));

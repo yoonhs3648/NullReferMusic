@@ -4,7 +4,6 @@ import {
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
 import {
-  joinLastfmTagNames,
   lastfmRawToOptionalEmbed,
   normalizeLastfmReleaseDate,
   type LastfmRawEmbedFields,
@@ -19,6 +18,7 @@ import {
 } from '@/lib/nrmLastfmSearchClient';
 import type { LastfmSearchErrorCode, LastfmTag } from '@/lib/nrmLastfmSearchTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
+import { lastfmTagsToNames, resolveEmbedGenre } from '@/lib/nrmGenreResolve';
 
 /** Last.fm 메타 API 인증·설정 오류 (다운로드 흐름에서 처리) */
 export class LastfmMetadataApiError extends Error {
@@ -63,18 +63,10 @@ function mergeRaw(
   }
 }
 
-function tagsToGenre(tags: LastfmTag[], existing?: string): string {
-  const fromTags = joinLastfmTagNames(tags, 5);
-  const prev = (existing ?? '').trim();
-  if (!fromTags) return prev;
-  if (!prev) return fromTags;
-  const parts = new Set(
-    `${prev}, ${fromTags}`
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-  return [...parts].slice(0, 5).join(', ');
+function appendLastfmTagNames(target: string[], tags: LastfmTag[]): void {
+  for (const name of lastfmTagsToNames(tags)) {
+    if (!target.includes(name)) target.push(name);
+  }
 }
 
 /**
@@ -101,9 +93,11 @@ export async function enrichLastfmDownloadMetadata(
 
   const trackMbid = normalizeLastfmMbid(seed.mbid);
   if (!trackMbid) {
-    return base;
+    const genre = await resolveEmbedGenre({ rawGenre: seed.genre ?? base.genre });
+    return normalizeDownloadMetadata({ ...base, genre: genre || base.genre });
   }
 
+  const collectedTagNames: string[] = [];
   const raw: LastfmRawEmbedFields = {
     album: base.album,
     genre: base.genre,
@@ -123,12 +117,12 @@ export async function enrichLastfmDownloadMetadata(
   }
 
   const { info, tags: trackTags } = trackR.data;
+  appendLastfmTagNames(collectedTagNames, trackTags);
   mergeRaw(raw, {
     album: info.album,
     coverUrl: normalizeCoverArtUrl(info.imageUrl),
     website: info.url,
     trackNumber: info.albumTrackPosition,
-    genre: tagsToGenre(trackTags),
     albumArtist: info.artist,
   });
 
@@ -145,8 +139,8 @@ export async function enrichLastfmDownloadMetadata(
       if (hit) {
         const detailA = await fetchLastfmArtistDetail(hit.name, hit.mbid);
         if (detailA.ok) {
+          appendLastfmTagNames(collectedTagNames, detailA.data.tags);
           mergeRaw(raw, {
-            genre: tagsToGenre(detailA.data.tags, raw.genre),
             website: detailA.data.info.url || raw.website,
             albumArtist: detailA.data.info.name || raw.albumArtist,
           });
@@ -181,13 +175,13 @@ export async function enrichLastfmDownloadMetadata(
             const match = byMbid ?? byName;
             if (match) trackNum = String(match.rank);
           }
+          appendLastfmTagNames(collectedTagNames, detailAl.data.tags);
           mergeRaw(raw, {
             album: al.name,
             albumArtist: al.artist || raw.albumArtist,
             coverUrl: normalizeCoverArtUrl(al.imageUrl) || raw.coverUrl,
             releaseDate:
               normalizeLastfmReleaseDate(al.published) || raw.releaseDate,
-            genre: tagsToGenre(detailAl.data.tags, raw.genre),
             trackNumber: trackNum,
           });
         }
@@ -196,13 +190,18 @@ export async function enrichLastfmDownloadMetadata(
   }
 
   const optional = lastfmRawToOptionalEmbed(raw);
+  const rawGenre = [seed.genre, base.genre].filter(Boolean).join(', ');
+  const resolvedGenre = await resolveEmbedGenre({
+    rawGenre,
+    lastfmTagNames: collectedTagNames,
+  });
   return normalizeDownloadMetadata({
     ...base,
     ...optional,
     artist: userArtist.trim(),
     title: userTitle.trim(),
     album: optional.album ?? base.album,
-    genre: optional.genre ?? base.genre,
+    genre: resolvedGenre || optional.genre || base.genre,
     releaseDate: optional.releaseDate ?? base.releaseDate,
     coverUrl: optional.coverUrl ?? base.coverUrl,
   });

@@ -317,7 +317,7 @@ async function tagThenPersist(
   fileUri: string,
   safeName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' }> {
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' }> {
   const { loadDownloadEncodeSettings, applyDownloadExtension } =
     await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
@@ -523,7 +523,7 @@ export async function finalizeYoutubeAudioOnDevice(
   fileUri: string,
   userSuggestedFileName: string,
   metadata?: NrmAudioFileMetadata,
-): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' }> {
+): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' }> {
   return tagThenPersist(fileUri, userSuggestedFileName, metadata);
 }
 

@@ -647,6 +647,14 @@ export function NrmYoutubeHome({
             setLyricsTranslationExhausted(false);
             setLyricsTranslationFailedOpen(true);
           });
+        } else if (out.lyricsWarning === 'memory_insufficient') {
+          InteractionManager.runAfterInteractions(() => {
+            notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
+          });
+        } else if (out.lyricsWarning === 'melon_align_failed') {
+          InteractionManager.runAfterInteractions(() => {
+            notifyUser('멜론가사 생성에 실패했습니다.');
+          });
         }
       } catch (e) {
         if (Platform.OS !== 'web') {

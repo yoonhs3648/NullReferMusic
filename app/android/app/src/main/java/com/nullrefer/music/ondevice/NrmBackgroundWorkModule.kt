@@ -1,5 +1,6 @@
 package com.nullrefer.music.ondevice
 
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -18,5 +19,14 @@ class NrmBackgroundWorkModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun release(token: String) {
     NrmBackgroundWorkCoordinator.release(reactApplicationContext, token)
+  }
+
+  @ReactMethod
+  fun hasActiveDownloadOrLyricsWork(promise: Promise) {
+    try {
+      promise.resolve(NrmBackgroundWorkCoordinator.hasBlockingExitWork())
+    } catch (e: Exception) {
+      promise.reject("E_BG_WORK", e.message ?: e.toString(), e)
+    }
   }
 }

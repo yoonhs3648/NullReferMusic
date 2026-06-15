@@ -62,6 +62,29 @@ export function isMelonLyricsUiMode(mode: NrmLyricsUiMode): mode is NrmMelonLyri
   return mode === 'melon' || mode === 'melon_translation';
 }
 
+const NRM_LRC_MODE_LINE_RE =
+  /^\[nrm:(configured|translation|melon|melon_translation)\]$/i;
+
+/** LRC 본문에서 타임스탬프·모드 태그를 제거한 plain 가사 추출 (트랙 편집 복원용) */
+export function extractPlainLyricsFromLrcText(lrcText: string): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of lrcText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || NRM_LRC_MODE_LINE_RE.test(trimmed)) continue;
+    const m = trimmed.match(/^\[[^\]]+\](.*)$/);
+    if (!m) continue;
+    const text = m[1].trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(text);
+  }
+  const plain = lines.join('\n').trim();
+  return lines.length >= 2 ? plain : '';
+}
+
 /** 저장된 website(멜론 곡 URL)에서 songId 추출 */
 export function extractMelonSongIdFromUrl(url: string | undefined): string | null {
   const u = (url ?? '').trim();

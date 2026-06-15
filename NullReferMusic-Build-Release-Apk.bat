@@ -24,15 +24,21 @@ echo - On-device download on Android ^(yt-dlp in APK^)
 echo ======================================================
 echo.
 
-echo [0/3] Release native assets (whisper-cli, shineenc)...
+echo [0/3] Release native assets (whisper-cli, shineenc, nrm-argos-translate)...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Verify-AndroidReleaseAssets.ps1"
 if errorlevel 1 (
   echo.
-  echo Missing assets. Run from repo root:
-  echo   powershell -ExecutionPolicy Bypass -File .\scripts\Build-Whisper-AndroidCli.ps1
-  echo   powershell -ExecutionPolicy Bypass -File .\scripts\Setup-AndroidShine.ps1
-  pause
-  exit /b 1
+  echo Missing assets — building native binaries...
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Whisper-AndroidCli.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Setup-AndroidShine.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-ArgosTranslate-Android.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Verify-AndroidReleaseAssets.ps1"
+  if errorlevel 1 (
+    echo.
+    echo Native asset build/verify failed. See docs/RELEASE-APK-IPA-RULE.md section 6-1-a.
+    pause
+    exit /b 1
+  )
 )
 
 cd /d "%APP%"

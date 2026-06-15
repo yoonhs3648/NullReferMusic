@@ -53,6 +53,8 @@ import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTra
 
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
 import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
+import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
+import { confirmUser } from '@/lib/nrmUserNotify';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 
@@ -153,6 +155,7 @@ export default function HomeScreen() {
   >('auth_failed');
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
   const menuRef = useRef<NrmAppMenuHandle>(null);
+  const exitPromptOpenRef = useRef(false);
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
 
@@ -613,7 +616,24 @@ export default function HomeScreen() {
 
       }
 
-      return false;
+      if (exitPromptOpenRef.current) return true;
+
+      void (async () => {
+        const active = await nrmHasActiveDownloadOrLyricsWork();
+        if (!active) {
+          BackHandler.exitApp();
+          return;
+        }
+        exitPromptOpenRef.current = true;
+        const ok = await confirmUser('NullReferenceMusic을 종료할까요?', {
+          cancelLabel: '취소',
+          confirmLabel: '종료',
+        });
+        exitPromptOpenRef.current = false;
+        if (ok) BackHandler.exitApp();
+      })();
+
+      return true;
 
     });
 

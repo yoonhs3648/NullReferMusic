@@ -48,15 +48,17 @@ export type FinalizeParallelOptions = {
 
 export type FinalizeParallelResult = {
   savedLabel: string;
-  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted';
+  lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient';
 };
 
 function whisperWarningFromResult(
   result: WhisperLrcStageResult | null,
-): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | undefined {
+): 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' | undefined {
   if (!result) return undefined;
   if (result.lyricsTranslationExhausted) return 'translation_exhausted';
   if (result.lyricsTranslationFailed) return 'translation_failed';
+  if (result.lyricsMelonMemoryInsufficient) return 'memory_insufficient';
+  if (result.lyricsMelonAlignFailed) return 'melon_align_failed';
   if (result.lyricsRequested && !result.lyricsEmbedded) return 'not_embedded';
   return undefined;
 }
@@ -282,6 +284,7 @@ async function finalizeNativeParallel(
       whisperRef.result = {
         lyricsRequested: true,
         lyricsEmbedded: false,
+        ...(melonMode ? { lyricsMelonAlignFailed: true } : {}),
       };
     } finally {
       options?.onLyricsStageEnded?.();

@@ -244,15 +244,15 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         File(outPrefix.absolutePath + ".lrc").delete()
         File(outPrefix.absolutePath + ".txt").delete()
       }
-    } catch (e: Exception) {
-      perf?.end("error=${e.message}")
+    } catch (t: Throwable) {
+      perf?.end("error=${t.message}")
       NrmStageLog.log(
           "whisper",
           "transcribe_fail",
-          mapOf("err" to (e.message ?: e.toString()).take(200)),
+          mapOf("err" to (t.message ?: t.toString()).take(200)),
       )
-      NrmFileLogger.error("whisper", "transcribeToLrc 실패 audio=$audioPath", e)
-      promise.reject("E_WHISPER", e.message ?: e.toString(), e)
+      NrmFileLogger.error("whisper", "transcribeToLrc 실패 audio=$audioPath", t)
+      resolveEmptyLrc(promise)
     } finally {
       NrmBackgroundWorkCoordinator.release(reactApplicationContext, lrcToken)
     }
@@ -498,12 +498,13 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       val token = "whisperx-align:${System.currentTimeMillis()}"
       NrmBackgroundWorkCoordinator.acquire(reactApplicationContext, token)
       try {
+        NrmMemoryGuard.prepareForHeavyInference(reactApplicationContext, "whisperx-align")
         val inFile = File(audioPath.trim())
         if (!inFile.isFile) {
           promise.reject("E_ARG", "오디오 파일이 없습니다.")
           return@Thread
         }
-        val lrc =
+        val outcome =
             WhisperXAlignEngine.alignToLrc(
                 reactApplicationContext,
                 inFile,
@@ -511,13 +512,23 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
                 mode,
             )
         val ok = Arguments.createMap()
-        ok.putString("lrc", lrc)
+        ok.putString("lrc", outcome.lrc)
+        ok.putBoolean("alignFailed", outcome.lrc.isBlank())
+        ok.putBoolean("alignMemoryInsufficient", outcome.memoryInsufficient)
         promise.resolve(ok)
-      } catch (e: Exception) {
-        promise.reject("E_ALIGN", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("whisperx-align", "alignMelonLyricsToLrc 실패 audio=$audioPath", t)
+        resolveEmptyLrc(promise, alignFailed = true)
       } finally {
         NrmBackgroundWorkCoordinator.release(reactApplicationContext, token)
       }
     }.start()
+  }
+
+  private fun resolveEmptyLrc(promise: Promise, alignFailed: Boolean = false) {
+    val ok = Arguments.createMap()
+    ok.putString("lrc", "")
+    ok.putBoolean("alignFailed", alignFailed)
+    promise.resolve(ok)
   }
 }

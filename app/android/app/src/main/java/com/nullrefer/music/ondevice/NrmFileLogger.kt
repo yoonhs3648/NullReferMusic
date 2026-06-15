@@ -48,15 +48,9 @@ object NrmFileLogger {
     synchronized(lock) {
       if (appContext != null) return
       appContext = context.applicationContext
-      userLoggingEnabled =
-          appContext!!
-              .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-              .getBoolean(KEY_ENABLED, false)
+      // on/off는 JS AsyncStorage가 단일 소스 — bridge 동기화 전까지는 항상 off
+      userLoggingEnabled = false
       updateDisplayPath()
-      if (userLoggingEnabled) {
-        ensureLogSink(createIfMissing = true)
-        logSessionHeader()
-      }
     }
   }
 

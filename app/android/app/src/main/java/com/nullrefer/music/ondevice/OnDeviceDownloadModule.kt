@@ -35,9 +35,9 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
           map.putString("path", paths.binaryPath())
         }
         promise.resolve(map)
-      } catch (e: Exception) {
-        NrmFileLogger.error("ffmpeg", "prefetchFfmpeg 실패", e)
-        promise.reject("E_FFMPEG_PREFETCH", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("ffmpeg", "prefetchFfmpeg 실패", t)
+        promise.reject("E_FFMPEG_PREFETCH", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -49,9 +49,9 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
       try {
         Python.start(AndroidPlatform(ctx))
         NrmFileLogger.log("yt-dlp", "Chaquopy Python 시작 완료")
-      } catch (e: Exception) {
-        NrmFileLogger.error("yt-dlp", "Chaquopy Python 시작 실패", e)
-        throw e
+      } catch (t: Throwable) {
+        NrmFileLogger.error("yt-dlp", "Chaquopy Python 시작 실패", t)
+        throw IllegalStateException(t.message ?: t.toString(), t)
       }
     }
   }
@@ -122,9 +122,9 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         }
         NrmFileLogger.log("yt-dlp", "getAudioStreamUrl OK len=${streamUrl.length}")
         promise.resolve(streamUrl)
-      } catch (e: Exception) {
-        NrmFileLogger.error("yt-dlp", "getAudioStreamUrl 실패 videoId=$videoId", e)
-        promise.reject("E_STREAM_URL", e.message ?: e.toString(), e)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("yt-dlp", "getAudioStreamUrl 실패 videoId=$videoId", t)
+        promise.reject("E_STREAM_URL", t.message ?: t.toString(), t as? Exception)
       } finally {
         if (cookieFilePath.isNotBlank()) {
           try { File(cookieFilePath).delete() } catch (_: Exception) {}
@@ -223,17 +223,17 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         map.putString("path", audioFile.absolutePath)
         map.putString("message", "기기에 저장되었습니다.")
         promise.resolve(map)
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmStageLog.log(
             "ytdlp",
             "download_fail",
             mapOf(
                 "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
-                "err" to (e.message ?: e.toString()).take(200),
+                "err" to (t.message ?: t.toString()).take(200),
             ),
         )
-        NrmFileLogger.error("yt-dlp", "downloadAudio 실패 url=$url", e)
-        promise.reject("E_ONDEVICE", e.message ?: e.toString(), e)
+        NrmFileLogger.error("yt-dlp", "downloadAudio 실패 url=$url", t)
+        promise.reject("E_ONDEVICE", t.message ?: t.toString(), t as? Exception)
       } finally {
         if (cookieFilePath.isNotBlank()) {
           try { File(cookieFilePath).delete() } catch (_: Exception) {}
@@ -310,17 +310,17 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         map.putString("path", outFile.absolutePath)
         map.putString("format", result.effectiveFormat)
         promise.resolve(map)
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmStageLog.log(
             "ffmpeg",
             "transcode_fail",
             mapOf(
                 "totalMs" to (SystemClock.elapsedRealtime() - stageT0),
-                "err" to (e.message ?: e.toString()).take(200),
+                "err" to (t.message ?: t.toString()).take(200),
             ),
         )
-        NrmFileLogger.error("yt-dlp", "transcodeAudio 실패 input=$inputPath", e)
-        promise.reject("E_TRANSCODE", e.message ?: e.toString(), e)
+        NrmFileLogger.error("yt-dlp", "transcodeAudio 실패 input=$inputPath", t)
+        promise.reject("E_TRANSCODE", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -386,13 +386,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         map.putString("uri", destUri.toString())
         promise.resolve(map)
         }
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmFileLogger.error(
             "saf",
             "copyFileToSaf 실패 src=${sourcePath.take(80)} tree=${treeUri.take(80)} name=$displayName",
-            e,
+            t,
         )
-        promise.reject("E_SAF_COPY", e.message ?: e.toString(), e)
+        promise.reject("E_SAF_COPY", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }
@@ -433,13 +433,13 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
           )
           promise.resolve(null)
         }
-      } catch (e: Exception) {
+      } catch (t: Throwable) {
         NrmFileLogger.error(
             "saf",
             "copyFileToExistingSaf 실패 src=${sourcePath.take(80)} dest=${destUri.take(80)}",
-            e,
+            t,
         )
-        promise.reject("E_SAF_COPY_EXISTING", e.message ?: e.toString(), e)
+        promise.reject("E_SAF_COPY_EXISTING", t.message ?: t.toString(), t as? Exception)
       }
     }.start()
   }

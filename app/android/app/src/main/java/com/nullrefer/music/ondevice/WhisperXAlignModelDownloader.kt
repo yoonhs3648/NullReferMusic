@@ -4,13 +4,11 @@ import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
 
 /** wav2vec2 CTC forced alignment 에셋 다운로드 (whisperx-align/) */
 object WhisperXAlignModelDownloader {
@@ -23,9 +21,10 @@ object WhisperXAlignModelDownloader {
       val progress: Int,
   )
 
-  private val executor = Executors.newSingleThreadExecutor()
   private val downloading = AtomicBoolean(false)
   private var progress = 0
+
+  fun progressPercent(): Int = if (downloading.get()) progress else -1
 
   @Volatile private var eventEmitter: ((String, WritableMap) -> Unit)? = null
 
@@ -49,9 +48,45 @@ object WhisperXAlignModelDownloader {
     }
     for (spec in WhisperXAlignModelCatalog.ASSETS) {
       val dest = File(dir, spec.fileName)
-      if (!dest.isFile || dest.length() < spec.minBytes) return null
+      if (!isAssetReady(dest, spec)) return null
     }
     return dir
+  }
+
+  /** 손상·미완료 에셋 및 .download 임시 파일 제거 (재시도·cold start 공용) */
+  fun removeInvalidAssets(context: Context): Int {
+    val dir = alignDir(context)
+    var removed = 0
+    for (spec in WhisperXAlignModelCatalog.ASSETS) {
+      val dest = File(dir, spec.fileName)
+      val tmp = File(dir, "${spec.fileName}.download")
+      if (tmp.isFile && tmp.delete()) {
+        removed++
+        NrmFileLogger.log("whisperx-align", "stale_tmp_removed file=${spec.fileName}.download")
+      }
+      if (dest.isFile && !isAssetReady(dest, spec)) {
+        val bytes = dest.length()
+        if (dest.delete()) {
+          removed++
+          NrmFileLogger.warn(
+              "whisperx-align",
+              "손상 에셋 삭제 file=${spec.fileName} bytes=$bytes",
+          )
+        }
+      }
+    }
+    return removed
+  }
+
+  private fun isAssetReady(dest: File, spec: WhisperXAlignModelCatalog.AssetSpec): Boolean {
+    if (!dest.isFile || dest.length() < spec.minBytes) return false
+    if (!spec.fileName.endsWith(".json")) return true
+    return try {
+      JSONObject(dest.readText(Charsets.UTF_8))
+      true
+    } catch (_: Exception) {
+      false
+    }
   }
 
   fun listStatuses(context: Context): List<AlignModelStatus> {
@@ -76,6 +111,7 @@ object WhisperXAlignModelDownloader {
   fun startDownload(context: Context) {
     val modelId = WhisperXAlignModelCatalog.MODEL_ID
     NrmFileLogger.log("whisperx-align", "startDownload modelId=$modelId assets=${WhisperXAlignModelCatalog.ASSETS.size}")
+    removeInvalidAssets(context)
     if (isInstalled(context)) {
       emitComplete(modelId, true)
       return
@@ -84,20 +120,26 @@ object WhisperXAlignModelDownloader {
     progress = 0
     emitProgress(modelId, 0)
     val appContext = context.applicationContext
-    NrmBackgroundWorkCoordinator.acquire(appContext, "whisperx-align-model")
-    executor.execute {
-      var ok = false
-      try {
-        ok = downloadAllAssets(appContext, modelId)
-      } catch (e: Exception) {
-        Log.w(TAG, "download failed: ${e.message}")
-        NrmFileLogger.error("whisperx-align", "startDownload 실패", e)
-      } finally {
-        downloading.set(false)
-        progress = 0
-        NrmBackgroundWorkCoordinator.release(appContext, "whisperx-align-model")
-        emitComplete(modelId, ok)
-      }
+    val jobId = "whisperx-align-model"
+    val queued =
+        NrmModelInstallQueue.enqueue(appContext, jobId, "WhisperX 정렬 모델") {
+          NrmBackgroundWorkCoordinator.acquire(appContext, jobId)
+          var ok = false
+          try {
+            ok = downloadAllAssets(appContext, modelId)
+          } catch (e: Exception) {
+            Log.w(TAG, "download failed: ${e.message}")
+            NrmFileLogger.error("whisperx-align", "startDownload 실패", e)
+          } finally {
+            downloading.set(false)
+            progress = 0
+            NrmBackgroundWorkCoordinator.release(appContext, jobId)
+            emitComplete(modelId, ok)
+          }
+        }
+    if (!queued) {
+      downloading.set(false)
+      progress = 0
     }
   }
 
@@ -107,7 +149,7 @@ object WhisperXAlignModelDownloader {
     val pending =
         assets.filter { spec ->
           val dest = File(dir, spec.fileName)
-          !(dest.isFile && dest.length() >= spec.minBytes)
+          !isAssetReady(dest, spec)
         }
     if (pending.isEmpty()) {
       emitProgress(modelId, 100)
@@ -130,20 +172,16 @@ object WhisperXAlignModelDownloader {
       val fileTotal = knownSizes[spec.fileName] ?: 0L
       val ok =
           downloadFile(
+              context = context,
               modelId = modelId,
               spec = spec,
               dest = dest,
-              onChunk = { chunk ->
-                if (totalBytes > 0) {
-                  doneBytes += chunk
-                  val pct = ((doneBytes * 100) / totalBytes).toInt().coerceIn(0, 99)
-                  progress = pct
-                  emitProgress(modelId, pct)
-                }
-              },
+              doneBytes = doneBytes,
+              totalBytes = totalBytes,
               fileTotalBytes = fileTotal,
           )
       if (!ok) return false
+      doneBytes += knownSizes[spec.fileName] ?: dest.length()
       if (totalBytes <= 0) {
         val idx = assets.indexOf(spec) + 1
         progress = ((idx * 100) / assets.size).coerceIn(0, 99)
@@ -171,64 +209,45 @@ object WhisperXAlignModelDownloader {
   }
 
   private fun downloadFile(
+      context: Context,
       modelId: String,
       spec: WhisperXAlignModelCatalog.AssetSpec,
       dest: File,
-      onChunk: (Long) -> Unit,
+      doneBytes: Long,
+      totalBytes: Long,
       fileTotalBytes: Long,
   ): Boolean {
     val tmp = File(dest.parentFile, "${spec.fileName}.download")
-    return try {
-      if (dest.isFile && dest.length() >= spec.minBytes) return true
-      if (tmp.isFile) tmp.delete()
-      NrmFileLogger.log("whisperx-align", "asset_download_start file=${spec.fileName}")
-      val conn = URL(spec.url).openConnection() as HttpURLConnection
-      conn.connectTimeout = 30_000
-      conn.readTimeout = 600_000
-      conn.instanceFollowRedirects = true
-      conn.requestMethod = "GET"
-      conn.connect()
-      if (conn.responseCode !in 200..299) {
-        NrmFileLogger.warn(
-            "whisperx-align",
-            "asset_download_http_${conn.responseCode} file=${spec.fileName}",
+    if (isAssetReady(dest, spec)) return true
+    if (dest.isFile) dest.delete()
+    NrmFileLogger.log("whisperx-align", "asset_download_start file=${spec.fileName}")
+    val ok =
+        NrmResilientHttpDownload.download(
+            context = context,
+            tag = "whisperx-align",
+            urlStr = spec.url,
+            tmp = tmp,
+            dest = dest,
+            minBytes = spec.minBytes,
+            onProgress = { pct, _, _ ->
+              if (totalBytes > 0 && fileTotalBytes > 0) {
+                val fileAbsolute = (fileTotalBytes * pct) / 100L
+                val overall = ((doneBytes + fileAbsolute) * 100 / totalBytes).toInt().coerceIn(0, 99)
+                progress = overall
+                emitProgress(modelId, overall)
+              } else if (fileTotalBytes <= 0) {
+                progress = pct
+                emitProgress(modelId, pct)
+              }
+            },
+            isValid = { file -> isAssetReady(file, spec) },
+            readTimeoutMs = 600_000,
         )
-        return false
-      }
-      val total = conn.contentLengthLong.coerceAtLeast(fileTotalBytes).coerceAtLeast(0L)
-      BufferedInputStream(conn.inputStream).use { input ->
-        FileOutputStream(tmp).use { output ->
-          val buf = ByteArray(256 * 1024)
-          var read: Int
-          var done = 0L
-          while (input.read(buf).also { read = it } != -1) {
-            output.write(buf, 0, read)
-            done += read
-            onChunk(read.toLong())
-            if (total > 0 && fileTotalBytes <= 0) {
-              val pct = ((done * 100) / total).toInt().coerceIn(0, 99)
-              progress = pct
-              emitProgress(modelId, pct)
-            }
-          }
-        }
-      }
-      conn.disconnect()
-      if (!tmp.renameTo(dest)) {
-        tmp.copyTo(dest, overwrite = true)
-        tmp.delete()
-      }
-      val ok = dest.isFile && dest.length() >= spec.minBytes
-      NrmFileLogger.log(
-          "whisperx-align",
-          "asset_download_done file=${spec.fileName} ok=$ok bytes=${dest.length()}",
-      )
-      ok
-    } catch (e: Exception) {
-      tmp.delete()
-      NrmFileLogger.error("whisperx-align", "asset_download_fail file=${spec.fileName}", e)
-      false
-    }
+    NrmFileLogger.log(
+        "whisperx-align",
+        "asset_download_done file=${spec.fileName} ok=$ok bytes=${dest.length()}",
+    )
+    return ok
   }
 
   private fun emitProgress(modelId: String, pct: Int) {

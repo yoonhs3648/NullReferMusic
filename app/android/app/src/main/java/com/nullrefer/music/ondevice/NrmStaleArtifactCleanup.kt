@@ -8,6 +8,7 @@ import java.io.File
  *
  * 비정상 종료뿐 아니라 실패·중단 후 정리되지 않은 `nrm-*` 아티팩트도 대상이다.
  * ffmpeg/whisper/shine 바이너리(codeCacheDir), 설치된 whisper 모델(filesDir/whisper),
+ * libretranslate 언어 팩·whisperx-align 모델의 미완료 .download / 손상 파일도 스윕한다.
  * 사용자 Download 폴더 산출물은 건드리지 않는다.
  */
 object NrmStaleArtifactCleanup {
@@ -37,6 +38,8 @@ object NrmStaleArtifactCleanup {
     var removed = 0
     removed += sweepCacheDir(appContext.cacheDir)
     removed += sweepWhisperPartials(appContext)
+    removed += LibreTranslatePackageDownloader.removeStalePackages(appContext)
+    removed += WhisperXAlignModelDownloader.removeInvalidAssets(appContext)
 
     NrmFileLogger.log(
         "startup-cleanup",

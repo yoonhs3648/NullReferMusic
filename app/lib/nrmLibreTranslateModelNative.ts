@@ -88,6 +88,11 @@ export function subscribeLibreTranslatePackageDownloadEvents(
     packageId: NrmLibreTranslatePackageId;
     phase: 'progress' | 'complete' | 'failed';
     progress: number;
+    attempt?: number;
+    maxAttempts?: number;
+    urlIndex?: number;
+    urlCount?: number;
+    step?: 'downloading' | 'installing';
   }) => void,
 ): () => void {
   if (!isLibreTranslateNativeAvailable() || !mod) {
@@ -96,7 +101,16 @@ export function subscribeLibreTranslatePackageDownloadEvents(
   const emitter = new NativeEventEmitter(NativeModules.NrmLibreTranslate);
   const sub = emitter.addListener(
     'LibreTranslatePackageDownload',
-    (body: { packageId?: string; phase?: string; progress?: number }) => {
+    (body: {
+      packageId?: string;
+      phase?: string;
+      progress?: number;
+      attempt?: number;
+      maxAttempts?: number;
+      urlIndex?: number;
+      urlCount?: number;
+      step?: string;
+    }) => {
       const id = (body.packageId ?? '').trim();
       if (!id.startsWith('libretranslate:')) return;
       const phase =
@@ -109,6 +123,11 @@ export function subscribeLibreTranslatePackageDownloadEvents(
         packageId: id as NrmLibreTranslatePackageId,
         phase,
         progress: Math.min(100, Math.max(0, body.progress ?? 0)),
+        attempt: body.attempt,
+        maxAttempts: body.maxAttempts,
+        urlIndex: body.urlIndex,
+        urlCount: body.urlCount,
+        step: body.step === 'installing' ? 'installing' : 'downloading',
       });
     },
   );

@@ -17,6 +17,7 @@ import com.nullrefer.music.ondevice.FfmpegBootstrap
 import com.nullrefer.music.ondevice.NrmFileLogger
 import com.nullrefer.music.ondevice.NrmStaleArtifactCleanup
 import com.nullrefer.music.ondevice.NrmStaleWorkNotificationCleanup
+import com.nullrefer.music.ondevice.NrmUncaughtExceptionHandler
 import com.nullrefer.music.ondevice.OnDeviceDownloadPackage
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
@@ -44,6 +45,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    NrmUncaughtExceptionHandler.install()
     NrmFileLogger.init(this)
     NrmStaleWorkNotificationCleanup.reconcileOnColdStart(this)
     NrmStaleArtifactCleanup.reconcileOnColdStart(this)

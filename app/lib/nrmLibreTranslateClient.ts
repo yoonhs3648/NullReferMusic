@@ -35,7 +35,7 @@ async function translateTextsWithLibreTranslate(
 
   return {
     ok: false,
-    message: 'LibreTranslate가 설치되지 않았습니다. API 설정 → 번역기 설치에서 언어 팩을 설치해주세요.',
+    message: 'LibreTranslate가 설치되지 않았습니다. 앱 설정 → 오프라인 번역기 설치에서 언어 팩을 설치해주세요.',
   };
 }
 

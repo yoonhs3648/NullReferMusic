@@ -13,12 +13,17 @@ import kotlin.math.max
  * 실패 시 Whisper 전사 등 다른 엔진으로 대체하지 않음 — 빈 LRC 반환.
  */
 object WhisperXAlignEngine {
+  data class AlignOutcome(
+      val lrc: String,
+      val memoryInsufficient: Boolean = false,
+  )
+
   fun alignToLrc(
       context: Context,
       audioFile: File,
       lyricsPlain: String,
       mode: String,
-  ): String {
+  ): AlignOutcome {
     val stageT0 = SystemClock.elapsedRealtime()
     NrmStageLog.log(
         "whisperx-align",
@@ -35,7 +40,7 @@ object WhisperXAlignEngine {
     if (alignDir == null) {
       NrmFileLogger.warn("whisperx-align", "align_abort model_not_installed")
       NrmStageLog.log("whisperx-align", "align_fail", mapOf("reason" to "model_not_installed"))
-      return ""
+      return AlignOutcome(lrc = "")
     }
 
     val melonLines =
@@ -46,15 +51,17 @@ object WhisperXAlignEngine {
             .toList()
     if (melonLines.isEmpty()) {
       NrmStageLog.log("whisperx-align", "align_fail", mapOf("reason" to "empty_lyrics"))
-      return ""
+      return AlignOutcome(lrc = "")
     }
 
     val parent = audioFile.parentFile ?: context.cacheDir
     val wav = File(parent, "nrm-whisperx-${System.currentTimeMillis()}.wav")
+    var durationMs = 180_000L
 
     try {
+      NrmMemoryGuard.prepareForHeavyInference(context, "whisperx-align")
       convertTo16kMonoWav(context, audioFile, wav)
-      val durationMs = wavDurationMs(wav)
+      durationMs = wavDurationMs(wav)
       NrmStageLog.log(
           "whisperx-align",
           "scaffold_wav_ready",
@@ -64,6 +71,7 @@ object WhisperXAlignEngine {
       val alignT0 = SystemClock.elapsedRealtime()
       val ctc =
           Wav2Vec2CtcForcedAligner.alignMelonLinesToLrc(
+              context,
               alignDir,
               wav,
               melonLines,
@@ -71,9 +79,14 @@ object WhisperXAlignEngine {
           )
       val aligned = ctc.lrc
       val alignMs = SystemClock.elapsedRealtime() - alignT0
+      if (ctc.memoryInsufficient) {
+        NrmStageLog.log("whisperx-align", "align_fail", mapOf("reason" to "low_memory"))
+        NrmFileLogger.warn("whisperx-align", "align_fail_low_memory mode=$mode")
+        return AlignOutcome(lrc = "", memoryInsufficient = true)
+      }
       if (aligned.isBlank()) {
         NrmStageLog.log("whisperx-align", "align_fail", mapOf("reason" to "empty_lrc"))
-        return ""
+        return AlignOutcome(lrc = "")
       }
 
       NrmStageLog.log(
@@ -92,18 +105,18 @@ object WhisperXAlignEngine {
           "whisperx-align",
           "align_ok mode=$mode engine=ctc_fa lrcLen=${aligned.length} lines=${melonLines.size}",
       )
-      return aligned
-    } catch (e: Exception) {
+      return AlignOutcome(lrc = aligned)
+    } catch (t: Throwable) {
       NrmStageLog.log(
           "whisperx-align",
           "align_fail",
           mapOf(
               "elapsedMs" to (SystemClock.elapsedRealtime() - stageT0),
-              "err" to (e.message ?: e.toString()).take(200),
+              "err" to (t.message ?: t.toString()).take(200),
           ),
       )
-      NrmFileLogger.error("whisperx-align", "align_fail mode=$mode", e)
-      throw e
+      NrmFileLogger.error("whisperx-align", "align_fail mode=$mode", t)
+      return AlignOutcome(lrc = "")
     } finally {
       wav.delete()
     }

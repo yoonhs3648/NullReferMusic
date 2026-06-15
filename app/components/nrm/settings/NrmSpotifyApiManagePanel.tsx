@@ -546,6 +546,8 @@ export function NrmSpotifyApiManagePanel({
 
   const handleChartsLogout = async () => {
     if (!chartsWebLoginActive) return;
+    const ok = await confirmUser('Spotify Charts API의 계정을 로그아웃할까요?');
+    if (!ok) return;
     setChartsLoginModalOpen(false);
     await logoutSpotifyChartsWebLogin();
     setChartsBearerToken('');
