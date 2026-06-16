@@ -1,8 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
-import { stripNrmLrcModeLine, parseLyricsModeFromLrcText } from '@/lib/nrmLrcUiMode';
-import { lyricsUiModeToEmbeddedToken } from '@/lib/nrmEmbeddedLyricsMode';
+import { stripNrmLrcModeLine } from '@/lib/nrmLrcUiMode';
 
 type NativeAudioMetadata = {
   applyMetadata: (
@@ -119,6 +118,7 @@ export async function embedSyncedLyricsIntoAudio(
   audioUri: string,
   lrcContent: string,
   extension: string,
+  lyricsMode?: string,
 ): Promise<void> {
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
@@ -127,11 +127,9 @@ export async function embedSyncedLyricsIntoAudio(
   }
   const uri = audioUri.trim();
   if (!uri || !lrcContent.trim()) return;
-  const parsedMode = parseLyricsModeFromLrcText(lrcContent);
-  const modeToken =
-    parsedMode && parsedMode !== 'unset'
-      ? lyricsUiModeToEmbeddedToken(parsedMode)
-      : '';
+  const { parseLyricsModeFromLrcText } = await import('@/lib/nrmLrcUiMode');
+  const modeFromHeader = parseLyricsModeFromLrcText(lrcContent);
+  const modeToken = (lyricsMode ?? modeFromHeader ?? '').trim();
   const playerLrc = stripNrmLrcModeLine(lrcContent);
   if (!playerLrc.trim() && !modeToken) return;
   await mod.embedSyncedLyrics(uri, playerLrc, extension.replace(/^\./, ''), modeToken);

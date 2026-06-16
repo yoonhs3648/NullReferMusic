@@ -86,14 +86,30 @@ object LibreTranslatePackageDownloader {
   }
 
   fun isArgosPackageRegistered(context: Context, packageId: String): Boolean {
-    if (argosInstalled[packageId] == true) return true
     val entry = LibreTranslatePackageCatalog.entryFor(packageId) ?: return false
-    if (!isPackageFileReady(context, entry)) return false
-    val ok = ArgosPackageInstaller.installFromArgosmodel(context, packageFile(context, entry).absolutePath)
-    if (ok) {
-      argosInstalled[packageId] = true
+    if (!isPackageFileReady(context, entry)) {
+      argosInstalled.remove(packageId)
+      return false
     }
-    return ok
+    if (!ArgosPackageInstaller.isEnKoReady(context)) {
+      val ok =
+          ArgosPackageInstaller.installFromArgosmodel(
+              context,
+              packageFile(context, entry).absolutePath,
+          )
+      if (!ok) {
+        argosInstalled.remove(packageId)
+        return false
+      }
+      ArgosBridge.invalidateSmokeTest()
+    }
+    val ready = ArgosBridge.isOfflineReady(context)
+    if (ready) {
+      argosInstalled[packageId] = true
+    } else {
+      argosInstalled.remove(packageId)
+    }
+    return ready
   }
 
   fun progressFor(packageId: String): Int = progressByPackage[packageId] ?: -1
@@ -185,7 +201,16 @@ object LibreTranslatePackageDownloader {
               emitProgress(entry.id, 100, "installing")
               ok = ArgosPackageInstaller.installFromArgosmodel(appContext, destFile.absolutePath)
               if (ok) {
-                argosInstalled[packageId] = true
+                ArgosBridge.invalidateSmokeTest()
+                ok = ArgosBridge.isOfflineReady(appContext)
+                if (ok) {
+                  argosInstalled[packageId] = true
+                } else {
+                  NrmFileLogger.warn(
+                      "libretranslate",
+                      "다운로드·설치 후 self-test 실패 — APK 네이티브 번역 CLI 확인 필요",
+                  )
+                }
               } else {
                 NrmFileLogger.warn(
                     "libretranslate",

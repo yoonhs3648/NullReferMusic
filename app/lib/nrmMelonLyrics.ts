@@ -89,27 +89,72 @@ export function extractPlainLyricsFromLrcText(lrcText: string): string {
   return lines.length >= 2 ? plain : '';
 }
 
-/** 저장된 website(멜론 곡 URL)에서 songId 추출 */
+/** 트랙 편집·저장 — 캐시된 plain 또는 website 재조회로 멜론 원문 가사 확보 */
+export async function resolveMelonPlainLyricsForEdit(
+  website: string | undefined,
+  cachedPlain?: string,
+): Promise<string> {
+  const cached = (cachedPlain ?? '').trim();
+  if (isMelonPlainLyricsText(cached)) return cached;
+  return fetchMelonPlainLyricsFromWebsite(website);
+}
+
+/** 멜론 곡 상세 URL (website 태그 정규화용) */
+export function buildMelonTrackWebsite(songId: string): string {
+  const id = songId.trim();
+  return id ? `https://www.melon.com/song/detail.htm?songId=${id}` : '';
+}
+
+/** 저장된 website·URL에서 멜론 songId 추출 */
 export function extractMelonSongIdFromUrl(url: string | undefined): string | null {
   const u = (url ?? '').trim();
   if (!u) return null;
-  const m = u.match(/[?&]songId=(\d+)/i);
-  return m?.[1] ?? null;
+  const query = u.match(/[?&]songId=(\d+)/i);
+  if (query?.[1]) return query[1];
+  const path = u.match(/\/song\/[^/?#]*?(\d{5,})/i);
+  return path?.[1] ?? null;
+}
+
+/** songId가 있으면 표준 멜론 곡 URL로 정규화 */
+export function normalizeMelonTrackWebsite(url: string | undefined): string {
+  const songId = extractMelonSongIdFromUrl(url);
+  return songId ? buildMelonTrackWebsite(songId) : (url ?? '').trim();
+}
+
+/** 트랙 메타 website가 멜론 곡인지 (가사 UI 멜론/일반 패밀리 구분) */
+export function isMelonTrackWebsite(website: string | undefined): boolean {
+  return !!extractMelonSongIdFromUrl(website);
 }
 
 /**
- * LRC 모드 태그가 없는 구 트랙: 멜론 URL + plain 가사가 있으면 Whisper 모드를 멜론 모드로 승격.
- * (차트·멜론 다운로드 후 LRC만 남은 경우 UI 복원용)
+ * 멜론 URL 여부에 따라 Whisper↔멜론 가사 패밀리를 정규화.
+ * LRC 본문·sentinel은 configured/translation만 담고, 멜론 여부는 website로 구분한다.
+ */
+export function applyWebsiteLyricsFamily(
+  mode: NrmLyricsUiMode,
+  website: string | undefined,
+): NrmLyricsUiMode {
+  if (mode === 'unset') return 'unset';
+  if (!isMelonTrackWebsite(website)) return mode;
+  if (mode === 'configured') return 'melon';
+  if (mode === 'translation') return 'melon_translation';
+  return mode;
+}
+
+/**
+ * 구 트랙 호환: Whisper 패밀리 모드를 멜론 website면 멜론 패밀리로 승격.
  */
 export function inferMelonLyricsUiModeFromContext(
   detected: NrmLyricsUiMode,
   melonPlain: string,
   website: string | undefined,
 ): NrmLyricsUiMode {
-  if (!melonPlain.trim() || !extractMelonSongIdFromUrl(website)) return detected;
-  if (detected === 'translation') return 'melon_translation';
-  if (detected === 'configured') return 'melon';
-  return detected;
+  const fromWebsite = applyWebsiteLyricsFamily(detected, website);
+  if (fromWebsite !== 'unset') return fromWebsite;
+  if (isMelonTrackWebsite(website) && isMelonPlainLyricsText(melonPlain)) {
+    return 'melon';
+  }
+  return 'unset';
 }
 
 /** 트랙 편집 — 메타 website로 멜론 원문 가사 재조회 */

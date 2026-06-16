@@ -48,5 +48,6 @@ library/libretranslate/_bin/
 app/android/app/src/main/assets/whisper/ggml-*.bin
 
 app/android/app/src/main/assets/libretranslate/nrm-argos-translate
-app/android/app/src/main/assets/libretranslate/*.so
+app/android/app/src/main/assets/libretranslate/**/*.so
+app/android/app/src/main/assets/libretranslate/**/nrm-argos-translate
 app/android/.gradle-home/

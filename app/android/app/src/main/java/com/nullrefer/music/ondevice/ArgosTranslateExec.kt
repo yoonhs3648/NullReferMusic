@@ -76,6 +76,57 @@ object ArgosTranslateExec {
   }
 
   private fun runCli(paths: ArgosTranslateBootstrap.ArgosTranslatePaths, cmd: List<String>): String? {
+    val result = runCliProcess(paths, cmd) ?: return null
+    if (result.exitCode != 0) {
+      NrmFileLogger.warn(
+          "libretranslate",
+          "CLI exit=${result.exitCode} stderr=${result.stderr.take(400)}",
+      )
+      return null
+    }
+    return result.stdout
+  }
+
+  /** 모델·CLI가 실제로 동작하는지 "Hello" 번역으로 검증 */
+  fun runSelfTest(context: Context, modelDir: File): Boolean {
+    val paths = ArgosTranslateBootstrap.ensure(context)
+    if (!paths.isReady()) {
+      NrmFileLogger.warn("libretranslate", "self_test CLI 없음 abi=${paths.abi}")
+      return false
+    }
+    val cliFile = File(paths.cliPath)
+    val cmd =
+        NrmExecutableFile.buildExecArgv(
+            cliFile,
+            listOf(
+                "--model-dir",
+                modelDir.absolutePath,
+                "--self-test",
+            ),
+        )
+    val result = runCliProcess(paths, cmd) ?: return false
+    val ok = result.exitCode == 0 && result.stdout.trim() == "OK"
+    if (!ok) {
+      NrmFileLogger.warn(
+          "libretranslate",
+          "self_test_failed exit=${result.exitCode} stdout=${result.stdout.take(80)} stderr=${result.stderr.take(400)} abi=${paths.abi}",
+      )
+    } else {
+      NrmFileLogger.log("libretranslate", "self_test_ok abi=${paths.abi}")
+    }
+    return ok
+  }
+
+  private data class CliResult(
+      val exitCode: Int,
+      val stdout: String,
+      val stderr: String,
+  )
+
+  private fun runCliProcess(
+      paths: ArgosTranslateBootstrap.ArgosTranslatePaths,
+      cmd: List<String>,
+  ): CliResult? {
     return try {
       val env = HashMap(System.getenv())
       if (paths.libDir.isNotBlank()) {
@@ -92,14 +143,7 @@ object ArgosTranslateExec {
       val stdout = proc.inputStream.bufferedReader().readText().trim()
       val stderr = proc.errorStream.bufferedReader().readText().trim()
       val code = proc.waitFor()
-      if (code != 0) {
-        NrmFileLogger.warn(
-            "libretranslate",
-            "CLI exit=$code stderr=${stderr.take(400)}",
-        )
-        return null
-      }
-      stdout
+      CliResult(exitCode = code, stdout = stdout, stderr = stderr)
     } catch (e: Exception) {
       NrmFileLogger.error("libretranslate", "CLI 실행 실패", e)
       null

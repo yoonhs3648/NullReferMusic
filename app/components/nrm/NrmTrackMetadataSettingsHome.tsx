@@ -43,8 +43,9 @@ import {
 import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 import {
   extractPlainLyricsFromLrcText,
-  fetchMelonPlainLyricsFromWebsite,
   isMelonPlainLyricsText,
+  normalizeMelonTrackWebsite,
+  resolveMelonPlainLyricsForEdit,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
@@ -256,6 +257,7 @@ export function NrmTrackMetadataSettingsHome({
     setInitialLyricsMode('unset');
     try {
       const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
+      const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
       let lrcText = '';
       if (track.lrcUri) {
         try {
@@ -267,12 +269,6 @@ export function NrmTrackMetadataSettingsHome({
         }
       }
 
-      const lyricsMode = resolveStoredLyricsModeFromFlags({
-        sidecarLrcText: lrcText,
-        metadataLyrics: meta.lyrics,
-        embeddedLyricsMode: meta.nrmLyricsMode,
-      });
-
       let melonPlain = isMelonPlainLyricsText(meta.lyrics)
         ? (meta.lyrics ?? '').trim()
         : (meta.melonLyricsPlain ?? '').trim();
@@ -280,8 +276,16 @@ export function NrmTrackMetadataSettingsHome({
         melonPlain = extractPlainLyricsFromLrcText(lrcText);
       }
       if (!melonPlain) {
-        melonPlain = await fetchMelonPlainLyricsFromWebsite(meta.website);
+        melonPlain = await resolveMelonPlainLyricsForEdit(normalizedWebsite);
       }
+
+      const lyricsMode = resolveStoredLyricsModeFromFlags({
+        sidecarLrcText: lrcText,
+        metadataLyrics: meta.lyrics,
+        embeddedLyricsMode: meta.nrmLyricsMode,
+        website: normalizedWebsite,
+        melonPlainLyrics: melonPlain,
+      });
 
       setInitialLyricsMode(lyricsMode);
       const { artist, title } = resolveEditableArtistTitle(
@@ -294,6 +298,7 @@ export function NrmTrackMetadataSettingsHome({
       const { artist: _a, title: _t, ...rest } = meta;
       setInitialFields({
         ...rest,
+        website: normalizedWebsite || rest.website,
         lyrics: lyricsUiModeToMetadataField(lyricsMode),
         melonLyricsPlain: melonPlain || undefined,
       });

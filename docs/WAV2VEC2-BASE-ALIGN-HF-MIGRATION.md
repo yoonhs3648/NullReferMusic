@@ -45,8 +45,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Publish-Wav2Vec2BaseOnnx.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Wav2Vec2BaseAlignUrl-HF.ps1
 ```
 
-업로드 대상 저장소: **`FinDIT-Studio/wav2vec2-base-korean-onnx`**  
-공개 URL: `https://huggingface.co/FinDIT-Studio/wav2vec2-base-korean-onnx/resolve/main/model.onnx`
+업로드 대상 저장소:
+- **`FinDIT-Studio/wav2vec2-base-korean-onnx`** (한국어 팩 ONNX)
+- **`FinDIT-Studio/wav2vec2-base-english-onnx`** (영어 팩 ONNX)
+
+공개 URL:
+- `https://huggingface.co/FinDIT-Studio/wav2vec2-base-korean-onnx/resolve/main/model.onnx`
+- `https://huggingface.co/FinDIT-Studio/wav2vec2-base-english-onnx/resolve/main/model.onnx`
+
+```powershell
+# 한국어 팩
+powershell -ExecutionPolicy Bypass -File .\scripts\Publish-Wav2Vec2BaseOnnx.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Wav2Vec2BaseAlignUrl-HF.ps1
+
+# 영어 팩
+powershell -ExecutionPolicy Bypass -File .\scripts\Publish-Wav2Vec2EnOnnx.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Wav2Vec2EnAlignUrl-HF.ps1
+```
 
 `vocab.json` / `config.json` / `preprocessor_config.json`은 계속 **Kkonjeong/wav2vec2-base-korean** HF에서 받음 (변경 없음).
 
@@ -57,15 +72,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Wav2Vec2BaseAlignUrl-H
 **`app/lib/nrmAlignModelCatalog.ts`**
 
 ```typescript
-const BASE_ONNX =
+const BASE_KO_ONNX =
   'https://huggingface.co/FinDIT-Studio/wav2vec2-base-korean-onnx/resolve/main/';
+const BASE_EN_ONNX =
+  'https://huggingface.co/FinDIT-Studio/wav2vec2-base-english-onnx/resolve/main/';
 ```
 
 **`app/android/app/src/main/java/com/nullrefer/music/ondevice/AlignModelCatalog.kt`**
 
 ```kotlin
-private const val BASE_ONNX =
+private const val BASE_KO_ONNX =
     "https://huggingface.co/FinDIT-Studio/wav2vec2-base-korean-onnx/resolve/main/"
+private const val BASE_EN_ONNX =
+    "https://huggingface.co/FinDIT-Studio/wav2vec2-base-english-onnx/resolve/main/"
 ```
 
 ### 3-3. 검증 스크립트 기본 URL (선택·권장)

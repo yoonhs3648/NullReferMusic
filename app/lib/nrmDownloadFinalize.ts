@@ -28,7 +28,6 @@ import {
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
-import { withNrmLyricsModeHeader } from '@/lib/nrmLrcUiMode';
 import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 import {
   transcribeWhisperLrc,
@@ -300,9 +299,16 @@ async function finalizeNativeParallel(
 
   const whisperDone = whisperRef.result;
   const lrcToPersist = whisperDone?.lrcFull?.trim() ?? '';
+  const persistedLyricsMode =
+    lyricsModeActive && (whisperMode ?? melonMode)
+      ? (whisperMode ?? melonMode!)
+      : null;
   const lrcToWrite =
-    lyricsModeActive && lrcToPersist
-      ? withNrmLyricsModeHeader(lrcToPersist, lyricsModeActive)
+    lrcToPersist && persistedLyricsMode
+      ? (await import('@/lib/nrmLrcUiMode')).withNrmLyricsModeHeader(
+          lrcToPersist,
+          persistedLyricsMode,
+        )
       : lrcToPersist;
   // 번역 실패 시에도 폴백 원본 LRC가 있으면 저장한다
   const canPersistLrc = lrcToWrite.length > 0;
@@ -327,6 +333,7 @@ async function finalizeNativeParallel(
           audioSaved.location.audioUri,
           lrcToWrite,
           audioExt,
+          persistedLyricsMode ?? undefined,
         );
         whisperRef.result = { ...whisperDone, lyricsEmbedded: true };
         logNrmDev('download.lrc', {

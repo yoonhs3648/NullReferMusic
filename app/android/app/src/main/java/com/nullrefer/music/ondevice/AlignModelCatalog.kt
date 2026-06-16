@@ -38,6 +38,7 @@ object AlignModelCatalog {
 
   private const val BASE_KOREAN =
       "https://huggingface.co/Kkonjeong/wav2vec2-base-korean/resolve/main/"
+  /** HF FinDIT-Studio 미업로드 — GitHub Release(공개·토큰 불필요) */
   private const val BASE_KO_ONNX =
       "https://github.com/yoonhs3648/NullReferMusic/releases/download/align-wav2vec2-base-v1/"
 
@@ -54,10 +55,16 @@ object AlignModelCatalog {
               label = "wav2vec2-base (Korean)",
               engine = EngineKind.CTC_ONNX,
               onnxReserveMb = 220L,
+              bundledAssetPaths =
+                  listOf(
+                      "nrm-align/wav2vec2-ko/vocab.json",
+                      "nrm-align/wav2vec2-ko/config.json",
+                      "nrm-align/wav2vec2-ko/preprocessor_config.json",
+                  ),
               assets =
                   listOf(
-                      AssetSpec("vocab.json", BASE_KOREAN + "vocab.json", 500L),
-                      AssetSpec("config.json", BASE_KOREAN + "config.json", 500L),
+                      AssetSpec("vocab.json", BASE_KOREAN + "vocab.json", 600L),
+                      AssetSpec("config.json", BASE_KOREAN + "config.json", 2_000L),
                       AssetSpec(
                           "preprocessor_config.json",
                           BASE_KOREAN + "preprocessor_config.json",
@@ -72,10 +79,16 @@ object AlignModelCatalog {
               label = "wav2vec2-base (English)",
               engine = EngineKind.CTC_ONNX,
               onnxReserveMb = 220L,
+              bundledAssetPaths =
+                  listOf(
+                      "nrm-align/wav2vec2-en/vocab.json",
+                      "nrm-align/wav2vec2-en/config.json",
+                      "nrm-align/wav2vec2-en/preprocessor_config.json",
+                  ),
               assets =
                   listOf(
-                      AssetSpec("vocab.json", BASE_ENGLISH + "vocab.json", 500L),
-                      AssetSpec("config.json", BASE_ENGLISH + "config.json", 500L),
+                      AssetSpec("vocab.json", BASE_ENGLISH + "vocab.json", 250L),
+                      AssetSpec("config.json", BASE_ENGLISH + "config.json", 1_000L),
                       AssetSpec(
                           "preprocessor_config.json",
                           BASE_ENGLISH + "preprocessor_config.json",

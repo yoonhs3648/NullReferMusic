@@ -126,17 +126,41 @@ assert.equal(
   }),
   'configured',
 );
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    sidecarLrcText: singleLines,
+    website: 'https://www.melon.com/song/detail.htm?songId=123',
+    melonPlainLyrics: '첫 줄\n둘째 줄',
+  }),
+  'melon',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    sidecarLrcText: dualLineLrc(DUPLICATE_TS_TRANSLATION_THRESHOLD),
+    website: 'https://www.melon.com/song/detail.htm?songId=123',
+    melonPlainLyrics: '첫 줄\n둘째 줄',
+  }),
+  'melon_translation',
+);
 
 assert.equal(
   inferMelonLyricsUiModeFromContext(
     'translation',
-    '첫 줄\n둘째 줄',
+    '',
     'https://www.melon.com/song/detail.htm?songId=123',
   ),
   'melon_translation',
 );
 assert.equal(
-  inferMelonLyricsUiModeFromContext('configured', '가사\n두번째', 'https://example.com'),
+  inferMelonLyricsUiModeFromContext(
+    'unset',
+    '첫 줄\n둘째 줄',
+    'https://www.melon.com/song/detail.htm?songId=123',
+  ),
+  'melon',
+);
+assert.equal(
+  inferMelonLyricsUiModeFromContext('configured', '', 'https://example.com'),
   'configured',
 );
 

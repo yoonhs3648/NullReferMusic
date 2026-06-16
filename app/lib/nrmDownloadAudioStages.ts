@@ -169,8 +169,10 @@ export async function postProcessDownloadedAudio(
       whisperResult = await transcribeWhisperLrc(uri, whisperMode, extension);
       if (whisperResult.lrcFull?.trim()) {
         try {
+          const { withNrmLyricsModeHeader } = await import('@/lib/nrmLrcUiMode');
           const { embedSyncedLyricsIntoAudio } = await import('@/lib/nrmApplyAudioMetadata.native');
-          await embedSyncedLyricsIntoAudio(uri, whisperResult.lrcFull, extension);
+          const lrcTagged = withNrmLyricsModeHeader(whisperResult.lrcFull.trim(), whisperMode);
+          await embedSyncedLyricsIntoAudio(uri, lrcTagged, extension, whisperMode);
           whisperResult = { ...whisperResult, lyricsEmbedded: true };
         } catch (embedErr) {
           logNrmRunError('download.lrc', embedErr, { event: 'embed_lyrics_fail_sequential', extension });

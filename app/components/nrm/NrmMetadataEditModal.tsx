@@ -31,10 +31,11 @@ import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 import {
   buildLyricsSentinel,
   extractMelonSongIdFromUrl,
-  fetchMelonPlainLyricsFromWebsite,
   isMelonLyricsUiMode,
   isMelonPlainLyricsText,
+  normalizeMelonTrackWebsite,
   parseLyricsUiMode,
+  resolveMelonPlainLyricsForEdit,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 import { isWhisperModelInstalled } from '@/lib/nrmWhisperModelNative';
@@ -415,9 +416,10 @@ export function NrmMetadataEditModal({
     setComposer(normalizeString(m?.composer));
     const rawLyrics = normalizeString(m?.lyrics);
     const plainFromField = normalizeString(m?.melonLyricsPlain);
-    const site = normalizeString(m?.website);
+    const site = normalizeMelonTrackWebsite(normalizeString(m?.website));
     const initialPlain = isMelonPlainLyricsText(rawLyrics) ? rawLyrics : plainFromField;
     setMelonPlainLyrics(initialPlain);
+    setWebsite(site);
     const storedMode =
       purpose === 'trackEdit'
         ? (initialStoredLyricsMode ?? 'unset')
@@ -432,7 +434,6 @@ export function NrmMetadataEditModal({
     }
     setBpm(normalizeString(m?.bpm));
     setCopyright(normalizeString(m?.copyright));
-    setWebsite(normalizeString(m?.website));
     setProducer(normalizeString(m?.producer));
     setRemixer(normalizeString(m?.remixer));
     setCoverUrl(normalizeString(m?.coverUrl));
@@ -443,8 +444,8 @@ export function NrmMetadataEditModal({
         : '',
     );
 
-    if (!initialPlain && isMelonLyricsUiMode(storedMode) && extractMelonSongIdFromUrl(site)) {
-      void fetchMelonPlainLyricsFromWebsite(site).then((plain) => {
+    if (extractMelonSongIdFromUrl(site)) {
+      void resolveMelonPlainLyricsForEdit(site, initialPlain).then((plain) => {
         if (!plain) return;
         setMelonPlainLyrics(plain);
       });
@@ -502,9 +503,19 @@ export function NrmMetadataEditModal({
   const confirmLabel = purpose === 'trackEdit' ? '저장' : '다운로드';
 
   const submitWithMetadata = useCallback(
-    (melonAlignLang?: MelonAlignLyricsLanguage) => {
+    async (melonAlignLang?: MelonAlignLyricsLanguage) => {
       if (!item) return;
-      const lyricsPayload = resolveLyricsForSubmit();
+      const site = normalizeMelonTrackWebsite(website);
+      let melonPlainForSubmit = melonPlainLyrics.trim();
+      if (isMelonLyricsUiMode(lyricsMode)) {
+        melonPlainForSubmit = (await resolveMelonPlainLyricsForEdit(site, melonPlainForSubmit)).trim();
+        if (!melonPlainForSubmit) {
+          const { notifyUser } = await import('@/lib/nrmUserNotify');
+          notifyUser('멜론 가사를 가져올 수 없습니다.');
+          return;
+        }
+      }
+      const lyricsPayload = resolveLyricsForSubmit(melonPlainForSubmit);
       const metadata: NrmAudioFileMetadata = {
         artist: artist.trim(),
         title: title.trim(),
@@ -524,7 +535,7 @@ export function NrmMetadataEditModal({
             : undefined,
         bpm: bpm.trim() || undefined,
         copyright: copyright.trim() || undefined,
-        website: website.trim() || undefined,
+        website: site || undefined,
         producer: producer.trim() || undefined,
         remixer: remixer.trim() || undefined,
       };
@@ -547,6 +558,7 @@ export function NrmMetadataEditModal({
       fileNameFormat,
       item,
       lyricsMode,
+      melonPlainLyrics,
       onConfirm,
       producer,
       purpose,
@@ -570,13 +582,13 @@ export function NrmMetadataEditModal({
             resolve: (lang) => {
               setLyricsLangPick(null);
               if (!lang) return;
-              submitWithMetadata(lang);
+              void submitWithMetadata(lang);
             },
           });
           return;
         }
       }
-      submitWithMetadata();
+      void submitWithMetadata();
     })();
   }, [canSubmitWithConflict, item, lyricsMode, purpose, submitWithMetadata]);
 
@@ -637,6 +649,17 @@ export function NrmMetadataEditModal({
     purpose !== 'trackEdit' &&
     metadataSource === 'melon' &&
     melonPlainLyrics.trim().length > 0;
+
+  const isMelonContext = useMemo(() => {
+    if (purpose === 'download') return metadataSource === 'melon';
+    return !!extractMelonSongIdFromUrl(website);
+  }, [metadataSource, purpose, website]);
+
+  const melonLyricsReady = useMemo(() => {
+    if (!isMelonContext) return false;
+    if (purpose === 'download') return downloadMelonReady;
+    return melonPlainLyrics.trim().length > 0;
+  }, [downloadMelonReady, isMelonContext, melonPlainLyrics, purpose]);
 
   useEffect(() => {
     if (!visible || lyricsUnsupported) {
@@ -781,44 +804,51 @@ export function NrmMetadataEditModal({
           return {
             ...opt,
             disabled:
-              purpose === 'trackEdit'
+              isMelonContext ||
+              (purpose === 'trackEdit'
                 ? (whisperLyricsLocked || !translationOptionEnabled) && !storedWhisperFamily
-                : whisperLyricsLocked || !translationOptionEnabled,
+                : whisperLyricsLocked || !translationOptionEnabled),
           };
         }
         if (opt.value === 'melon_translation') {
           return {
             ...opt,
             disabled:
-              purpose === 'trackEdit'
+              !isMelonContext ||
+              !melonLyricsReady ||
+              (purpose === 'trackEdit'
                 ? (melonLyricsLocked || !translationOptionEnabled) && !storedMelonFamily
-                : melonLyricsLocked || !downloadMelonReady || !translationOptionEnabled,
+                : melonLyricsLocked || !translationOptionEnabled),
           };
         }
         if (opt.value === 'configured') {
           return {
             ...opt,
             disabled:
-              purpose === 'trackEdit'
+              isMelonContext ||
+              (purpose === 'trackEdit'
                 ? whisperLyricsLocked && !storedWhisperFamily
-                : whisperLyricsLocked,
+                : whisperLyricsLocked),
           };
         }
         if (opt.value === 'melon') {
           return {
             ...opt,
             disabled:
-              purpose === 'trackEdit'
+              !isMelonContext ||
+              !melonLyricsReady ||
+              (purpose === 'trackEdit'
                 ? melonLyricsLocked && !storedMelonFamily
-                : melonLyricsLocked || !downloadMelonReady,
+                : melonLyricsLocked),
           };
         }
         return { ...opt, disabled: false as const };
       }),
     [
-      downloadMelonReady,
+      isMelonContext,
       lyricsModeOrder,
       melonLyricsLocked,
+      melonLyricsReady,
       purpose,
       storedMelonFamily,
       storedWhisperFamily,
@@ -827,30 +857,32 @@ export function NrmMetadataEditModal({
     ],
   );
 
-  // 다운로드 팝업: 기본값·메타 태그와 무관하게 비활성 모드가 선택돼 있으면 설정안함
+  // 비활성 모드가 선택돼 있으면 설정안함
   useEffect(() => {
-    if (purpose !== 'download' || !visible || lyricsMode === 'unset') return;
+    if (!visible || lyricsMode === 'unset') return;
     const selected = lyricsOptions.find((o) => o.value === lyricsMode);
     if (selected?.disabled) {
       setLyricsMode('unset');
     }
-  }, [purpose, visible, lyricsMode, lyricsOptions]);
+  }, [visible, lyricsMode, lyricsOptions]);
 
-  function resolveLyricsForSubmit(): Pick<NrmAudioFileMetadata, 'lyrics' | 'melonLyricsPlain'> {
+  function resolveLyricsForSubmit(
+    plainOverride?: string,
+  ): Pick<NrmAudioFileMetadata, 'lyrics' | 'melonLyricsPlain'> {
     if (lyricsUnsupported) return {};
     if (lyricsMode === 'unset') return {};
     const selected = lyricsOptions.find((o) => o.value === lyricsMode);
-    if (purpose === 'download' && selected?.disabled) return {};
+    if (selected?.disabled) return {};
     if (isMelonLyricsUiMode(lyricsMode)) {
       const melonBlocked =
         melonLyricsLocked &&
         !(purpose === 'trackEdit' && isMelonLyricsUiMode(storedLyricsMode));
       if (melonBlocked) return {};
-      const plain = melonPlainLyrics.trim();
-      if (!plain && purpose !== 'trackEdit') return {};
+      const plain = (plainOverride ?? melonPlainLyrics).trim();
+      if (!plain) return {};
       return {
         lyrics: buildLyricsSentinel(lyricsMode),
-        melonLyricsPlain: plain || undefined,
+        melonLyricsPlain: plain,
       };
     }
     if (whisperLyricsLocked) return {};

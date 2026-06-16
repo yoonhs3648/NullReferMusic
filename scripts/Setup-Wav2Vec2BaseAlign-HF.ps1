@@ -16,3 +16,4 @@ param(
 
 $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'Publish-Wav2Vec2BaseOnnx.ps1') @PSBoundParameters
+& (Join-Path $PSScriptRoot 'Publish-Wav2Vec2EnOnnx.ps1') @PSBoundParameters

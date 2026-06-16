@@ -5,13 +5,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$assetsCli = Join-Path $repoRoot "app/android/app/src/main/assets/libretranslate/nrm-argos-translate"
-$libBin = Join-Path $repoRoot "library/libretranslate/_bin/android-arm64-v8a/bin/nrm-argos-translate"
+$assetsRoot = Join-Path $repoRoot "app/android/app/src/main/assets/libretranslate"
+$libBinRoot = Join-Path $repoRoot "library/libretranslate/_bin"
 $cmakeRoot = Join-Path $repoRoot "library/libretranslate"
 $vendorRoot = Join-Path $repoRoot "library/libretranslate/_vendor"
 $ct2Src = Join-Path $vendorRoot "CTranslate2"
 $spmSrc = Join-Path $vendorRoot "sentencepiece"
 $minBytes = 200000
+$abis = @("arm64-v8a", "x86_64")
 
 function Resolve-AndroidSdk {
     if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) { return $env:ANDROID_HOME }
@@ -70,18 +71,122 @@ function Ensure-GitCheckout {
     }
 }
 
-if ((Test-Path $assetsCli) -and -not $Force) {
-    $len = (Get-Item $assetsCli).Length
-    if ($len -ge $minBytes) {
-        Write-Host "[argos-android] OK assets nrm-argos-translate ($len bytes)"
-        exit 0
+function Copy-OmpForAbi {
+    param(
+        [string]$Ndk,
+        [string]$Abi,
+        [string]$DestDir
+    )
+    $clangRoot = Join-Path $Ndk "toolchains/llvm/prebuilt/windows-x86_64/lib/clang"
+    if (-not (Test-Path $clangRoot)) { return }
+    $arch = if ($Abi -eq "x86_64") { "x86_64" } else { "aarch64" }
+    $ompCandidates = @()
+    Get-ChildItem $clangRoot -Directory | ForEach-Object {
+        $omp = Join-Path $_.FullName "lib/linux/$arch/libomp.so"
+        if (Test-Path $omp) { $ompCandidates += Get-Item $omp }
     }
+    if ($ompCandidates.Count -gt 0) {
+        $omp = $ompCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        Copy-Item $omp.FullName (Join-Path $DestDir "libomp.so") -Force
+        Write-Host "[argos-android] copied libomp.so ($Abi)"
+    }
+}
+
+function Build-Abi {
+    param(
+        [string]$Abi,
+        [string]$Ndk,
+        [string]$Cmake,
+        [string]$Ninja,
+        [string]$Toolchain
+    )
+    $buildDir = Join-Path $vendorRoot "build-android-$Abi"
+    if ($Force -and (Test-Path $buildDir)) {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+
+    Write-Host "[argos-android] cmake configure ($Abi)..."
+    & $Cmake -G Ninja -S $cmakeRoot -B $buildDir `
+        "-DCMAKE_TOOLCHAIN_FILE=$Toolchain" `
+        "-DCMAKE_MAKE_PROGRAM=$Ninja" `
+        "-DANDROID_ABI=$Abi" `
+        -DANDROID_PLATFORM=android-24 `
+        -DCMAKE_BUILD_TYPE=Release `
+        "-DCT2_SRC_DIR=$($ct2Src -replace '\\','/')" `
+        "-DSPM_SRC_DIR=$($spmSrc -replace '\\','/')" `
+        -DBUILD_SHARED_LIBS=ON `
+        -DCT2_BUILD_CLI=OFF `
+        -DCT2_BUILD_TESTS=OFF `
+        -DWITH_DNNL=OFF `
+        -DWITH_MKL=OFF `
+        -DENABLE_GPU=OFF `
+        -DOPENMP_RUNTIME=COMP
+
+    Write-Host "[argos-android] build ($Abi)..."
+    & $Cmake --build $buildDir --target nrm-argos-translate -j 8
+
+    $built = Get-ChildItem $buildDir -Recurse -File -Filter "nrm-argos-translate" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq "" } |
+        Select-Object -First 1
+    if (-not $built) {
+        throw "nrm-argos-translate binary not found under $buildDir"
+    }
+    if ($built.Length -lt $minBytes) {
+        throw "nrm-argos-translate too small ($($built.Length) bytes) for $Abi"
+    }
+
+    $assetsAbiDir = Join-Path $assetsRoot $Abi
+    $libBinAbiDir = Join-Path $libBinRoot "android-$Abi/bin"
+    New-Item -ItemType Directory -Force -Path $assetsAbiDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $libBinAbiDir | Out-Null
+
+    Copy-Item $built.FullName (Join-Path $assetsAbiDir "nrm-argos-translate") -Force
+    Copy-Item $built.FullName (Join-Path $libBinAbiDir "nrm-argos-translate") -Force
+
+    $soFiles = Get-ChildItem $buildDir -Recurse -File -Filter "*.so" -ErrorAction SilentlyContinue
+    foreach ($so in $soFiles) {
+        Copy-Item $so.FullName (Join-Path $assetsAbiDir $so.Name) -Force
+        Write-Host "[argos-android] copied $($so.Name) ($Abi)"
+    }
+    Copy-OmpForAbi -Ndk $Ndk -Abi $Abi -DestDir $assetsAbiDir
+
+    return $built
+}
+
+$allOk = $true
+foreach ($abi in $abis) {
+    $abiCli = Join-Path $assetsRoot "$abi/nrm-argos-translate"
+    if ((Test-Path $abiCli) -and -not $Force) {
+        $len = (Get-Item $abiCli).Length
+        if ($len -ge $minBytes) {
+            Write-Host "[argos-android] OK assets $abi/nrm-argos-translate ($len bytes)"
+            continue
+        }
+    }
+    $allOk = $false
+}
+
+if ($allOk -and -not $Force) {
+    $legacyCli = Join-Path $assetsRoot "nrm-argos-translate"
+    if (-not (Test-Path $legacyCli)) {
+        Copy-Item (Join-Path $assetsRoot "arm64-v8a/nrm-argos-translate") $legacyCli -Force
+        foreach ($name in @("libctranslate2.so", "libomp.so")) {
+            $src = Join-Path $assetsRoot "arm64-v8a/$name"
+            if (Test-Path $src) {
+                Copy-Item $src (Join-Path $assetsRoot $name) -Force
+            }
+        }
+    }
+    Write-Host "[argos-android] all ABIs present"
+    exit 0
 }
 
 Ensure-GitCheckout -Dir $ct2Src -Repo "https://github.com/OpenNMT/CTranslate2.git" -Tag "v3.24.0" -Submodules @(
     "third_party/cxxopts",
     "third_party/spdlog",
-    "third_party/ruy"
+    "third_party/ruy",
+    "third_party/cpu_features"
 )
 Ensure-GitCheckout -Dir $spmSrc -Repo "https://github.com/google/sentencepiece.git" -Tag "v0.2.0" -Submodules @()
 
@@ -91,74 +196,34 @@ $toolchain = Join-Path $ndk "build/cmake/android.toolchain.cmake"
 if (-not (Test-Path $toolchain)) {
     throw "NDK toolchain missing: $toolchain"
 }
-
-$buildDir = Join-Path $vendorRoot "build-android-arm64"
-if ($Force -and (Test-Path $buildDir)) {
-    Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
-}
-New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
-
 $ninja = Join-Path (Split-Path $cmake -Parent) "ninja.exe"
 if (-not (Test-Path $ninja)) { throw "ninja.exe not found next to cmake: $ninja" }
 
-Write-Host "[argos-android] cmake configure..."
-& $cmake -G Ninja -S $cmakeRoot -B $buildDir `
-    "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
-    "-DCMAKE_MAKE_PROGRAM=$ninja" `
-    -DANDROID_ABI=arm64-v8a `
-    -DANDROID_PLATFORM=android-24 `
-    -DCMAKE_BUILD_TYPE=Release `
-    -DCT2_SRC_DIR="$($ct2Src -replace '\\','/')" `
-    -DSPM_SRC_DIR="$($spmSrc -replace '\\','/')" `
-    -DBUILD_SHARED_LIBS=ON `
-    -DCT2_BUILD_CLI=OFF `
-    -DCT2_BUILD_TESTS=OFF `
-    -DWITH_DNNL=OFF `
-    -DWITH_MKL=OFF `
-    -DENABLE_GPU=OFF `
-    -DOPENMP_RUNTIME=COMP
+New-Item -ItemType Directory -Force -Path $assetsRoot | Out-Null
 
-Write-Host "[argos-android] build..."
-& $cmake --build $buildDir --target nrm-argos-translate -j 8
-
-$built = Get-ChildItem $buildDir -Recurse -File -Filter "nrm-argos-translate" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Extension -eq "" } |
-    Select-Object -First 1
-if (-not $built) {
-    throw "nrm-argos-translate binary not found under $buildDir"
-}
-$lenBuilt = $built.Length
-if ($lenBuilt -lt $minBytes) {
-    throw "nrm-argos-translate too small ($lenBuilt bytes)"
-}
-
-$assetsDir = Split-Path $assetsCli -Parent
-New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
-New-Item -ItemType Directory -Force -Path (Split-Path $libBin -Parent) | Out-Null
-Copy-Item $built.FullName $assetsCli -Force
-Copy-Item $built.FullName $libBin -Force
-
-$soFiles = Get-ChildItem $buildDir -Recurse -File -Filter "*.so" -ErrorAction SilentlyContinue
-foreach ($so in $soFiles) {
-    Copy-Item $so.FullName (Join-Path $assetsDir $so.Name) -Force
-    Write-Host "[argos-android] copied $($so.Name)"
-}
-
-Write-Host "[argos-android] OK -> $assetsCli ($lenBuilt bytes)"
-
-# OpenMP 런타임 (CTranslate2 / whisper 와 동일)
-$sdk = Resolve-AndroidSdk
-$ndk = Resolve-NdkRoot
-$clangRoot = Join-Path $ndk "toolchains/llvm/prebuilt/windows-x86_64/lib/clang"
-$ompCandidates = @()
-if (Test-Path $clangRoot) {
-    Get-ChildItem $clangRoot -Directory | ForEach-Object {
-        $omp = Join-Path $_.FullName "lib/linux/aarch64/libomp.so"
-        if (Test-Path $omp) { $ompCandidates += Get-Item $omp }
+$lastBuilt = $null
+$builtAbis = @()
+foreach ($abi in $abis) {
+    try {
+        $lastBuilt = Build-Abi -Abi $abi -Ndk $ndk -Cmake $cmake -Ninja $ninja -Toolchain $toolchain
+        $builtAbis += $abi
+    } catch {
+        if ($abi -eq "arm64-v8a") { throw }
+        Write-Warning "[argos-android] $abi build failed (emulator optional): $_"
     }
 }
-if ($ompCandidates.Count -gt 0) {
-    $omp = $ompCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    Copy-Item $omp.FullName (Join-Path $assetsDir "libomp.so") -Force
-    Write-Host "[argos-android] copied libomp.so"
+
+if ($builtAbis.Count -eq 0) {
+    throw "No ABI built successfully"
 }
+
+# verify 스크립트·구버전 경로 호환 — arm64를 flat 경로에도 복사
+$arm64Dir = Join-Path $assetsRoot "arm64-v8a"
+foreach ($name in @("nrm-argos-translate", "libctranslate2.so", "libomp.so")) {
+    $src = Join-Path $arm64Dir $name
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $assetsRoot $name) -Force
+    }
+}
+
+Write-Host "[argos-android] OK -> $assetsRoot (arm64-v8a + x86_64, $($lastBuilt.Length) bytes each ABI)"

@@ -80,6 +80,75 @@ static std::string join_null(const std::vector<std::string>& parts) {
   return out;
 }
 
+static const char* compute_type_name(ctranslate2::ComputeType type) {
+  switch (type) {
+    case ctranslate2::ComputeType::FLOAT32:
+      return "float32";
+    case ctranslate2::ComputeType::INT8_FLOAT32:
+      return "int8_float32";
+    case ctranslate2::ComputeType::INT8:
+      return "int8";
+    default:
+      return "default";
+  }
+}
+
+static std::unique_ptr<ctranslate2::Translator> make_translator(const std::string& model_path) {
+#if defined(__ANDROID__)
+  // Android NDK 빌드는 INT8 가속 백엔드가 없다. FLOAT32만 사용한다.
+  const ctranslate2::ComputeType candidates[] = {
+      ctranslate2::ComputeType::FLOAT32,
+  };
+#else
+  const ctranslate2::ComputeType candidates[] = {
+      ctranslate2::ComputeType::FLOAT32,
+      ctranslate2::ComputeType::INT8_FLOAT32,
+      ctranslate2::ComputeType::INT8,
+  };
+#endif
+  for (auto compute_type : candidates) {
+    try {
+      auto translator = std::make_unique<ctranslate2::Translator>(
+          model_path, ctranslate2::Device::CPU, compute_type);
+      std::cerr << "translator init ok compute=" << compute_type_name(compute_type) << "\n";
+      return translator;
+    } catch (const std::exception& e) {
+      std::cerr << "translator init failed (" << compute_type_name(compute_type)
+                << "): " << e.what() << "\n";
+    }
+  }
+  return nullptr;
+}
+
+static std::vector<std::string> translate_with_translator(
+    ctranslate2::Translator& translator,
+    const SpmPair& spm,
+    const std::vector<std::string>& texts) {
+  std::vector<std::string> out;
+  out.reserve(texts.size());
+  for (const std::string& text : texts) {
+    if (text.empty()) {
+      out.push_back("");
+      continue;
+    }
+    std::vector<std::string> source_tokens;
+    spm.source.Encode(text, &source_tokens);
+    if (source_tokens.empty()) {
+      out.push_back("");
+      continue;
+    }
+    const auto results = translator.translate_batch({source_tokens});
+    if (results.empty() || results[0].hypotheses.empty()) {
+      out.push_back("");
+      continue;
+    }
+    std::string line;
+    spm.target.Decode(results[0].hypotheses[0], &line);
+    out.push_back(line);
+  }
+  return out;
+}
+
 static std::string translate_one(const std::string& model_dir, const std::string& text) {
   SpmPair spm;
   if (!load_spm(model_dir, spm)) {
@@ -88,18 +157,10 @@ static std::string translate_one(const std::string& model_dir, const std::string
   }
   const std::string model_path = model_dir + "/model";
   try {
-    ctranslate2::Translator translator(model_path, ctranslate2::Device::CPU,
-                                     ctranslate2::ComputeType::INT8);
-    std::vector<std::string> source_tokens;
-    spm.source.Encode(text, &source_tokens);
-    if (source_tokens.empty()) return "";
-
-    const auto results = translator.translate_batch({source_tokens});
-    if (results.empty() || results[0].hypotheses.empty()) return "";
-
-    std::string out;
-    spm.target.Decode(results[0].hypotheses[0], &out);
-    return out;
+    auto translator = make_translator(model_path);
+    if (!translator) return "";
+    const auto out = translate_with_translator(*translator, spm, {text});
+    return out.empty() ? "" : out[0];
   } catch (const std::exception& e) {
     std::cerr << e.what() << "\n";
     return "";
@@ -114,36 +175,14 @@ static std::vector<std::string> translate_batch(const std::string& model_dir,
     return {};
   }
   const std::string model_path = model_dir + "/model";
-  std::vector<std::string> out;
-  out.reserve(texts.size());
   try {
-    ctranslate2::Translator translator(model_path, ctranslate2::Device::CPU,
-                                       ctranslate2::ComputeType::INT8);
-    for (const std::string& text : texts) {
-      if (text.empty()) {
-        out.push_back("");
-        continue;
-      }
-      std::vector<std::string> source_tokens;
-      spm.source.Encode(text, &source_tokens);
-      if (source_tokens.empty()) {
-        out.push_back("");
-        continue;
-      }
-      const auto results = translator.translate_batch({source_tokens});
-      if (results.empty() || results[0].hypotheses.empty()) {
-        out.push_back("");
-        continue;
-      }
-      std::string line;
-      spm.target.Decode(results[0].hypotheses[0], &line);
-      out.push_back(line);
-    }
+    auto translator = make_translator(model_path);
+    if (!translator) return {};
+    return translate_with_translator(*translator, spm, texts);
   } catch (const std::exception& e) {
     std::cerr << e.what() << "\n";
     return {};
   }
-  return out;
 }
 
 int main(int argc, char** argv) {
@@ -151,11 +190,12 @@ int main(int argc, char** argv) {
   std::string text;
   std::string text_b64;
   std::string batch_b64;
+  bool self_test = false;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
-      std::cout << "nrm-argos-translate --model-dir DIR [--text-b64 B64 | --batch-b64 B64]\n";
+      std::cout << "nrm-argos-translate --model-dir DIR [--text-b64 B64 | --batch-b64 B64 | --self-test]\n";
       return 0;
     }
     if (arg == "--model-dir" && i + 1 < argc) {
@@ -174,11 +214,25 @@ int main(int argc, char** argv) {
       batch_b64 = argv[++i];
       continue;
     }
+    if (arg == "--self-test") {
+      self_test = true;
+      continue;
+    }
   }
 
   if (model_dir.empty()) {
     std::cerr << "missing --model-dir\n";
     return 2;
+  }
+
+  if (self_test) {
+    const std::string out = translate_one(model_dir, "Hello");
+    if (out.empty()) {
+      std::cerr << "self_test_failed empty_output\n";
+      return 3;
+    }
+    std::cout << "OK\n";
+    return 0;
   }
 
   if (!batch_b64.empty()) {

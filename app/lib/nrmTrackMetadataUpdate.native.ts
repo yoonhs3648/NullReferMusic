@@ -13,8 +13,12 @@ import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import type { NrmLyricsUiMode } from '@/lib/nrmMelonLyrics';
+import {
+  normalizeMelonTrackWebsite,
+  resolveMelonPlainLyricsForEdit,
+} from '@/lib/nrmMelonLyrics';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
-import { resolveLyricsSidecarAction, withNrmLyricsModeHeader } from '@/lib/nrmLrcUiMode';
+import { resolveLyricsSidecarAction } from '@/lib/nrmLrcUiMode';
 import {
   deletePersistedLrc,
   persistLrcForSavedAudio,
@@ -240,9 +244,11 @@ export async function applyTrackMetadataUpdate(
     lrcText: string,
     mode: Exclude<NrmLyricsUiMode, 'unset'>,
   ): Promise<void> {
-    const payload = withNrmLyricsModeHeader(lrcText, mode);
+    const { withNrmLyricsModeHeader } = await import('@/lib/nrmLrcUiMode');
+    const payload = withNrmLyricsModeHeader(lrcText.trim(), mode);
+    if (!payload) return;
     if (useEmbed) {
-      await embedSyncedLyricsIntoAudio(location.audioUri, payload, ext);
+      await embedSyncedLyricsIntoAudio(location.audioUri, payload, ext, mode);
     } else {
       await persistLrcForSavedAudio(location, payload);
     }
@@ -330,16 +336,17 @@ export async function applyTrackMetadataUpdate(
     return;
   }
 
-  // generate-melon: WhisperX Forced Alignment으로 멜론 가사 정렬
+  // generate-melon: Forced Alignment으로 멜론 가사 정렬
   if (lyricsAction.kind === 'generate-melon') {
-    let plain = (metadata.melonLyricsPlain ?? '').trim();
-    if (!plain) {
-      const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
-      plain = (await fetchMelonPlainLyricsFromWebsite(metadata.website)).trim();
-    }
+    const plain = (
+      await resolveMelonPlainLyricsForEdit(
+        normalizeMelonTrackWebsite(metadata.website),
+        metadata.melonLyricsPlain,
+      )
+    ).trim();
     if (!plain) {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
-      notifyUser('멜론 가사 데이터가 없습니다.');
+      notifyUser('멜론 가사를 가져올 수 없습니다.');
       return;
     }
     try {

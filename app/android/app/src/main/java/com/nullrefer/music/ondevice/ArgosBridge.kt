@@ -4,13 +4,26 @@ import android.content.Context
 
 /** LibreTranslate(Argos) 오프라인 번역 — Kotlin + nrm-argos-translate CLI */
 object ArgosBridge {
+  @Volatile private var smokeTestOk: Boolean? = null
+
+  fun invalidateSmokeTest() {
+    smokeTestOk = null
+  }
+
   fun installPackage(context: Context, argosmodelPath: String): Boolean {
-    return ArgosPackageInstaller.installFromArgosmodel(context, argosmodelPath)
+    val ok = ArgosPackageInstaller.installFromArgosmodel(context, argosmodelPath)
+    if (ok) invalidateSmokeTest()
+    return ok
   }
 
   fun isOfflineReady(context: Context): Boolean {
     if (!ArgosPackageInstaller.isEnKoReady(context)) return false
-    return ArgosTranslateBootstrap.ensure(context).isReady()
+    if (!ArgosTranslateBootstrap.ensure(context).isReady()) return false
+    smokeTestOk?.let { return it }
+    val modelDir = ArgosPackageInstaller.resolveRuntimeModelDir(context) ?: return false
+    val ok = ArgosTranslateExec.runSelfTest(context, modelDir)
+    smokeTestOk = ok
+    return ok
   }
 
   data class TranslateBatch(

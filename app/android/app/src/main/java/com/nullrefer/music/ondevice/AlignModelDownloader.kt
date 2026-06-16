@@ -10,7 +10,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import org.json.JSONObject
 
 /** Forced Alignment 모델 다운로드·설치 (aeneas 번들 / wav2vec2-base INT8 HF) */
 object AlignModelDownloader {
@@ -72,10 +71,16 @@ object AlignModelDownloader {
         return if (marker.isFile && engine.isFile && engine.length() > 10L) dir else null
       }
       AlignModelCatalog.EngineKind.CTC_ONNX -> {
+        val marker = File(dir, ".installed")
         for (spec in entry.assets) {
           val dest = File(dir, spec.fileName)
-          if (!isAssetReady(dest, spec)) return null
+          if (!isAssetReady(dest, spec)) {
+            if (marker.isFile) marker.delete()
+            logAssetNotReady(spec.fileName, dest, spec.minBytes)
+            return null
+          }
         }
+        if (!marker.isFile) marker.writeText("ok")
         return dir
       }
     }
@@ -114,6 +119,7 @@ object AlignModelDownloader {
     for (entry in AlignModelCatalog.ENTRIES) {
       if (entry.engine != AlignModelCatalog.EngineKind.CTC_ONNX) continue
       val dir = modelDir(context, entry)
+      val marker = File(dir, ".installed")
       for (spec in entry.assets) {
         val dest = File(dir, spec.fileName)
         val tmp = File(dir, "${spec.fileName}.download")
@@ -122,18 +128,57 @@ object AlignModelDownloader {
           if (dest.delete()) removed++
         }
       }
+      if (removed > 0 && marker.isFile) marker.delete()
     }
     return removed
   }
 
   private fun isAssetReady(dest: File, spec: AlignModelCatalog.AssetSpec): Boolean {
     if (!dest.isFile || dest.length() < spec.minBytes) return false
-    if (!spec.fileName.endsWith(".json")) return true
+    return when {
+      spec.fileName.endsWith(".onnx", ignoreCase = true) -> isLikelyOnnxFile(dest)
+      spec.fileName.endsWith(".json", ignoreCase = true) -> isLikelyJsonFile(dest)
+      else -> true
+    }
+  }
+
+  private fun isLikelyOnnxFile(file: File): Boolean {
     return try {
-      JSONObject(dest.readText(Charsets.UTF_8))
-      true
+      file.inputStream().use { ins ->
+        val magic = ByteArray(4)
+        if (ins.read(magic) != 4) return false
+        magic[0] != '<'.code.toByte()
+      }
     } catch (_: Exception) {
       false
+    }
+  }
+
+  private fun isLikelyJsonFile(file: File): Boolean {
+    return try {
+      file.inputStream().use { ins ->
+        val buf = ByteArray(32)
+        val n = ins.read(buf)
+        if (n <= 0) return false
+        String(buf, 0, n, Charsets.UTF_8).trimStart().startsWith("{")
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun logAssetNotReady(fileName: String, dest: File, minBytes: Long) {
+    NrmFileLogger.warn(
+        "forced-align",
+        "asset_not_ready file=$fileName bytes=${dest.length()} min=$minBytes exists=${dest.isFile}",
+    )
+  }
+
+  private fun installBundledOnnxMetadata(context: Context, entry: AlignModelCatalog.Entry) {
+    for (assetPath in entry.bundledAssetPaths) {
+      val fileName = assetPath.substringAfterLast('/')
+      val dest = File(modelDir(context, entry), fileName)
+      copyAssetIfPresent(context, assetPath, dest)
     }
   }
 
@@ -212,6 +257,7 @@ object AlignModelDownloader {
 
   private fun downloadOnnxAssets(context: Context, entry: AlignModelCatalog.Entry): Boolean {
     val dir = modelDir(context, entry)
+    installBundledOnnxMetadata(context, entry)
     val pending =
         entry.assets.filter { spec ->
           val dest = File(dir, spec.fileName)
@@ -219,7 +265,7 @@ object AlignModelDownloader {
         }
     if (pending.isEmpty()) {
       emitProgress(entry.id, 100)
-      return true
+      return markOnnxInstallComplete(entry, dir)
     }
 
     var totalBytes = 0L
@@ -256,7 +302,21 @@ object AlignModelDownloader {
       }
     }
     emitProgress(entry.id, 100)
-    return isModelInstalled(context, entry.id)
+    return markOnnxInstallComplete(entry, dir)
+  }
+
+  private fun markOnnxInstallComplete(entry: AlignModelCatalog.Entry, dir: File): Boolean {
+    for (spec in entry.assets) {
+      val dest = File(dir, spec.fileName)
+      if (!isAssetReady(dest, spec)) {
+        logAssetNotReady(spec.fileName, dest, spec.minBytes)
+        File(dir, ".installed").delete()
+        return false
+      }
+    }
+    File(dir, ".installed").writeText("ok")
+    NrmFileLogger.log("forced-align", "install_complete modelId=${entry.id} dir=${dir.name}")
+    return true
   }
 
   private fun probeContentLength(urlStr: String): Long {

@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -20,6 +20,7 @@ import {
   subscribeWhisperModelDownloadEvents,
   whisperModelDownloadCompleteMessage,
 } from '@/lib/nrmWhisperModelNative';
+import { createFirstInstallAutoSelectTracker } from '@/lib/nrmFirstInstallAutoSelect';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -46,18 +47,32 @@ export function NrmWhisperModelPicker({
   const { rows, ready, downloadModel, statusFor } = useWhisperModelStatuses(
     active && showWhisperInstallUi,
   );
+  const firstInstallTracker = useMemo(
+    () => createFirstInstallAutoSelectTracker<NrmWhisperModelId>(),
+    [],
+  );
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!showWhisperInstallUi || !active) return;
     return subscribeWhisperModelDownloadEvents((ev) => {
       if (ev.phase === 'complete') {
-        notifyUser(whisperModelDownloadCompleteMessage(ev.modelId));
-        onChange(ev.modelId);
+        const pending = firstInstallTracker.pendingModelId();
+        if (
+          firstInstallTracker.shouldSelectAfterInstall() &&
+          pending &&
+          ev.modelId === pending
+        ) {
+          notifyUser(whisperModelDownloadCompleteMessage(ev.modelId));
+          onChangeRef.current(ev.modelId);
+          firstInstallTracker.clearPending();
+        }
       } else if (ev.phase === 'failed') {
         notifyUser('모델 다운로드에 실패했습니다. Wi‑Fi 연결을 확인한 뒤 다시 시도하세요.');
       }
     });
-  }, [active]);
+  }, [active, firstInstallTracker]);
 
   if (showWhisperInstallUi && !ready) {
     return <ActivityIndicator size="small" color={bodyColor} style={styles.loader} />;
@@ -166,7 +181,13 @@ export function NrmWhisperModelPicker({
                 ) : (
                   <View style={styles.downloadBtnRow}>
                     <Pressable
-                      onPress={() => void downloadModel(opt.id)}
+                      onPress={() => {
+                        firstInstallTracker.markDownloadStart(
+                          rows.some((r) => r.installed && !r.downloading),
+                          opt.id,
+                        );
+                        void downloadModel(opt.id);
+                      }}
                       style={({ pressed }) => [
                         styles.downloadBtn,
                         pressed && styles.pressed,

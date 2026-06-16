@@ -278,5 +278,5 @@ export const NRM_MUSIC_QUOTES: readonly NrmMusicQuoteEntry[] = [
   { nameKo: '루페 피아스코', nameEn: 'Lupe Fiasco', years: '1981 ~', quoteEn: 'Don\'t let the uniform define who you are.', quoteKo: '제복이 당신이 누구인지 정의하게 두지 마라.' },
   { nameKo: '에이셉 퍼그', nameEn: 'A$AP Ferg', years: '1988 ~', quoteEn: 'Always strive and prosper.', quoteKo: '언제나 고군분투하고 번창하라.' },
   { nameKo: '디 엠 엑스', nameEn: 'DMX', years: '1970–2021', quoteEn: 'To flooded with wealth is to starve the spirit.', quoteKo: '부유함에 지나치게 침수되는 것은 영혼을 굶주리게 만드는다.' },
-  { nameKo: '윤현상', nameEn: 'Steven Yoon', years: '1996 ~', quoteEn: 'FUCK YOU', quoteKo: '안녕하세요.' },
+  { nameKo: '윤현상', nameEn: 'Steven Yoon / a.k.a NullReference', years: '1996 ~', quoteEn: 'FUCK YOU', quoteKo: '안녕하세요.' },
 ] as const;

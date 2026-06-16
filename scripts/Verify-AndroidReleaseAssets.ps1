@@ -18,9 +18,19 @@ $required = @(
         Purpose = "MP3 encode when FFmpeg has no libshine/libmp3lame"
     },
     @{
+        Path = "app/android/app/src/main/assets/libretranslate/arm64-v8a/nrm-argos-translate"
+        MinBytes = 200000
+        Purpose = "LibreTranslate CLI (arm64 phones)"
+    },
+    @{
+        Path = "app/android/app/src/main/assets/libretranslate/x86_64/nrm-argos-translate"
+        MinBytes = 200000
+        Purpose = "LibreTranslate CLI (x86_64 emulator)"
+    },
+    @{
         Path = "app/android/app/src/main/assets/libretranslate/nrm-argos-translate"
         MinBytes = 200000
-        Purpose = "LibreTranslate offline translate CLI (Argos / CTranslate2)"
+        Purpose = "LibreTranslate offline translate CLI (legacy flat path)"
     },
     @{
         Path = "app/android/app/src/main/assets/libretranslate/libctranslate2.so"

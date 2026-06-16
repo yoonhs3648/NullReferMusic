@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import {
 
@@ -25,11 +25,9 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
 
 import {
-
   NRM_ALIGN_MODEL_OPTIONS,
-
+  NRM_ALIGN_AENEAS_ID,
   NRM_ALIGN_WAV2VEC2_BASE_ID,
-
 } from '@/lib/nrmAlignModelCatalog';
 
 import { useAlignModelStatuses } from '@/lib/nrmAlignModelStore';
@@ -47,6 +45,8 @@ import {
   subscribeAlignModelDownloadEvents,
 
 } from '@/lib/nrmAlignModelNative';
+
+import { createFirstInstallAutoSelectTracker } from '@/lib/nrmFirstInstallAutoSelect';
 
 import { notifyUser } from '@/lib/nrmUserNotify';
 
@@ -176,6 +176,15 @@ export function NrmAlignModelPicker({
 
   );
 
+  const firstInstallTracker = useMemo(
+    () => createFirstInstallAutoSelectTracker<NrmAlignModelId>(),
+    [],
+  );
+
+  const onChangeRef = useRef(onChange);
+
+  onChangeRef.current = onChange;
+
 
 
   useEffect(() => {
@@ -185,19 +194,35 @@ export function NrmAlignModelPicker({
     return subscribeAlignModelDownloadEvents((ev) => {
       if (ev.phase === 'failed') {
         notifyUser('Forced Alignment 모델 설치에 실패했습니다.');
+        firstInstallTracker.clearPending();
         return;
       }
       if (ev.phase !== 'complete') return;
-      void import('@/lib/nrmAlignModelNative').then(({ isAlignModelInstalled }) =>
-        isAlignModelInstalled(NRM_ALIGN_WAV2VEC2_BASE_ID).then((ok) => {
+      if (!firstInstallTracker.shouldSelectAfterInstall()) return;
+
+      const pending = firstInstallTracker.pendingModelId();
+      if (!pending) return;
+
+      void import('@/lib/nrmAlignModelNative').then(({ isAlignModelInstalled }) => {
+        const trySelect = async (modelId: NrmAlignModelId) => {
+          const ok = await isAlignModelInstalled(modelId);
           if (!ok) return;
-          notifyUser(alignModelDownloadCompleteMessage(NRM_ALIGN_WAV2VEC2_BASE_ID));
-          onChange(NRM_ALIGN_WAV2VEC2_BASE_ID);
-        }),
-      );
+          notifyUser(alignModelDownloadCompleteMessage(modelId));
+          onChangeRef.current(modelId);
+          firstInstallTracker.clearPending();
+        };
+
+        if (pending === NRM_ALIGN_WAV2VEC2_BASE_ID) {
+          void trySelect(NRM_ALIGN_WAV2VEC2_BASE_ID);
+          return;
+        }
+        if (pending === NRM_ALIGN_AENEAS_ID) {
+          void trySelect(NRM_ALIGN_AENEAS_ID);
+        }
+      });
     });
 
-  }, [active, onChange]);
+  }, [active, firstInstallTracker]);
 
 
 
@@ -415,7 +440,13 @@ export function NrmAlignModelPicker({
 
                     <Pressable
 
-                      onPress={() => void downloadModel(opt.id)}
+                      onPress={() => {
+                        firstInstallTracker.markDownloadStart(
+                          rows.some((r) => r.installed && !r.downloading),
+                          opt.id,
+                        );
+                        void downloadModel(opt.id);
+                      }}
 
                       style={({ pressed }) => [
 
