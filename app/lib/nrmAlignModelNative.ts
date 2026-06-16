@@ -167,25 +167,35 @@ function waitForPackDownload(packId: NrmAlignModelPackId): Promise<'complete' | 
   });
 }
 
-export async function startAlignModelDownload(modelId: NrmAlignModelId): Promise<void> {
-  if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return;
-  if (!isNrmAlignModelId(modelId)) return;
-  if (modelId === NRM_ALIGN_WAV2VEC2_BASE_ID) {
-    await startWav2Vec2BundleDownload();
-    return;
+export async function startAlignModelDownload(modelId: NrmAlignModelId): Promise<boolean> {
+  if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return false;
+  if (!isNrmAlignModelId(modelId)) return false;
+  try {
+    if (modelId === NRM_ALIGN_WAV2VEC2_BASE_ID) {
+      return await startWav2Vec2BundleDownload();
+    }
+    const result = await mod.startAlignModelDownload(modelId);
+    return result?.started !== false;
+  } catch {
+    return false;
   }
-  await mod.startAlignModelDownload(modelId);
 }
 
 /** wav2vec2-base — 한국어(1/2)·영어(2/2) 팩 순차 설치 */
-export async function startWav2Vec2BundleDownload(): Promise<void> {
-  if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return;
+export async function startWav2Vec2BundleDownload(): Promise<boolean> {
+  if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return false;
   for (const packId of WAV2VEC2_PACK_IDS) {
     if (await isPackInstalled(packId)) continue;
-    await mod.startAlignModelDownload(packId);
-    const result = await waitForPackDownload(packId);
-    if (result === 'failed') break;
+    try {
+      const result = await mod.startAlignModelDownload(packId);
+      if (result?.started === false) return false;
+    } catch {
+      return false;
+    }
+    const dlResult = await waitForPackDownload(packId);
+    if (dlResult === 'failed') return false;
   }
+  return true;
 }
 
 export function subscribeAlignModelDownloadEvents(

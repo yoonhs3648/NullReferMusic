@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
+import { NRM_ALIGN_WAV2VEC2_BASE_ID } from '@/lib/nrmAlignModelCatalog';
 import {
   fetchAlignModelStatuses,
   isAlignModelNativeAvailable,
@@ -40,7 +41,26 @@ export function useAlignModelStatuses(active: boolean) {
   const downloadModel = useCallback(async (modelId: NrmAlignModelId) => {
     const { confirmLargeDownloadIfNotOnWifi } = await import('@/lib/nrmLargeDownloadGuard');
     if (!(await confirmLargeDownloadIfNotOnWifi())) return;
-    await startAlignModelDownload(modelId);
+
+    setRows((prev) =>
+      prev.map((row) => {
+        if (row.modelId !== modelId) return row;
+        if (modelId === NRM_ALIGN_WAV2VEC2_BASE_ID) {
+          return {
+            ...row,
+            downloading: true,
+            bundlePackProgress: { step: 1 as const, koProgress: 0, enProgress: 0 },
+          };
+        }
+        return { ...row, downloading: true, progress: 0 };
+      }),
+    );
+
+    const ok = await startAlignModelDownload(modelId);
+    if (!ok) {
+      const { notifyUser } = await import('@/lib/nrmUserNotify');
+      notifyUser('Forced Alignment 모델 설치를 시작하지 못했습니다.');
+    }
     void refresh();
   }, [refresh]);
 

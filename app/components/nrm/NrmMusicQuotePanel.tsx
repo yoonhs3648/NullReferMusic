@@ -3,8 +3,10 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  formatMusicQuoteArtistLine,
+  parseMusicQuoteYears,
   pickRandomMusicQuote,
+  presentMusicQuoteEn,
+  presentMusicQuoteKo,
   type NrmMusicQuoteEntry,
 } from '@/lib/nrmMusicQuote';
 
@@ -14,26 +16,74 @@ type Props = {
   refreshKey: number;
 };
 
+const quoteSerif = Platform.select({
+  web: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif',
+  ios: 'Georgia',
+  default: undefined,
+});
+
 export function NrmMusicQuotePanel({ isDark, refreshKey }: Props) {
   const quote: NrmMusicQuoteEntry = useMemo(
     () => pickRandomMusicQuote(),
     [refreshKey],
   );
 
-  const artistLine = formatMusicQuoteArtistLine(quote);
-  if (!artistLine && !quote.quoteEn) return null;
+  const years = useMemo(() => parseMusicQuoteYears(quote.years), [quote.years]);
+  const quoteEn = presentMusicQuoteEn(quote.quoteEn);
+  const quoteKo = presentMusicQuoteKo(quote.quoteKo);
+
+  if (!quote.nameKo && !quote.nameEn && !quoteEn) return null;
 
   const ink = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
-  const muted = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted48;
+  const muted = isDark ? 'rgba(255,255,255,0.52)' : nrmTokens.color.inkMuted48;
+  const faint = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(29,29,31,0.42)';
   const accent = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+
+  const yearsLine =
+    years && years.birth && years.death
+      ? `${years.birth} — ${years.death}`
+      : years?.raw ?? '';
 
   return (
     <View style={styles.root} accessibilityRole="text">
-      <View style={[styles.inner, isDark ? styles.innerDark : styles.innerLight]}>
-        <Text style={[styles.artist, { color: ink }]}>{artistLine}</Text>
-        <View style={[styles.rule, { backgroundColor: accent }]} />
-        <Text style={[styles.quoteEn, { color: ink }]}>"{quote.quoteEn}"</Text>
-        <Text style={[styles.quoteKo, { color: muted }]}>{quote.quoteKo}</Text>
+      <View style={styles.content}>
+        <View style={styles.artistBlock}>
+          {quote.nameKo ? (
+            <Text style={[styles.nameKo, { color: ink }]} numberOfLines={2}>
+              {quote.nameKo}
+            </Text>
+          ) : null}
+          {quote.nameEn ? (
+            <Text style={[styles.nameEn, { color: muted }]} numberOfLines={2}>
+              {quote.nameEn}
+            </Text>
+          ) : null}
+          {yearsLine ? (
+            <Text style={[styles.years, { color: faint }]} numberOfLines={1}>
+              {yearsLine}
+            </Text>
+          ) : null}
+        </View>
+
+        {quoteEn ? (
+          <View style={styles.quoteBlock}>
+            <Text style={[styles.openQuote, { color: accent }]} accessibilityElementsHidden>
+              {'\u201C'}
+            </Text>
+            <Text
+              style={[
+                styles.quoteEn,
+                { color: ink },
+                quoteSerif ? { fontFamily: quoteSerif } : null,
+              ]}>
+              {quoteEn}
+            </Text>
+          </View>
+        ) : null}
+
+        {quoteKo ? (
+          <Text style={[styles.quoteKo, { color: muted }]}>{quoteKo}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -46,50 +96,78 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
     alignSelf: 'center',
-    paddingTop: nrmTokens.space.lg,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingTop: nrmTokens.space.md,
     paddingBottom: nrmTokens.space.xl,
     justifyContent: 'center',
   },
-  inner: {
-    paddingHorizontal: nrmTokens.space.lg,
-    paddingVertical: nrmTokens.space.xl,
-    borderRadius: nrmTokens.radius.lg,
-    gap: nrmTokens.space.md,
+  content: {
+    width: '100%',
+    gap: nrmTokens.space.lg,
     ...Platform.select({
       web: { boxSizing: 'border-box' as const },
     }),
   },
-  innerLight: {
-    backgroundColor: 'rgba(0,0,0,0.02)',
+  artistBlock: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 4,
   },
-  innerDark: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+  nameKo: {
+    fontSize: 30,
+    fontWeight: '700',
+    letterSpacing: -0.6,
+    lineHeight: 38,
+    textAlign: 'center',
   },
-  artist: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-    letterSpacing: 0.35,
+  nameEn: {
+    fontSize: 17,
+    fontWeight: '500',
+    letterSpacing: 0.15,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  years: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 1.2,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 6,
     textTransform: 'none',
-    lineHeight: 20,
-    opacity: 0.92,
   },
-  rule: {
-    width: 28,
-    height: 2,
-    borderRadius: 1,
-    opacity: 0.55,
+  quoteBlock: {
+    width: '100%',
+    paddingTop: nrmTokens.space.sm,
+    gap: nrmTokens.space.xs,
+  },
+  openQuote: {
+    fontSize: 44,
+    lineHeight: 44,
+    fontWeight: '400',
+    opacity: 0.42,
+    alignSelf: 'flex-start',
+    marginBottom: -8,
+    ...Platform.select({
+      web: { fontFamily: 'Georgia, serif' },
+      default: {},
+    }),
   },
   quoteEn: {
-    fontSize: nrmTokens.font.lead,
-    fontWeight: '500',
+    fontSize: 22,
+    fontWeight: '400',
     fontStyle: 'italic',
-    lineHeight: 28,
-    letterSpacing: -0.2,
+    lineHeight: 34,
+    letterSpacing: -0.15,
+    width: '100%',
   },
   quoteKo: {
-    fontSize: nrmTokens.font.body,
+    fontSize: 18,
     fontWeight: '400',
-    lineHeight: 26,
-    letterSpacing: -0.15,
+    lineHeight: 30,
+    letterSpacing: -0.2,
+    width: '100%',
+    paddingTop: nrmTokens.space.xs,
   },
 });

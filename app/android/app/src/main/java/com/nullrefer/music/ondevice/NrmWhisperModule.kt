@@ -488,11 +488,14 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   fun startAlignModelDownload(modelId: String?, promise: Promise) {
     try {
       val id = (modelId ?: "").trim()
-      if (AlignModelCatalog.entryForPreference(id) == null) {
+      val entry =
+          AlignModelCatalog.entryById(id)
+              ?: AlignModelCatalog.entryForPreference(id)
+      if (entry == null) {
         promise.reject("E_ARG", "invalid_align_model_id")
         return
       }
-      AlignModelDownloader.startDownload(reactApplicationContext, id)
+      AlignModelDownloader.startDownload(reactApplicationContext, entry.id)
       val ok = Arguments.createMap()
       ok.putBoolean("started", true)
       promise.resolve(ok)

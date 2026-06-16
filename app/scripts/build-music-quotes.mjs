@@ -109,6 +109,34 @@ async function writeXlsxFromRows(rows) {
   XLSX.writeFile(wb, xlsxPath);
 }
 
+function refineQuoteEn(en) {
+  let s = en.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1');
+}
+
+function refineQuoteKo(ko) {
+  return ko
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/ 것이다\./g, '다.')
+    .replace(/있는 것이 아니라/g, '있지 않고')
+    .replace(/하는 것이 아니라/g, '하는 일이 아니라');
+}
+
+function refineRows(rows) {
+  return rows.map((r) => ({
+    ...r,
+    quoteEn: refineQuoteEn(r.quoteEn),
+    quoteKo: refineQuoteKo(r.quoteKo),
+  }));
+}
+
 function escTs(s) {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
@@ -141,7 +169,7 @@ async function main() {
     console.log(`Created ${xlsxPath}`);
   }
 
-  fs.writeFileSync(outPath, emitTs(rows), 'utf8');
+  fs.writeFileSync(outPath, emitTs(refineRows(rows)), 'utf8');
   console.log(`Wrote ${outPath}`);
 }
 

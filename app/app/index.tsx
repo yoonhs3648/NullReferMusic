@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
 
-  Animated,
   BackHandler,
 
   KeyboardAvoidingView,
@@ -12,7 +11,6 @@ import {
   Platform,
 
   StyleSheet,
-  Text,
 
   useWindowDimensions,
 
@@ -139,10 +137,6 @@ export default function HomeScreen() {
   const [homeEpoch, setHomeEpoch] = useState(0);
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
   const [searchViewEpoch, setSearchViewEpoch] = useState(0);
-  const [easterVisible, setEasterVisible] = useState(false);
-  const easterOpacity = useRef(new Animated.Value(0)).current;
-  const logoTapCountRef = useRef(0);
-  const easterHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
   const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
   const ytOverlayHistoryActiveRef = useRef(false);
@@ -262,37 +256,8 @@ export default function HomeScreen() {
 
 
   const onMainLogoPress = useCallback(() => {
-    logoTapCountRef.current += 1;
-    if (logoTapCountRef.current >= 10) {
-      logoTapCountRef.current = 0;
-      if (easterHoldTimerRef.current) {
-        clearTimeout(easterHoldTimerRef.current);
-        easterHoldTimerRef.current = null;
-      }
-      setEasterVisible(true);
-      easterOpacity.setValue(1);
-      easterHoldTimerRef.current = setTimeout(() => {
-        Animated.timing(easterOpacity, {
-          toValue: 0,
-          duration: 420,
-          useNativeDriver: true,
-        }).start(({ finished }) => {
-          if (finished) setEasterVisible(false);
-        });
-      }, 1000);
-    }
-
     resetToYoutubeHome();
-
-  }, [easterOpacity, resetToYoutubeHome]);
-
-  useEffect(() => {
-    return () => {
-      if (easterHoldTimerRef.current) {
-        clearTimeout(easterHoldTimerRef.current);
-      }
-    };
-  }, []);
+  }, [resetToYoutubeHome]);
 
 
 
@@ -949,28 +914,6 @@ export default function HomeScreen() {
           onShowLastfmAuthInvalid={showLastfmAuthInvalidOverlay}
         />
 
-        {easterVisible ? (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.easterEggOverlay,
-              {
-                opacity: easterOpacity,
-                backgroundColor: isDark
-                  ? 'rgba(18,18,20,0.84)'
-                  : 'rgba(255,255,255,0.84)',
-              },
-            ]}>
-            <Text
-              style={[
-                styles.easterEggText,
-                { color: isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink },
-              ]}>
-              Made by hsyoon
-            </Text>
-          </Animated.View>
-        ) : null}
-
         {Platform.OS !== 'web' ? (
           <>
             {Platform.OS === 'android' ? (
@@ -1099,21 +1042,6 @@ const styles = StyleSheet.create({
 
     maxWidth: nrmTokens.layout.maxContentWidth,
 
-  },
-  easterEggOverlay: {
-    position: 'absolute',
-    left: nrmTokens.space.xl,
-    right: nrmTokens.space.xl,
-    top: '42%',
-    borderRadius: nrmTokens.radius.lg,
-    paddingVertical: nrmTokens.space.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  easterEggText: {
-    fontSize: nrmTokens.font.lead,
-    fontWeight: '700',
-    letterSpacing: 0.2,
   },
 
   logoWrap: {

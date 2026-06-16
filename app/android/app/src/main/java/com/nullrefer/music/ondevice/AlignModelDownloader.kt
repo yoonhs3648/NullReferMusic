@@ -180,6 +180,7 @@ object AlignModelDownloader {
     if (!queued) {
       flag.set(false)
       progressByModel.remove(entry.id)
+      emitComplete(entry.id, false)
     }
   }
 
