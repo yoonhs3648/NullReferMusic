@@ -9,16 +9,21 @@ import {
 } from '@/lib/nrmDownloadAudioMetadata';
 import { fetchMelonAlbumDetail, fetchMelonTrackDetail } from '@/lib/nrmMelonSearchClient';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
-import { resolveEmbedGenre } from '@/lib/nrmGenreResolve';
 
 function mergeMeta(
   base: NrmAudioFileMetadata,
   patch: Partial<NrmAudioFileMetadata>,
 ): NrmAudioFileMetadata {
   const out: NrmAudioFileMetadata = { ...base };
-  for (const [k, v] of Object.entries(patch) as [keyof NrmAudioFileMetadata, string | undefined][]) {
-    const val = (v ?? '').trim();
-    if (val) out[k] = val;
+  for (const key of Object.keys(patch) as (keyof NrmAudioFileMetadata)[]) {
+    const v = patch[key];
+    if (v === undefined || v === null) continue;
+    if (key === 'melonAlignLang') {
+      if (v === 'ko' || v === 'en') out.melonAlignLang = v;
+      continue;
+    }
+    const val = String(v).trim();
+    if (val) (out as Record<string, string>)[key] = val;
   }
   return out;
 }
@@ -44,8 +49,11 @@ export async function enrichMelonDownloadMetadata(
   const base = buildMelonSeedAudioMetadata(seed, userArtist, userTitle);
   const songId = (seed.songId ?? '').trim();
   if (!songId) {
-    const genre = await resolveEmbedGenre({ rawGenre: seed.genre ?? base.genre });
-    return normalizeDownloadMetadata({ ...base, genre: genre || base.genre });
+    const raw = (base.genre || seed.genre || '').trim();
+    return normalizeDownloadMetadata({
+      ...base,
+      platformGenreRaw: raw || undefined,
+    });
   }
 
   const trackR = await fetchMelonTrackDetail(songId);
@@ -83,6 +91,9 @@ export async function enrichMelonDownloadMetadata(
     }
   }
 
-  const genre = await resolveEmbedGenre({ rawGenre: meta.genre });
-  return normalizeDownloadMetadata({ ...meta, genre: genre || meta.genre });
+  const platformGenreRaw = (meta.genre || seed.genre || '').trim();
+  return normalizeDownloadMetadata({
+    ...meta,
+    platformGenreRaw: platformGenreRaw || undefined,
+  });
 }

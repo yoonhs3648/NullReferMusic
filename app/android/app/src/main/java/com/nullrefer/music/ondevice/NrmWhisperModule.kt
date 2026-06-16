@@ -19,7 +19,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
   init {
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
-    WhisperXAlignModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
+    AlignModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
 
   override fun getName(): String = "NrmWhisper"
@@ -445,7 +445,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun getAlignModelStatuses(promise: Promise) {
     try {
-      val statuses = WhisperXAlignModelDownloader.listStatuses(reactApplicationContext)
+      val statuses = AlignModelDownloader.listStatuses(reactApplicationContext)
       val arr: WritableArray = Arguments.createArray()
       for (s in statuses) {
         val row: WritableMap = Arguments.createMap()
@@ -462,9 +462,23 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun isAlignModelInstalled(promise: Promise) {
+  fun isAlignModelInstalled(modelId: String?, promise: Promise) {
     try {
-      promise.resolve(WhisperXAlignModelDownloader.isInstalled(reactApplicationContext))
+      val id = (modelId ?: AlignModelCatalog.WAV2VEC2_BASE_ID).trim()
+      if (AlignModelCatalog.isBundleId(id)) {
+        promise.resolve(AlignModelDownloader.isModelInstalled(reactApplicationContext, id))
+        return
+      }
+      promise.resolve(AlignModelDownloader.isModelInstalled(reactApplicationContext, id))
+    } catch (e: Exception) {
+      promise.reject("E_ALIGN_STATUS", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun isAnyAlignModelInstalled(promise: Promise) {
+    try {
+      promise.resolve(AlignModelDownloader.hasAnyModelInstalled(reactApplicationContext))
     } catch (e: Exception) {
       promise.reject("E_ALIGN_STATUS", e.message ?: e.toString(), e)
     }
@@ -474,11 +488,11 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   fun startAlignModelDownload(modelId: String?, promise: Promise) {
     try {
       val id = (modelId ?: "").trim()
-      if (id != WhisperXAlignModelCatalog.MODEL_ID) {
+      if (AlignModelCatalog.entryForPreference(id) == null) {
         promise.reject("E_ARG", "invalid_align_model_id")
         return
       }
-      WhisperXAlignModelDownloader.startDownload(reactApplicationContext)
+      AlignModelDownloader.startDownload(reactApplicationContext, id)
       val ok = Arguments.createMap()
       ok.putBoolean("started", true)
       promise.resolve(ok)
@@ -492,24 +506,30 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       audioPath: String,
       lyricsPlain: String,
       mode: String,
+      alignModelPreference: String?,
       promise: Promise,
   ) {
     Thread {
-      val token = "whisperx-align:${System.currentTimeMillis()}"
+      val token = "forced-align:${System.currentTimeMillis()}"
       NrmBackgroundWorkCoordinator.acquire(reactApplicationContext, token)
       try {
-        NrmMemoryGuard.prepareForHeavyInference(reactApplicationContext, "whisperx-align")
+        NrmMemoryGuard.prepareForHeavyInference(reactApplicationContext, "forced-align")
         val inFile = File(audioPath.trim())
         if (!inFile.isFile) {
           promise.reject("E_ARG", "오디오 파일이 없습니다.")
           return@Thread
         }
+        val pref =
+            AlignModelCatalog.normalizeAlignPackId(
+                alignModelPreference ?: AlignModelCatalog.WAV2VEC2_KO_ID,
+            )
         val outcome =
-            WhisperXAlignEngine.alignToLrc(
+            ForcedAlignEngine.alignToLrc(
                 reactApplicationContext,
                 inFile,
                 lyricsPlain,
                 mode,
+                pref,
             )
         val ok = Arguments.createMap()
         ok.putString("lrc", outcome.lrc)
@@ -517,7 +537,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
         ok.putBoolean("alignMemoryInsufficient", outcome.memoryInsufficient)
         promise.resolve(ok)
       } catch (t: Throwable) {
-        NrmFileLogger.error("whisperx-align", "alignMelonLyricsToLrc 실패 audio=$audioPath", t)
+        NrmFileLogger.error("forced-align", "alignMelonLyricsToLrc 실패 audio=$audioPath", t)
         resolveEmptyLrc(promise, alignFailed = true)
       } finally {
         NrmBackgroundWorkCoordinator.release(reactApplicationContext, token)

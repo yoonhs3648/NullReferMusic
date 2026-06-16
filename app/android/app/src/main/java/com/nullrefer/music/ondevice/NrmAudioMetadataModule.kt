@@ -214,10 +214,16 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             )
         val out = Arguments.createMap()
         parseFfmpegProbeMetadata(probeOut, out)
+        val embeddedMode = out.getString("nrmLyricsMode")?.trim().orEmpty()
         // MP3: FFmpeg probe가 SYLT/USLT 바이너리 프레임을 텍스트로 출력하지 않으므로 직접 디코드
-        if (!out.hasKey("lyrics") && inFile.name.lowercase().endsWith(".mp3")) {
-          val embeddedLrc = readEmbeddedLyricsFromMp3(inFile)
-          if (embeddedLrc != null) out.putString("lyrics", embeddedLrc)
+        if (inFile.name.lowercase().endsWith(".mp3")) {
+          if (embeddedMode.isEmpty()) {
+            readNrmLyricsModeFromMp3(inFile)?.let { out.putString("nrmLyricsMode", it) }
+          }
+          if (!out.hasKey("lyrics")) {
+            val embeddedLrc = readEmbeddedLyricsFromMp3(inFile)
+            if (embeddedLrc != null) out.putString("lyrics", embeddedLrc)
+          }
         }
         val coverFile = extractEmbeddedCoverFile(paths, inFile)
         if (coverFile != null) {
@@ -836,6 +842,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             "producer" to "producer",
             "remixer" to "remixer",
             "lyrics" to "lyrics",
+            "nrm_lyrics_mode" to "nrmLyricsMode",
         )
     var context = ProbeMetaContext.FORMAT
     // lyrics는 멀티라인이므로 별도 누적 처리
@@ -948,17 +955,28 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
    * audioUri: file:// 또는 content:// (SAF) URI
    */
   @ReactMethod
-  fun embedSyncedLyrics(audioUri: String, lrcContent: String, extension: String, promise: Promise) {
+  fun embedSyncedLyrics(
+      audioUri: String,
+      lrcContent: String,
+      extension: String,
+      lyricsMode: String?,
+      promise: Promise,
+  ) {
     Thread {
       val t0 = SystemClock.elapsedRealtime()
-      NrmStageLog.log("ffmpeg", "embed_synced_lyrics_start", mapOf("uri" to audioUri.take(80), "ext" to extension))
+      val modeToken = lyricsMode?.trim().orEmpty()
+      NrmStageLog.log(
+          "ffmpeg",
+          "embed_synced_lyrics_start",
+          mapOf("uri" to audioUri.take(80), "ext" to extension, "mode" to modeToken.take(24)),
+      )
       try {
         val ext = extension.lowercase().trimStart('.')
         val (workFile, isTemp) = resolveAudioToWorkFile(audioUri, ext)
         try {
           when (ext) {
-            "m4a", "mp4", "aac" -> embedLyricsM4a(workFile, lrcContent)
-            "mp3" -> embedLyricsMp3(workFile, lrcContent)
+            "m4a", "mp4", "aac" -> embedLyricsM4a(workFile, lrcContent, modeToken)
+            "mp3" -> embedLyricsMp3(workFile, lrcContent, modeToken)
             else -> throw Exception("지원하지 않는 확장자: $ext")
           }
           if (isTemp) writeWorkFileBackToUri(workFile, audioUri)
@@ -1008,22 +1026,38 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
    * `-c:a copy` 만 지정하면 attached_pic 비디오 스트림에 기본 인코더가 적용되어
    * 느려지거나 멈출 수 있다.
    */
-  private fun embedLyricsM4a(file: File, lrc: String) {
+  private companion object {
+    const val NRM_LYRICS_MODE_META_KEY = "nrm_lyrics_mode"
+    const val NRM_LYRICS_MODE_TXXX_DESC = "NRM_LYRICS_MODE"
+  }
+
+  private fun embedLyricsM4a(file: File, lrc: String, lyricsMode: String) {
+    val playerLrc = stripNrmModeHeaderForPlayer(lrc.trim())
+    if (playerLrc.isEmpty() && lyricsMode.isEmpty()) return
     val paths = FfmpegBootstrap.ensure(reactApplicationContext)
       ?: throw Exception("FFmpeg를 사용할 수 없습니다.")
     val tempOut = uniqueCacheFile(file.parentFile ?: reactApplicationContext.cacheDir, "nrm-lyr-m4a", ".m4a")
     try {
+      val ffmpegArgs = mutableListOf(
+          "-y", "-i", file.absolutePath,
+          "-map", "0",
+          "-c", "copy",
+          "-map_metadata", "0",
+      )
+      if (playerLrc.isNotEmpty()) {
+        ffmpegArgs.add("-metadata")
+        ffmpegArgs.add("lyrics=$playerLrc")
+      }
+      if (lyricsMode.isNotEmpty()) {
+        ffmpegArgs.add("-metadata")
+        ffmpegArgs.add("$NRM_LYRICS_MODE_META_KEY=$lyricsMode")
+      }
+      ffmpegArgs.add("-movflags")
+      ffmpegArgs.add("+faststart")
+      ffmpegArgs.add(tempOut.absolutePath)
       FfmpegExec.runWithPaths(
         paths.binary, paths.libDir,
-        listOf(
-          "-y", "-i", file.absolutePath,
-          "-map", "0",          // 오디오 + attached_pic 스트림 전체 포함
-          "-c", "copy",         // 재인코딩 없이 복사 (빠름)
-          "-map_metadata", "0",
-          "-metadata", "lyrics=$lrc",
-          "-movflags", "+faststart",
-          tempOut.absolutePath,
-        ),
+        ffmpegArgs,
         tag = "ffmpeg-embed-lyrics-m4a",
       )
       if (!tempOut.isFile || tempOut.length() < 512L) throw Exception("FFmpeg 출력 파일이 없거나 너무 작음")
@@ -1039,13 +1073,30 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   }
 
   /** mp3: LRC → USLT(LRC 텍스트) + SYLT(바이너리 싱크) — Musicolet 등은 USLT의 LRC 구문을 읽음 */
-  private fun embedLyricsMp3(file: File, lrc: String) {
-    val trimmed = lrc.trim()
-    if (trimmed.isEmpty()) return
+  private fun stripNrmModeHeaderForPlayer(lrc: String): String {
+    val legacy = Regex("""^\[nrm:(configured|translation|melon|melon_translation)\]$""", RegexOption.IGNORE_CASE)
+    val modern = Regex("""^\[re:NRM/(configured|translation|melon|melon_translation)\]$""", RegexOption.IGNORE_CASE)
+    return lrc.lines()
+      .filter { line ->
+        val t = line.trim()
+        t.isNotEmpty() && !legacy.matches(t) && !modern.matches(t)
+      }
+      .joinToString("\n")
+      .trim()
+  }
+
+  private fun embedLyricsMp3(file: File, lrc: String, lyricsMode: String) {
+    val trimmed = stripNrmModeHeaderForPlayer(lrc.trim())
+    if (trimmed.isEmpty() && lyricsMode.isEmpty()) return
     val id3Major = peekId3MajorVersion(file) ?: 3
     val frames = mutableListOf<ByteArray>()
-    buildUsltFrame(trimmed, id3Major)?.let { frames += it }
-    buildSyltFrame(trimmed, id3Major)?.let { frames += it }
+    if (trimmed.isNotEmpty()) {
+      buildUsltFrame(trimmed, id3Major)?.let { frames += it }
+      buildSyltFrame(trimmed, id3Major)?.let { frames += it }
+    }
+    if (lyricsMode.isNotEmpty()) {
+      buildTxxxFrame(NRM_LYRICS_MODE_TXXX_DESC, lyricsMode, id3Major)?.let { frames += it }
+    }
     if (frames.isEmpty()) return
     insertOrReplaceEmbeddedLyricsInMp3(file, frames, id3Major)
   }
@@ -1062,6 +1113,20 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       return null
     }
     return header[3].toInt() and 0xFF
+  }
+
+  /** LRC 텍스트 → USLT ID3 프레임 (플레이어 호환: LRC 타임스탬프 문자열 그대로) */
+  private fun buildTxxxFrame(description: String, value: String, id3Major: Int): ByteArray? {
+    val desc = description.trim()
+    val valTrim = value.trim()
+    if (desc.isEmpty() || valTrim.isEmpty()) return null
+    val body = ByteArrayOutputStream().also { os ->
+      os.write(3) // UTF-8
+      os.write(desc.toByteArray(Charsets.UTF_8))
+      os.write(0)
+      os.write(valTrim.toByteArray(Charsets.UTF_8))
+    }.toByteArray()
+    return wrapId3v2Frame("TXXX", body, id3Major)
   }
 
   /** LRC 텍스트 → USLT ID3 프레임 (플레이어 호환: LRC 타임스탬프 문자열 그대로) */
@@ -1134,6 +1199,73 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   private fun readEmbeddedLyricsFromMp3(file: File): String? {
     readUsltLyricsFromMp3(file)?.let { return it }
     return readSyltLyricsFromMp3(file)
+  }
+
+  /** MP3 TXXX(NRM_LYRICS_MODE) → 가사 UI 모드 토큰 */
+  private fun readNrmLyricsModeFromMp3(file: File): String? {
+    return try {
+      val bytes = file.readBytes()
+      val range = id3TagBodyRange(bytes) ?: return null
+      val (bodyStart, tagEnd) = range
+      val id3Major = bytes[3].toInt() and 0xFF
+      var pos = bodyStart
+      while (pos + 10 <= tagEnd) {
+        if (bytes[pos] == 0.toByte()) break
+        val frameId = String(bytes.sliceArray(pos until pos + 4))
+        val frameSize = readId3FrameSize(bytes, pos + 4, id3Major)
+        if (frameSize <= 0 || pos + 10 + frameSize > tagEnd) break
+        if (frameId == "TXXX") {
+          val (desc, value) =
+            decodeTxxxFrameBody(bytes.sliceArray(pos + 10 until pos + 10 + frameSize))
+              ?: Pair("", "")
+          if (desc.equals(NRM_LYRICS_MODE_TXXX_DESC, ignoreCase = true) && value.isNotBlank()) {
+            return value.trim()
+          }
+        }
+        pos += 10 + frameSize
+      }
+      null
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun decodeTxxxFrameBody(data: ByteArray): Pair<String, String>? {
+    if (data.isEmpty()) return null
+    val encoding = data[0].toInt() and 0xFF
+    var pos = 1
+    val descEnd = findId3TextTerminator(data, pos, encoding) ?: return null
+    val desc =
+      decodeId3EncodedText(data.sliceArray(pos until descEnd), encoding)
+    pos = descEnd + if (encoding == 1 || encoding == 2) 2 else 1
+    if (pos >= data.size) return Pair(desc, "")
+    val value = decodeId3EncodedText(data.sliceArray(pos until data.size), encoding)
+    return Pair(desc, value)
+  }
+
+  private fun findId3TextTerminator(data: ByteArray, start: Int, encoding: Int): Int? {
+    if (encoding == 1 || encoding == 2) {
+      var i = start
+      while (i + 1 < data.size) {
+        if (data[i] == 0.toByte() && data[i + 1] == 0.toByte()) return i
+        i += 2
+      }
+      return null
+    }
+    var i = start
+    while (i < data.size) {
+      if (data[i] == 0.toByte()) return i
+      i++
+    }
+    return null
+  }
+
+  private fun decodeId3EncodedText(data: ByteArray, encoding: Int): String {
+    if (data.isEmpty()) return ""
+    return when (encoding) {
+      1, 2 -> String(data, Charsets.UTF_16LE)
+      else -> String(data, Charsets.UTF_8)
+    }
   }
 
   private fun readUsltLyricsFromMp3(file: File): String? {
@@ -1298,7 +1430,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     val filtered =
       removeId3FramesFromBody(
         tagBody,
-        setOf("USLT", "SYLT"),
+        frameIdsToRemove = setOf("USLT", "SYLT"),
+        txxxDescriptionsToRemove = setOf(NRM_LYRICS_MODE_TXXX_DESC),
         usesSyncsafeFrameSize = id3Major >= 4,
       )
     val newTagBody = filtered + newFrameBytes
@@ -1378,6 +1511,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   private fun removeId3FramesFromBody(
     tagBody: ByteArray,
     frameIdsToRemove: Set<String>,
+    txxxDescriptionsToRemove: Set<String> = emptySet(),
     usesSyncsafeFrameSize: Boolean,
   ): ByteArray {
     val result = ByteArrayOutputStream()
@@ -1394,7 +1528,17 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           (tagBody[pos + 7].toInt() and 0xFF)
       }
       if (frameSize < 0 || pos + 10 + frameSize > tagBody.size) break
-      if (!frameIdsToRemove.contains(frameId)) {
+      val shouldRemove =
+        when {
+          frameIdsToRemove.contains(frameId) -> true
+          frameId == "TXXX" && txxxDescriptionsToRemove.isNotEmpty() -> {
+            val body = tagBody.sliceArray(pos + 10 until pos + 10 + frameSize)
+            val desc = decodeTxxxFrameBody(body)?.first.orEmpty()
+            txxxDescriptionsToRemove.any { it.equals(desc, ignoreCase = true) }
+          }
+          else -> false
+        }
+      if (!shouldRemove) {
         result.write(tagBody, pos, 10 + frameSize)
       }
       pos += 10 + frameSize

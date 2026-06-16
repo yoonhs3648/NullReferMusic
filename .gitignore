@@ -34,6 +34,13 @@ library/whisper/*.zip
 library/whisper/_bin/
 library/whisper/_src_whisper_cpp/
 
+# wav2vec2-base FA ONNX (HF 업로드 전 로컬 export)
+library/wav2vec2-base-int8/*.onnx
+library/wav2vec2-base-int8/onnx-export/
+library/wav2vec2-base-en/*.onnx
+library/wav2vec2-base-en/onnx-export/model.onnx
+library/.hf-token.local
+
 library/libretranslate/_vendor/
 library/libretranslate/_bin/
 

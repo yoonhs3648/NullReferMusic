@@ -39,7 +39,7 @@ object NrmStaleArtifactCleanup {
     removed += sweepCacheDir(appContext.cacheDir)
     removed += sweepWhisperPartials(appContext)
     removed += LibreTranslatePackageDownloader.removeStalePackages(appContext)
-    removed += WhisperXAlignModelDownloader.removeInvalidAssets(appContext)
+    removed += AlignModelDownloader.removeInvalidAssets(appContext)
 
     NrmFileLogger.log(
         "startup-cleanup",

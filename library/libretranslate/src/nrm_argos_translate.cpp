@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,29 +36,113 @@ static std::string b64_decode_text(const std::string& b64) {
   return out;
 }
 
-static std::string translate_one(const std::string& model_dir, const std::string& text) {
-  const std::string model_path = model_dir + "/model";
-  const std::string source_spm = model_dir + "/source.spm";
-  const std::string target_spm = model_dir + "/target.spm";
+struct SpmPair {
+  sentencepiece::SentencePieceProcessor source;
+  sentencepiece::SentencePieceProcessor target;
+  bool ok = false;
+};
 
-  sentencepiece::SentencePieceProcessor source_sp;
-  sentencepiece::SentencePieceProcessor target_sp;
-  if (!source_sp.Load(source_spm).ok() || !target_sp.Load(target_spm).ok()) {
+static bool load_spm(const std::string& model_dir, SpmPair& pair) {
+  const std::string legacy_source = model_dir + "/source.spm";
+  const std::string legacy_target = model_dir + "/target.spm";
+  const std::string unified = model_dir + "/sentencepiece.model";
+
+  if (pair.source.Load(legacy_source).ok() && pair.target.Load(legacy_target).ok()) {
+    pair.ok = true;
+    return true;
+  }
+  if (pair.source.Load(unified).ok() && pair.target.Load(unified).ok()) {
+    pair.ok = true;
+    return true;
+  }
+  pair.ok = false;
+  return false;
+}
+
+static std::vector<std::string> split_null(const std::string& blob) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  for (size_t i = 0; i <= blob.size(); i++) {
+    if (i == blob.size() || blob[i] == '\0') {
+      if (i > start) out.push_back(blob.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+static std::string join_null(const std::vector<std::string>& parts) {
+  std::string out;
+  for (size_t i = 0; i < parts.size(); i++) {
+    if (i > 0) out.push_back('\0');
+    out += parts[i];
+  }
+  return out;
+}
+
+static std::string translate_one(const std::string& model_dir, const std::string& text) {
+  SpmPair spm;
+  if (!load_spm(model_dir, spm)) {
     std::cerr << "spm load failed\n";
     return "";
   }
-
-  ctranslate2::Translator translator(model_path, ctranslate2::Device::CPU,
+  const std::string model_path = model_dir + "/model";
+  try {
+    ctranslate2::Translator translator(model_path, ctranslate2::Device::CPU,
                                      ctranslate2::ComputeType::INT8);
-  std::vector<std::string> source_tokens;
-  source_sp.Encode(text, &source_tokens);
-  if (source_tokens.empty()) return "";
+    std::vector<std::string> source_tokens;
+    spm.source.Encode(text, &source_tokens);
+    if (source_tokens.empty()) return "";
 
-  const auto results = translator.translate_batch({source_tokens});
-  if (results.empty() || results[0].hypotheses.empty()) return "";
+    const auto results = translator.translate_batch({source_tokens});
+    if (results.empty() || results[0].hypotheses.empty()) return "";
 
-  std::string out;
-  target_sp.Decode(results[0].hypotheses[0], &out);
+    std::string out;
+    spm.target.Decode(results[0].hypotheses[0], &out);
+    return out;
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << "\n";
+    return "";
+  }
+}
+
+static std::vector<std::string> translate_batch(const std::string& model_dir,
+                                                const std::vector<std::string>& texts) {
+  SpmPair spm;
+  if (!load_spm(model_dir, spm)) {
+    std::cerr << "spm load failed\n";
+    return {};
+  }
+  const std::string model_path = model_dir + "/model";
+  std::vector<std::string> out;
+  out.reserve(texts.size());
+  try {
+    ctranslate2::Translator translator(model_path, ctranslate2::Device::CPU,
+                                       ctranslate2::ComputeType::INT8);
+    for (const std::string& text : texts) {
+      if (text.empty()) {
+        out.push_back("");
+        continue;
+      }
+      std::vector<std::string> source_tokens;
+      spm.source.Encode(text, &source_tokens);
+      if (source_tokens.empty()) {
+        out.push_back("");
+        continue;
+      }
+      const auto results = translator.translate_batch({source_tokens});
+      if (results.empty() || results[0].hypotheses.empty()) {
+        out.push_back("");
+        continue;
+      }
+      std::string line;
+      spm.target.Decode(results[0].hypotheses[0], &line);
+      out.push_back(line);
+    }
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << "\n";
+    return {};
+  }
   return out;
 }
 
@@ -65,11 +150,12 @@ int main(int argc, char** argv) {
   std::string model_dir;
   std::string text;
   std::string text_b64;
+  std::string batch_b64;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
-      std::cout << "nrm-argos-translate --model-dir DIR --text-b64 B64\n";
+      std::cout << "nrm-argos-translate --model-dir DIR [--text-b64 B64 | --batch-b64 B64]\n";
       return 0;
     }
     if (arg == "--model-dir" && i + 1 < argc) {
@@ -84,13 +170,35 @@ int main(int argc, char** argv) {
       text_b64 = argv[++i];
       continue;
     }
+    if (arg == "--batch-b64" && i + 1 < argc) {
+      batch_b64 = argv[++i];
+      continue;
+    }
+  }
+
+  if (model_dir.empty()) {
+    std::cerr << "missing --model-dir\n";
+    return 2;
+  }
+
+  if (!batch_b64.empty()) {
+    const std::string blob = b64_decode_text(batch_b64);
+    const std::vector<std::string> inputs = split_null(blob);
+    if (inputs.empty()) {
+      std::cerr << "empty batch\n";
+      return 2;
+    }
+    const std::vector<std::string> outputs = translate_batch(model_dir, inputs);
+    if (outputs.size() != inputs.size()) return 3;
+    std::cout << join_null(outputs);
+    return 0;
   }
 
   if (!text_b64.empty()) {
     text = b64_decode_text(text_b64);
   }
-  if (model_dir.empty() || text.empty()) {
-    std::cerr << "missing --model-dir or text\n";
+  if (text.empty()) {
+    std::cerr << "missing text\n";
     return 2;
   }
 

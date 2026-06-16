@@ -47,7 +47,8 @@ import {
   isMelonPlainLyricsText,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
-import { isWhisperXAlignModelInstalled } from '@/lib/nrmWhisperXAlignNative';
+import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
+import { loadAlignModelPreference } from '@/lib/nrmDownloadSettings';
 import { hasAnyWhisperModelOnDevice } from '@/lib/nrmWhisperModelNative';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
@@ -269,6 +270,7 @@ export function NrmTrackMetadataSettingsHome({
       const lyricsMode = resolveStoredLyricsModeFromFlags({
         sidecarLrcText: lrcText,
         metadataLyrics: meta.lyrics,
+        embeddedLyricsMode: meta.nrmLyricsMode,
       });
 
       let melonPlain = isMelonPlainLyricsText(meta.lyrics)
@@ -328,9 +330,10 @@ export function NrmTrackMetadataSettingsHome({
             (track.extension === '.mp3' || track.extension === '.m4a') &&
             (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
           if (lyricsEditable) {
+            const alignPref = await loadAlignModelPreference();
             const [whisperReady, alignReady] = await Promise.all([
               hasAnyWhisperModelOnDevice(),
-              isWhisperXAlignModelInstalled(),
+              isAlignModelInstalled(alignPref),
             ]);
             if (!whisperReady && newLyricsMode === 'unset' && lyricsModeAtOpen !== 'unset') {
               if (

@@ -18,7 +18,7 @@ import {
 } from '@/lib/nrmLastfmSearchClient';
 import type { LastfmSearchErrorCode, LastfmTag } from '@/lib/nrmLastfmSearchTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
-import { lastfmTagsToNames, resolveEmbedGenre } from '@/lib/nrmGenreResolve';
+import { lastfmTagsToNames } from '@/lib/nrmGenreResolve';
 
 /** Last.fm 메타 API 인증·설정 오류 (다운로드 흐름에서 처리) */
 export class LastfmMetadataApiError extends Error {
@@ -93,8 +93,11 @@ export async function enrichLastfmDownloadMetadata(
 
   const trackMbid = normalizeLastfmMbid(seed.mbid);
   if (!trackMbid) {
-    const genre = await resolveEmbedGenre({ rawGenre: seed.genre ?? base.genre });
-    return normalizeDownloadMetadata({ ...base, genre: genre || base.genre });
+    const raw = (base.genre || seed.genre || '').trim();
+    return normalizeDownloadMetadata({
+      ...base,
+      platformGenreRaw: raw || undefined,
+    });
   }
 
   const collectedTagNames: string[] = [];
@@ -190,18 +193,19 @@ export async function enrichLastfmDownloadMetadata(
   }
 
   const optional = lastfmRawToOptionalEmbed(raw);
-  const rawGenre = [seed.genre, base.genre].filter(Boolean).join(', ');
-  const resolvedGenre = await resolveEmbedGenre({
-    rawGenre,
-    lastfmTagNames: collectedTagNames,
-  });
+  const seedGenre = [seed.genre, base.genre].filter(Boolean).join(', ');
+  const platformGenre =
+    optional.genre?.trim() ||
+    (collectedTagNames.length > 0 ? collectedTagNames.slice(0, 3).join(', ') : '') ||
+    seedGenre.trim();
   return normalizeDownloadMetadata({
     ...base,
     ...optional,
     artist: userArtist.trim(),
     title: userTitle.trim(),
     album: optional.album ?? base.album,
-    genre: resolvedGenre || optional.genre || base.genre,
+    genre: platformGenre || optional.genre || base.genre,
+    platformGenreRaw: platformGenre || seedGenre.trim() || undefined,
     releaseDate: optional.releaseDate ?? base.releaseDate,
     coverUrl: optional.coverUrl ?? base.coverUrl,
   });

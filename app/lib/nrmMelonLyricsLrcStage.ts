@@ -1,6 +1,5 @@
-/**
- * 멜론 원문 가사 + wav2vec2 CTC forced alignment → LRC.
- */
+import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+
 import { Platform } from 'react-native';
 
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
@@ -14,6 +13,7 @@ export async function transcribeMelonLyricsLrc(
   mode: NrmMelonLyricsMode,
   extension: string,
   melonLyricsPlain: string,
+  melonAlignLang: MelonAlignLyricsLanguage = 'ko',
 ): Promise<WhisperLrcStageResult> {
   if (Platform.OS === 'web') {
     return { lyricsRequested: false, lyricsEmbedded: false };
@@ -38,8 +38,16 @@ export async function transcribeMelonLyricsLrc(
   let lyricsMelonAlignFailed = false;
   let lyricsMelonMemoryInsufficient = false;
   try {
-    const { alignMelonLyricsToLrcNative } = await import('@/lib/nrmWhisperXAlignNative');
-    const aligned = await alignMelonLyricsToLrcNative(fileUri, plain, mode);
+    const { loadAlignModelPreference } = await import('@/lib/nrmDownloadSettings');
+    const { alignMelonLyricsToLrcNative } = await import('@/lib/nrmAlignModelNative');
+    const alignPref = await loadAlignModelPreference();
+    const aligned = await alignMelonLyricsToLrcNative(
+      fileUri,
+      plain,
+      mode,
+      alignPref,
+      melonAlignLang,
+    );
     lrc = normalizeWhisperLrc(aligned.lrc);
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
     lyricsMelonAlignFailed = aligned.alignFailed && !lyricsMelonMemoryInsufficient;

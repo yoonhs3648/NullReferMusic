@@ -53,6 +53,7 @@ export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
   whisperMode: NrmWhisperLyricsMode | null;
   melonMode: NrmMelonLyricsMode | null;
   melonLyricsPlain: string | null;
+  melonAlignLang: 'ko' | 'en';
 } {
   const whisperMode = parseWhisperLyricsMode(meta.lyrics);
   const melonMode = parseMelonLyricsMode(meta.lyrics);
@@ -61,12 +62,16 @@ export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
     delete ffmpegMetadata.lyrics;
   }
   delete ffmpegMetadata.melonLyricsPlain;
+  delete ffmpegMetadata.melonAlignLang;
+  delete ffmpegMetadata.platformGenreRaw;
   const plain = (meta.melonLyricsPlain ?? '').trim();
+  const melonAlignLang = meta.melonAlignLang === 'en' ? 'en' : 'ko';
   return {
     ffmpegMetadata,
     whisperMode,
     melonMode,
     melonLyricsPlain: plain || null,
+    melonAlignLang,
   };
 }
 

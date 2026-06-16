@@ -35,6 +35,10 @@ import {
   nrmNotifyDownloadWorkEnded,
 } from '@/lib/nrmMobileDownloadNotifications';
 import {
+  nrmBackgroundWorkRelease,
+  nrmDownloadBackgroundWorkToken,
+} from '@/lib/nrmBackgroundWork';
+import {
   normalizeDownloadMetadata,
   type NrmAudioFileMetadata,
 } from '@/lib/nrmDownloadAudioMetadata';
@@ -607,6 +611,8 @@ export function NrmYoutubeHome({
             Platform.OS !== 'web'
               ? () => {
                   nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
+                  // 오디오 저장 완료 후 dl 토큰 해제 — 가사(Whisper/멜론)는 별도 native 토큰
+                  nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
                 }
               : undefined,
           onLyricsStageStarted:

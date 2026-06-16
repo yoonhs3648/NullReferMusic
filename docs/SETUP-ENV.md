@@ -25,7 +25,7 @@
    상세: `docs/RELEASE-APK-IPA-RULE.md` §6-1-a
 7. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
 8. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)
-9. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트, §6-1-a assets 필수)
+9. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트, §6-1-a assets·§6-1-b 명언 Excel 필수)
 10. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`
@@ -94,7 +94,7 @@ npm -v
 | 파일 | 설명 |
 |------|------|
 | **`StartServer.bat`** | Spring Boot(8787) + Expo Metro(8081, LAN QR) + PC 브라우저. LAN IP는 `scripts/Get-LanIp.ps1` 로 자동 설정. `NRM_REPO_ROOT` 지원 |
-| **`NullReferMusic-Build-Release-Apk.bat`** | 릴리스 APK 빌드 (`app\android\gradlew.bat assembleRelease`) |
+| **`NullReferMusic-Build-Release-Apk.bat`** | 릴리스 APK 빌드 (tsc → 명언 Excel generate → `assembleRelease`) |
 
 내부용: `scripts/Get-LanIp.ps1` 만 유지(StartServer 호출). Android Gradle용 `app/android/gradlew.bat` 은 Wrapper로 별도 유지.
 

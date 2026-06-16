@@ -44,6 +44,8 @@ type NativeReadResult = {
   coverUrl?: string;
   /** 내장 가사 (LRC 텍스트). 가사 모드 감지용. */
   lyrics?: string;
+  /** MP3 TXXX / m4a nrm_lyrics_mode — 앱 전용 */
+  nrmLyricsMode?: string;
 };
 
 type NativeAudioMetadata = {
@@ -127,6 +129,7 @@ export async function readAudioFileMetadata(
     producer: (raw.producer ?? '').trim() || undefined,
     remixer: (raw.remixer ?? '').trim() || undefined,
     lyrics: (raw.lyrics ?? '').trim() || undefined,
+    nrmLyricsMode: (raw.nrmLyricsMode ?? '').trim() || undefined,
   });
 
   if (localUri.includes('/cache/') || localUri.includes('cache%2F')) {

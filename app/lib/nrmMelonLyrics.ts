@@ -4,6 +4,7 @@ import {
   buildAutoWhisperLyricsSentinel,
   type NrmWhisperLyricsMode,
 } from '@/lib/nrmWhisperLyrics';
+import { isLrcMetadataTagLine, isNrmLyricsModeHeaderLine } from '@/lib/nrmLrcUiMode';
 
 /** 멜론 원문 가사 + WhisperX 정렬 모드 */
 export type NrmMelonLyricsMode = 'melon' | 'melon_translation';
@@ -62,16 +63,19 @@ export function isMelonLyricsUiMode(mode: NrmLyricsUiMode): mode is NrmMelonLyri
   return mode === 'melon' || mode === 'melon_translation';
 }
 
-const NRM_LRC_MODE_LINE_RE =
-  /^\[nrm:(configured|translation|melon|melon_translation)\]$/i;
-
-/** LRC 본문에서 타임스탬프·모드 태그를 제거한 plain 가사 추출 (트랙 편집 복원용) */
+/** LRC 본문에서 타임스탬프·모드·메타데이터 태그를 제거한 plain 가사 추출 (트랙 편집 복원용) */
 export function extractPlainLyricsFromLrcText(lrcText: string): string {
   const lines: string[] = [];
   const seen = new Set<string>();
   for (const rawLine of lrcText.split(/\r?\n/)) {
     const trimmed = rawLine.trim();
-    if (!trimmed || NRM_LRC_MODE_LINE_RE.test(trimmed)) continue;
+    if (
+      !trimmed ||
+      isNrmLyricsModeHeaderLine(trimmed) ||
+      isLrcMetadataTagLine(trimmed)
+    ) {
+      continue;
+    }
     const m = trimmed.match(/^\[[^\]]+\](.*)$/);
     if (!m) continue;
     const text = m[1].trim();

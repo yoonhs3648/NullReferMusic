@@ -332,19 +332,22 @@ export async function applyTrackMetadataUpdate(
 
   // generate-melon: WhisperX Forced Alignment으로 멜론 가사 정렬
   if (lyricsAction.kind === 'generate-melon') {
-    const plain = (metadata.melonLyricsPlain ?? '').trim();
+    let plain = (metadata.melonLyricsPlain ?? '').trim();
+    if (!plain) {
+      const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
+      plain = (await fetchMelonPlainLyricsFromWebsite(metadata.website)).trim();
+    }
     if (!plain) {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
-      throw new Error('멜론 가사 데이터가 없습니다.');
+      notifyUser('멜론 가사 데이터가 없습니다.');
+      return;
     }
     try {
       const workUri = await materializeToCache(location.audioUri, location.fileName);
       const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
-      const melon = await transcribeMelonLyricsLrc(
-        workUri,
-        lyricsAction.mode,
-        ext,
-        plain,
+      const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+      const melon = await runWhisperTranscribeSerial(displayLabel, () =>
+        transcribeMelonLyricsLrc(workUri, lyricsAction.mode, ext, plain),
       );
       if (melon.lrcFull?.trim()) {
         await saveLrc(melon.lrcFull, lyricsAction.mode);
@@ -367,7 +370,10 @@ export async function applyTrackMetadataUpdate(
   // generate: Whisper 재전사 후 저장
   try {
     const workUri = await materializeToCache(location.audioUri, location.fileName);
-    const whisper = await transcribeWhisperLrc(workUri, lyricsAction.mode, ext);
+    const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+    const whisper = await runWhisperTranscribeSerial(displayLabel, () =>
+      transcribeWhisperLrc(workUri, lyricsAction.mode, ext),
+    );
     if (whisper.lrcFull?.trim()) {
       await saveLrc(whisper.lrcFull, lyricsAction.mode);
       nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');

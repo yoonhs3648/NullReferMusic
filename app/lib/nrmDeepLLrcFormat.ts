@@ -83,7 +83,7 @@ export function collectLrcTranslationTargets(lines: string[]): LrcTranslationTar
   }));
 }
 
-/** DeepL 응답은 가사만 온다고 가정 (구버전 `[타임] …` 응답도 파싱) */
+/** DeepL·LibreTranslate 응답은 가사만 온다고 가정 (구버전 `[타임] …` 응답도 파싱) */
 export function normalizeDeepLLyricTranslation(
   deeplResponse: string,
   requestLyric?: string,
@@ -92,8 +92,25 @@ export function normalizeDeepLLyricTranslation(
   if (!resp) return '';
   const fromResp = splitLrcLine(resp);
   if (fromResp?.text) return fromResp.text;
-  if (requestLyric && resp === requestLyric.trim()) return resp;
+  if (requestLyric && resp === requestLyric.trim()) return '';
   return resp;
+}
+
+/** 한글(가사 번역) 포함 여부 — 오프라인 en→ko 검증용 */
+export function containsHangul(text: string): boolean {
+  return /[\uAC00-\uD7A3]/.test(text);
+}
+
+function isSameLyricTranslation(original: string, translation: string): boolean {
+  const orig = original.trim();
+  const trans = translation.trim();
+  if (!orig || !trans) return true;
+  if (orig.toLowerCase() === trans.toLowerCase()) return true;
+  const unwrapped =
+    trans.startsWith('(') && trans.endsWith(')')
+      ? trans.slice(1, -1).trim()
+      : trans;
+  return orig.toLowerCase() === unwrapped.toLowerCase();
 }
 
 /**
@@ -205,9 +222,17 @@ export function mergeDeepLResponsesIntoLrc(
       deeplResponses[i] ?? '',
       slot.deeplText ?? undefined,
     );
-    if (translation) {
-      byLineIndex.set(slot.lineIndex, translation);
+    if (!translation) {
+      continue;
     }
+    if (isSameLyricTranslation(slot.lyricText, translation)) {
+      continue;
+    }
+    // 오프라인 en→ko: 한글이 없으면 번역 실패로 간주하고 원문 아래 줄을 추가하지 않음
+    if ((detected === 'EN' || detected === '') && !containsHangul(translation)) {
+      continue;
+    }
+    byLineIndex.set(slot.lineIndex, translation);
   }
 
   for (const slot of slots) {

@@ -125,12 +125,12 @@ object NrmBackgroundWorkCoordinator {
     }
 
     if (tokens.any { it == "whisperx-align-model" }) {
-      val pct = WhisperXAlignModelDownloader.progressPercent()
+      val pct = AlignModelDownloader.progressPercent()
       lines.add(
           if (pct in 0..99) {
-            "WhisperX 정렬 모델 다운로드 중 ($pct%)"
+            "Forced Alignment 모델 설치 중 ($pct%)"
           } else {
-            "WhisperX 정렬 모델 다운로드 중"
+            "Forced Alignment 모델 설치 중"
           },
       )
     }

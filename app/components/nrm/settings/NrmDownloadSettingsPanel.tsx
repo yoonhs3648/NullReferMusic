@@ -25,6 +25,8 @@ import {
   loadDownloadVbrMode,
   loadLyricsOutputMode,
   loadWhisperModelPreference,
+  loadAlignModelPreference,
+  saveAlignModelPreference,
   NRM_AUDIO_EXTENSIONS,
   NRM_ENABLED_AUDIO_EXTENSIONS,
   NRM_DOWNLOAD_FILENAME_FORMATS,
@@ -45,22 +47,25 @@ import {
   type NrmDownloadVbrMode,
   type NrmLyricsOutputMode,
   type NrmWhisperModelPreference,
+  type NrmAlignModelPreference,
 } from '@/lib/nrmDownloadSettings';
 import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModelPicker';
+import { NrmAlignModelPicker } from '@/components/nrm/settings/NrmAlignModelPicker';
 import { NrmDownloadEncodeOptionPicker } from '@/components/nrm/settings/NrmDownloadEncodeOptionPicker';
+import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import {
   LOSSLESS_SETTING_OPTIONS,
   VBR_SETTING_OPTIONS,
 } from '@/lib/nrmDownloadEncodeSettingsUi';
-import { NrmWhisperXAlignPicker } from '@/components/nrm/settings/NrmWhisperXAlignPicker';
-import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import {
   isStandaloneAndroid,
   isStandaloneIos,
   isYtDlpEncodeSettingsEffective,
 } from '@/lib/nrmStandalonePlatform';
 import { fetchWhisperModelStatuses } from '@/lib/nrmWhisperModelNative';
+import { fetchAlignModelStatuses } from '@/lib/nrmAlignModelNative';
 import type { NrmWhisperModelId } from '@/lib/nrmWhisperCatalog';
+import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
@@ -113,6 +118,8 @@ export function NrmDownloadSettingsPanel({
   const [lyricsOutputMode, setLyricsOutputMode] = useState<NrmLyricsOutputMode>('sidecar');
   const [whisperModelPreference, setWhisperModelPreference] =
     useState<NrmWhisperModelPreference>('whisper:large-v3-turbo');
+  const [alignModelPreference, setAlignModelPreference] =
+    useState<NrmAlignModelPreference>('aeneas:sync');
 
   useEffect(() => {
     if (section === 'path') {
@@ -167,24 +174,40 @@ export function NrmDownloadSettingsPanel({
     if (section === 'lyricsEmbed') {
       void (async () => {
         try {
-          const preference = await loadWhisperModelPreference();
+          const [whisperPref, alignPref] = await Promise.all([
+            loadWhisperModelPreference(),
+            loadAlignModelPreference(),
+          ]);
           const { isWhisperModelNativeAvailable } = await import('@/lib/nrmWhisperModelNative');
-          const rows = isWhisperModelNativeAvailable()
-            ? await fetchWhisperModelStatuses()
-            : [];
-          if (rows.length > 0) {
-            const installed = rows
+          const { isAlignModelNativeAvailable } = await import('@/lib/nrmAlignModelNative');
+          const [whisperRows, alignRows] = await Promise.all([
+            isWhisperModelNativeAvailable() ? fetchWhisperModelStatuses() : [],
+            isAlignModelNativeAvailable() ? fetchAlignModelStatuses() : [],
+          ]);
+
+          let nextWhisper = whisperPref;
+          if (whisperRows.length > 0) {
+            const whisperInstalled = whisperRows
               .filter((r) => r.installed)
               .map((r) => r.modelId as NrmWhisperModelId);
-            if (installed.length > 0 && !installed.includes(preference)) {
-              setWhisperModelPreference(installed[0]);
-              await saveWhisperModelPreference(installed[0]);
-            } else {
-              setWhisperModelPreference(preference);
+            if (whisperInstalled.length > 0 && !whisperInstalled.includes(whisperPref)) {
+              nextWhisper = whisperInstalled[0];
+              await saveWhisperModelPreference(nextWhisper);
             }
-          } else {
-            setWhisperModelPreference(preference);
           }
+          setWhisperModelPreference(nextWhisper);
+
+          let nextAlign = alignPref;
+          if (alignRows.length > 0) {
+            const alignInstalled = alignRows
+              .filter((r) => r.installed)
+              .map((r) => r.modelId as NrmAlignModelId);
+            if (alignInstalled.length > 0 && !alignInstalled.includes(alignPref)) {
+              nextAlign = alignInstalled[0];
+              await saveAlignModelPreference(nextAlign);
+            }
+          }
+          setAlignModelPreference(nextAlign);
         } catch {
           /* ignore */
         } finally {
@@ -270,6 +293,11 @@ export function NrmDownloadSettingsPanel({
   const selectWhisperModelPreference = useCallback((preference: NrmWhisperModelPreference) => {
     setWhisperModelPreference(preference);
     void saveWhisperModelPreference(preference);
+  }, []);
+
+  const selectAlignModelPreference = useCallback((preference: NrmAlignModelPreference) => {
+    setAlignModelPreference(preference);
+    void saveAlignModelPreference(preference);
   }, []);
 
   const displayPath = dirUri ? safUriToDisplayPath(dirUri) : null;
@@ -504,15 +532,17 @@ export function NrmDownloadSettingsPanel({
           ) : (
             <>
               <Text style={[styles.whisperSectionLabel, { color: bodyColor }]}>
-                WhisperX Forced Alignment
+                Forced Alignment (가사 → 싱크가사)
               </Text>
-              <NrmWhisperXAlignPicker
+              <NrmAlignModelPicker
+                value={alignModelPreference}
+                onChange={selectAlignModelPreference}
                 titleColor={titleColor}
                 bodyColor={bodyColor}
                 active
               />
               <Text style={[styles.whisperSectionLabel, { color: bodyColor }]}>
-                Whisper 전사 모델
+                Whisper 전사 모델 (AI 가사 생성)
               </Text>
               <NrmWhisperModelPicker
                 value={whisperModelPreference}

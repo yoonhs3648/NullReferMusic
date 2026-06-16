@@ -154,9 +154,15 @@ async function finalizeNativeParallel(
   options?: FinalizeParallelOptions,
 ): Promise<FinalizeParallelResult> {
   const encode = await loadDownloadEncodeSettings();
-  const { whisperMode, melonMode, melonLyricsPlain, ffmpegMetadata } = embedMetadata
+  const { whisperMode, melonMode, melonLyricsPlain, melonAlignLang, ffmpegMetadata } = embedMetadata
     ? splitMetadataForDownloadStages(embedMetadata)
-    : { whisperMode: null, melonMode: null, melonLyricsPlain: null, ffmpegMetadata: undefined };
+    : {
+        whisperMode: null,
+        melonMode: null,
+        melonLyricsPlain: null,
+        melonAlignLang: 'ko' as const,
+        ffmpegMetadata: undefined,
+      };
 
   const lyricsModeActive = whisperMode ?? melonMode;
 
@@ -264,6 +270,7 @@ async function finalizeNativeParallel(
               melonMode,
               extension,
               melonLyricsPlain,
+              melonAlignLang,
             ),
           );
         }

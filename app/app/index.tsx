@@ -58,6 +58,7 @@ import { confirmUser } from '@/lib/nrmUserNotify';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 
+import { NrmMusicQuotePanel } from '@/components/nrm/NrmMusicQuotePanel';
 import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -136,6 +137,7 @@ export default function HomeScreen() {
   );
 
   const [homeEpoch, setHomeEpoch] = useState(0);
+  const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
   const [searchViewEpoch, setSearchViewEpoch] = useState(0);
   const [easterVisible, setEasterVisible] = useState(false);
   const easterOpacity = useRef(new Animated.Value(0)).current;
@@ -167,7 +169,9 @@ export default function HomeScreen() {
 
   const rootBackground = getNrmRootBackgroundColor(isDark);
 
-  const isWelcome = layoutPhase === 'welcome';
+  const bumpQuoteRefresh = useCallback(() => {
+    setQuoteRefreshKey((k) => k + 1);
+  }, []);
 
   const isAppleMusicCharts = mainView === 'appleMusicCharts';
   const isSpotifyChartsOfficial = mainView === 'spotifyChartsOfficial';
@@ -238,7 +242,8 @@ export default function HomeScreen() {
     setMainView('youtube');
     setLayoutPhase('welcome');
     setHomeEpoch((v) => v + 1);
-  }, [dismissYoutubeOverlay]);
+    bumpQuoteRefresh();
+  }, [dismissYoutubeOverlay, bumpQuoteRefresh]);
 
   /** 차트·검색 트랙 클릭: 유튜브 오버레이 (원 플랫폼 화면은 마운트 유지) */
   const navigateToSearchFromChart = useCallback(
@@ -812,14 +817,14 @@ export default function HomeScreen() {
 
   const renderYoutubePanel = (overlay: YoutubeOverlayState | null) => {
     const youtubeBrowsing = !!overlay || layoutPhase === 'browsing';
+    const showWelcomeQuotes = !youtubeBrowsing;
 
     const logoBlock = (
       <View
         style={[
           styles.logoWrap,
-          isWelcome && !overlay
-            ? styles.logoWrapWelcome
-            : [styles.logoWrapBrowsing, { paddingTop: logoPadTop }],
+          styles.logoWrapBrowsing,
+          { paddingTop: logoPadTop },
         ]}>
         <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onMainLogoPress} />
       </View>
@@ -848,6 +853,7 @@ export default function HomeScreen() {
         style={[
           styles.keyboardAvoid,
           youtubeBrowsing && styles.youtubeBrowsingRoot,
+          !youtubeBrowsing && styles.youtubeWelcomeRoot,
         ]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         enabled>
@@ -856,11 +862,19 @@ export default function HomeScreen() {
             styles.centerColumn,
             youtubeBrowsing ? styles.youtubeBrowsingColumn : styles.youtubeWelcomeColumn,
             { paddingHorizontal: pad },
-            !youtubeBrowsing && Platform.OS === 'web' ? { minHeight: winH } : null,
           ]}>
           {logoBlock}
-          <View style={youtubeBrowsing ? styles.youtubeHomeShell : undefined}>
+          <View
+            style={
+              youtubeBrowsing ? styles.youtubeHomeShell : styles.youtubeWelcomeBody
+            }>
             {youtubeHome}
+            {showWelcomeQuotes ? (
+              <NrmMusicQuotePanel
+                isDark={isDark}
+                refreshKey={quoteRefreshKey}
+              />
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1046,6 +1060,11 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
 
+  youtubeWelcomeRoot: {
+    flex: 1,
+    minHeight: 0,
+  },
+
   youtubeBrowsingColumn: {
     flex: 1,
     minHeight: 0,
@@ -1056,8 +1075,16 @@ const styles = StyleSheet.create({
 
   youtubeWelcomeColumn: {
     flex: 1,
-    justifyContent: 'center',
-    paddingBottom: nrmTokens.space.xl,
+    minHeight: 0,
+    width: '100%',
+    maxWidth: nrmTokens.layout.maxContentWidth,
+    alignSelf: 'center',
+  },
+
+  youtubeWelcomeBody: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
   },
 
   youtubeHomeShell: {
@@ -1098,12 +1125,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
 
     alignItems: 'center',
-
-  },
-
-  logoWrapWelcome: {
-
-    marginBottom: nrmTokens.space.xl,
 
   },
 

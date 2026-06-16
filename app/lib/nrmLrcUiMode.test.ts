@@ -5,8 +5,11 @@ import {
   detectLrcUiModeFromText,
   detectLyricsUiModeFromStoredText,
   DUPLICATE_TS_TRANSLATION_THRESHOLD,
+  buildNrmLrcModeLine,
   parseLyricsModeFromLrcText,
+  resolveLyricsSidecarAction,
   resolveStoredLyricsModeFromFlags,
+  stripNrmLrcModeLine,
   withNrmLyricsModeHeader,
 } from './nrmLrcUiMode';
 import { inferMelonLyricsUiModeFromContext } from './nrmMelonLyrics';
@@ -63,7 +66,11 @@ const singleLines = Array.from(
 assert.equal(detectLrcUiModeFromText(singleLines), 'configured');
 
 const melonTagged = withNrmLyricsModeHeader(dualLineLrc(DUPLICATE_TS_TRANSLATION_THRESHOLD), 'melon_translation');
+assert.equal(buildNrmLrcModeLine('translation'), '[re:NRM/translation]');
+assert.ok(melonTagged.startsWith('[re:NRM/melon_translation]\n'));
 assert.equal(parseLyricsModeFromLrcText(melonTagged), 'melon_translation');
+assert.equal(parseLyricsModeFromLrcText('[nrm:melon]\n[00:01.00] test'), 'melon');
+assert.equal(stripNrmLrcModeLine(melonTagged), dualLineLrc(DUPLICATE_TS_TRANSLATION_THRESHOLD));
 assert.equal(detectLrcUiModeFromText(melonTagged), 'translation');
 
 const embeddedMelonTagged = withNrmLyricsModeHeader(
@@ -94,6 +101,27 @@ assert.equal(
 );
 assert.equal(
   resolveStoredLyricsModeFromFlags({
+    embeddedLyricsMode: 'melon',
+    metadataLyrics: '__AUTO_FROM_WHISPER__:configured',
+  }),
+  'melon',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    embeddedLyricsMode: 'translation',
+    metadataLyrics: '[00:01.00] hello',
+  }),
+  'translation',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    sidecarLrcText: embeddedMelonTagged,
+    embeddedLyricsMode: 'configured',
+  }),
+  'melon',
+);
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
     sidecarLrcText: singleLines,
   }),
   'configured',
@@ -111,5 +139,17 @@ assert.equal(
   inferMelonLyricsUiModeFromContext('configured', '가사\n두번째', 'https://example.com'),
   'configured',
 );
+
+assert.deepEqual(resolveLyricsSidecarAction('melon', 'melon', null), {
+  kind: 'generate-melon',
+  mode: 'melon',
+});
+assert.deepEqual(resolveLyricsSidecarAction('melon', 'melon', 'content://lrc'), {
+  kind: 'none',
+});
+assert.deepEqual(resolveLyricsSidecarAction('unset', 'configured', null), {
+  kind: 'generate',
+  mode: 'configured',
+});
 
 console.log('nrmLrcUiMode.test.ts: ok');

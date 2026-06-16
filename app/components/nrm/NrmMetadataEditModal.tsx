@@ -22,6 +22,7 @@ import {
 } from '@/lib/nrmDownloadSettings';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { loadNrmGenreTagCatalog } from '@/lib/nrmGenreTagSettings';
+import { resolveGenreDropdownSelection } from '@/lib/nrmGenreResolve';
 import {
   buildAudioFileName,
   guessInitialDownloadFields,
@@ -37,7 +38,10 @@ import {
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 import { isWhisperModelInstalled } from '@/lib/nrmWhisperModelNative';
-import { isWhisperXAlignModelInstalled } from '@/lib/nrmWhisperXAlignNative';
+import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
+import { isNrmWav2Vec2BundleId } from '@/lib/nrmAlignModelCatalog';
+import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+import { loadAlignModelPreference } from '@/lib/nrmDownloadSettings';
 import { loadWhisperModelPreference } from '@/lib/nrmDownloadSettings';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
@@ -85,6 +89,17 @@ export type NrmMetadataEditModalProps = {
 
 const GENRE_MANUAL_VALUE = '__manual__';
 
+function isPlatformDownloadSource(
+  source: NrmMetadataEditModalProps['metadataSource'],
+): boolean {
+  return (
+    source === 'melon' ||
+    source === 'lastfm' ||
+    source === 'spotify' ||
+    source === 'chart'
+  );
+}
+
 const WEB_SCROLL_CLASS = 'nrm-scroll-web';
 
 function webScrollClassName(isDark: boolean): string | undefined {
@@ -108,17 +123,17 @@ function normalizeString(s: string | undefined | null): string {
 
 function resolveGenreSelection(
   genreValue: string,
-  categoryNames: string[],
+  catalog: import('@/lib/nrmGenreTagSettings').NrmGenreTagCatalog,
 ): { selection: string; custom: string } {
   const trimmed = genreValue.trim();
   if (!trimmed) {
     return { selection: GENRE_MANUAL_VALUE, custom: '' };
   }
-  const match = categoryNames.find((n) => n === trimmed);
-  if (match) {
-    return { selection: match, custom: '' };
+  const resolved = resolveGenreDropdownSelection(catalog, { rawGenre: trimmed });
+  if (resolved.selection) {
+    return { selection: resolved.selection, custom: '' };
   }
-  return { selection: GENRE_MANUAL_VALUE, custom: trimmed };
+  return { selection: GENRE_MANUAL_VALUE, custom: resolved.custom };
 }
 
 type InlineSelectProps = {
@@ -338,6 +353,7 @@ export function NrmMetadataEditModal({
   const [remixer, setRemixer] = useState('');
   const [coverUrl, setCoverUrl] = useState('');
   const [moreExpanded, setMoreExpanded] = useState(false);
+  const [platformGenreRaw, setPlatformGenreRaw] = useState('');
   const [whisperModelMissing, setWhisperModelMissing] = useState(false);
   const [whisperGateLoading, setWhisperGateLoading] = useState(false);
 
@@ -421,6 +437,11 @@ export function NrmMetadataEditModal({
     setRemixer(normalizeString(m?.remixer));
     setCoverUrl(normalizeString(m?.coverUrl));
     setMoreExpanded(false);
+    setPlatformGenreRaw(
+      purpose === 'download' && isPlatformDownloadSource(metadataSource)
+        ? normalizeString(m?.platformGenreRaw ?? m?.genre)
+        : '',
+    );
 
     if (!initialPlain && isMelonLyricsUiMode(storedMode) && extractMelonSongIdFromUrl(site)) {
       void fetchMelonPlainLyricsFromWebsite(site).then((plain) => {
@@ -432,7 +453,7 @@ export function NrmMetadataEditModal({
     void loadNrmGenreTagCatalog().then((catalog) => {
       const names = catalog.categories.map((c) => c.name);
       setGenreCategoryNames(names);
-      const resolved = resolveGenreSelection(normalizeString(m?.genre), names);
+      const resolved = resolveGenreSelection(normalizeString(m?.genre), catalog);
       setGenreSelection(resolved.selection);
       setGenreCustom(resolved.custom);
     });
@@ -470,12 +491,94 @@ export function NrmMetadataEditModal({
 
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmPayload | null>(null);
+  const [lyricsLangPick, setLyricsLangPick] = useState<{
+    resolve: (lang: MelonAlignLyricsLanguage | null) => void;
+  } | null>(null);
 
   const blocked = busy || deleting;
   const canSubmit =
     !!item && artist.trim().length > 0 && title.trim().length > 0 && !blocked;
   const canSubmitWithConflict = canSubmit && !nameConflict;
   const confirmLabel = purpose === 'trackEdit' ? '저장' : '다운로드';
+
+  const submitWithMetadata = useCallback(
+    (melonAlignLang?: MelonAlignLyricsLanguage) => {
+      if (!item) return;
+      const lyricsPayload = resolveLyricsForSubmit();
+      const metadata: NrmAudioFileMetadata = {
+        artist: artist.trim(),
+        title: title.trim(),
+        album: album.trim(),
+        genre: resolvedGenre,
+        releaseDate: releaseDate.trim(),
+        coverUrl: coverUrl.trim(),
+        albumArtist: artist.trim() || undefined,
+        trackNumber: trackNumber.trim() || undefined,
+        discNumber: discNumber.trim() || undefined,
+        composer: composer.trim() || undefined,
+        lyrics: lyricsPayload.lyrics,
+        melonLyricsPlain: lyricsPayload.melonLyricsPlain,
+        melonAlignLang:
+          purpose === 'download' && isMelonLyricsUiMode(lyricsMode) && melonAlignLang
+            ? melonAlignLang
+            : undefined,
+        bpm: bpm.trim() || undefined,
+        copyright: copyright.trim() || undefined,
+        website: website.trim() || undefined,
+        producer: producer.trim() || undefined,
+        remixer: remixer.trim() || undefined,
+      };
+      const fileName = buildAudioFileName(
+        artist.trim(),
+        title.trim(),
+        extension,
+        fileNameFormat,
+      );
+      onConfirm(item.videoId, fileName, metadata);
+    },
+    [
+      album,
+      artist,
+      bpm,
+      composer,
+      copyright,
+      discNumber,
+      extension,
+      fileNameFormat,
+      item,
+      lyricsMode,
+      onConfirm,
+      producer,
+      purpose,
+      releaseDate,
+      remixer,
+      resolvedGenre,
+      title,
+      trackNumber,
+      website,
+      coverUrl,
+    ],
+  );
+
+  const handlePrimaryAction = useCallback(() => {
+    void (async () => {
+      if (!item || !canSubmitWithConflict) return;
+      if (purpose === 'download' && isMelonLyricsUiMode(lyricsMode)) {
+        const alignPref = await loadAlignModelPreference();
+        if (isNrmWav2Vec2BundleId(alignPref)) {
+          setLyricsLangPick({
+            resolve: (lang) => {
+              setLyricsLangPick(null);
+              if (!lang) return;
+              submitWithMetadata(lang);
+            },
+          });
+          return;
+        }
+      }
+      submitWithMetadata();
+    })();
+  }, [canSubmitWithConflict, item, lyricsMode, purpose, submitWithMetadata]);
 
   const stackCoverColumn = cardMaxWidth < 400;
 
@@ -558,10 +661,13 @@ export function NrmMetadataEditModal({
         first = false;
         setWhisperGateLoading(true);
       }
-      const pref = await loadWhisperModelPreference();
+      const [pref, alignPref] = await Promise.all([
+        loadWhisperModelPreference(),
+        loadAlignModelPreference(),
+      ]);
       const [hasWhisper, hasAlign] = await Promise.all([
         isWhisperModelInstalled(pref),
-        isWhisperXAlignModelInstalled(),
+        isAlignModelInstalled(alignPref),
       ]);
       if (cancelled) return;
       setWhisperModelMissing(!hasWhisper);
@@ -955,6 +1061,16 @@ export function NrmMetadataEditModal({
 
             {moreExpanded ? (
               <View style={styles.moreFields}>
+                {purpose === 'download' && isPlatformDownloadSource(metadataSource) ? (
+                  <View style={styles.platformGenreRow}>
+                    <Text style={[styles.platformGenreText, { color: bodyColor }]}>
+                      장르 원본 :{' '}
+                      <Text style={{ color: titleColor }}>
+                        {platformGenreRaw || '(없음)'}
+                      </Text>
+                    </Text>
+                  </View>
+                ) : null}
                 <InlineTextField
                   label="트랙번호"
                   value={trackNumber}
@@ -1107,36 +1223,7 @@ export function NrmMetadataEditModal({
             </Pressable>
 
             <Pressable
-              onPress={() => {
-                if (!item || !canSubmitWithConflict) return;
-                const lyricsPayload = resolveLyricsForSubmit();
-                const metadata: NrmAudioFileMetadata = {
-                  artist: artist.trim(),
-                  title: title.trim(),
-                  album: album.trim(),
-                  genre: resolvedGenre,
-                  releaseDate: releaseDate.trim(),
-                  coverUrl: coverUrl.trim(),
-                  albumArtist: artist.trim() || undefined,
-                  trackNumber: trackNumber.trim() || undefined,
-                  discNumber: discNumber.trim() || undefined,
-                  composer: composer.trim() || undefined,
-                  lyrics: lyricsPayload.lyrics,
-                  melonLyricsPlain: lyricsPayload.melonLyricsPlain,
-                  bpm: bpm.trim() || undefined,
-                  copyright: copyright.trim() || undefined,
-                  website: website.trim() || undefined,
-                  producer: producer.trim() || undefined,
-                  remixer: remixer.trim() || undefined,
-                };
-                const fileName = buildAudioFileName(
-                  artist.trim(),
-                  title.trim(),
-                  extension,
-                  fileNameFormat,
-                );
-                onConfirm(item.videoId, fileName, metadata);
-              }}
+              onPress={handlePrimaryAction}
               disabled={!canSubmitWithConflict}
               style={({ pressed }) => [
                 styles.btnPrimary,
@@ -1161,6 +1248,39 @@ export function NrmMetadataEditModal({
             />
           </View>
         ) : null}
+
+        {lyricsLangPick ? (
+          <View style={styles.confirmHost} pointerEvents="box-none">
+            <View style={[styles.lyricsLangCard, { borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline, backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas }]}>
+              <Text style={[styles.lyricsLangTitle, { color: titleColor }]}>가사의 언어를 선택하세요.</Text>
+              <View style={styles.lyricsLangActions}>
+                <Pressable
+                  onPress={() => lyricsLangPick.resolve('ko')}
+                  style={({ pressed }) => [styles.lyricsLangBtn, styles.lyricsLangBtnPrimary, pressed && styles.pressed]}
+                  accessibilityRole="button">
+                  <Text style={styles.lyricsLangBtnPrimaryLabel}>한국어</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => lyricsLangPick.resolve('en')}
+                  style={({ pressed }) => [styles.lyricsLangBtn, styles.lyricsLangBtnPrimary, pressed && styles.pressed]}
+                  accessibilityRole="button">
+                  <Text style={styles.lyricsLangBtnPrimaryLabel}>English</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => lyricsLangPick.resolve(null)}
+                  style={({ pressed }) => [
+                    styles.lyricsLangBtn,
+                    styles.lyricsLangBtnSecondary,
+                    { borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline },
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button">
+                  <Text style={[styles.lyricsLangBtnSecondaryLabel, { color: bodyColor }]}>취소</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        ) : null}
       </View>
     </Modal>
   );
@@ -1177,7 +1297,37 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 300,
     elevation: 300,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
+  lyricsLangCard: {
+    borderRadius: nrmTokens.radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: nrmTokens.space.lg,
+    width: '88%',
+    maxWidth: 360,
+    gap: nrmTokens.space.md,
+  },
+  lyricsLangTitle: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  lyricsLangActions: { gap: nrmTokens.space.sm },
+  lyricsLangBtn: {
+    borderRadius: nrmTokens.radius.md,
+    paddingVertical: nrmTokens.space.md,
+    alignItems: 'center',
+  },
+  lyricsLangBtnPrimary: { backgroundColor: nrmTokens.color.primary },
+  lyricsLangBtnPrimaryLabel: {
+    color: nrmTokens.color.onPrimary,
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+  },
+  lyricsLangBtnSecondary: { borderWidth: StyleSheet.hairlineWidth },
+  lyricsLangBtnSecondaryLabel: { fontSize: nrmTokens.font.body, fontWeight: '500' },
   dim: { backgroundColor: 'rgba(0,0,0,0.45)' },
   card: {
     borderRadius: nrmTokens.radius.lg,
@@ -1331,6 +1481,14 @@ const styles = StyleSheet.create({
   },
   moreToggleLabel: { fontSize: nrmTokens.font.body, fontWeight: '600' },
   moreFields: { gap: nrmTokens.space.sm, paddingBottom: nrmTokens.space.sm },
+  platformGenreRow: {
+    paddingVertical: nrmTokens.space.xs,
+    marginBottom: nrmTokens.space.xs,
+  },
+  platformGenreText: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 20,
+  },
   preview: {
     fontSize: nrmTokens.font.caption,
     marginTop: nrmTokens.space.sm,

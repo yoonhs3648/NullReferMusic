@@ -24,7 +24,7 @@ echo - On-device download on Android ^(yt-dlp in APK^)
 echo ======================================================
 echo.
 
-echo [0/3] Release native assets (whisper-cli, shineenc, nrm-argos-translate)...
+echo [0/4] Release native assets (whisper-cli, shineenc, nrm-argos-translate)...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Verify-AndroidReleaseAssets.ps1"
 if errorlevel 1 (
   echo.
@@ -42,7 +42,7 @@ if errorlevel 1 (
 )
 
 cd /d "%APP%"
-echo [1/3] Typecheck...
+echo [1/4] Typecheck...
 call npx tsc --noEmit
 if errorlevel 1 (
   echo Typecheck failed.
@@ -50,7 +50,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/3] Gradle assembleRelease...
+echo [2/4] Music quotes from Excel (data\nrm-music-quotes.xlsx)...
+call npm run generate:music-quotes
+if errorlevel 1 (
+  echo generate:music-quotes failed.
+  pause
+  exit /b 1
+)
+
+echo [3/4] Gradle assembleRelease...
 cd /d "%ANDROID%"
 call gradlew.bat assembleRelease --no-daemon
 if errorlevel 1 (

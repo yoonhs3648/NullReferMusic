@@ -79,6 +79,14 @@ export async function translateLrcToKoreanWithLibreTranslate(
     if (responses.length !== apiTexts.length) {
       return { ok: false, message: 'LibreTranslate 번역 결과 개수가 요청과 일치하지 않습니다.' };
     }
+    const { containsHangul } = await import('@/lib/nrmDeepLLrcFormat');
+    const hasKoreanLine = responses.some((line) => containsHangul(line));
+    if (!hasKoreanLine) {
+      return {
+        ok: false,
+        message: 'LibreTranslate 번역 결과에 한글이 없습니다. 오프라인 번역기 설치 상태를 확인해주세요.',
+      };
+    }
   }
 
   const outLrc = mergeDeepLResponsesIntoLrc(

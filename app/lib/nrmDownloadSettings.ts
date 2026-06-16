@@ -5,6 +5,12 @@ import {
   migrateWhisperModelPreference,
   type NrmWhisperModelId,
 } from '@/lib/nrmWhisperCatalog';
+import {
+  DEFAULT_ALIGN_MODEL_PREFERENCE,
+  isNrmAlignModelId,
+  migrateAlignModelPreference,
+  type NrmAlignModelId,
+} from '@/lib/nrmAlignModelCatalog';
 
 /** 다운로드 파일 확장자 (선택 UI 순서) */
 export const NRM_AUDIO_EXTENSIONS = [
@@ -27,6 +33,7 @@ const STORAGE_LOSSLESS_MODE = 'nrm_download_lossless_mode_v1';
 const STORAGE_FILENAME_FORMAT = 'nrm_download_filename_format_v1';
 const STORAGE_METADATA_MODE = 'nrm_download_metadata_mode_v1';
 const STORAGE_WHISPER_MODEL_PREFERENCE = 'nrm_download_whisper_model_preference_v1';
+const STORAGE_ALIGN_MODEL_PREFERENCE = 'nrm_download_align_model_preference_v1';
 
 const DEFAULT_EXT: NrmAudioExtension = '.m4a';
 const DEFAULT_QUALITY = 0;
@@ -106,8 +113,10 @@ export function isEnabledNrmAudioExtension(v: string): v is NrmAudioExtension {
 }
 
 export type NrmWhisperModelPreference = NrmWhisperModelId;
+export type NrmAlignModelPreference = NrmAlignModelId;
 export { NRM_WHISPER_MODEL_IDS as NRM_WHISPER_MODEL_PREFERENCES } from '@/lib/nrmWhisperCatalog';
 export { isNrmWhisperModelId as isNrmWhisperModelPreference } from '@/lib/nrmWhisperCatalog';
+export { isNrmAlignModelId as isNrmAlignModelPreference } from '@/lib/nrmAlignModelCatalog';
 
 /** yt-dlp --audio-format 값 (.ogg → vorbis) */
 export function extensionToYtDlpFormat(ext: NrmAudioExtension): string {
@@ -323,6 +332,25 @@ export async function saveWhisperModelPreference(
   await AsyncStorage.setItem(
     STORAGE_WHISPER_MODEL_PREFERENCE,
     isNrmWhisperModelId(preference) ? preference : DEFAULT_WHISPER_MODEL_PREFERENCE,
+  );
+}
+
+export async function loadAlignModelPreference(): Promise<NrmAlignModelPreference> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_ALIGN_MODEL_PREFERENCE);
+    if (raw) return migrateAlignModelPreference(raw);
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_ALIGN_MODEL_PREFERENCE;
+}
+
+export async function saveAlignModelPreference(
+  preference: NrmAlignModelPreference,
+): Promise<void> {
+  await AsyncStorage.setItem(
+    STORAGE_ALIGN_MODEL_PREFERENCE,
+    isNrmAlignModelId(preference) ? preference : DEFAULT_ALIGN_MODEL_PREFERENCE,
   );
 }
 

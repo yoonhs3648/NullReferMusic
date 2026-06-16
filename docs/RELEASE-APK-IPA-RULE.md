@@ -126,6 +126,32 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Verify-AndroidReleaseAssets.p
 
 **AI 에이전트:** APK 빌드 요청 시 `Verify-AndroidReleaseAssets.ps1`를 통과시키지 못하면, 사용자에게 묻지 말고 위 스크립트로 바이너리를 생성한 뒤 **Git에 추가 가능한 상태**로 만든 다음 빌드한다.
 
+### 6-1-b. 메인 화면 음악인 명언 데이터 (필수 · Git 형상관리)
+
+릴리스 APK의 **메인 화면 명언**은 Excel 원본에서 생성된 TypeScript를 번들에 포함한다. **APK 빌드 전에 반드시 갱신**한다.
+
+| 경로 (저장소) | 용도 |
+|---------------|------|
+| `data/nrm-music-quotes.xlsx` | **편집 원본** (Excel). 행 1개 = 명언 1개 |
+| `data/nrm-music-quotes.csv` | 백업·diff용 (선택). xlsx 없을 때만 스크립트가 읽음 |
+| `app/lib/nrmMusicQuotes.generated.ts` | 앱이 import하는 **생성 결과** (빌드에 포함) |
+| `app/scripts/build-music-quotes.mjs` | xlsx/csv → `.generated.ts` 변환 |
+
+**Excel 시트 열 (첫 행 헤더, 순서 고정):** `nameKo`, `nameEn`, `years`, `quoteEn`, `quoteKo`
+
+**릴리스 APK 빌드 시 필수 명령 (자동 연동):**
+
+```powershell
+cd app
+npm run generate:music-quotes
+```
+
+- `npm run android:release` 및 저장소 루트 `NullReferMusic-Build-Release-Apk.bat`는 **`assembleRelease` 직전에 위 명령을 자동 실행**한다 (`package.json`의 `preandroid:release`).
+- **xlsx만 수정하고 generate를 건너뛰면 APK에는 이전 명언이 들어간다.** 에이전트는 APK 빌드 요청 시 generate 생략 금지.
+- xlsx가 없으면 `data/nrm-music-quotes.csv`를 읽고 xlsx를 생성한다. CSV만 편집한 경우: `npm run generate:music-quotes -- --sync-excel` 후 빌드.
+
+**AI 에이전트:** APK 빌드·`assembleRelease` 실행 전 `generate:music-quotes`가 성공했는지 확인한다. 실패 시 빌드를 진행하지 않고 원인을 수정한다.
+
 ### 6-2. 앱 메타데이터 확인
 | 항목 | 기준값 | 위치 |
 |------|--------|------|
@@ -141,8 +167,14 @@ node scripts/make-icons.mjs
 ```
 
 ### 6-3. 빌드 실행
+
+`NullReferMusic-Build-Release-Apk.bat` 또는 아래 순서를 따른다. **`generate:music-quotes`는 bat·`npm run android:release`에서 자동 실행**된다 (§6-1-b).
+
 ```
-cd C:\NullReferMusic\app\android
+cd C:\NullReferMusic\app
+npx tsc --noEmit
+npm run generate:music-quotes
+cd android
 .\gradlew.bat assembleRelease --no-daemon
 ```
 

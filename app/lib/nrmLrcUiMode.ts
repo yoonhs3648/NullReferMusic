@@ -1,4 +1,5 @@
 import { splitLrcLine, normalizeLrcLines } from '@/lib/nrmDeepLLrcFormat';
+import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 
 import type { NrmLyricsUiMode, NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 
@@ -20,32 +21,63 @@ import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export const DUPLICATE_TS_TRANSLATION_THRESHOLD = 10;
 
-const NRM_LRC_MODE_LINE_RE =
-  /^\[nrm:(configured|translation|melon|melon_translation)\]$/i;
+const LRC_MODE_VALUES = '(configured|translation|melon|melon_translation)';
 
-/** LRC 첫머리에 저장하는 가사 UI 모드 태그 (플레이어는 타임스탬프 줄이 아니므로 무시됨) */
+/** 구 형식 — 플레이어에 가사로 노출될 수 있어 하위 호환 파싱만 유지 */
+const LEGACY_NRM_LRC_MODE_LINE_RE = new RegExp(`^\\[nrm:${LRC_MODE_VALUES}\\]$`, 'i');
+
+/** LRC 1.x/2.0 표준 메타데이터 `[re:…]` (프로그램/작성 도구) — 대부분 플레이어가 가사 줄로 표시하지 않음 */
+const NRM_LRC_MODE_LINE_RE = new RegExp(`^\\[re:NRM\\/${LRC_MODE_VALUES}\\]$`, 'i');
+
+/** ar/ti/al 등 일반 LRC 메타데이터 줄 (타임스탬프 가사 아님) */
+export const LRC_METADATA_TAG_LINE_RE =
+  /^\[(?:ar|ti|al|by|offset|re|ve|la|au|length|language|tool|too|version|total|key):[^\]]*\]$/i;
+
+export function isNrmLyricsModeHeaderLine(line: string): boolean {
+  const t = line.trim();
+  return LEGACY_NRM_LRC_MODE_LINE_RE.test(t) || NRM_LRC_MODE_LINE_RE.test(t);
+}
+
+export function isLrcMetadataTagLine(line: string): boolean {
+  return LRC_METADATA_TAG_LINE_RE.test(line.trim());
+}
+
+function parseModeToken(raw: string): Exclude<NrmLyricsUiMode, 'unset'> | null {
+  const mode = raw.toLowerCase();
+  if (
+    mode === 'configured' ||
+    mode === 'translation' ||
+    mode === 'melon' ||
+    mode === 'melon_translation'
+  ) {
+    return mode;
+  }
+  return null;
+}
+
+/** LRC 첫머리에 저장하는 가사 UI 모드 — 표준 `[re:…]` 메타데이터 태그 */
 export function buildNrmLrcModeLine(mode: Exclude<NrmLyricsUiMode, 'unset'>): string {
-  return `[nrm:${mode}]`;
+  return `[re:NRM/${mode}]`;
 }
 
 export function parseLyricsModeFromLrcText(lrcText: string): NrmLyricsUiMode | null {
-  for (const line of lrcText.split(/\r?\n/).slice(0, 8)) {
-    const m = line.trim().match(NRM_LRC_MODE_LINE_RE);
-    if (!m) continue;
-    const mode = m[1].toLowerCase();
-    if (
-      mode === 'configured' ||
-      mode === 'translation' ||
-      mode === 'melon' ||
-      mode === 'melon_translation'
-    ) {
-      return mode;
+  for (const line of lrcText.split(/\r?\n/).slice(0, 12)) {
+    const t = line.trim();
+    const legacy = t.match(LEGACY_NRM_LRC_MODE_LINE_RE);
+    if (legacy) {
+      const mode = parseModeToken(legacy[1]);
+      if (mode) return mode;
+    }
+    const modern = t.match(NRM_LRC_MODE_LINE_RE);
+    if (modern) {
+      const mode = parseModeToken(modern[1]);
+      if (mode) return mode;
     }
   }
   return null;
 }
 
-/** ffmpeg sentinel, LRC `[nrm:…]` 태그, LRC 본문 순으로 UI 가사 모드 복원 */
+/** ffmpeg sentinel, LRC `[re:NRM/…]` 태그, LRC 본문 순으로 UI 가사 모드 복원 */
 export function detectLyricsUiModeFromStoredText(raw: string | undefined): {
   mode: NrmLyricsUiMode;
   lrcModeFromTag: NrmLyricsUiMode | null;
@@ -65,7 +97,7 @@ export function detectLyricsUiModeFromStoredText(raw: string | undefined): {
 
 export function stripNrmLrcModeLine(lrcText: string): string {
   const lines = lrcText.split(/\r?\n/);
-  const filtered = lines.filter((line) => !NRM_LRC_MODE_LINE_RE.test(line.trim()));
+  const filtered = lines.filter((line) => !isNrmLyricsModeHeaderLine(line));
   return filtered.join('\n').trim();
 }
 
@@ -211,6 +243,17 @@ export type LyricsSidecarAction =
 
  */
 
+function lyricsGenerationActionForMode(
+  mode: Exclude<NrmLyricsUiMode, 'unset'>,
+): LyricsSidecarAction {
+  if (mode === 'melon') return { kind: 'generate-melon', mode: 'melon' };
+  if (mode === 'melon_translation') {
+    return { kind: 'generate-melon', mode: 'melon_translation' };
+  }
+  if (mode === 'configured') return { kind: 'generate', mode: 'configured' };
+  return { kind: 'generate', mode: 'translation' };
+}
+
 export function resolveLyricsSidecarAction(
 
   initial: NrmLyricsUiMode,
@@ -221,7 +264,13 @@ export function resolveLyricsSidecarAction(
 
 ): LyricsSidecarAction {
 
-  if (initial === next) return { kind: 'none' };
+  if (initial === next) {
+    // UI 모드는 같지만 LRC가 아직 없으면(멜론 정렬 실패 등) 저장 시 생성을 허용
+    if (next !== 'unset' && !existingLrcUri?.trim()) {
+      return lyricsGenerationActionForMode(next);
+    }
+    return { kind: 'none' };
+  }
 
   if (next === 'unset') return { kind: 'delete' };
 
@@ -294,12 +343,14 @@ export function resolveLyricsSidecarAction(
 }
 
 /**
- * 트랙 편집 — 사이드카 LRC·내장 가사의 `[nrm:…]` 태그 또는 메타 sentinel로 저장 모드 복원.
+ * 트랙 편집 — 사이드카 LRC·숨김 embed 모드·메타 sentinel 순으로 저장 모드 복원.
  * 사이드카 LRC가 있으면 우선한다.
  */
 export function resolveStoredLyricsModeFromFlags(input: {
   sidecarLrcText?: string;
   metadataLyrics?: string;
+  /** MP3 TXXX / m4a nrm_lyrics_mode (플레이어 비표시) */
+  embeddedLyricsMode?: string | null;
 }): NrmLyricsUiMode {
   const sidecar = (input.sidecarLrcText ?? '').trim();
   if (sidecar) {
@@ -309,6 +360,11 @@ export function resolveStoredLyricsModeFromFlags(input: {
     if (fromSentinel !== 'unset') return fromSentinel;
     const body = detectLrcUiModeFromText(sidecar);
     if (body !== 'unset') return body;
+  }
+  const embedded = (input.embeddedLyricsMode ?? '').trim();
+  if (embedded) {
+    const fromEmbedded = parseEmbeddedLyricsModeToken(embedded);
+    if (fromEmbedded) return fromEmbedded;
   }
   const meta = (input.metadataLyrics ?? '').trim();
   if (!meta) return 'unset';

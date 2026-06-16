@@ -1,7 +1,6 @@
 package com.nullrefer.music.ondevice
 
 import android.content.Context
-import java.io.File
 
 /** LibreTranslate(Argos) 오프라인 번역 — Kotlin + nrm-argos-translate CLI */
 object ArgosBridge {
@@ -21,28 +20,66 @@ object ArgosBridge {
 
   fun translateTextsToKorean(context: Context, texts: List<String>): TranslateBatch? {
     if (!isOfflineReady(context)) return null
+    val modelDir = ArgosPackageInstaller.resolveRuntimeModelDir(context) ?: return null
+
     val outTexts = ArrayList<String>(texts.size)
     val outLangs = ArrayList<String>(texts.size)
-    for (raw in texts) {
-      val text = raw.trim()
+    val pendingTexts = ArrayList<String>()
+    val pendingIndices = ArrayList<Int>()
+    var anyNonEmptyInput = false
+
+    for (i in texts.indices) {
+      val text = texts[i].trim()
       if (text.isEmpty()) {
         outTexts.add("")
         outLangs.add("")
         continue
       }
-      val (translated, src) = translateOneToKorean(context, text)
-      outTexts.add(translated)
-      outLangs.add(src)
+      anyNonEmptyInput = true
+      if (isMostlyHangul(text)) {
+        outTexts.add("")
+        outLangs.add("KO")
+        continue
+      }
+      pendingIndices.add(i)
+      pendingTexts.add(text)
+      outTexts.add("")
+      outLangs.add("")
     }
+
+    if (pendingTexts.isNotEmpty()) {
+      val translated =
+          ArgosTranslateExec.translateBatchWithModel(context, modelDir, pendingTexts)
+              ?: return null
+      if (translated.size != pendingTexts.size) return null
+      var anyMachineTranslated = false
+      for (j in pendingIndices.indices) {
+        val idx = pendingIndices[j]
+        val line = translated[j].trim()
+        outTexts[idx] = line
+        outLangs[idx] = "EN"
+        if (line.isNotBlank()) anyMachineTranslated = true
+      }
+      if (!anyMachineTranslated) return null
+    }
+
+    if (!anyNonEmptyInput) {
+      return TranslateBatch(outTexts, outLangs)
+    }
+
+    val anyTranslated = outTexts.any { it.isNotBlank() }
+    if (!anyTranslated) return null
     return TranslateBatch(outTexts, outLangs)
   }
 
-  private fun translateOneToKorean(context: Context, text: String): Pair<String, String> {
-    val enKo = ArgosPackageInstaller.findInstalledModelDir(context, "en", "ko")
-    if (enKo != null) {
-      val out = ArgosTranslateExec.translateWithModel(context, enKo, text)
-      if (!out.isNullOrBlank()) return out to "EN"
+  /** 라틴 문자 없이 한글만 있는 줄 — en→ko 모델 대상 아님 */
+  private fun isMostlyHangul(text: String): Boolean {
+    var hangul = 0
+    var latin = 0
+    for (ch in text) {
+      if (ch in '\uAC00'..'\uD7A3') hangul++
+      else if (ch.isLetter() && ch.code < 128) latin++
     }
-    return text to ""
+    return hangul > 0 && latin == 0
   }
 }

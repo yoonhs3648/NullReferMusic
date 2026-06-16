@@ -23,10 +23,25 @@ export type NrmAudioFileMetadata = {
   /** ffmpeg: lyrics */
   lyrics?: string;
   /**
+   * MP3 TXXX(NRM_LYRICS_MODE) / m4a nrm_lyrics_mode — 앱 전용 가사 UI 모드.
+   * 플레이어에는 노출되지 않으며 readMetadata로만 복원한다.
+   */
+  nrmLyricsMode?: string;
+  /**
    * 다운로드 파이프라인 전용 — 멜론 원문 가사(plain).
    * ffmpeg/파일 태그에는 기록하지 않는다.
    */
   melonLyricsPlain?: string;
+  /**
+   * 다운로드 파이프라인 전용 — 멜론 싱크 시 wav2vec2 KO/EN 팩 선택.
+   * ffmpeg/파일 태그에는 기록하지 않는다.
+   */
+  melonAlignLang?: 'ko' | 'en';
+  /**
+   * 다운로드 팝업 표시용 — Melon·Last.fm·Spotify 등 플랫폼 API 원본 장르.
+   * ffmpeg/파일 태그에는 기록하지 않는다.
+   */
+  platformGenreRaw?: string;
   /** ffmpeg: bpm */
   bpm?: string;
   /** ffmpeg: copyright */
@@ -66,7 +81,13 @@ export function normalizeDownloadMetadata(
     discNumber: trimOpt(meta.discNumber),
     composer: trimOpt(meta.composer),
     lyrics: trimOpt(meta.lyrics),
+    nrmLyricsMode: trimOpt(meta.nrmLyricsMode),
     melonLyricsPlain: trimOpt(meta.melonLyricsPlain),
+    melonAlignLang:
+      meta.melonAlignLang === 'en' || meta.melonAlignLang === 'ko'
+        ? meta.melonAlignLang
+        : undefined,
+    platformGenreRaw: trimOpt(meta.platformGenreRaw),
     bpm: trimOpt(meta.bpm),
     copyright: trimOpt(meta.copyright),
     website: trimOpt(meta.website),
@@ -80,7 +101,9 @@ export function normalizeDownloadMetadata(
     'discNumber',
     'composer',
     'lyrics',
+    'nrmLyricsMode',
     'melonLyricsPlain',
+    'platformGenreRaw',
     'bpm',
     'copyright',
     'website',
@@ -137,6 +160,7 @@ export function buildChartAudioMetadata(
     title: userTitle,
     album: track.album ?? '',
     genre: track.genre ?? '',
+    platformGenreRaw: (track.genre ?? '').trim(),
     releaseDate: track.releaseDate ?? '',
     coverUrl: track.imageUrl ?? '',
   });

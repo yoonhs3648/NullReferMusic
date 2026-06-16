@@ -44,6 +44,7 @@ object Wav2Vec2CtcForcedAligner {
       wav: File,
       melonLines: List<String>,
       audioDurationMs: Long,
+      onnxReserveMb: Long = 220L,
   ): AlignResult {
     if (melonLines.isEmpty()) {
       return AlignResult(lrc = "", alignedLines = 0, totalLines = 0)
@@ -65,43 +66,40 @@ object Wav2Vec2CtcForcedAligner {
         return alignMemoryFailed(melonLines)
       }
 
-      if (!NrmMemoryGuard.canAttemptCtcAlign(context)) {
+      if (!NrmMemoryGuard.canAttemptCtcAlign(context, onnxReserveMb)) {
         NrmFileLogger.warn(
             "whisperx-align",
-            "ctc_fa_low_mem_pre_session availMb=${NrmMemoryGuard.availMemMb(context)} need=${NrmMemoryGuard.MIN_WORK_AVAIL_MB + 700}",
+            "ctc_fa_low_mem_pre_session availMb=${NrmMemoryGuard.availMemMb(context)} need=${NrmMemoryGuard.MIN_WORK_AVAIL_MB + onnxReserveMb}",
         )
         return alignMemoryFailed(melonLines)
       }
 
       val modelFile = File(alignDir, "model.onnx")
-      if (modelFile.isFile) {
-        getOrCreateSession(modelFile)
+      if (!modelFile.isFile) {
+        return alignFailed(melonLines)
       }
 
-      if (!NrmMemoryGuard.hasMinimumWorkMemory(context)) {
+      NrmMemoryGuard.prepareForHeavyInference(context, "whisperx-align")
+
+      val profile = NrmMemoryGuard.resolveCtcProfile(context)
+      if (profile.tier == "blocked") {
         NrmFileLogger.warn(
             "whisperx-align",
-            "ctc_fa_low_mem_post_session availMb=${NrmMemoryGuard.availMemMb(context)}",
+            "ctc_fa_blocked availMb=${NrmMemoryGuard.availMemMb(context)}",
         )
-        releaseOnnxSession()
         return alignMemoryFailed(melonLines)
       }
 
-      val profile = NrmMemoryGuard.resolveCtcProfile(context)
-      val chunkSamples = profile.chunkSamples
+      val chunkSamples =
+          NrmMemoryGuard.effectiveChunkSamples(context, profile.chunkSamples)
       val linesPerSegment = profile.linesPerSegment
       NrmFileLogger.log(
           "whisperx-align",
           "ctc_fa_profile tier=${profile.tier} chunkSamples=$chunkSamples linesPerSeg=$linesPerSegment availMb=${NrmMemoryGuard.availMemMb(context)}",
       )
 
-      val useSegments =
-          profile.tier != "high" ||
-              melonLines.size > linesPerSegment ||
-              sampleCount > chunkSamples * 10
-
       val result =
-          if (useSegments) {
+          try {
             alignMelonLinesSegmented(
                 context,
                 alignDir,
@@ -111,18 +109,18 @@ object Wav2Vec2CtcForcedAligner {
                 sampleCount,
                 chunkSamples,
                 linesPerSegment,
+                modelFile,
             )
-          } else {
-            val audio = readAndNormalizeWav(wav)
-            alignAudioToLines(
-                context,
-                alignDir,
-                audio,
-                melonLines,
-                durationMs,
-                timeOffsetMs = 0,
-                chunkSamples = chunkSamples,
-            )
+          } catch (t: Throwable) {
+            if (t is OutOfMemoryError || t.cause is OutOfMemoryError) {
+              NrmFileLogger.warn(
+                  "whisperx-align",
+                  "ctc_fa_oom availMb=${NrmMemoryGuard.availMemMb(context)}",
+              )
+              return alignMemoryFailed(melonLines)
+            } else {
+              throw t
+            }
           }
 
       if (result.lrc.isBlank()) {
@@ -131,10 +129,9 @@ object Wav2Vec2CtcForcedAligner {
       return result
     } catch (t: Throwable) {
       if (t is OutOfMemoryError || t.cause is OutOfMemoryError) {
-        NrmFileLogger.error(
+        NrmFileLogger.warn(
             "whisperx-align",
-            "ctc_fa_oom lines=${melonLines.size} availMb=${NrmMemoryGuard.availMemMb(context)}",
-            t,
+            "ctc_fa_oom availMb=${NrmMemoryGuard.availMemMb(context)}",
         )
         return alignMemoryFailed(melonLines)
       }
@@ -183,13 +180,23 @@ object Wav2Vec2CtcForcedAligner {
       totalSamples: Int,
       chunkSamples: Int,
       linesPerSegment: Int,
+      modelFile: File,
   ): AlignResult {
+    val baseProfile =
+        NrmMemoryGuard.CtcInferenceProfile(
+            tier = "seg",
+            chunkSamples = chunkSamples,
+            linesPerSegment = linesPerSegment,
+        )
     val chunks = melonLines.chunked(linesPerSegment)
     val sb = StringBuilder()
     var aligned = 0
     var lineOffset = 0
     for (chunk in chunks) {
-      if (!NrmMemoryGuard.hasMinimumWorkMemory(context)) {
+      val liveProfile = NrmMemoryGuard.resolveLiveCtcProfile(context, baseProfile)
+      val segChunkSamples =
+          NrmMemoryGuard.effectiveChunkSamples(context, liveProfile.chunkSamples)
+      if (!NrmMemoryGuard.waitForChunkMemory(context, "whisperx-align")) {
         NrmFileLogger.warn(
             "whisperx-align",
             "ctc_fa_low_mem_segment availMb=${NrmMemoryGuard.availMemMb(context)}",
@@ -208,15 +215,25 @@ object Wav2Vec2CtcForcedAligner {
         continue
       }
       val part =
-          alignAudioToLines(
-              context,
-              alignDir,
-              segAudio,
-              chunk,
-              segDuration,
-              timeOffsetMs = startMs.toInt(),
-              chunkSamples = chunkSamples,
-          )
+          try {
+            alignAudioToLines(
+                context,
+                alignDir,
+                modelFile,
+                segAudio,
+                chunk,
+                segDuration,
+                timeOffsetMs = startMs.toInt(),
+                chunkSamples = segChunkSamples,
+            )
+          } catch (t: Throwable) {
+            if (t is OutOfMemoryError || t.cause is OutOfMemoryError) {
+              NrmFileLogger.warn("whisperx-align", "ctc_fa_segment_oom lines=${chunk.size}")
+              return alignMemoryFailed(melonLines)
+            } else {
+              throw t
+            }
+          }
       if (part.lrc.isNotBlank()) {
         sb.append(part.lrc).append('\n')
         aligned += part.alignedLines
@@ -226,7 +243,7 @@ object Wav2Vec2CtcForcedAligner {
           "whisperx-align",
           "ctc_fa_segment lines=${chunk.size} startMs=$startMs endMs=$endMs samples=${segAudio.size}",
       )
-      NrmMemoryGuard.trimBetweenInferenceSteps("whisperx-align")
+      NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
     }
     val lrc = sb.toString().trim()
     return AlignResult(
@@ -239,6 +256,7 @@ object Wav2Vec2CtcForcedAligner {
   private fun alignAudioToLines(
       context: Context,
       alignDir: File,
+      modelFile: File,
       audio: FloatArray,
       melonLines: List<String>,
       audioDurationMs: Long,
@@ -250,11 +268,10 @@ object Wav2Vec2CtcForcedAligner {
     }
 
     val vocabFile = File(alignDir, "vocab.json")
-    val modelFile = File(alignDir, "model.onnx")
     val vocab = loadVocab(vocabFile)
     val blankId = vocab.charToId["<pad>"] ?: vocab.charToId["|"] ?: 0
 
-    val logProbs = inferLogProbs(modelFile, audio, chunkSamples)
+    val logProbs = inferLogProbsEphemeral(context, modelFile, audio, chunkSamples)
     if (logProbs.isEmpty()) {
       throw IllegalStateException("empty_logits")
     }
@@ -475,32 +492,65 @@ object Wav2Vec2CtcForcedAligner {
     }
   }
 
+  private fun inferLogProbsEphemeral(
+      context: Context,
+      modelFile: File,
+      audio: FloatArray,
+      chunkSamples: Int,
+  ): Array<FloatArray> {
+    releaseOnnxSession()
+    NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
+    if (!NrmMemoryGuard.waitForChunkMemory(context, "whisperx-align")) {
+      throw IllegalStateException("low_memory_before_onnx")
+    }
+    val session = env.createSession(modelFile.absolutePath, buildSessionOptions())
+    try {
+      val effectiveChunk = NrmMemoryGuard.effectiveChunkSamples(context, chunkSamples)
+      if (audio.size <= effectiveChunk) {
+        return inferLogProbsWithSession(session, audio, effectiveChunk, offsetSamples = 0)
+      }
+      val allFrames = ArrayList<FloatArray>(max(1, audio.size / 320))
+      var offset = 0
+      var chunkIndex = 0
+      while (offset < audio.size) {
+        if (!NrmMemoryGuard.waitForChunkMemory(context, "whisperx-align")) {
+          throw IllegalStateException("low_memory_onnx_chunk")
+        }
+        val liveChunk = NrmMemoryGuard.effectiveChunkSamples(context, effectiveChunk)
+        val end = min(offset + liveChunk, audio.size)
+        val chunkLen = end - offset
+        val chunk = FloatArray(chunkLen)
+        System.arraycopy(audio, offset, chunk, 0, chunkLen)
+        val chunkProbs =
+            inferLogProbsWithSession(session, chunk, liveChunk, offsetSamples = offset)
+        allFrames.addAll(chunkProbs.toList())
+        NrmFileLogger.log(
+            "whisperx-align",
+            "onnx_chunk idx=$chunkIndex offset=$offset end=$end frames=${chunkProbs.size} chunkSamples=$liveChunk availMb=${NrmMemoryGuard.availMemMb(context)}",
+        )
+        offset = end
+        chunkIndex += 1
+        NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
+      }
+      return allFrames.toTypedArray()
+    } finally {
+      try {
+        session.close()
+      } catch (_: Exception) {
+        // ignore
+      }
+      releaseOnnxSession()
+      NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
+    }
+  }
+
+  /** @deprecated inferLogProbsEphemeral(context, ...) 사용 */
   private fun inferLogProbs(
       modelFile: File,
       audio: FloatArray,
       chunkSamples: Int,
   ): Array<FloatArray> {
-    val session = getOrCreateSession(modelFile)
-    if (audio.size <= chunkSamples) {
-      return inferLogProbsWithSession(session, audio, chunkSamples, offsetSamples = 0)
-    }
-    val allFrames = ArrayList<FloatArray>(audio.size / 320)
-    var offset = 0
-    var chunkIndex = 0
-    while (offset < audio.size) {
-      val end = min(offset + chunkSamples, audio.size)
-      val chunk = audio.copyOfRange(offset, end)
-      val chunkProbs =
-          inferLogProbsWithSession(session, chunk, chunkSamples, offsetSamples = offset)
-      allFrames.addAll(chunkProbs.toList())
-      NrmFileLogger.log(
-          "whisperx-align",
-          "onnx_chunk idx=$chunkIndex offset=$offset end=$end frames=${chunkProbs.size} chunkSamples=$chunkSamples",
-      )
-      offset = end
-      chunkIndex += 1
-    }
-    return allFrames.toTypedArray()
+    throw UnsupportedOperationException("inferLogProbs requires context")
   }
 
   private fun inferLogProbsWithSession(

@@ -1,6 +1,8 @@
 import { NativeModules, Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { stripNrmLrcModeLine, parseLyricsModeFromLrcText } from '@/lib/nrmLrcUiMode';
+import { lyricsUiModeToEmbeddedToken } from '@/lib/nrmEmbeddedLyricsMode';
 
 type NativeAudioMetadata = {
   applyMetadata: (
@@ -29,6 +31,7 @@ type NativeAudioMetadata = {
     audioUri: string,
     lrcContent: string,
     extension: string,
+    lyricsMode?: string,
   ) => Promise<null>;
 };
 
@@ -124,7 +127,14 @@ export async function embedSyncedLyricsIntoAudio(
   }
   const uri = audioUri.trim();
   if (!uri || !lrcContent.trim()) return;
-  await mod.embedSyncedLyrics(uri, lrcContent, extension.replace(/^\./, ''));
+  const parsedMode = parseLyricsModeFromLrcText(lrcContent);
+  const modeToken =
+    parsedMode && parsedMode !== 'unset'
+      ? lyricsUiModeToEmbeddedToken(parsedMode)
+      : '';
+  const playerLrc = stripNrmLrcModeLine(lrcContent);
+  if (!playerLrc.trim() && !modeToken) return;
+  await mod.embedSyncedLyrics(uri, playerLrc, extension.replace(/^\./, ''), modeToken);
 }
 
 /** 메타 편집 후 MediaStore 재스캔·DB 태그 동기화 (삼성 뮤직 등) */

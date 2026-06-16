@@ -52,6 +52,7 @@ export function NrmWhisperModelPicker({
     return subscribeWhisperModelDownloadEvents((ev) => {
       if (ev.phase === 'complete') {
         notifyUser(whisperModelDownloadCompleteMessage(ev.modelId));
+        onChange(ev.modelId);
       } else if (ev.phase === 'failed') {
         notifyUser('모델 다운로드에 실패했습니다. Wi‑Fi 연결을 확인한 뒤 다시 시도하세요.');
       }

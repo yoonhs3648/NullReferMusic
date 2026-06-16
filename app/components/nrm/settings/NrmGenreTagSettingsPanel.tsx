@@ -14,6 +14,7 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   createNewGenreCategoryId,
+  findGlobalTagConflict,
   loadNrmGenreTagCatalog,
   normalizeGenreTagInput,
   resetNrmGenreTagCatalogToDefault,
@@ -117,6 +118,13 @@ export function NrmGenreTagSettingsPanel({
     const raw = tagDrafts[categoryId] ?? '';
     const tag = normalizeGenreTagInput(raw);
     if (!tag) return;
+    const conflict = findGlobalTagConflict(categories, tag, categoryId);
+    if (conflict) {
+      notifyUser(
+        `「${tag}」 태그는 이미 「${conflict.categoryName}」 장르에 등록되어 있습니다.`,
+      );
+      return;
+    }
     setCategories((prev) =>
       prev.map((c) => {
         if (c.id !== categoryId) return c;
@@ -125,7 +133,7 @@ export function NrmGenreTagSettingsPanel({
       }),
     );
     setTagDrafts((prev) => ({ ...prev, [categoryId]: '' }));
-  }, [tagDrafts]);
+  }, [categories, tagDrafts]);
 
   const removeTag = useCallback((categoryId: string, tag: string) => {
     setCategories((prev) =>
@@ -145,7 +153,7 @@ export function NrmGenreTagSettingsPanel({
     }
     setSaving(true);
     try {
-      await saveNrmGenreTagCatalog({ version: 2, categories });
+      await saveNrmGenreTagCatalog({ version: 4, categories });
       notifyUser('장르·태그 설정을 저장했습니다.');
     } catch (e) {
       notifyUser(e instanceof Error ? e.message : '저장하지 못했습니다.');
