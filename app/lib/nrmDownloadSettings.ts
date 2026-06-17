@@ -301,13 +301,9 @@ export async function saveDownloadFileNameFormat(
 }
 
 export async function loadDownloadMetadataMode(): Promise<NrmDownloadMetadataMode> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_METADATA_MODE);
-    if (raw && isNrmDownloadMetadataMode(raw)) return raw;
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_METADATA_MODE;
+  // UI에서 메타데이터 모드 선택을 숨김 — 항상 수동(다운로드 팝업) 설정.
+  // auto/none 경로는 레거시 호환용으로 코드에 유지.
+  return 'manual';
 }
 
 export async function saveDownloadMetadataMode(

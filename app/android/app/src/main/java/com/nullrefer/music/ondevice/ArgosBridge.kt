@@ -5,10 +5,18 @@ import android.content.Context
 /** LibreTranslate(Argos) 오프라인 번역 — Kotlin + nrm-argos-translate CLI */
 object ArgosBridge {
   @Volatile private var smokeTestOk: Boolean? = null
+  @Volatile private var activeComputeType: String = ""
 
   fun invalidateSmokeTest() {
     smokeTestOk = null
+    activeComputeType = ""
   }
+
+  fun setActiveComputeType(compute: String) {
+    activeComputeType = compute.trim()
+  }
+
+  fun getActiveComputeType(): String = activeComputeType
 
   fun installPackage(context: Context, argosmodelPath: String): Boolean {
     val ok = ArgosPackageInstaller.installFromArgosmodel(context, argosmodelPath)

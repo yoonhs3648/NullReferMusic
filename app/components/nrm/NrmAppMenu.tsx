@@ -42,6 +42,7 @@ import { NrmTranslationSettingsPanel } from '@/components/nrm/settings/NrmTransl
 import { NrmLibreTranslateInstallPanel } from '@/components/nrm/settings/NrmLibreTranslateInstallPanel';
 import { NrmLyricsOrderSettingsPanel } from '@/components/nrm/settings/NrmLyricsOrderSettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
+import { NrmMainPageSettingsPanel } from '@/components/nrm/settings/NrmMainPageSettingsPanel';
 import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { hasLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
 import {
@@ -142,7 +143,9 @@ type Panel =
   | 'downloadFilenameSettings'
   | 'downloadMetadataSettings'
   | 'downloadLyricsEmbedSettings'
+  | 'downloadLyricsSyncerSettings'
   | 'downloadLyricsOutputSettings'
+  | 'mainPageSettings'
   | 'fileLoggingSettings'
   | 'trackMetadataSettings'
   | ChartMenuPanel
@@ -492,6 +495,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'downloadFilenameSettings':
       case 'downloadMetadataSettings':
       case 'downloadLyricsEmbedSettings':
+      case 'downloadLyricsSyncerSettings':
       case 'downloadLyricsOutputSettings':
         setPanel('downloadManage');
         break;
@@ -504,6 +508,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       case 'downloadManage':
         setPanel('root');
         break;
+      case 'mainPageSettings':
       case 'fileLoggingSettings':
         setPanel('settings');
         break;
@@ -1037,6 +1042,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => setPanel('mainPageSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    메인페이지 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => setPanel('fileLoggingSettings')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1377,21 +1397,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => setPanel('downloadMetadataSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    메타데이터 설정
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
                   onPress={() => setPanel('downloadLyricsOutputSettings')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1421,6 +1426,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => setPanel('downloadLyricsSyncerSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    가사 싱커 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'mainPageSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmMainPageSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('settings')}
+                />
               </DrawerShell>
             ) : null}
 
@@ -1570,6 +1603,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
                   section="lyricsEmbed"
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => setPanel('downloadManage')}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'downloadLyricsSyncerSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmDownloadSettingsPanel
+                  section="lyricsSyncer"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={() => setPanel('downloadManage')}

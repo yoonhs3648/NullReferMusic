@@ -143,13 +143,14 @@ export async function postProcessDownloadedAudio(
   extension: string,
 ): Promise<PostProcessAudioResult> {
   let uri = fileUri;
-  const whisperMode = metadata
-    ? splitMetadataForDownloadStages(metadata).whisperMode
-    : null;
+  const split = metadata ? splitMetadataForDownloadStages(metadata) : null;
+  const whisperMode = split?.whisperMode ?? null;
+  const melonPlain = split?.melonLyricsPlain ?? null;
 
   uri = await applyFfmpegMetadataStage(uri, metadata);
 
   let lyricsWarning: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' | undefined;
+  let plainAlreadyInLrcEmbed = false;
   if (whisperMode) {
     const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.whisper', {
@@ -169,11 +170,16 @@ export async function postProcessDownloadedAudio(
       whisperResult = await transcribeWhisperLrc(uri, whisperMode, extension);
       if (whisperResult.lrcFull?.trim()) {
         try {
-          const { withNrmLyricsModeHeader } = await import('@/lib/nrmLrcUiMode');
           const { embedSyncedLyricsIntoAudio } = await import('@/lib/nrmApplyAudioMetadata.native');
-          const lrcTagged = withNrmLyricsModeHeader(whisperResult.lrcFull.trim(), whisperMode);
-          await embedSyncedLyricsIntoAudio(uri, lrcTagged, extension, whisperMode);
+          await embedSyncedLyricsIntoAudio(
+            uri,
+            whisperResult.lrcFull.trim(),
+            extension,
+            whisperMode,
+            melonPlain,
+          );
           whisperResult = { ...whisperResult, lyricsEmbedded: true };
+          plainAlreadyInLrcEmbed = !!melonPlain;
         } catch (embedErr) {
           logNrmRunError('download.lrc', embedErr, { event: 'embed_lyrics_fail_sequential', extension });
           whisperResult = { ...whisperResult, lyricsEmbedded: false };
@@ -195,6 +201,15 @@ export async function postProcessDownloadedAudio(
       lyricsWarning: lyricsWarning ?? null,
       lyricsOutputMode: useEmbed ? 'embed' : 'sidecar',
     });
+  }
+
+  if (melonPlain && !plainAlreadyInLrcEmbed) {
+    try {
+      const { persistPlainLyricsEmbedIfNeeded } = await import('@/lib/nrmPersistPlainLyricsEmbed');
+      await persistPlainLyricsEmbedIfNeeded(uri, extension, melonPlain);
+    } catch (embedErr) {
+      logNrmRunError('download.plain', embedErr, { event: 'embed_plain_fail_sequential', extension });
+    }
   }
 
   return { fileUri: uri, lyricsWarning };

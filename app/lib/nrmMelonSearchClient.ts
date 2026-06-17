@@ -452,6 +452,7 @@ export async function fetchMelonArtistDetail(
 
 export async function fetchMelonAlbumDetail(
   albumId: string,
+  options?: { enrich?: boolean },
 ): Promise<MelonSearchOutcome<MelonAlbumDetail>> {
   const out = useDirect()
     ? await fetchMelonAlbumDetailDirect(albumId)
@@ -459,11 +460,15 @@ export async function fetchMelonAlbumDetail(
         `/api/search/melon/album/detail?albumId=${encodeURIComponent(albumId.trim())}`,
       );
   if (!out.ok) return out;
+  if (options?.enrich === false) {
+    return { ok: true, data: out.data };
+  }
   return { ok: true, data: await enrichMelonAlbumDetail(out.data) };
 }
 
 export async function fetchMelonTrackDetail(
   songId: string,
+  options?: { enrich?: boolean },
 ): Promise<MelonSearchOutcome<MelonTrackDetail>> {
   const out = useDirect()
     ? await fetchMelonTrackDetailDirect(songId)
@@ -476,5 +481,8 @@ export async function fetchMelonTrackDetail(
     similarTracks: out.data.similarTracks ?? [],
     albumDetail: out.data.albumDetail ?? null,
   };
+  if (options?.enrich === false) {
+    return { ok: true, data };
+  }
   return { ok: true, data: await enrichMelonTrackDetail(data) };
 }

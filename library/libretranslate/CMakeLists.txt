@@ -15,6 +15,9 @@ set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(WITH_DNNL OFF CACHE BOOL "" FORCE)
 set(WITH_MKL OFF CACHE BOOL "" FORCE)
 set(ENABLE_GPU OFF CACHE BOOL "" FORCE)
+# Android NDK: MKL/DNNL/OpenBLAS 없음 — Ruy SGEMM은 INT8 계열만 (backend.cc).
+# nrm_argos_translate.cpp Android 분기: INT8_FLOAT32 / INT8 만 사용. FLOAT32 금지.
+set(WITH_RUY ON CACHE BOOL "" FORCE)
 
 add_subdirectory(${CT2_SRC_DIR} ${CMAKE_BINARY_DIR}/ctranslate2-build EXCLUDE_FROM_ALL)
 

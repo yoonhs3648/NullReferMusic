@@ -3,8 +3,11 @@ import '@/lib/nrmMetroLogBootstrap';
 import '@/lib/nrmFileLogBootstrap';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { Platform } from 'react-native';
 import 'react-native-reanimated';
 
+import { NrmAppPermissionGate } from '@/components/nrm/NrmAppPermissionGate';
 import { NrmNotifyHost } from '@/components/nrm/NrmNotifyHost';
 import { NrmYoutubeCookieHarvester } from '@/components/nrm/NrmYoutubeCookieHarvester';
 import { NrmYoutubeDecipherHost } from '@/components/nrm/NrmYoutubeDecipherHost';
@@ -14,6 +17,7 @@ import {
 } from '@/context/NrmUiAppearanceContext';
 import { getNrmNavigationTheme } from '@/constants/nrmNavigationTheme';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
+import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -21,6 +25,18 @@ function RootLayoutInner() {
   const { isDark } = useNrmUiAppearance();
   const navigationTheme = getNrmNavigationTheme(isDark ? 'dark' : 'light');
   const rootBackground = getNrmRootBackgroundColor(isDark);
+  const [permissionsReady, setPermissionsReady] = useState(Platform.OS !== 'android');
+
+  const onPermissionsGranted = useCallback(() => {
+    setPermissionsReady(true);
+    if (Platform.OS !== 'web') {
+      void setupNrmMobileDownloadNotifications();
+    }
+  }, []);
+
+  if (!permissionsReady) {
+    return <NrmAppPermissionGate onGranted={onPermissionsGranted} />;
+  }
 
   return (
     <ThemeProvider value={navigationTheme}>

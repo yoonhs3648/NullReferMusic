@@ -13,12 +13,14 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import { NRM_LIBRETRANSLATE_PACKAGES } from '@/lib/nrmLibreTranslateCatalog';
 import { useLibreTranslatePackageStatuses } from '@/lib/nrmLibreTranslateModelStore';
 import {
+  fetchLibreTranslateEngineInfo,
   isLibreTranslateNativeAvailable,
   isLibreTranslateOfflineReady,
   libreTranslatePackageCompleteMessage,
   subscribeLibreTranslatePackageDownloadEvents,
 } from '@/lib/nrmLibreTranslateModelNative';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
+import { saveTranslationProvider } from '@/lib/nrmTranslationSettings';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -61,13 +63,23 @@ export function NrmLibreTranslateInstallPanel({
     active && showInstallUi,
   );
   const [offlineReady, setOfflineReady] = useState(false);
+  const [computeType, setComputeType] = useState<string | null>(null);
   const [downloadDetail, setDownloadDetail] = useState<DownloadDetail | null>(null);
+
+  const refreshEngineState = async () => {
+    const [ready, info] = await Promise.all([
+      isLibreTranslateOfflineReady(),
+      fetchLibreTranslateEngineInfo(),
+    ]);
+    setOfflineReady(ready);
+    setComputeType(info.computeType);
+  };
 
   useEffect(() => {
     if (!showInstallUi || !active) return;
-    void isLibreTranslateOfflineReady().then(setOfflineReady);
+    void refreshEngineState();
     const timer = setInterval(() => {
-      void isLibreTranslateOfflineReady().then(setOfflineReady);
+      void refreshEngineState();
     }, 5000);
     return () => clearInterval(timer);
   }, [active]);
@@ -84,11 +96,21 @@ export function NrmLibreTranslateInstallPanel({
       }
       if (ev.phase === 'complete') {
         setDownloadDetail(null);
-        notifyUser(libreTranslatePackageCompleteMessage(ev.packageId));
-        void isLibreTranslateOfflineReady().then(setOfflineReady);
+        void (async () => {
+          await refreshEngineState();
+          await refresh();
+          const ready = await isLibreTranslateOfflineReady();
+          if (ready) {
+            await saveTranslationProvider('libretranslate');
+            notifyUser(libreTranslatePackageCompleteMessage(ev.packageId));
+          }
+        })();
       } else if (ev.phase === 'failed') {
         setDownloadDetail(null);
-        notifyUser('언어 팩 다운로드 또는 설치에 실패했습니다. Wi‑Fi 연결을 확인한 뒤 다시 시도하세요.');
+        void refresh();
+        notifyUser(
+          '오프라인 번역기 설치에 실패했습니다. Wi‑Fi 연결을 확인한 뒤 다시 시도하세요.',
+        );
       }
     });
   }, [active, refresh]);
@@ -126,15 +148,17 @@ export function NrmLibreTranslateInstallPanel({
         />
         <Text style={[styles.readyText, { color: titleColor }]}>
           {offlineReady
-            ? 'LibreTranslate 오프라인 번역 준비 완료'
+            ? `LibreTranslate 오프라인 번역 준비 완료${computeType ? ` (${computeType})` : ''}`
             : statusFor('libretranslate:pack-en-ko')?.installed
-              ? '언어 팩은 설치됐지만 번역 엔진(nrm-argos-translate)이 이 APK에 포함되어 있지 않습니다. 최신 앱을 다시 설치하거나, 개발 빌드라면 scripts/Build-ArgosTranslate-Android.ps1 실행 후 재빌드하세요.'
-              : '영어→한국어 팩을 설치하면 오프라인 번역을 사용할 수 있습니다.'}
+              ? '언어 팩은 설치됐지만 번역 엔진 검증에 실패했습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 설치해 주세요.'
+              : statusFor('libretranslate:pack-en-ko')?.downloading
+                ? '언어 팩을 설치하는 중입니다…'
+                : '영어→한국어 팩을 설치하면 오프라인 번역을 사용할 수 있습니다.'}
         </Text>
       </View>
 
       <Text style={[styles.sectionHint, { color: bodyColor }]}>
-        영어 → 한글 번역만 지원합니다.
+        영어 → 한글 번역만 지원합니다. Android 엔진은 int8_float32(우선) 또는 int8을 사용합니다.
       </Text>
 
       <View style={styles.list}>

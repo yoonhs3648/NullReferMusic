@@ -56,7 +56,7 @@ export async function enrichMelonDownloadMetadata(
     });
   }
 
-  const trackR = await fetchMelonTrackDetail(songId);
+  const trackR = await fetchMelonTrackDetail(songId, { enrich: false });
   if (!trackR.ok) {
     return base;
   }
@@ -74,8 +74,20 @@ export async function enrichMelonDownloadMetadata(
   });
 
   const albumId = (info.albumId ?? '').trim();
-  if (albumId) {
-    const albumR = await fetchMelonAlbumDetail(albumId);
+  const embeddedAlbum = trackR.data.albumDetail?.info;
+  if (embeddedAlbum && embeddedAlbum.albumId === albumId) {
+    const track = trackR.data.albumDetail?.info.tracks.find((t) => t.songId === songId);
+    meta = mergeMeta(meta, {
+      album: embeddedAlbum.name || meta.album,
+      albumArtist: embeddedAlbum.artist,
+      genre: embeddedAlbum.genre || meta.genre,
+      releaseDate: normalizeMelonReleaseDate(embeddedAlbum.releaseDate) || meta.releaseDate,
+      coverUrl: normalizeCoverArtUrl(embeddedAlbum.imageUrl) || meta.coverUrl,
+      trackNumber: track ? String(track.rank) : undefined,
+      copyright: buildMelonCopyright(embeddedAlbum.label, embeddedAlbum.agency),
+    });
+  } else if (albumId) {
+    const albumR = await fetchMelonAlbumDetail(albumId, { enrich: false });
     if (albumR.ok) {
       const al = albumR.data.info;
       const track = al.tracks.find((t) => t.songId === songId);

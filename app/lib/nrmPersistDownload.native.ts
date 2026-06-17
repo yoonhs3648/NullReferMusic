@@ -394,7 +394,8 @@ export async function persistLrcTextToDestination(
   safeName: string,
   lrcText: string,
 ): Promise<string | null> {
-  const trimmed = lrcText.trim();
+  const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
+  const trimmed = preparePureSidecarLrcText(lrcText);
   if (!trimmed) return null;
 
   const cacheRoot = FileSystem.cacheDirectory;
@@ -530,7 +531,8 @@ export async function persistLrcForSavedAudio(
   location: PersistedAudioLocation,
   lrcText: string,
 ): Promise<string | null> {
-  const trimmed = lrcText.trim();
+  const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
+  const trimmed = preparePureSidecarLrcText(lrcText);
   const lrcName = lrcNameFromFileName(location.fileName);
   if (!trimmed) {
     logLrcPersist('skip_empty', {

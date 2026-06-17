@@ -16,6 +16,10 @@ import {
   alignPackLabel,
 } from '@/lib/nrmAlignModelCatalog';
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+import {
+  loadMelonSyncSettings,
+  melonSyncSettingsToNativePayload,
+} from '@/lib/nrmMelonSyncSettings';
 import { resolveAlignModelForMelonSync } from '@/lib/nrmAlignLyricsLang';
 
 export type Wav2Vec2BundlePackProgress = {
@@ -49,6 +53,7 @@ type NrmWhisperNative = {
     lyricsPlain: string,
     mode: 'melon' | 'melon_translation',
     alignModelPreference: string,
+    syncOptions?: Record<string, string | boolean>,
   ) => Promise<{ lrc?: string; alignFailed?: boolean; alignMemoryInsufficient?: boolean }>;
 };
 
@@ -260,7 +265,15 @@ export async function alignMelonLyricsToLrcNative(
     lyricsLang,
   );
   try {
-    const result = await mod.alignMelonLyricsToLrc(fsPath, lyricsPlain, mode, pref);
+    const syncSettings = await loadMelonSyncSettings();
+    const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang);
+    const result = await mod.alignMelonLyricsToLrc(
+      fsPath,
+      lyricsPlain,
+      mode,
+      pref,
+      syncOptions,
+    );
     const lrc = (result.lrc ?? '').trim();
     const alignMemoryInsufficient = !!result.alignMemoryInsufficient;
     return {

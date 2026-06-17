@@ -20,6 +20,7 @@ import {
   loadDownloadFileNameFormat,
   type NrmDownloadFileNameFormat,
 } from '@/lib/nrmDownloadSettings';
+import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { loadNrmGenreTagCatalog } from '@/lib/nrmGenreTagSettings';
 import { resolveGenreDropdownSelection } from '@/lib/nrmGenreResolve';
@@ -72,6 +73,8 @@ export type NrmMetadataEditModalProps = {
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   /** trackEdit: LRC·내장 가사 플래그로 복원한 저장 모드 */
   initialStoredLyricsMode?: NrmLyricsUiMode;
+  /** trackEdit: TXXX·nrm_plain_lyrics 등 파일에 내장된 멜론 plain 원문 존재 */
+  initialHasEmbeddedPlainLyrics?: boolean;
   /** 초기 필드 로딩 중 (다운로드: API 선조회 / 트랙 편집: 파일에서 읽기) */
   busy?: boolean;
   /** download: 다운로드 / trackEdit: 저장된 트랙 편집 */
@@ -311,6 +314,7 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   initialStoredLyricsMode,
+  initialHasEmbeddedPlainLyrics = false,
   busy = false,
   purpose = 'download',
   excludeFileStem,
@@ -444,7 +448,7 @@ export function NrmMetadataEditModal({
         : '',
     );
 
-    if (extractMelonSongIdFromUrl(site)) {
+    if (purpose === 'download' && extractMelonSongIdFromUrl(site)) {
       void resolveMelonPlainLyricsForEdit(site, initialPlain).then((plain) => {
         if (!plain) return;
         setMelonPlainLyrics(plain);
@@ -507,15 +511,18 @@ export function NrmMetadataEditModal({
       if (!item) return;
       const site = normalizeMelonTrackWebsite(website);
       let melonPlainForSubmit = melonPlainLyrics.trim();
-      if (isMelonLyricsUiMode(lyricsMode)) {
+      const melonTrack = !!extractMelonSongIdFromUrl(site);
+      if (melonTrack || isMelonLyricsUiMode(lyricsMode)) {
         melonPlainForSubmit = (await resolveMelonPlainLyricsForEdit(site, melonPlainForSubmit)).trim();
-        if (!melonPlainForSubmit) {
+        if (isMelonLyricsUiMode(lyricsMode) && !melonPlainForSubmit) {
           const { notifyUser } = await import('@/lib/nrmUserNotify');
           notifyUser('멜론 가사를 가져올 수 없습니다.');
           return;
         }
       }
-      const lyricsPayload = resolveLyricsForSubmit(melonPlainForSubmit);
+      const lyricsPayload = resolveLyricsForSubmit(
+        isMelonLyricsUiMode(lyricsMode) ? melonPlainForSubmit : undefined,
+      );
       const metadata: NrmAudioFileMetadata = {
         artist: artist.trim(),
         title: title.trim(),
@@ -528,7 +535,7 @@ export function NrmMetadataEditModal({
         discNumber: discNumber.trim() || undefined,
         composer: composer.trim() || undefined,
         lyrics: lyricsPayload.lyrics,
-        melonLyricsPlain: lyricsPayload.melonLyricsPlain,
+        melonLyricsPlain: lyricsPayload.melonLyricsPlain ?? (melonPlainForSubmit || undefined),
         melonAlignLang:
           purpose === 'download' && isMelonLyricsUiMode(lyricsMode) && melonAlignLang
             ? melonAlignLang
@@ -652,14 +659,42 @@ export function NrmMetadataEditModal({
 
   const isMelonContext = useMemo(() => {
     if (purpose === 'download') return metadataSource === 'melon';
-    return !!extractMelonSongIdFromUrl(website);
-  }, [metadataSource, purpose, website]);
+    const modeFromEmbed = parseEmbeddedLyricsModeToken(
+      normalizeString(initialMetadataFields?.nrmLyricsMode),
+    );
+    return (
+      initialHasEmbeddedPlainLyrics ||
+      melonPlainLyrics.trim().length > 0 ||
+      (modeFromEmbed != null && isMelonLyricsUiMode(modeFromEmbed))
+    );
+  }, [
+    initialHasEmbeddedPlainLyrics,
+    initialMetadataFields?.nrmLyricsMode,
+    metadataSource,
+    melonPlainLyrics,
+    purpose,
+  ]);
 
   const melonLyricsReady = useMemo(() => {
-    if (!isMelonContext) return false;
-    if (purpose === 'download') return downloadMelonReady;
-    return melonPlainLyrics.trim().length > 0;
-  }, [downloadMelonReady, isMelonContext, melonPlainLyrics, purpose]);
+    if (purpose === 'download') {
+      return isMelonContext && downloadMelonReady;
+    }
+    const modeFromEmbed = parseEmbeddedLyricsModeToken(
+      normalizeString(initialMetadataFields?.nrmLyricsMode),
+    );
+    return (
+      initialHasEmbeddedPlainLyrics ||
+      melonPlainLyrics.trim().length > 0 ||
+      (modeFromEmbed != null && isMelonLyricsUiMode(modeFromEmbed))
+    );
+  }, [
+    downloadMelonReady,
+    initialHasEmbeddedPlainLyrics,
+    initialMetadataFields?.nrmLyricsMode,
+    isMelonContext,
+    melonPlainLyrics,
+    purpose,
+  ]);
 
   useEffect(() => {
     if (!visible || lyricsUnsupported) {
@@ -739,12 +774,6 @@ export function NrmMetadataEditModal({
       clearInterval(poll);
     };
   }, [lyricsUnsupported, visible]);
-
-  useEffect(() => {
-    if (!translationOptionEnabled && (lyricsMode === 'translation' || lyricsMode === 'melon_translation')) {
-      setLyricsMode('unset');
-    }
-  }, [lyricsMode, translationOptionEnabled]);
 
   const conflictDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -865,6 +894,12 @@ export function NrmMetadataEditModal({
       setLyricsMode('unset');
     }
   }, [visible, lyricsMode, lyricsOptions]);
+
+  useEffect(() => {
+    if (!translationOptionEnabled && (lyricsMode === 'translation' || lyricsMode === 'melon_translation')) {
+      setLyricsMode('unset');
+    }
+  }, [lyricsMode, translationOptionEnabled]);
 
   function resolveLyricsForSubmit(
     plainOverride?: string,

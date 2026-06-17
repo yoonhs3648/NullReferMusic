@@ -46,6 +46,8 @@ type NativeReadResult = {
   lyrics?: string;
   /** MP3 TXXX / m4a nrm_lyrics_mode — 앱 전용 */
   nrmLyricsMode?: string;
+  /** TXXX NRM_PLAIN_LYRICS / m4a nrm_plain_lyrics — 멜론 plain 가사 원문 */
+  melonLyricsPlain?: string;
 };
 
 type NativeAudioMetadata = {
@@ -130,6 +132,7 @@ export async function readAudioFileMetadata(
     remixer: (raw.remixer ?? '').trim() || undefined,
     lyrics: (raw.lyrics ?? '').trim() || undefined,
     nrmLyricsMode: (raw.nrmLyricsMode ?? '').trim() || undefined,
+    melonLyricsPlain: (raw.melonLyricsPlain ?? '').trim() || undefined,
   });
 
   if (localUri.includes('/cache/') || localUri.includes('cache%2F')) {

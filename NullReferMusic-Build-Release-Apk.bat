@@ -59,9 +59,20 @@ if errorlevel 1 (
 )
 
 echo [3/4] Gradle assembleRelease...
-cd /d "%ANDROID%"
+set "GRADLE_USER_HOME=C:\g"
+if not exist "C:\g" mkdir "C:\g" 2>nul
+rem Windows 260-char path limit — short drive for CMake/ninja
+subst N: /d >nul 2>&1
+subst N: "%ROOT%"
+if exist "N:\app\android\gradlew.bat" (
+  cd /d "N:\app\android"
+) else (
+  cd /d "%ANDROID%"
+)
 call gradlew.bat assembleRelease --no-daemon
-if errorlevel 1 (
+set "GRADLE_EXIT=%ERRORLEVEL%"
+subst N: /d >nul 2>&1
+if not "%GRADLE_EXIT%"=="0" (
   echo Build failed.
   pause
   exit /b 1

@@ -19,6 +19,7 @@ import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import {
+  isEmbeddedSyncLyricsText,
   lyricsUiModeToMetadataField,
   resolveStoredLyricsModeFromFlags,
 } from '@/lib/nrmLrcUiMode';
@@ -42,10 +43,7 @@ import {
 } from '@/lib/nrmTrackListCoverLoader';
 import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 import {
-  extractPlainLyricsFromLrcText,
-  isMelonPlainLyricsText,
   normalizeMelonTrackWebsite,
-  resolveMelonPlainLyricsForEdit,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
@@ -143,6 +141,7 @@ export function NrmTrackMetadataSettingsHome({
     Omit<NrmAudioFileMetadata, 'artist' | 'title'>
   >(EMPTY_METADATA_FIELDS);
   const [initialLyricsMode, setInitialLyricsMode] = useState<NrmLyricsUiMode>('unset');
+  const [initialHasEmbeddedPlainLyrics, setInitialHasEmbeddedPlainLyrics] = useState(false);
   const savingTracksRef = useRef<Set<string>>(new Set());
 
   const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -255,6 +254,7 @@ export function NrmTrackMetadataSettingsHome({
     setInitialTitle('');
     setInitialFields(EMPTY_METADATA_FIELDS);
     setInitialLyricsMode('unset');
+    setInitialHasEmbeddedPlainLyrics(false);
     try {
       const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
       const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
@@ -269,25 +269,19 @@ export function NrmTrackMetadataSettingsHome({
         }
       }
 
-      let melonPlain = isMelonPlainLyricsText(meta.lyrics)
-        ? (meta.lyrics ?? '').trim()
-        : (meta.melonLyricsPlain ?? '').trim();
-      if (!melonPlain && lrcText.trim()) {
-        melonPlain = extractPlainLyricsFromLrcText(lrcText);
-      }
-      if (!melonPlain) {
-        melonPlain = await resolveMelonPlainLyricsForEdit(normalizedWebsite);
-      }
+      const embeddedPlain = (meta.melonLyricsPlain ?? '').trim();
+      const embeddedSync = isEmbeddedSyncLyricsText(meta.lyrics) ? (meta.lyrics ?? '').trim() : '';
 
       const lyricsMode = resolveStoredLyricsModeFromFlags({
+        hasSidecarLrc: !!track.lrcUri && lrcText.trim().length > 0,
         sidecarLrcText: lrcText,
-        metadataLyrics: meta.lyrics,
+        embeddedSyncLyrics: embeddedSync,
+        embeddedPlainLyrics: embeddedPlain,
         embeddedLyricsMode: meta.nrmLyricsMode,
-        website: normalizedWebsite,
-        melonPlainLyrics: melonPlain,
       });
 
       setInitialLyricsMode(lyricsMode);
+      setInitialHasEmbeddedPlainLyrics(embeddedPlain.length > 0);
       const { artist, title } = resolveEditableArtistTitle(
         meta.artist,
         meta.title,
@@ -296,6 +290,7 @@ export function NrmTrackMetadataSettingsHome({
       setInitialArtist(artist);
       setInitialTitle(title);
       const { artist: _a, title: _t, ...rest } = meta;
+      const melonPlain = embeddedPlain;
       setInitialFields({
         ...rest,
         website: normalizedWebsite || rest.website,
@@ -527,6 +522,7 @@ export function NrmTrackMetadataSettingsHome({
         initialTitle={initialTitle}
         initialMetadataFields={initialFields}
         initialStoredLyricsMode={initialLyricsMode}
+        initialHasEmbeddedPlainLyrics={initialHasEmbeddedPlainLyrics}
         busy={modalBusy}
         deleteFileName={editTrack?.fileName}
         onDelete={editTrack ? onDeleteTrack : undefined}

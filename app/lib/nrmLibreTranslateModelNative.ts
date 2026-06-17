@@ -20,6 +20,7 @@ type NrmLibreTranslateNative = {
     }>
   >;
   isOfflineReady?: () => Promise<boolean>;
+  getEngineInfo?: () => Promise<{ ready?: boolean; computeType?: string }>;
   startPackageDownload?: (packageId: string) => Promise<{ started?: boolean }>;
   translateTexts?: (
     texts: string[],
@@ -51,6 +52,20 @@ export async function fetchLibreTranslatePackageStatuses(): Promise<
       progress: Math.min(100, Math.max(0, row?.progress ?? (installed ? 100 : 0))),
     };
   });
+}
+
+export async function fetchLibreTranslateEngineInfo(): Promise<{
+  ready: boolean;
+  computeType: string | null;
+}> {
+  if (!isLibreTranslateNativeAvailable() || !mod?.getEngineInfo) {
+    return { ready: false, computeType: null };
+  }
+  const info = await mod.getEngineInfo();
+  return {
+    ready: !!info?.ready,
+    computeType: (info?.computeType ?? '').trim() || null,
+  };
 }
 
 export async function isLibreTranslateOfflineReady(): Promise<boolean> {

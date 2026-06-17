@@ -51,6 +51,7 @@ import {
 } from '@/lib/nrmDownloadSettings';
 import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModelPicker';
 import { NrmAlignModelPicker } from '@/components/nrm/settings/NrmAlignModelPicker';
+import { NrmMelonSyncSettingsPanel } from '@/components/nrm/settings/NrmMelonSyncSettingsPanel';
 import { NrmDownloadEncodeOptionPicker } from '@/components/nrm/settings/NrmDownloadEncodeOptionPicker';
 import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import {
@@ -66,6 +67,11 @@ import { fetchWhisperModelStatuses } from '@/lib/nrmWhisperModelNative';
 import { fetchAlignModelStatuses } from '@/lib/nrmAlignModelNative';
 import type { NrmWhisperModelId } from '@/lib/nrmWhisperCatalog';
 import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
+import {
+  loadMelonSyncSettings,
+  DEFAULT_MELON_SYNC_SETTINGS,
+  type NrmMelonSyncSettings,
+} from '@/lib/nrmMelonSyncSettings';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 
@@ -78,6 +84,7 @@ export type NrmDownloadSettingsSection =
   | 'filename'
   | 'metadata'
   | 'lyricsEmbed'
+  | 'lyricsSyncer'
   | 'lyricsOutput';
 
 const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
@@ -89,6 +96,7 @@ const SECTION_TITLES: Record<NrmDownloadSettingsSection, string> = {
   filename: '파일명 설정',
   metadata: '메타데이터 설정',
   lyricsEmbed: 'AI 가사 추출 엔진 설정',
+  lyricsSyncer: '가사 싱커 설정',
   lyricsOutput: '가사 저장 방식 설정',
 };
 
@@ -120,6 +128,8 @@ export function NrmDownloadSettingsPanel({
     useState<NrmWhisperModelPreference>('whisper:large-v3-turbo');
   const [alignModelPreference, setAlignModelPreference] =
     useState<NrmAlignModelPreference>('aeneas:sync');
+  const [melonSyncSettings, setMelonSyncSettings] =
+    useState<NrmMelonSyncSettings>(DEFAULT_MELON_SYNC_SETTINGS);
 
   useEffect(() => {
     if (section === 'path') {
@@ -214,6 +224,15 @@ export function NrmDownloadSettingsPanel({
           setLoaded(true);
         }
       })();
+      return;
+    }
+    if (section === 'lyricsSyncer') {
+      void loadMelonSyncSettings()
+        .then((melonSync) => {
+          setMelonSyncSettings(melonSync);
+          setLoaded(true);
+        })
+        .catch(() => setLoaded(true));
       return;
     }
     if (section === 'vbr') {
@@ -552,6 +571,21 @@ export function NrmDownloadSettingsPanel({
                 active
               />
             </>
+          )}
+        </View>
+      ) : null}
+
+      {section === 'lyricsSyncer' ? (
+        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+          {!loaded ? (
+            <ActivityIndicator size="small" color={bodyColor} />
+          ) : (
+            <NrmMelonSyncSettingsPanel
+              settings={melonSyncSettings}
+              onChange={setMelonSyncSettings}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+            />
           )}
         </View>
       ) : null}

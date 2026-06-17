@@ -21,6 +21,7 @@ object ForcedAlignEngine {
       lyricsPlain: String,
       mode: String,
       alignModelId: String,
+      syncOptions: MelonSyncAlignOptions = MelonSyncAlignOptions(),
   ): AlignOutcome {
     val stageT0 = SystemClock.elapsedRealtime()
     NrmStageLog.log(
@@ -88,6 +89,7 @@ object ForcedAlignEngine {
                   melonLines,
                   durationMs,
                   onnxReserveMb = entry.onnxReserveMb,
+                  options = syncOptions,
               )
             }
           }

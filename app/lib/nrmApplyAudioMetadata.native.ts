@@ -31,7 +31,10 @@ type NativeAudioMetadata = {
     lrcContent: string,
     extension: string,
     lyricsMode?: string,
+    plainLyrics?: string | null,
   ) => Promise<null>;
+  /** 싱크 내장(USLT/SYLT·©lyr)만 제거, plain 내장 유지 */
+  stripSyncedEmbeddedLyrics?: (audioUri: string, extension: string) => Promise<null>;
 };
 
 function toFsPath(fileUri: string): string {
@@ -119,6 +122,7 @@ export async function embedSyncedLyricsIntoAudio(
   lrcContent: string,
   extension: string,
   lyricsMode?: string,
+  plainLyrics?: string | null,
 ): Promise<void> {
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
@@ -126,13 +130,48 @@ export async function embedSyncedLyricsIntoAudio(
     throw new Error('NrmAudioMetadata.embedSyncedLyrics를 사용할 수 없습니다.');
   }
   const uri = audioUri.trim();
-  if (!uri || !lrcContent.trim()) return;
+  if (!uri) return;
   const { parseLyricsModeFromLrcText } = await import('@/lib/nrmLrcUiMode');
+  const { normalizePlainLyricsForEmbed } = await import('@/lib/nrmPlainLyricsEmbed');
   const modeFromHeader = parseLyricsModeFromLrcText(lrcContent);
   const modeToken = (lyricsMode ?? modeFromHeader ?? '').trim();
   const playerLrc = stripNrmLrcModeLine(lrcContent);
-  if (!playerLrc.trim() && !modeToken) return;
-  await mod.embedSyncedLyrics(uri, playerLrc, extension.replace(/^\./, ''), modeToken);
+  const plain = normalizePlainLyricsForEmbed(plainLyrics);
+  if (!playerLrc.trim() && !modeToken && !plain) return;
+  await mod.embedSyncedLyrics(
+    uri,
+    playerLrc,
+    extension.replace(/^\./, ''),
+    modeToken,
+    plain ?? '',
+  );
+}
+
+/** Android 전용: 멜론 plain 가사 원문만 TXXX / nrm_plain_lyrics에 내장 */
+export async function embedPlainLyricsIntoAudio(
+  audioUri: string,
+  extension: string,
+  plainLyrics: string,
+): Promise<void> {
+  await embedSyncedLyricsIntoAudio(audioUri, '', extension, undefined, plainLyrics);
+}
+
+/**
+ * Android 전용: 싱크 가사(USLT/SYLT·©lyr)와 앱 모드 태그만 제거.
+ * plain 내장(NRM_PLAIN_LYRICS / nrm_plain_lyrics)은 유지한다.
+ */
+export async function stripSyncedEmbeddedLyricsFromAudio(
+  audioUri: string,
+  extension: string,
+): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
+  if (!mod?.stripSyncedEmbeddedLyrics) {
+    throw new Error('NrmAudioMetadata.stripSyncedEmbeddedLyrics를 사용할 수 없습니다.');
+  }
+  const uri = audioUri.trim();
+  if (!uri) return;
+  await mod.stripSyncedEmbeddedLyrics(uri, extension.replace(/^\./, ''));
 }
 
 /** 메타 편집 후 MediaStore 재스캔·DB 태그 동기화 (삼성 뮤직 등) */

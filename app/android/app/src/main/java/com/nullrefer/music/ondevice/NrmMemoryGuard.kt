@@ -88,14 +88,40 @@ object NrmMemoryGuard {
    * 잔여 메모리에 따른 CTC 프로파일.
    * ONNX 세션 로드 후 avail이 급락할 수 있어 시작 시점보다 보수적으로 잡는다.
    */
-  fun resolveCtcProfile(context: Context): CtcInferenceProfile {
-    return profileForAvail(availMemMb(context))
+  fun resolveCtcProfile(context: Context, quality: String = "standard"): CtcInferenceProfile {
+    val base = profileForAvail(availMemMb(context))
+    return boostProfileForQuality(base, quality)
+  }
+
+  private fun boostProfileForQuality(base: CtcInferenceProfile, quality: String): CtcInferenceProfile {
+    return when (quality) {
+      "accurate" ->
+          when (base.tier) {
+            "high" -> base.copy(chunkSamples = 96_000)
+            "high_mid" -> base.copy(chunkSamples = 80_000)
+            "mid" -> base.copy(chunkSamples = 64_000)
+            "mid_low" -> base.copy(chunkSamples = 48_000)
+            "low" -> base.copy(chunkSamples = 32_000)
+            "min" -> base.copy(chunkSamples = 16_000)
+            "ultra" -> base.copy(chunkSamples = 8_000)
+            "ultra_low" -> base.copy(chunkSamples = 4_000)
+            else -> base
+          }
+      "fast" ->
+          CtcInferenceProfile(
+              tier = base.tier,
+              chunkSamples = min(base.chunkSamples, 32_000),
+          )
+      else -> base
+    }
   }
 
   private fun profileForAvail(avail: Long): CtcInferenceProfile {
     return when {
       avail >= 1_800 ->
           CtcInferenceProfile(tier = "high", chunkSamples = 80_000)
+      avail >= 1_600 ->
+          CtcInferenceProfile(tier = "high_mid", chunkSamples = 72_000)
       avail >= 1_400 ->
           CtcInferenceProfile(tier = "high_mid", chunkSamples = 64_000)
       avail >= 1_100 ->
@@ -163,24 +189,34 @@ object NrmMemoryGuard {
     return LibreTranslatePackageDownloader.hasActiveDownload() && avail < LOW_AVAIL_MB
   }
 
-  /** 청크·세그먼트 사이 GC. avail이 낮을수록 대기 시간을 늘린다. */
-  fun trimBetweenInferenceSteps(context: Context?, tag: String) {
+  /** 청크·세그먼트 사이 GC. 여유 RAM이 충분하면 sleep·로그를 최소화한다. */
+  fun trimBetweenInferenceSteps(context: Context?, tag: String, force: Boolean = false) {
     val avail = availMemMb(context)
+    if (!force && avail >= 1_400) {
+      return
+    }
     val sleepMs =
         when {
+          avail >= 900 -> 8L
           avail < MIN_CHUNK_AVAIL_MB -> 120L
           avail < MIN_WORK_AVAIL_MB -> 80L
           avail < 600 -> 60L
-          else -> 40L
+          else -> 24L
         }
     try {
-      System.runFinalization()
-      System.gc()
-      Thread.sleep(sleepMs)
+      if (avail < 900 || force) {
+        System.runFinalization()
+        System.gc()
+      }
+      if (sleepMs > 0) {
+        Thread.sleep(sleepMs)
+      }
     } catch (_: InterruptedException) {
       Thread.currentThread().interrupt()
     }
-    NrmFileLogger.log(tag, "mem_trim_done availMb=${availMemMb(context)}")
+    if (avail < 900 || force) {
+      NrmFileLogger.log(tag, "mem_trim_done availMb=${availMemMb(context)}")
+    }
   }
 
   /** 청크 추론 전 메모리가 부족하면 짧게 GC 후 재시도. 실패 시 false. */

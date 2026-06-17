@@ -1,5 +1,4 @@
 import { splitLrcLine, normalizeLrcLines } from '@/lib/nrmDeepLLrcFormat';
-import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 
 import type { NrmLyricsUiMode, NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 
@@ -10,6 +9,7 @@ import {
   parseLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 
+import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export const DUPLICATE_TS_TRANSLATION_THRESHOLD = 10;
@@ -92,6 +92,11 @@ export function stripNrmLrcModeLine(lrcText: string): string {
   const lines = lrcText.split(/\r?\n/);
   const filtered = lines.filter((line) => !isNrmLyricsModeHeaderLine(line));
   return filtered.join('\n').trim();
+}
+
+/** 외장 .lrc — 모드 플래그 줄만 제거하고 순수 싱크 가사 본문만 남긴다 */
+export function preparePureSidecarLrcText(lrcText: string): string {
+  return stripNrmLrcModeLine(lrcText);
 }
 
 export function withNrmLyricsModeHeader(
@@ -336,50 +341,83 @@ export function resolveLyricsSidecarAction(
 }
 
 /**
- * 트랙 편집 — 사이드카 LRC·메타 sentinel·구 내장 모드 순으로 저장 모드 복원.
- * 멜론/일반 가사 패밀리는 website로, 번역지원은 LRC 동일 타임스탬프 2줄(≥10)로 판단.
+ * USLT/SYLT(mp3)·©lyr(m4a) 등에서 읽은 싱크 가사(LRC) 텍스트인지.
+ * sentinel·plain 텍스트는 제외한다.
+ */
+export function isEmbeddedSyncLyricsText(raw: string | undefined): boolean {
+  const text = (raw ?? '').trim();
+  if (!text) return false;
+  if (parseLyricsUiMode(text) !== 'unset') return false;
+  return normalizeLrcLines(text).some((line) => !!splitLrcLine(line)?.text);
+}
+
+function pickLrcTextForModeDetection(
+  sidecarLrcText: string,
+  embeddedSyncLyrics: string,
+): string {
+  const sidecar = sidecarLrcText.trim();
+  if (sidecar) return sidecar;
+  return embeddedSyncLyrics.trim();
+}
+
+function isTranslationFromDuplicateTimestamps(lrcText: string): boolean {
+  const body = lrcText.trim();
+  if (!body) return false;
+  return countDuplicateTimestampLyrics(body) >= DUPLICATE_TS_TRANSLATION_THRESHOLD;
+}
+
+/**
+ * 트랙 메타데이터 설정 — 가사 드롭다운 기본값.
+ *
+ * - unset: .lrc·싱크 내장·plain 내장·모드 태그 모두 없음, 또는 plain만 있고 싱크·모드 태그 없음
+ * - configured/translation: 싱크 가사만, plain 내장 없음 (번역 = 동일 타임스탬프 ≥10)
+ * - melon/melon_translation: 싱크 가사 + plain 내장, 또는 plain + nrm_lyrics_mode 태그
  */
 export function resolveStoredLyricsModeFromFlags(input: {
+  hasSidecarLrc?: boolean;
   sidecarLrcText?: string;
-  metadataLyrics?: string;
-  /** MP3 TXXX / m4a nrm_lyrics_mode — 가사 UI 모드 복원용 */
-  embeddedLyricsMode?: string | null;
-  website?: string;
-  melonPlainLyrics?: string;
+  embeddedSyncLyrics?: string;
+  /** TXXX NRM_PLAIN_LYRICS(mp3) 또는 m4a nrm_plain_lyrics */
+  embeddedPlainLyrics?: string;
+  /** TXXX NRM_LYRICS_MODE(mp3) 또는 m4a nrm_lyrics_mode */
+  embeddedLyricsMode?: string;
 }): NrmLyricsUiMode {
-  function modeFromStoredText(raw: string): NrmLyricsUiMode {
-    const text = raw.trim();
-    if (!text) return 'unset';
+  const sidecarText = (input.sidecarLrcText ?? '').trim();
+  const hasSidecar = !!(input.hasSidecarLrc && sidecarText);
+  const embeddedSync = isEmbeddedSyncLyricsText(input.embeddedSyncLyrics)
+    ? (input.embeddedSyncLyrics ?? '').trim()
+    : '';
+  const hasEmbeddedSync = embeddedSync.length > 0;
+  const hasPlainEmbed = (input.embeddedPlainLyrics ?? '').trim().length > 0;
+  const embeddedMode = parseEmbeddedLyricsModeToken(input.embeddedLyricsMode);
+  const embeddedMelonMode = embeddedMode && isMelonLyricsUiMode(embeddedMode) ? embeddedMode : null;
 
-    const fromSentinel = parseLyricsUiMode(text);
-    if (fromSentinel !== 'unset') return fromSentinel;
-
-    const tag = parseLyricsModeFromLrcText(text);
-    if (tag) return tag;
-
-    const body = detectLrcUiModeFromText(text);
-    return body;
+  if (!hasSidecar && !hasEmbeddedSync && !hasPlainEmbed && !embeddedMode) {
+    return 'unset';
   }
 
-  let mode: NrmLyricsUiMode = 'unset';
+  const lrcForDup = pickLrcTextForModeDetection(sidecarText, embeddedSync);
+  const isTranslation = isTranslationFromDuplicateTimestamps(lrcForDup);
 
-  const sidecar = (input.sidecarLrcText ?? '').trim();
-  if (sidecar) mode = modeFromStoredText(sidecar);
-
-  if (mode === 'unset') {
-    const embedded = (input.embeddedLyricsMode ?? '').trim();
-    if (embedded) {
-      const fromEmbedded = parseEmbeddedLyricsModeToken(embedded);
-      if (fromEmbedded) mode = fromEmbedded;
+  if (!hasPlainEmbed) {
+    if (!hasSidecar && !hasEmbeddedSync) {
+      return 'unset';
     }
+    if (embeddedMelonMode) {
+      return embeddedMelonMode;
+    }
+    return isTranslation ? 'translation' : 'configured';
   }
 
-  if (mode === 'unset') {
-    const meta = (input.metadataLyrics ?? '').trim();
-    if (meta) mode = modeFromStoredText(meta);
+  if (hasPlainEmbed && (hasSidecar || hasEmbeddedSync)) {
+    return isTranslation ? 'melon_translation' : 'melon';
   }
 
-  return inferMelonLyricsUiModeFromContext(mode, input.melonPlainLyrics ?? '', input.website);
+  if (hasPlainEmbed && embeddedMelonMode) {
+    return embeddedMelonMode;
+  }
+
+  return 'unset';
 }
 
 export function isWhisperLyricsFamily(mode: NrmLyricsUiMode): mode is NrmWhisperLyricsMode {

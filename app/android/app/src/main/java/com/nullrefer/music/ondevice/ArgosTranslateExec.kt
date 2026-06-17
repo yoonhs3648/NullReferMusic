@@ -105,16 +105,27 @@ object ArgosTranslateExec {
             ),
         )
     val result = runCliProcess(paths, cmd) ?: return false
-    val ok = result.exitCode == 0 && result.stdout.trim() == "OK"
-    if (!ok) {
+    val ok = result.exitCode == 0 && result.stdout.trim().startsWith("OK")
+    if (ok) {
+      val compute = parseSelfTestCompute(result.stdout)
+      if (compute.isNotBlank()) {
+        ArgosBridge.setActiveComputeType(compute)
+      }
+      NrmFileLogger.log("libretranslate", "self_test_ok abi=${paths.abi} compute=$compute")
+    } else {
       NrmFileLogger.warn(
           "libretranslate",
           "self_test_failed exit=${result.exitCode} stdout=${result.stdout.take(80)} stderr=${result.stderr.take(400)} abi=${paths.abi}",
       )
-    } else {
-      NrmFileLogger.log("libretranslate", "self_test_ok abi=${paths.abi}")
     }
     return ok
+  }
+
+  private fun parseSelfTestCompute(stdout: String): String {
+    val line = stdout.trim()
+    val idx = line.indexOf(" compute=")
+    if (idx < 0) return ""
+    return line.substring(idx + " compute=".length).trim()
   }
 
   private data class CliResult(

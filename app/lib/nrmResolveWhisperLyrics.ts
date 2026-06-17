@@ -27,7 +27,8 @@ function toFsPath(fileUri: string): string {
 }
 
 async function writeLrcSidecar(audioPath: string, lrc: string): Promise<void> {
-  const trimmed = lrc.trim();
+  const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
+  const trimmed = preparePureSidecarLrcText(lrc);
   if (!trimmed) return;
   await FileSystem.writeAsStringAsync(siblingLrcUri(audioPath), `${trimmed}\n`);
 }

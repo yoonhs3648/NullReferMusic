@@ -7,6 +7,7 @@ import {
   applyAudioFileMetadata,
   embedSyncedLyricsIntoAudio,
   rescanMediaStoreAfterMetadataEdit,
+  stripSyncedEmbeddedLyricsFromAudio,
   syncMediaStoreAudioTags,
 } from '@/lib/nrmApplyAudioMetadata.native';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
@@ -33,6 +34,7 @@ import {
 } from '@/lib/nrmMobileDownloadNotifications.native';
 import { loadLyricsOutputMode } from '@/lib/nrmDownloadSettings';
 import { notifyUser } from '@/lib/nrmUserNotify';
+import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 
 const LRC_SAF_MIME = 'application/octet-stream';
 
@@ -183,6 +185,19 @@ function lyricsJobId(track: NrmDownloadTrackItem): string {
   return `track-meta:${track.audioUri}`;
 }
 
+/** 알려진 LRC URI + 오디오와 같은 폴더의 사이드카 `.lrc`를 모두 삭제 */
+async function deleteSidecarLrcForTrack(
+  location: PersistedAudioLocation,
+  knownLrcUri?: string | null,
+): Promise<void> {
+  const candidates = new Set<string>();
+  if (knownLrcUri?.trim()) candidates.add(knownLrcUri.trim());
+  candidates.add(siblingLrcUri(location.audioUri));
+  for (const uri of candidates) {
+    await deletePersistedLrc(uri);
+  }
+}
+
 export type ApplyTrackMetadataUpdateInput = {
   track: NrmDownloadTrackItem;
   newFileName: string;
@@ -222,7 +237,11 @@ export async function applyTrackMetadataUpdate(
   }
 
   if (lyricsAction.kind === 'delete') {
-    if (lrcUri) await deletePersistedLrc(lrcUri);
+    await deleteSidecarLrcForTrack(location, lrcUri);
+    const ext = location.fileName.slice(location.fileName.lastIndexOf('.')).toLowerCase();
+    if (ext === '.mp3' || ext === '.m4a') {
+      await stripSyncedEmbeddedLyricsFromAudio(location.audioUri, ext);
+    }
     return;
   }
 
@@ -243,14 +262,22 @@ export async function applyTrackMetadataUpdate(
   async function saveLrc(
     lrcText: string,
     mode: Exclude<NrmLyricsUiMode, 'unset'>,
+    plainLyrics?: string | null,
   ): Promise<void> {
-    const { withNrmLyricsModeHeader } = await import('@/lib/nrmLrcUiMode');
-    const payload = withNrmLyricsModeHeader(lrcText.trim(), mode);
-    if (!payload) return;
+    const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
+    const pureBody = lrcText.trim();
+    const sidecarPayload = preparePureSidecarLrcText(pureBody);
+    if (!sidecarPayload && !pureBody) return;
     if (useEmbed) {
-      await embedSyncedLyricsIntoAudio(location.audioUri, payload, ext, mode);
+      await embedSyncedLyricsIntoAudio(
+        location.audioUri,
+        pureBody,
+        ext,
+        mode,
+        plainLyrics,
+      );
     } else {
-      await persistLrcForSavedAudio(location, payload);
+      await persistLrcForSavedAudio(location, sidecarPayload);
     }
   }
 
@@ -357,7 +384,7 @@ export async function applyTrackMetadataUpdate(
         transcribeMelonLyricsLrc(workUri, lyricsAction.mode, ext, plain),
       );
       if (melon.lrcFull?.trim()) {
-        await saveLrc(melon.lrcFull, lyricsAction.mode);
+        await saveLrc(melon.lrcFull, lyricsAction.mode, plain);
         nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
       } else if (melon.lyricsMelonMemoryInsufficient) {
         nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');

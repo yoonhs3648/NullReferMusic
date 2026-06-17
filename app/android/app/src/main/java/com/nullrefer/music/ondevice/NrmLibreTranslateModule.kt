@@ -57,6 +57,22 @@ class NrmLibreTranslateModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun getEngineInfo(promise: Promise) {
+    try {
+      val ready = LibreTranslatePackageDownloader.isOfflineReady(reactApplicationContext)
+      val out = Arguments.createMap()
+      out.putBoolean("ready", ready)
+      val compute = ArgosBridge.getActiveComputeType()
+      if (compute.isNotBlank()) {
+        out.putString("computeType", compute)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("E_LIBRE_ENGINE", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
   fun startPackageDownload(packageId: String?, promise: Promise) {
     try {
       val id = (packageId ?: "").trim()

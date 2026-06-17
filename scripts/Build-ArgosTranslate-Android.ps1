@@ -62,10 +62,14 @@ function Ensure-GitCheckout {
     Push-Location $Dir
     try {
         git -c core.longpaths=true submodule sync --recursive 2>$null
-        foreach ($sm in $Submodules) {
-            Write-Host "[argos-android] submodule $sm"
-            git -c core.longpaths=true submodule update --init --depth 1 $sm
+        if ($Submodules -and $Submodules.Count -gt 0) {
+            foreach ($sm in $Submodules) {
+                Write-Host "[argos-android] submodule $sm"
+                git -c core.longpaths=true submodule update --init --depth 1 $sm
+            }
         }
+        Write-Host "[argos-android] submodule recursive (ruy/cpuinfo 등)"
+        git -c core.longpaths=true submodule update --init --recursive --depth 1
     } finally {
         Pop-Location
     }
@@ -79,7 +83,11 @@ function Copy-OmpForAbi {
     )
     $clangRoot = Join-Path $Ndk "toolchains/llvm/prebuilt/windows-x86_64/lib/clang"
     if (-not (Test-Path $clangRoot)) { return }
-    $arch = if ($Abi -eq "x86_64") { "x86_64" } else { "aarch64" }
+    $arch = switch ($Abi) {
+        "x86_64" { "x86_64" }
+        "armeabi-v7a" { "arm" }
+        default { "aarch64" }
+    }
     $ompCandidates = @()
     Get-ChildItem $clangRoot -Directory | ForEach-Object {
         $omp = Join-Path $_.FullName "lib/linux/$arch/libomp.so"
@@ -120,8 +128,14 @@ function Build-Abi {
         -DCT2_BUILD_TESTS=OFF `
         -DWITH_DNNL=OFF `
         -DWITH_MKL=OFF `
+        -DWITH_RUY=ON `
         -DENABLE_GPU=OFF `
         -DOPENMP_RUNTIME=COMP
+
+    $cacheFile = Join-Path $buildDir "CMakeCache.txt"
+    if (-not (Select-String -Path $cacheFile -Pattern "WITH_RUY:BOOL=ON" -Quiet)) {
+        throw "WITH_RUY must be ON (SGEMM backend required) for $Abi"
+    }
 
     Write-Host "[argos-android] build ($Abi)..."
     & $Cmake --build $buildDir --target nrm-argos-translate -j 8
@@ -209,7 +223,7 @@ foreach ($abi in $abis) {
         $builtAbis += $abi
     } catch {
         if ($abi -eq "arm64-v8a") { throw }
-        Write-Warning "[argos-android] $abi build failed (emulator optional): $_"
+        Write-Warning "[argos-android] $abi build failed (optional ABI): $_"
     }
 }
 

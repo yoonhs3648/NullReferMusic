@@ -199,17 +199,20 @@ object LibreTranslatePackageDownloader {
             ok = downloadPackage(appContext, entry, destFile)
             if (ok) {
               emitProgress(entry.id, 100, "installing")
-              ok = ArgosPackageInstaller.installFromArgosmodel(appContext, destFile.absolutePath)
-              if (ok) {
+              val installOk =
+                  ArgosPackageInstaller.installFromArgosmodel(appContext, destFile.absolutePath)
+              if (installOk) {
                 ArgosBridge.invalidateSmokeTest()
-                ok = ArgosBridge.isOfflineReady(appContext)
-                if (ok) {
+                val engineOk = ArgosBridge.isOfflineReady(appContext)
+                if (engineOk) {
                   argosInstalled[packageId] = true
+                  ok = true
                 } else {
                   NrmFileLogger.warn(
                       "libretranslate",
-                      "다운로드·설치 후 self-test 실패 — APK 네이티브 번역 CLI 확인 필요",
+                      "언어 팩 설치됨 — 번역 엔진 self-test 실패(번역 동작 불가). APK CLI 재빌드 필요",
                   )
+                  ok = false
                 }
               } else {
                 NrmFileLogger.warn(
@@ -218,6 +221,7 @@ object LibreTranslatePackageDownloader {
                 )
                 destFile.delete()
                 argosInstalled.remove(packageId)
+                ok = false
               }
             } else {
               NrmFileLogger.warn("libretranslate", "언어 팩 다운로드 실패 packageId=$packageId")

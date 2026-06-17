@@ -3,6 +3,7 @@ package com.nullrefer.music.ondevice
 import android.os.SystemClock
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -510,6 +511,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       lyricsPlain: String,
       mode: String,
       alignModelPreference: String?,
+      syncOptions: ReadableMap?,
       promise: Promise,
   ) {
     Thread {
@@ -526,6 +528,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             AlignModelCatalog.normalizeAlignPackId(
                 alignModelPreference ?: AlignModelCatalog.WAV2VEC2_KO_ID,
             )
+        val options = MelonSyncAlignOptions.fromReadable(syncOptions)
         val outcome =
             ForcedAlignEngine.alignToLrc(
                 reactApplicationContext,
@@ -533,6 +536,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
                 lyricsPlain,
                 mode,
                 pref,
+                options,
             )
         val ok = Arguments.createMap()
         ok.putString("lrc", outcome.lrc)

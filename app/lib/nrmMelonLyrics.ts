@@ -165,7 +165,7 @@ export async function fetchMelonPlainLyricsFromWebsite(
   if (!songId) return '';
   try {
     const { fetchMelonTrackDetail } = await import('@/lib/nrmMelonSearchClient');
-    const r = await fetchMelonTrackDetail(songId);
+    const r = await fetchMelonTrackDetail(songId, { enrich: false });
     if (!r.ok) return '';
     const plain = (r.data.info.lyrics ?? '').trim();
     return isMelonPlainLyricsText(plain) ? plain : '';

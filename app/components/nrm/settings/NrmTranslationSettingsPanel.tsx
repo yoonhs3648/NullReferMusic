@@ -3,7 +3,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
-import { isLibreTranslateOfflineReady } from '@/lib/nrmLibreTranslateModelNative';
+import {
+  isLibreTranslateOfflineReady,
+  subscribeLibreTranslatePackageDownloadEvents,
+} from '@/lib/nrmLibreTranslateModelNative';
 import {
   listTranslationProviders,
   loadTranslationProvider,
@@ -39,7 +42,15 @@ export function NrmTranslationSettingsPanel({
     const timer = setInterval(() => {
       void reload();
     }, 5000);
-    return () => clearInterval(timer);
+    const unsub = subscribeLibreTranslatePackageDownloadEvents((ev) => {
+      if (ev.phase === 'complete') {
+        void reload();
+      }
+    });
+    return () => {
+      clearInterval(timer);
+      unsub();
+    };
   }, [active, reload]);
 
   const selectProvider = useCallback(

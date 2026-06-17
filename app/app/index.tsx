@@ -50,12 +50,12 @@ import { NrmSpotifyArtistSearchHome } from '@/components/nrm/search/NrmSpotifyAr
 import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTrackSearchHome';
 
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
-import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
 import { confirmUser } from '@/lib/nrmUserNotify';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 
+import { NrmHomeChartCarousel } from '@/components/nrm/NrmHomeChartCarousel';
 import { NrmMusicQuotePanel } from '@/components/nrm/NrmMusicQuotePanel';
 import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 
@@ -64,6 +64,19 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
+import {
+  fetchHomeChartTop20,
+  homeChartDownloadSource,
+  invalidateHomeChartCache,
+  peekHomeChartCache,
+  type HomeChartSource,
+} from '@/lib/nrmHomeChartClient';
+import {
+  DEFAULT_MAIN_PAGE_MODE,
+  loadMainPageMode,
+  registerMainPageModeListener,
+  type NrmMainPageMode,
+} from '@/lib/nrmMainPageSettings';
 import { saveSpotifyChartsSession } from '@/lib/nrmSpotifyChartsSession';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
@@ -102,6 +115,12 @@ type YoutubeOverlayState = {
   downloadSource: 'chart' | 'lastfm' | 'melon' | null;
 };
 
+type HomeChartState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; items: ChartTrackItem[]; source: HomeChartSource }
+  | { status: 'failed' };
+
 async function formatYoutubeDisplayQuery(artist?: string | null, title?: string | null): Promise<string> {
   const a = (artist ?? '').trim();
   const t = (title ?? '').trim();
@@ -136,6 +155,9 @@ export default function HomeScreen() {
 
   const [homeEpoch, setHomeEpoch] = useState(0);
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
+  const [homeChartEpoch, setHomeChartEpoch] = useState(0);
+  const [mainPageMode, setMainPageMode] = useState<NrmMainPageMode>(DEFAULT_MAIN_PAGE_MODE);
+  const [homeChartState, setHomeChartState] = useState<HomeChartState>({ status: 'idle' });
   const [searchViewEpoch, setSearchViewEpoch] = useState(0);
   /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
   const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
@@ -166,6 +188,48 @@ export default function HomeScreen() {
   const bumpQuoteRefresh = useCallback(() => {
     setQuoteRefreshKey((k) => k + 1);
   }, []);
+
+  const bumpHomeChartRefresh = useCallback(() => {
+    invalidateHomeChartCache();
+    setHomeChartEpoch((k) => k + 1);
+  }, []);
+
+  useEffect(() => {
+    void loadMainPageMode().then(setMainPageMode);
+    registerMainPageModeListener(setMainPageMode);
+    return () => registerMainPageModeListener(null);
+  }, []);
+
+  useEffect(() => {
+    if (mainPageMode !== 'charts' || layoutPhase !== 'welcome' || youtubeOverlay !== null) {
+      return;
+    }
+    const ac = new AbortController();
+    const epoch = homeChartEpoch;
+    const cached = peekHomeChartCache(epoch);
+    if (cached?.ok) {
+      setHomeChartState({
+        status: 'ready',
+        items: cached.items,
+        source: cached.source,
+      });
+    } else {
+      setHomeChartState({ status: 'loading' });
+    }
+    void fetchHomeChartTop20(ac.signal, epoch).then((out) => {
+      if (ac.signal.aborted) return;
+      if (out.ok) {
+        setHomeChartState({
+          status: 'ready',
+          items: out.items,
+          source: out.source,
+        });
+      } else if (!cached?.ok) {
+        setHomeChartState({ status: 'failed' });
+      }
+    });
+    return () => ac.abort();
+  }, [mainPageMode, layoutPhase, youtubeOverlay, homeChartEpoch]);
 
   const isAppleMusicCharts = mainView === 'appleMusicCharts';
   const isSpotifyChartsOfficial = mainView === 'spotifyChartsOfficial';
@@ -237,7 +301,8 @@ export default function HomeScreen() {
     setLayoutPhase('welcome');
     setHomeEpoch((v) => v + 1);
     bumpQuoteRefresh();
-  }, [dismissYoutubeOverlay, bumpQuoteRefresh]);
+    bumpHomeChartRefresh();
+  }, [dismissYoutubeOverlay, bumpQuoteRefresh, bumpHomeChartRefresh]);
 
   /** 차트·검색 트랙 클릭: 유튜브 오버레이 (원 플랫폼 화면은 마운트 유지) */
   const navigateToSearchFromChart = useCallback(
@@ -251,6 +316,13 @@ export default function HomeScreen() {
       });
     },
     [openYoutubeOverlay],
+  );
+
+  const navigateFromHomeChart = useCallback(
+    (item: ChartTrackItem, source: HomeChartSource) => {
+      void navigateToSearchFromChart(item, homeChartDownloadSource(source));
+    },
+    [navigateToSearchFromChart],
   );
 
 
@@ -535,10 +607,6 @@ export default function HomeScreen() {
   );
 
   useEffect(() => {
-    if (Platform.OS !== 'web') void setupNrmMobileDownloadNotifications();
-  }, []);
-
-  useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onPopState = () => {
       if (youtubeOverlay) {
@@ -782,14 +850,25 @@ export default function HomeScreen() {
 
   const renderYoutubePanel = (overlay: YoutubeOverlayState | null) => {
     const youtubeBrowsing = !!overlay || layoutPhase === 'browsing';
-    const showWelcomeQuotes = !youtubeBrowsing;
+    const chartLoadFailed =
+      mainPageMode === 'charts' && homeChartState.status === 'failed';
+    const useCenteredWelcomeLayout =
+      !youtubeBrowsing &&
+      (mainPageMode === 'none' || (mainPageMode === 'charts' && chartLoadFailed));
+    const showWelcomeQuote =
+      !youtubeBrowsing && mainPageMode === 'quotation';
+    const showWelcomeChart =
+      !youtubeBrowsing &&
+      mainPageMode === 'charts' &&
+      !chartLoadFailed;
 
     const logoBlock = (
       <View
         style={[
           styles.logoWrap,
-          styles.logoWrapBrowsing,
-          { paddingTop: logoPadTop },
+          !useCenteredWelcomeLayout && styles.logoWrapBrowsing,
+          useCenteredWelcomeLayout && styles.logoWrapCentered,
+          !useCenteredWelcomeLayout && { paddingTop: logoPadTop },
         ]}>
         <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onMainLogoPress} />
       </View>
@@ -813,6 +892,27 @@ export default function HomeScreen() {
       />
     );
 
+    const welcomeBottom = showWelcomeQuote ? (
+      <NrmMusicQuotePanel
+        isDark={isDark}
+        refreshKey={quoteRefreshKey}
+      />
+    ) : showWelcomeChart ? (
+      <NrmHomeChartCarousel
+        key={`home-chart-${homeChartEpoch}-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
+        isDark={isDark}
+        items={homeChartState.status === 'ready' ? homeChartState.items : []}
+        loading={
+          homeChartState.status === 'loading' || homeChartState.status === 'idle'
+        }
+        onTrackPress={(item) => {
+          const source =
+            homeChartState.status === 'ready' ? homeChartState.source : 'melon';
+          navigateFromHomeChart(item, source);
+        }}
+      />
+    ) : null;
+
     return (
       <KeyboardAvoidingView
         style={[
@@ -825,21 +925,24 @@ export default function HomeScreen() {
         <View
           style={[
             styles.centerColumn,
-            youtubeBrowsing ? styles.youtubeBrowsingColumn : styles.youtubeWelcomeColumn,
+            youtubeBrowsing
+              ? styles.youtubeBrowsingColumn
+              : useCenteredWelcomeLayout
+                ? styles.youtubeWelcomeColumnCentered
+                : styles.youtubeWelcomeColumn,
             { paddingHorizontal: pad },
           ]}>
           {logoBlock}
           <View
             style={
-              youtubeBrowsing ? styles.youtubeHomeShell : styles.youtubeWelcomeBody
+              youtubeBrowsing
+                ? styles.youtubeHomeShell
+                : useCenteredWelcomeLayout
+                  ? styles.youtubeWelcomeBodyCentered
+                  : styles.youtubeWelcomeBody
             }>
             {youtubeHome}
-            {showWelcomeQuotes ? (
-              <NrmMusicQuotePanel
-                isDark={isDark}
-                refreshKey={quoteRefreshKey}
-              />
-            ) : null}
+            {welcomeBottom}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1024,10 +1127,25 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
 
+  youtubeWelcomeColumnCentered: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    maxWidth: nrmTokens.layout.maxContentWidth,
+    alignSelf: 'center',
+    justifyContent: 'center',
+  },
+
   youtubeWelcomeBody: {
     flex: 1,
     minHeight: 0,
     width: '100%',
+  },
+
+  youtubeWelcomeBodyCentered: {
+    width: '100%',
+    maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
+    alignSelf: 'center',
   },
 
   youtubeHomeShell: {
@@ -1060,6 +1178,10 @@ const styles = StyleSheet.create({
 
     paddingBottom: nrmTokens.space.md,
 
+  },
+
+  logoWrapCentered: {
+    paddingBottom: nrmTokens.space.lg,
   },
 
 });
