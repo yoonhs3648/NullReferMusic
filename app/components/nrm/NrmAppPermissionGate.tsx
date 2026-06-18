@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   BackHandler,
   Platform,
   Pressable,
@@ -66,26 +67,66 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
     [onGranted],
   );
 
+  const requestingRef = useRef(false);
+
+  const syncPermissionSnapshot = useCallback(async (): Promise<NrmRequiredPermissionState> => {
+    const state = await checkRequiredPermissions();
+    setSnapshot(state);
+    return state;
+  }, []);
+
+  const showPromptIfNeeded = useCallback(
+    async (opts?: { skipCheckingPhase?: boolean }) => {
+      if (!opts?.skipCheckingPhase) {
+        setPhase('checking');
+      }
+      const state = await syncPermissionSnapshot();
+      if (finishIfGranted(state)) return;
+      requestingRef.current = false;
+      setPhase('prompt');
+    },
+    [finishIfGranted, syncPermissionSnapshot],
+  );
+
   useEffect(() => {
     if (Platform.OS !== 'android') {
       onGranted();
       return;
     }
-    void (async () => {
-      const state = await checkRequiredPermissions();
-      setSnapshot(state);
-      if (finishIfGranted(state)) return;
-      setPhase('prompt');
-    })();
-  }, [finishIfGranted, onGranted]);
+    void showPromptIfNeeded();
+  }, [onGranted, showPromptIfNeeded]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        if (requestingRef.current) {
+          setPhase('prompt');
+        }
+        return;
+      }
+      void showPromptIfNeeded({ skipCheckingPhase: true });
+    });
+    return () => sub.remove();
+  }, [showPromptIfNeeded]);
 
   const onRequestPress = useCallback(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' || requestingRef.current) return;
+    requestingRef.current = true;
     setPhase('requesting');
     void (async () => {
-      const state = await requestAllRequiredPermissions();
-      setSnapshot(state);
-      if (!finishIfGranted(state)) {
+      let granted = false;
+      try {
+        const state = await requestAllRequiredPermissions();
+        setSnapshot(state);
+        granted = finishIfGranted(state);
+      } finally {
+        requestingRef.current = false;
+        if (!granted) {
+          setPhase('prompt');
+        }
+      }
+      if (!granted) {
         BackHandler.exitApp();
       }
     })();

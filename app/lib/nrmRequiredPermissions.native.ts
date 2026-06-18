@@ -62,23 +62,19 @@ export async function requestAllRequiredPermissions(): Promise<NrmRequiredPermis
     return { notifications: true, media: true, saf: true };
   }
 
-  let notifications = await checkNotificationPermission();
+  /** 버튼 탭마다 시스템 권한 다이얼로그를 다시 띄우기 위해 check 생략 후 request */
+  const notifRes = await requestNotificationPermissionsAsync();
+  const notifications = notifRes.status === 'granted';
   if (!notifications) {
-    const res = await requestNotificationPermissionsAsync();
-    notifications = res.status === 'granted';
-  }
-  if (!notifications) {
-    return { notifications: false, media: false, saf: true };
+    const media = await checkMediaPermission();
+    return { notifications: false, media, saf: true };
   }
 
-  let media = await checkMediaPermission();
-  if (!media) {
-    const res = await MediaLibrary.requestPermissionsAsync(
-      false,
-      getAndroidMediaGranularPermissions(),
-    );
-    media = res.status === 'granted';
-  }
+  const mediaRes = await MediaLibrary.requestPermissionsAsync(
+    false,
+    getAndroidMediaGranularPermissions(),
+  );
+  const media = mediaRes.status === 'granted';
   if (!media) {
     return { notifications: true, media: false, saf: true };
   }
