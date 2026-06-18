@@ -4,6 +4,7 @@ import { NativeModules } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { normalizeDownloadMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { normalizeMelonTrackWebsite } from '@/lib/nrmMelonLyrics';
 import { isBogusEmbeddedAudioTitle } from '@/lib/nrmAudioMetadataTitle';
 
 /** 트랙별 메타데이터 인메모리 캐시 (audioUri\0fileName → 결과) */
@@ -127,7 +128,7 @@ export async function readAudioFileMetadata(
     composer: (raw.composer ?? '').trim() || undefined,
     bpm: (raw.bpm ?? '').trim() || undefined,
     copyright: (raw.copyright ?? '').trim() || undefined,
-    website: (raw.website ?? '').trim() || undefined,
+    website: normalizeMelonTrackWebsite((raw.website ?? '').trim()) || undefined,
     producer: (raw.producer ?? '').trim() || undefined,
     remixer: (raw.remixer ?? '').trim() || undefined,
     lyrics: (raw.lyrics ?? '').trim() || undefined,

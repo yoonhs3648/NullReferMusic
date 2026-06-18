@@ -15,18 +15,9 @@ type Props = {
   rowHover: string;
 };
 
-const OPTIONS: { id: NrmAlignLyricsLangDetectionMode; label: string; description: string }[] = [
-  {
-    id: 'manual',
-    label: '수동',
-    description:
-      '멜론 가사 싱크 시 한국어·영어 wav2vec2 팩을 직접 선택합니다. (기본값)',
-  },
-  {
-    id: 'auto',
-    label: '자동',
-    description: '멜론 plain 원문의 한글·영문 비율로 팩을 자동 선택합니다.',
-  },
+const OPTIONS: { id: NrmAlignLyricsLangDetectionMode; label: string }[] = [
+  { id: 'manual', label: '수동' },
+  { id: 'auto', label: '자동' },
 ];
 
 export function NrmAlignLyricsLangDetectionPanel({
@@ -49,9 +40,6 @@ export function NrmAlignLyricsLangDetectionPanel({
 
   return (
     <View style={styles.root}>
-      <Text style={[styles.hint, { color: bodyColor }]}>
-        wav2vec2-base 멜론 싱크 시 사용할 언어 팩 선택 방식입니다.
-      </Text>
       {OPTIONS.map((opt) => {
         const active = mode === opt.id;
         return (
@@ -64,7 +52,6 @@ export function NrmAlignLyricsLangDetectionPanel({
             ]}>
             <View style={styles.rowText}>
               <Text style={[styles.rowLabel, { color: titleColor }]}>{opt.label}</Text>
-              <Text style={[styles.rowDesc, { color: bodyColor }]}>{opt.description}</Text>
             </View>
             <View
               style={[
@@ -83,12 +70,6 @@ export function NrmAlignLyricsLangDetectionPanel({
 
 const styles = StyleSheet.create({
   root: { gap: nrmTokens.space.sm },
-  hint: {
-    fontSize: 14,
-    lineHeight: 20,
-    opacity: 0.88,
-    marginBottom: nrmTokens.space.xs,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -96,8 +77,7 @@ const styles = StyleSheet.create({
     paddingVertical: nrmTokens.space.sm,
   },
   rowText: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: nrmTokens.font.body, fontWeight: '600', marginBottom: 4 },
-  rowDesc: { fontSize: 14, lineHeight: 20, opacity: 0.88 },
+  rowLabel: { fontSize: nrmTokens.font.body, fontWeight: '600' },
   radio: {
     width: 22,
     height: 22,

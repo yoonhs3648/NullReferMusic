@@ -91,23 +91,59 @@ export function NrmPeriodChartsHome({
   const [snapshotDow, setSnapshotDow] = useState(DEFAULT_WEEKLY_SNAPSHOT_DAY);
   const [region, setRegion] = useState<PeriodChartRegion>('kr');
 
+  type SpotifyPeriodTabSnapshot = SpotifyPeriodDateSelection & {
+    region: PeriodChartRegion;
+  };
+  type LastfmPeriodTabSnapshot = {
+    year: number;
+    month: number;
+    region: PeriodChartRegion;
+  };
+
   const spotifyKindSnapshotsRef = useRef<
-    Partial<Record<SpotifyPeriodChartKind, SpotifyPeriodDateSelection>>
+    Partial<Record<SpotifyPeriodChartKind, SpotifyPeriodTabSnapshot>>
   >(
     platform === 'spotify'
-      ? { daily: { year: initialSpotify.year, month: initialSpotify.month, day: initialSpotify.day, weekOfMonth: initialSpotify.weekOfMonth } }
+      ? {
+          daily: {
+            year: initialSpotify.year,
+            month: initialSpotify.month,
+            day: initialSpotify.day,
+            weekOfMonth: initialSpotify.weekOfMonth,
+            region: 'kr',
+          },
+        }
+      : {},
+  );
+
+  const lastfmGranularitySnapshotsRef = useRef<
+    Partial<Record<PeriodChartGranularity, LastfmPeriodTabSnapshot>>
+  >(
+    platform === 'lastfm'
+      ? {
+          month: {
+            year: initialLastfm.year,
+            month: initialLastfm.month,
+            region: 'kr',
+          },
+        }
       : {},
   );
 
   useEffect(() => {
     if (platform !== 'spotify') return;
-    spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth };
-  }, [platform, spotifyKind, year, month, day, weekOfMonth]);
+    spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth, region };
+  }, [platform, spotifyKind, year, month, day, weekOfMonth, region]);
+
+  useEffect(() => {
+    if (platform !== 'lastfm') return;
+    lastfmGranularitySnapshotsRef.current[granularity] = { year, month, region };
+  }, [platform, granularity, year, month, region]);
 
   const handleSpotifyKindChange = useCallback(
     (next: SpotifyPeriodChartKind) => {
       if (next === spotifyKind) return;
-      spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth };
+      spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth, region };
       const saved = spotifyKindSnapshotsRef.current[next];
       const nextDate =
         saved ?? createDefaultSpotifyPeriodDateForKind(next, snapshotDow);
@@ -116,8 +152,53 @@ export function NrmPeriodChartsHome({
       setMonth(nextDate.month);
       setDay(nextDate.day);
       setWeekOfMonth(nextDate.weekOfMonth);
+      setRegion(saved?.region ?? 'kr');
     },
-    [spotifyKind, year, month, day, weekOfMonth, snapshotDow],
+    [spotifyKind, year, month, day, weekOfMonth, region, snapshotDow],
+  );
+
+  const handleSpotifyRegionChange = useCallback(
+    (next: PeriodChartRegion) => {
+      setRegion(next);
+      if (platform !== 'spotify') return;
+      spotifyKindSnapshotsRef.current[spotifyKind] = {
+        ...(spotifyKindSnapshotsRef.current[spotifyKind] ?? {
+          year,
+          month,
+          day,
+          weekOfMonth,
+        }),
+        region: next,
+      };
+    },
+    [platform, spotifyKind, year, month, day, weekOfMonth],
+  );
+
+  const handleLastfmGranularityChange = useCallback(
+    (next: PeriodChartGranularity) => {
+      if (next === granularity) return;
+      lastfmGranularitySnapshotsRef.current[granularity] = { year, month, region };
+      const saved = lastfmGranularitySnapshotsRef.current[next];
+      setGranularity(next);
+      if (saved) {
+        setYear(saved.year);
+        setMonth(saved.month);
+        setRegion(saved.region);
+      }
+    },
+    [granularity, year, month, region],
+  );
+
+  const handleLastfmRegionChange = useCallback(
+    (next: PeriodChartRegion) => {
+      setRegion(next);
+      if (platform !== 'lastfm') return;
+      lastfmGranularitySnapshotsRef.current[granularity] = {
+        ...(lastfmGranularitySnapshotsRef.current[granularity] ?? { year, month }),
+        region: next,
+      };
+    },
+    [platform, granularity, year, month],
   );
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
@@ -301,7 +382,7 @@ export function NrmPeriodChartsHome({
         onMonthChange={setMonth}
         onDayChange={setDay}
         onWeekOfMonthChange={setWeekOfMonth}
-        onRegionChange={setRegion}
+        onRegionChange={handleSpotifyRegionChange}
         onReselect={() => reload()}
       />
     ) : (
@@ -314,10 +395,10 @@ export function NrmPeriodChartsHome({
         month={month}
         region={region}
         pickerControl={pickerControl}
-        onGranularityChange={setGranularity}
+        onGranularityChange={handleLastfmGranularityChange}
         onYearChange={setYear}
         onMonthChange={setMonth}
-        onRegionChange={setRegion}
+        onRegionChange={handleLastfmRegionChange}
         onReselect={() => reload()}
       />
     );

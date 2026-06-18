@@ -96,6 +96,20 @@ export async function resolveMelonPlainLyricsForEdit(
   return fetchMelonPlainLyricsFromWebsite(website);
 }
 
+/** ffmetadata·일부 태그 리더가 이스케이프한 메타값 복원 (= → \= 등) */
+export function unescapeMetadataValue(raw: string): string {
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] === '\\' && i + 1 < raw.length) {
+      out += raw[i + 1];
+      i += 1;
+    } else {
+      out += raw[i];
+    }
+  }
+  return out;
+}
+
 /** 멜론 곡 상세 URL (website 태그 정규화용) */
 export function buildMelonTrackWebsite(songId: string): string {
   const id = songId.trim();
@@ -104,10 +118,12 @@ export function buildMelonTrackWebsite(songId: string): string {
 
 /** 저장된 website·URL에서 멜론 songId 추출 */
 export function extractMelonSongIdFromUrl(url: string | undefined): string | null {
-  const u = (url ?? '').trim();
+  const u = unescapeMetadataValue((url ?? '').trim());
   if (!u) return null;
   const query = u.match(/[?&]songId=(\d+)/i);
   if (query?.[1]) return query[1];
+  const escapedQuery = u.match(/[?&]songId\\=(\d+)/i);
+  if (escapedQuery?.[1]) return escapedQuery[1];
   const path = u.match(/\/song\/[^/?#]*?(\d{5,})/i);
   return path?.[1] ?? null;
 }
@@ -115,12 +131,12 @@ export function extractMelonSongIdFromUrl(url: string | undefined): string | nul
 /** songId가 있으면 표준 멜론 곡 URL로 정규화 */
 export function normalizeMelonTrackWebsite(url: string | undefined): string {
   const songId = extractMelonSongIdFromUrl(url);
-  return songId ? buildMelonTrackWebsite(songId) : (url ?? '').trim();
+  return songId ? buildMelonTrackWebsite(songId) : unescapeMetadataValue((url ?? '').trim());
 }
 
 /** 트랙 메타 website가 멜론 곡인지 (melon.com + songId) */
 export function isMelonTrackWebsite(website: string | undefined): boolean {
-  const u = (website ?? '').trim();
+  const u = unescapeMetadataValue((website ?? '').trim());
   if (!u || !extractMelonSongIdFromUrl(u)) return false;
   try {
     const host = new URL(u).hostname.toLowerCase();

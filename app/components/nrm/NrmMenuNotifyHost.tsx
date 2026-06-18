@@ -6,6 +6,7 @@ import {
   type UserNotifyOverlayMode,
 } from '@/components/nrm/NrmUserNotifyOverlay';
 import {
+  registerMenuChoiceListener,
   registerMenuConfirmListener,
   registerMenuNotifyListener,
 } from '@/lib/nrmUserNotify';
@@ -25,14 +26,17 @@ export function NrmMenuNotifyHost({ isDark, active }: Props) {
     if (!active) {
       registerMenuNotifyListener(null);
       registerMenuConfirmListener(null);
+      registerMenuChoiceListener(null);
       setOverlay(null);
       return;
     }
     registerMenuNotifyListener((p) => setOverlay({ kind: 'notify', payload: p }));
     registerMenuConfirmListener((p) => setOverlay({ kind: 'confirm', payload: p }));
+    registerMenuChoiceListener((p) => setOverlay({ kind: 'choice', payload: p }));
     return () => {
       registerMenuNotifyListener(null);
       registerMenuConfirmListener(null);
+      registerMenuChoiceListener(null);
     };
   }, [active]);
 

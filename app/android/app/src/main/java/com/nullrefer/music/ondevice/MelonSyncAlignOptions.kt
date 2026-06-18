@@ -33,7 +33,7 @@ data class MelonSyncAlignOptions(
       when (quality) {
         QUALITY_FAST -> 0
         QUALITY_STANDARD -> 1_200
-        else -> 2_400
+        else -> 4_000
       }
 
   fun minIntroMs(): Int = if (firstLineIntroCorrection) 800 else 0

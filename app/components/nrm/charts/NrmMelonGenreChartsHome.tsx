@@ -24,8 +24,9 @@ import {
   MELON_DEFAULT_GENRE_ID,
   MELON_PERIOD_MAX_RANK,
   MELON_PERIOD_PAGE_SIZE,
-  type MelonGenreDateSelection,
+  restoreMelonGenreForKind,
   type MelonGenreId,
+  type MelonGenreTabSnapshot,
   type MelonPeriodChartKind,
 } from '@/lib/nrmMelonGenreChartCatalog';
 import { fetchMelonGenreChartPage } from '@/lib/nrmMelonGenreChartsClient';
@@ -56,24 +57,39 @@ export function NrmMelonGenreChartsHome({
   const [month, setMonth] = useState(initial.month);
   const [weekOfMonth, setWeekOfMonth] = useState(initial.weekOfMonth);
 
-  const kindSnapshotsRef = useRef<Partial<Record<MelonPeriodChartKind, MelonGenreDateSelection>>>({
-    weekly: initial,
+  const kindSnapshotsRef = useRef<Partial<Record<MelonPeriodChartKind, MelonGenreTabSnapshot>>>({
+    weekly: { ...initial, classCd: MELON_DEFAULT_GENRE_ID },
   });
 
   useEffect(() => {
-    kindSnapshotsRef.current[kind] = { year, month, weekOfMonth };
-  }, [kind, year, month, weekOfMonth]);
+    kindSnapshotsRef.current[kind] = { year, month, weekOfMonth, classCd };
+  }, [kind, year, month, weekOfMonth, classCd]);
 
   const handleKindChange = useCallback(
     (next: MelonPeriodChartKind) => {
       if (next === kind) return;
-      kindSnapshotsRef.current[kind] = { year, month, weekOfMonth };
+      kindSnapshotsRef.current[kind] = { year, month, weekOfMonth, classCd };
       const saved = kindSnapshotsRef.current[next];
       const nextDate = saved ?? createDefaultMelonGenreChartDateForKind(next);
+      const nextClassCd = saved
+        ? restoreMelonGenreForKind(saved.classCd, next)
+        : MELON_DEFAULT_GENRE_ID;
       setKind(next);
       setYear(nextDate.year);
       setMonth(nextDate.month);
       setWeekOfMonth(nextDate.weekOfMonth);
+      setClassCd(nextClassCd);
+    },
+    [kind, year, month, weekOfMonth, classCd],
+  );
+
+  const handleGenreChange = useCallback(
+    (next: MelonGenreId) => {
+      setClassCd(next);
+      kindSnapshotsRef.current[kind] = {
+        ...(kindSnapshotsRef.current[kind] ?? { year, month, weekOfMonth }),
+        classCd: next,
+      };
     },
     [kind, year, month, weekOfMonth],
   );
@@ -206,7 +222,7 @@ export function NrmMelonGenreChartsHome({
           weekOfMonth={weekOfMonth}
           pickerControl={pickerControl}
           onKindChange={handleKindChange}
-          onGenreChange={setClassCd}
+          onGenreChange={handleGenreChange}
           onYearChange={setYear}
           onMonthChange={setMonth}
           onWeekOfMonthChange={setWeekOfMonth}

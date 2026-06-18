@@ -9,7 +9,6 @@ import {
 } from '@/components/nrm/charts/NrmPeriodChartDropdown';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  clampMelonGenreForKind,
   clampMelonMonth,
   clampMelonWeekOfMonth,
   defaultMelonWeekOfMonth,
@@ -126,8 +125,6 @@ export function NrmMelonGenreChartFilters({
       return;
     }
     onKindChange(next);
-    const nextGenre = clampMelonGenreForKind(classCd, next);
-    if (nextGenre !== classCd) onGenreChange(nextGenre);
   };
 
   const applyGenreIndex = (index: number) => {

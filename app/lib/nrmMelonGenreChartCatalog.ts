@@ -296,6 +296,20 @@ export type MelonGenreDateSelection = {
   weekOfMonth: number;
 };
 
+export type MelonGenreTabSnapshot = MelonGenreDateSelection & {
+  classCd: MelonGenreId;
+};
+
+/** 탭별 저장 장르가 해당 탭 옵션에 없을 때만 연간 보정 */
+export function restoreMelonGenreForKind(
+  classCd: MelonGenreId,
+  kind: MelonPeriodChartKind,
+): MelonGenreId {
+  const options = listMelonGenreOptionsForKind(kind);
+  if (options.some((g) => g.id === classCd)) return classCd;
+  return clampMelonGenreForKind(classCd, kind);
+}
+
 /** 탭별 첫 진입 기본값 (이후 탭 전환 시에는 저장된 선택 복원) */
 export function createDefaultMelonGenreChartDateForKind(
   kind: MelonPeriodChartKind,

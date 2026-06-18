@@ -6,11 +6,12 @@ import {
   getNrmModalScrimColor,
   getNrmRootBackgroundColor,
 } from '@/lib/nrmUiAppearanceColors';
-import type { ConfirmPayload, NotifyPayload } from '@/lib/nrmUserNotify';
+import type { ChoicePayload, ConfirmPayload, NotifyPayload } from '@/lib/nrmUserNotify';
 
 export type UserNotifyOverlayMode =
   | { kind: 'notify'; payload: NotifyPayload }
-  | { kind: 'confirm'; payload: ConfirmPayload };
+  | { kind: 'confirm'; payload: ConfirmPayload }
+  | { kind: 'choice'; payload: ChoicePayload };
 
 type Props = {
   overlay: UserNotifyOverlayMode;
@@ -26,10 +27,12 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
   const msgColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const highlightColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
   const isConfirm = overlay.kind === 'confirm';
+  const isChoice = overlay.kind === 'choice';
+  const blocksBackdropClose = isConfirm || isChoice;
 
   return (
     <View style={[styles.wrap, { backgroundColor: rootBg }]} pointerEvents="box-none">
-      {!isConfirm ? (
+      {!blocksBackdropClose ? (
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
           onPress={onClose}
@@ -86,6 +89,41 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
               accessibilityRole="button">
               <Text style={styles.confirmBtnPrimaryLabel}>
                 {overlay.payload.confirmLabel}
+              </Text>
+            </Pressable>
+          </View>
+        ) : isChoice && overlay.kind === 'choice' ? (
+          <View style={styles.choiceCol}>
+            {overlay.payload.options.map((opt) => (
+              <Pressable
+                key={opt.id}
+                onPress={() => {
+                  overlay.payload.resolve(opt.id);
+                  onClose();
+                }}
+                style={({ pressed }) => [
+                  styles.choiceBtn,
+                  styles.confirmBtnPrimary,
+                  pressed && styles.confirmBtnPressed,
+                ]}
+                accessibilityRole="button">
+                <Text style={styles.confirmBtnPrimaryLabel}>{opt.label}</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => {
+                overlay.payload.resolve(null);
+                onClose();
+              }}
+              style={({ pressed }) => [
+                styles.choiceBtn,
+                styles.confirmBtnSecondary,
+                { borderColor: cardBorder },
+                pressed && styles.confirmBtnPressed,
+              ]}
+              accessibilityRole="button">
+              <Text style={[styles.confirmBtnSecondaryLabel, { color: msgColor }]}>
+                {overlay.payload.cancelLabel ?? '취소'}
               </Text>
             </Pressable>
           </View>
@@ -157,6 +195,18 @@ const styles = StyleSheet.create({
     gap: nrmTokens.space.sm,
     marginTop: nrmTokens.space.xl,
     alignSelf: 'stretch',
+  },
+  choiceCol: {
+    gap: nrmTokens.space.sm,
+    marginTop: nrmTokens.space.xl,
+    alignSelf: 'stretch',
+  },
+  choiceBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: nrmTokens.space.sm,
+    borderRadius: nrmTokens.radius.pill,
   },
   confirmBtn: {
     flex: 1,

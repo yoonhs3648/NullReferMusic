@@ -7,6 +7,7 @@ import {
 } from '@/components/nrm/NrmUserNotifyOverlay';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
 import {
+  registerChoiceListener,
   registerConfirmListener,
   registerNotifyListener,
 } from '@/lib/nrmUserNotify';
@@ -20,9 +21,11 @@ export function NrmNotifyHost() {
   useEffect(() => {
     registerNotifyListener((p) => setOverlay({ kind: 'notify', payload: p }));
     registerConfirmListener((p) => setOverlay({ kind: 'confirm', payload: p }));
+    registerChoiceListener((p) => setOverlay({ kind: 'choice', payload: p }));
     return () => {
       registerNotifyListener(null);
       registerConfirmListener(null);
+      registerChoiceListener(null);
     };
   }, []);
 
@@ -34,7 +37,7 @@ export function NrmNotifyHost() {
       transparent
       animationType="fade"
       onRequestClose={() => {
-        if (overlay?.kind !== 'confirm') close();
+        if (overlay?.kind !== 'confirm' && overlay?.kind !== 'choice') close();
       }}
       statusBarTranslucent>
       {overlay ? (

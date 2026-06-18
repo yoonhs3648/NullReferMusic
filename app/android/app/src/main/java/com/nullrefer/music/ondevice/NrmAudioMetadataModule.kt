@@ -1379,16 +1379,33 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       val trimmed = line.trim()
       if (trimmed.startsWith(";")) continue
       if (trimmed.startsWith("${NRM_LYRICS_MODE_META_KEY}=")) {
-        val value = trimmed.removePrefix("${NRM_LYRICS_MODE_META_KEY}=").trim()
+        val value = unescapeFfmetadataValue(trimmed.removePrefix("${NRM_LYRICS_MODE_META_KEY}=").trim())
         if (value.isNotEmpty()) lyricsMode = value
         continue
       }
       if (trimmed.startsWith("comment=")) {
-        val value = trimmed.removePrefix("comment=").trim()
+        val value = unescapeFfmetadataValue(trimmed.removePrefix("comment=").trim())
         if (value.isNotEmpty()) comment = value
       }
     }
     return M4aFfmetadataFields(lyricsMode = lyricsMode, comment = comment)
+  }
+
+  /** ffmetadata 덤프의 이스케이프 복원 (= → \= 등) */
+  private fun unescapeFfmetadataValue(raw: String): String {
+    if (!raw.contains('\\')) return raw
+    val sb = StringBuilder(raw.length)
+    var i = 0
+    while (i < raw.length) {
+      if (raw[i] == '\\' && i + 1 < raw.length) {
+        sb.append(raw[i + 1])
+        i += 2
+      } else {
+        sb.append(raw[i])
+        i++
+      }
+    }
+    return sb.toString()
   }
 
   /** MP3 TXXX(NRM_LYRICS_MODE) → 가사 UI 모드 토큰 */

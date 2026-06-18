@@ -37,6 +37,13 @@ object Wav2Vec2CtcForcedAligner {
   private const val VOCAL_FRAME_HOP = 160
   /** 인트로(연주)와 첫 가사 사이 최소 간격 — CTC가 0초에 붙는 것 방지 */
   private const val MIN_INTRO_MS = 800
+  /** first_line_bump 최대 이동 — 초과 시 CTC 결과 유지 (onset 오탐 방지) */
+  private const val MAX_INTRO_BUMP_MS = 15_000
+  /** 2패스 경계 gap 보정 최소 초과 (ms) */
+  private const val BOUNDARY_CLOSE_MIN_GAP_MS = 3_000
+  /** onset 프로브: 보컬 구간 대비·절대 상한 (ms) */
+  private const val ONSET_PROBE_MAX_MS = 60_000
+  private const val ONSET_PROBE_VOCAL_FRACTION = 0.35
   private const val ONSET_SUSTAIN_FRAMES = 10
   data class AlignResult(
       val lrc: String,
@@ -239,8 +246,8 @@ object Wav2Vec2CtcForcedAligner {
           val split = balancedSplitIndex(melonLines, options.vocabKind())
           val left = melonLines.subList(0, split)
           val right = melonLines.subList(split, melonLines.size)
-          val lw = lineCharWeights(left, options.vocabKind()).sum().toDouble()
-          val rw = lineCharWeights(right, options.vocabKind()).sum().toDouble().coerceAtLeast(1.0)
+          val lw = combinedGroupWeight(left, options.vocabKind())
+          val rw = combinedGroupWeight(right, options.vocabKind())
           val total = lw + rw
           val mid = lw / total
           segments =
@@ -357,8 +364,8 @@ object Wav2Vec2CtcForcedAligner {
               val split = balancedSplitIndex(segment.lines, options.vocabKind())
               val left = segment.lines.subList(0, split)
               val right = segment.lines.subList(split, segment.lines.size)
-              val lw = lineCharWeights(left, options.vocabKind()).sum().toDouble()
-              val rw = lineCharWeights(right, options.vocabKind()).sum().toDouble().coerceAtLeast(1.0)
+              val lw = combinedGroupWeight(left, options.vocabKind())
+              val rw = combinedGroupWeight(right, options.vocabKind())
               val total = lw + rw
               val midW = segment.weightStart + (segment.weightEnd - segment.weightStart) * (lw / total)
               val subSegments =
@@ -502,8 +509,8 @@ object Wav2Vec2CtcForcedAligner {
     val splitAt = balancedSplitIndex(lines, options.vocabKind())
     val left = lines.subList(0, splitAt)
     val right = lines.subList(splitAt, lines.size)
-    val leftWeight = lineCharWeights(left, options.vocabKind()).sum().toDouble()
-    val rightWeight = lineCharWeights(right, options.vocabKind()).sum().toDouble().coerceAtLeast(1.0)
+    val leftWeight = combinedGroupWeight(left, options.vocabKind())
+    val rightWeight = combinedGroupWeight(right, options.vocabKind())
     val total = leftWeight + rightWeight
     val midWeight = weightStart + (weightEnd - weightStart) * (leftWeight / total)
     val leftFrames = max(1, (frames * leftWeight / total).toInt())
@@ -588,10 +595,11 @@ object Wav2Vec2CtcForcedAligner {
       if (!sustained) continue
       if (lookbackFrames >= 30) {
         var introSum = 0f
-        for (k in f - lookbackFrames until f) {
+        val lookbackStart = max(0, f - lookbackFrames)
+        for (k in lookbackStart until f) {
           introSum += energies[k]
         }
-        val introAvg = introSum / lookbackFrames
+        val introAvg = introSum / (f - lookbackStart)
         if (introAvg >= energies[f] - 0.35f) continue
       }
       return (f.toLong() * VOCAL_FRAME_HOP * 1000L) / SAMPLE_RATE
@@ -606,45 +614,59 @@ object Wav2Vec2CtcForcedAligner {
       lineCharStarts: IntArray,
       blankId: Int,
       frameMs: Double,
+      audioDurationMs: Long,
       options: MelonSyncAlignOptions,
   ): Int {
-    if (lineCharStarts.isEmpty() || tokens.isEmpty()) return -1
-    val firstChar = lineCharStarts[0]
-    if (firstChar !in charToToken.indices) return -1
-    val firstTokenIdx = charToToken[firstChar]
-    if (firstTokenIdx !in tokens.indices) return -1
-    val firstVocabId = tokens[firstTokenIdx]
-    val probeTokens = linkedSetOf(firstVocabId)
-    for (c in firstChar until min(firstChar + 8, charToToken.size)) {
-      if (c !in charToToken.indices) break
-      val ti = charToToken[c]
-      if (ti in tokens.indices) probeTokens.add(tokens[ti])
+    if (lineCharStarts.isEmpty() || tokens.isEmpty() || logProbs.isEmpty() || frameMs <= 0.0) {
+      return -1
     }
-    var bestFrame = 0
-    var bestScore = Float.NEGATIVE_INFINITY
-    val scores = FloatArray(logProbs.size)
-    for (t in logProbs.indices) {
-      var maxTok = Float.NEGATIVE_INFINITY
-      for (vid in probeTokens) {
-        if (vid in logProbs[t].indices) {
-          maxTok = max(maxTok, logProbs[t][vid])
+    try {
+      val firstChar = lineCharStarts[0]
+      if (firstChar !in charToToken.indices) return -1
+      val firstTokenIdx = charToToken[firstChar]
+      if (firstTokenIdx !in tokens.indices) return -1
+      val firstVocabId = tokens[firstTokenIdx]
+      val probeTokens = linkedSetOf(firstVocabId)
+      for (c in firstChar until min(firstChar + 8, charToToken.size)) {
+        if (c !in charToToken.indices) break
+        val ti = charToToken[c]
+        if (ti in tokens.indices) probeTokens.add(tokens[ti])
+      }
+      val searchWindowMs =
+          min(
+                  (audioDurationMs.coerceAtLeast(1L) * ONSET_PROBE_VOCAL_FRACTION).toLong(),
+                  ONSET_PROBE_MAX_MS.toLong(),
+              )
+              .coerceAtLeast(options.minIntroMs().toLong())
+      val searchEndFrame =
+          min(
+              logProbs.size,
+              max(1, (searchWindowMs / frameMs).toInt()),
+          )
+      val scores = FloatArray(searchEndFrame)
+      var bestScore = Float.NEGATIVE_INFINITY
+      for (t in 0 until searchEndFrame) {
+        var maxTok = Float.NEGATIVE_INFINITY
+        for (vid in probeTokens) {
+          if (vid in logProbs[t].indices) {
+            maxTok = max(maxTok, logProbs[t][vid])
+          }
+        }
+        val blank = if (blankId in logProbs[t].indices) logProbs[t][blankId] else 0f
+        scores[t] = maxTok - blank
+        if (scores[t] > bestScore) bestScore = scores[t]
+      }
+      if (bestScore <= Float.NEGATIVE_INFINITY + 1f) return -1
+      val threshold = bestScore - options.onsetProbeThreshold()
+      for (t in 0 until searchEndFrame) {
+        if (scores[t] >= threshold) {
+          return max(options.minIntroMs(), (t * frameMs).toInt())
         }
       }
-      val blank = if (blankId in logProbs[t].indices) logProbs[t][blankId] else 0f
-      scores[t] = maxTok - blank
-      if (scores[t] > bestScore) {
-        bestScore = scores[t]
-        bestFrame = t
-      }
+      return -1
+    } catch (_: Throwable) {
+      return -1
     }
-    if (bestScore <= Float.NEGATIVE_INFINITY + 1f) return -1
-    val threshold = bestScore - options.onsetProbeThreshold()
-    for (t in logProbs.indices) {
-      if (scores[t] >= threshold) {
-        return max(options.minIntroMs(), (t * frameMs).toInt())
-      }
-    }
-    return max(options.minIntroMs(), (bestFrame * frameMs).toInt())
   }
   private fun alignAudioToLines(
       context: Context,
@@ -717,6 +739,7 @@ object Wav2Vec2CtcForcedAligner {
               lineCharStarts,
               blankId,
               frameMs,
+              audioDurationMs,
               options,
           )
         } else {
@@ -738,20 +761,26 @@ object Wav2Vec2CtcForcedAligner {
       if (rawMs[0] < minFirst) {
         val delta = minFirst - rawMs[0]
         val msFromSegmentStart = rawMs[0] - timeOffsetMs
-        val adjusted =
-            when {
-              // CTC가 세그먼트 시작 근처인데 onset 프로브만 뒤로 밀 때 — 인트로 오탐 방지
-              msFromSegmentStart < 6_000 && delta > 10_000 ->
-                  (timeOffsetMs + options.minIntroMs()).coerceAtLeast(rawMs[0])
-              delta > 12_000 -> rawMs[0] + (delta * 2) / 3
-              else -> minFirst
-            }
-        if (adjusted != rawMs[0]) {
+        if (delta > MAX_INTRO_BUMP_MS) {
           NrmFileLogger.log(
               "whisperx-align",
-              "ctc_fa_first_line_bump before=${rawMs[0]} after=$adjusted delta=$delta fromSegStart=$msFromSegmentStart",
+              "ctc_fa_first_line_bump_skip delta=$delta max=$MAX_INTRO_BUMP_MS raw=${rawMs[0]} minFirst=$minFirst",
           )
-          rawMs[0] = adjusted
+        } else {
+          val adjusted =
+              when {
+                msFromSegmentStart < 6_000 && delta > 10_000 ->
+                    (timeOffsetMs + options.minIntroMs()).coerceAtLeast(rawMs[0])
+                delta > 12_000 -> rawMs[0] + (delta * 2) / 3
+                else -> minFirst
+              }
+          if (adjusted != rawMs[0]) {
+            NrmFileLogger.log(
+                "whisperx-align",
+                "ctc_fa_first_line_bump before=${rawMs[0]} after=$adjusted delta=$delta fromSegStart=$msFromSegmentStart",
+            )
+            rawMs[0] = adjusted
+          }
         }
       }
     }
@@ -801,16 +830,36 @@ object Wav2Vec2CtcForcedAligner {
   private fun lineCharWeights(lines: List<String>, vocabKind: MelonSyncVocabKind): IntArray {
     return IntArray(lines.size) { i -> normalizeLine(lines[i], vocabKind).length.coerceAtLeast(1) }
   }
+
+  /** 2패스 분할 가중치: 줄 수 60% + 글자 수 40% */
+  private fun combinedGroupWeight(lines: List<String>, vocabKind: MelonSyncVocabKind): Double {
+    if (lines.isEmpty()) return 0.001
+    val charWeights = lineCharWeights(lines, vocabKind)
+    val n = lines.size
+    val totalChars = charWeights.sum().coerceAtLeast(1)
+    var sum = 0.0
+    for (i in 0 until n) {
+      sum += 0.6 * (1.0 / n) + 0.4 * (charWeights[i].toDouble() / totalChars)
+    }
+    return sum.coerceAtLeast(0.001)
+  }
+
   private fun balancedSplitIndex(lines: List<String>, vocabKind: MelonSyncVocabKind): Int {
-    val weights = lineCharWeights(lines, vocabKind)
-    val total = weights.sum().coerceAtLeast(1)
-    val half = total / 2
-    var cum = 0
+    val charWeights = lineCharWeights(lines, vocabKind)
+    val n = lines.size
+    if (n <= 1) return 1
+    val totalChars = charWeights.sum().coerceAtLeast(1)
+    val combined =
+        DoubleArray(n) { i ->
+          0.6 * (1.0 / n) + 0.4 * (charWeights[i].toDouble() / totalChars)
+        }
+    val half = combined.sum() / 2.0
+    var cum = 0.0
     for (i in 0 until lines.lastIndex) {
-      cum += weights[i]
+      cum += combined[i]
       if (cum >= half) return i + 1
     }
-    return max(1, lines.size / 2)
+    return max(1, n / 2)
   }
   private fun estimateFrameCount(sampleCount: Int): Int {
     return max(1, (sampleCount + FRAME_STRIDE_SAMPLES - 1) / FRAME_STRIDE_SAMPLES)
@@ -1303,7 +1352,7 @@ object Wav2Vec2CtcForcedAligner {
     val rawRatio = (targetEnd - firstMs).toDouble() / span.toDouble()
     val ratio =
         when {
-          rawRatio < 0.88 -> return lrc.also {
+          rawRatio < 0.90 -> return lrc.also {
             logStretchSkip(
                 segmentScoped,
                 "ratio_out_of_range",
@@ -1317,30 +1366,30 @@ object Wav2Vec2CtcForcedAligner {
                 targetEnd = targetEnd,
             )
           }
-          rawRatio > 1.32 ->
-              if (drift > 0 && rawRatio <= 1.50) {
-                NrmFileLogger.log(
-                    "whisperx-align",
-                    "ctc_fa_stretch_clamp rawRatio=${"%.3f".format(Locale.US, rawRatio)} applied=1.28",
+          rawRatio <= 1.25 -> rawRatio
+          rawRatio <= 1.40 -> {
+            val soft = 1.25 + (rawRatio - 1.25) * 0.4
+            NrmFileLogger.log(
+                "whisperx-align",
+                "ctc_fa_stretch_soft_clamp rawRatio=${"%.3f".format(Locale.US, rawRatio)} applied=${"%.3f".format(Locale.US, soft)}",
+            )
+            soft
+          }
+          else ->
+              return lrc.also {
+                logStretchSkip(
+                    segmentScoped,
+                    "ratio_out_of_range",
+                    parsed.size,
+                    vocal,
+                    durationMs,
+                    drift = drift,
+                    ratio = rawRatio,
+                    firstMs = firstMs,
+                    lastMs = lastMs,
+                    targetEnd = targetEnd,
                 )
-                1.28
-              } else {
-                return lrc.also {
-                  logStretchSkip(
-                      segmentScoped,
-                      "ratio_out_of_range",
-                      parsed.size,
-                      vocal,
-                      durationMs,
-                      drift = drift,
-                      ratio = rawRatio,
-                      firstMs = firstMs,
-                      lastMs = lastMs,
-                      targetEnd = targetEnd,
-                  )
-                }
               }
-          else -> rawRatio
         }
     val scaledMs = IntArray(parsed.size)
     scaledMs[0] = firstMs
@@ -1407,7 +1456,7 @@ object Wav2Vec2CtcForcedAligner {
             segmentStartMs.toInt() + MIN_INTRO_MS,
         )
     val excessGap = firstNew - targetFirst
-    if (excessGap < 6_000) return segLrc
+    if (excessGap < BOUNDARY_CLOSE_MIN_GAP_MS) return segLrc
     val shift = excessGap.coerceAtMost(firstNew - segmentStartMs.toInt())
     if (shift <= 0) return segLrc
     NrmFileLogger.log(

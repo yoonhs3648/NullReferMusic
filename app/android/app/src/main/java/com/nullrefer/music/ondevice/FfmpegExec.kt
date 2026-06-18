@@ -375,7 +375,7 @@ object FfmpegExec {
     }
 
     // ffmpeg -i 단독 프로브는 출력 파일 없이 exit=1이 정상 (스트림 정보만 수집)
-    if (exitCode == 1 && tag == "ffmpeg-probe-audio") {
+    if (exitCode == 1 && (tag == "ffmpeg-probe-audio" || tag == "ffmpeg-fa-probe")) {
       if (output.contains("Input #") || output.contains("Stream #")) {
         NrmFileLogger.log(tag, "probe ok exit=1")
         return

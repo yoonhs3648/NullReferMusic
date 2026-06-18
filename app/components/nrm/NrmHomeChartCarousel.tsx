@@ -2,6 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   PanResponder,
   Platform,
   Pressable,
@@ -31,6 +33,74 @@ function menuSwipeGuardPx(insetsLeft: number): number {
   return base + insetsLeft;
 }
 
+function modIndex(i: number, count: number): number {
+  if (count <= 0) return 0;
+  return ((i % count) + count) % count;
+}
+
+type CarouselSlideProps = {
+  item: ChartTrackItem;
+  index: number;
+  coverSize: number;
+  isDark: boolean;
+  ink: string;
+  muted: string;
+  onPress: () => void;
+};
+
+function CarouselSlide({
+  item,
+  index,
+  coverSize,
+  isDark,
+  ink,
+  muted,
+  onPress,
+}: CarouselSlideProps) {
+  const rank = item.rank > 0 ? item.rank : index + 1;
+  const podiumColors = homeChartPodiumTextColors(rank, isDark);
+  const rankTopLabelColor = podiumColors?.label ?? muted;
+  const rankNumberColor = podiumColors?.number ?? ink;
+
+  return (
+    <View style={[styles.slide, { width: coverSize }]}>
+      <View style={styles.rankHero} accessibilityLabel={`탑 ${rank}`}>
+        <Text style={[styles.rankTopLabel, { color: rankTopLabelColor }]}>TOP</Text>
+        <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{rank}</Text>
+      </View>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.coverPress,
+          { width: coverSize, height: coverSize },
+          pressed && styles.coverPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.artists} ${item.title}`}>
+        <View style={[styles.coverFrame, { width: coverSize, height: coverSize }]}>
+          <View
+            style={[
+              styles.coverShadow,
+              {
+                width: coverSize,
+                height: coverSize,
+                shadowColor: isDark ? '#000' : '#1d1d1f',
+              },
+            ]}>
+            <NrmChartTrackArt
+              imageUrl={item.imageUrl}
+              size={coverSize}
+              borderRadius={nrmTokens.radius.lg}
+              cacheKey={`${item.trackId}-${rank}`}
+            />
+          </View>
+          <NrmHomeChartRankCrown rank={rank} coverSize={coverSize} />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
 export function NrmHomeChartCarousel({
   isDark,
   items,
@@ -46,8 +116,9 @@ export function NrmHomeChartCarousel({
   const coverSize = Math.min(Math.round(width * 0.74), 340);
   const arrowW = 38;
   const arrowH = 48;
-  /** 앨범 커버 바깥쪽으로 살짝 띄운 간격 */
   const arrowGap = 10;
+  const slideGap = Math.round(coverSize * 0.08);
+  const slideStride = coverSize + slideGap;
 
   const ink = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const muted = isDark ? 'rgba(255,255,255,0.58)' : nrmTokens.color.inkMuted48;
@@ -59,23 +130,63 @@ export function NrmHomeChartCarousel({
   const itemsFingerprint = useMemo(() => homeChartItemsFingerprint(items), [items]);
   const prevFingerprintRef = useRef(itemsFingerprint);
 
+  const translateX = useRef(new Animated.Value(0)).current;
+  const dragX = useRef(new Animated.Value(0)).current;
+  const animatingRef = useRef(false);
+
   useEffect(() => {
     if (prevFingerprintRef.current === itemsFingerprint) return;
     prevFingerprintRef.current = itemsFingerprint;
     setIndex(0);
-  }, [itemsFingerprint]);
+    translateX.setValue(0);
+    dragX.setValue(0);
+  }, [itemsFingerprint, translateX, dragX]);
 
-  const current = count > 0 ? items[Math.min(index, count - 1)] : null;
+  const current = count > 0 ? items[modIndex(index, count)] : null;
+  const prevItem = count > 1 ? items[modIndex(index - 1, count)] : null;
+  const nextItem = count > 1 ? items[modIndex(index + 1, count)] : null;
+
+  const settleTo = useCallback(
+    (nextIndex: number, direction: -1 | 0 | 1) => {
+      if (count <= 1 || animatingRef.current) return;
+      if (direction === 0) {
+        Animated.spring(dragX, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 140,
+          friction: 18,
+        }).start();
+        return;
+      }
+      animatingRef.current = true;
+      Animated.timing(dragX, {
+        toValue: direction * -slideStride,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) {
+          animatingRef.current = false;
+          dragX.setValue(0);
+          return;
+        }
+        setIndex(nextIndex);
+        dragX.setValue(0);
+        animatingRef.current = false;
+      });
+    },
+    [count, dragX, slideStride],
+  );
 
   const goPrev = useCallback(() => {
-    if (count <= 1) return;
-    setIndex((i) => (i - 1 + count) % count);
-  }, [count]);
+    if (count <= 1 || animatingRef.current) return;
+    settleTo(modIndex(indexRef.current - 1, count), 1);
+  }, [count, settleTo]);
 
   const goNext = useCallback(() => {
-    if (count <= 1) return;
-    setIndex((i) => (i + 1) % count);
-  }, [count]);
+    if (count <= 1 || animatingRef.current) return;
+    settleTo(modIndex(indexRef.current + 1, count), -1);
+  }, [count, settleTo]);
 
   const edgeGuard = menuSwipeGuardPx(insets.left);
 
@@ -84,20 +195,39 @@ export function NrmHomeChartCarousel({
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (evt, g) => {
+          if (animatingRef.current || count <= 1) return false;
           if (evt.nativeEvent.pageX < edgeGuard) return false;
           return Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.15;
         },
+        onPanResponderMove: (_, g) => {
+          if (animatingRef.current) return;
+          const maxDrag = slideStride * 0.92;
+          const clamped = Math.max(-maxDrag, Math.min(maxDrag, g.dx));
+          dragX.setValue(clamped);
+        },
         onPanResponderRelease: (_, g) => {
-          if (g.dx > 48) goPrev();
-          else if (g.dx < -48) goNext();
+          if (animatingRef.current) return;
+          const threshold = slideStride * 0.22;
+          if (g.dx > threshold) {
+            settleTo(modIndex(indexRef.current - 1, count), 1);
+          } else if (g.dx < -threshold) {
+            settleTo(modIndex(indexRef.current + 1, count), -1);
+          } else {
+            settleTo(indexRef.current, 0);
+          }
+        },
+        onPanResponderTerminate: () => {
+          if (!animatingRef.current) settleTo(indexRef.current, 0);
         },
       }),
-    [edgeGuard, goNext, goPrev],
+    [count, edgeGuard, dragX, settleTo, slideStride],
   );
 
   const onPressTrack = useCallback(() => {
     if (current) onTrackPress(current);
   }, [current, onTrackPress]);
+
+  const trackTranslateX = Animated.add(translateX, dragX);
 
   if (loading) {
     return (
@@ -110,25 +240,15 @@ export function NrmHomeChartCarousel({
 
   if (!current) return null;
 
-  const rank = current.rank > 0 ? current.rank : index + 1;
-  const podiumColors = homeChartPodiumTextColors(rank, isDark);
-  const rankTopLabelColor = podiumColors?.label ?? muted;
-  const rankNumberColor = podiumColors?.number ?? ink;
-
   return (
     <View style={styles.root} accessibilityRole="adjustable" {...panResponder.panHandlers}>
       <View style={styles.content}>
-        <View style={styles.rankHero} accessibilityLabel={`탑 ${rank}`}>
-          <Text style={[styles.rankTopLabel, { color: rankTopLabelColor }]}>TOP</Text>
-          <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{rank}</Text>
-        </View>
-
         <View
           style={[
             styles.coverStage,
             {
               width: coverSize,
-              height: coverSize,
+              height: coverSize + 72,
             },
           ]}>
           <Pressable
@@ -140,7 +260,7 @@ export function NrmHomeChartCarousel({
                 width: arrowW,
                 height: arrowH,
                 backgroundColor: pressed && count > 1 ? arrowPressedBg : arrowBg,
-                top: coverSize / 2 - arrowH / 2,
+                top: (coverSize + 72) / 2 - arrowH / 2,
                 left: -(arrowW + arrowGap),
               },
               count <= 1 && styles.navBtnHidden,
@@ -150,38 +270,55 @@ export function NrmHomeChartCarousel({
             <Ionicons name="chevron-back" size={20} color={ink} style={styles.navIcon} />
           </Pressable>
 
-          <Pressable
-            onPress={onPressTrack}
-            style={({ pressed }) => [
-              styles.coverPress,
-              {
-                width: coverSize,
-                height: coverSize,
-              },
-              pressed && styles.coverPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={`${current.artists} ${current.title}`}>
-            <View style={[styles.coverFrame, { width: coverSize, height: coverSize }]}>
-              <View
-                style={[
-                  styles.coverShadow,
-                  {
-                    width: coverSize,
-                    height: coverSize,
-                    shadowColor: isDark ? '#000' : '#1d1d1f',
-                  },
-                ]}>
-                <NrmChartTrackArt
-                  imageUrl={current.imageUrl}
-                  size={coverSize}
-                  borderRadius={nrmTokens.radius.lg}
-                  cacheKey={`${current.trackId}-${rank}`}
+          <View style={[styles.carouselViewport, { width: coverSize, height: coverSize + 72 }]}>
+            <Animated.View
+              style={[
+                styles.carouselTrack,
+                {
+                  width: slideStride * 3 - slideGap,
+                  transform: [{ translateX: trackTranslateX }],
+                  marginLeft: -slideStride,
+                },
+              ]}>
+              {prevItem ? (
+                <CarouselSlide
+                  item={prevItem}
+                  index={modIndex(index - 1, count)}
+                  coverSize={coverSize}
+                  isDark={isDark}
+                  ink={ink}
+                  muted={muted}
+                  onPress={() => onTrackPress(prevItem)}
                 />
-              </View>
-              <NrmHomeChartRankCrown rank={rank} coverSize={coverSize} />
-            </View>
-          </Pressable>
+              ) : (
+                <View style={{ width: coverSize }} />
+              )}
+              <View style={{ width: slideGap }} />
+              <CarouselSlide
+                item={current}
+                index={modIndex(index, count)}
+                coverSize={coverSize}
+                isDark={isDark}
+                ink={ink}
+                muted={muted}
+                onPress={onPressTrack}
+              />
+              <View style={{ width: slideGap }} />
+              {nextItem ? (
+                <CarouselSlide
+                  item={nextItem}
+                  index={modIndex(index + 1, count)}
+                  coverSize={coverSize}
+                  isDark={isDark}
+                  ink={ink}
+                  muted={muted}
+                  onPress={() => onTrackPress(nextItem)}
+                />
+              ) : (
+                <View style={{ width: coverSize }} />
+              )}
+            </Animated.View>
+          </View>
 
           <Pressable
             onPress={goNext}
@@ -192,7 +329,7 @@ export function NrmHomeChartCarousel({
                 width: arrowW,
                 height: arrowH,
                 backgroundColor: pressed && count > 1 ? arrowPressedBg : arrowBg,
-                top: coverSize / 2 - arrowH / 2,
+                top: (coverSize + 72) / 2 - arrowH / 2,
                 left: coverSize + arrowGap,
               },
               count <= 1 && styles.navBtnHidden,
@@ -264,6 +401,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 0,
     overflow: 'visible',
+  },
+  carouselViewport: {
+    overflow: 'hidden',
+  },
+  carouselTrack: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  slide: {
+    alignItems: 'center',
   },
   navBtn: {
     position: 'absolute',

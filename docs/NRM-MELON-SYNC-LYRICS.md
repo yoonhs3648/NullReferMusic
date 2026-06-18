@@ -114,6 +114,22 @@ ctc_fa_stitch segments=2 globalStretch=false
 
 에이전트는 **새 개선마다 이 섹션 맨 위에 항목 추가**.
 
+### 2026-06-19 — CTC 후처리 완화 (ChatGPT 검토 반영, Wav2Vec2CtcForcedAligner.kt)
+
+**배경:** 긴 인트로 곡 onset 오탐·2패스 경계 drift·과도한 stretch clamp. CTC 결과는 유지하고 후처리만 완화.
+
+| 변경 | 내용 | 기대 효과 |
+|------|------|-----------|
+| onset 프로브 | 탐색 창 `min(35%×세그먼트길이, 60s)` 내에서만 bestScore·threshold 계산; **첫 threshold 통과 프레임** 사용, 전역 bestFrame 폴백 제거 | Dangerously류 63s 오탐 방지 |
+| intro bump 상한 | `delta > 15s` → bump 생략 (`ctc_fa_first_line_bump_skip`) | CTC ~32s 정답 보존 |
+| boundary close | gap 임계 **6s → 3s** | 2패스 경계 2~4s drift 조기 보정 |
+| stretch | 적용 **0.90~1.25**; 1.25~1.40 soft clamp `1.25+(r-1.25)×0.4`; >1.40 skip | 1.28 강제 clamp 부작용 완화 |
+| overlap (accurate) | **2400 → 4000** samples (~250ms) | 청크 경계 토큰 잘림 감소 |
+| 2패스 weight | 글자만 → **줄 60% + 글자 40%** | 연주 구간 있는 곡 세그먼트 경계 안정 |
+| 안전 | `estimateFirstLineOnsetMs` try/catch → 실패 시 bump 생략 | 정렬 중 예외로 앱 중단 방지 |
+
+**검증:** `compileDebugKotlin` 성공. 로그: `ctc_fa_first_line_bump_skip`, `ctc_fa_stretch_soft_clamp`, `ctc_fa_boundary_close`.
+
 ### 2026-06-18 — CTC 후처리: bump·경계·stretch (Wav2Vec2CtcForcedAligner.kt)
 
 **배경:** 위 4절 로그 분석.
@@ -157,12 +173,15 @@ ctc_fa_stitch segments=2 globalStretch=false
 | 상수/임계값 | 값 | 비고 |
 |-------------|-----|------|
 | `MIN_INTRO_MS` | 800 | 첫 줄 최소 |
-| bump skip | segStart<6s & delta>10s | 2026-06-18 추가 |
-| boundary close | gap≥6000ms | stitch 시 |
+| `MAX_INTRO_BUMP_MS` | 15000 | 초과 시 bump 생략 (2026-06-19) |
+| onset probe window | min(35%×dur, 60s) | 첫 threshold crossing (2026-06-19) |
+| bump skip | segStart<6s & delta>10s | 2026-06-18 |
+| boundary close | gap≥3000ms | stitch 시 (2026-06-19: 6000→3000) |
 | stretch drift threshold | 900ms | 미만이면 skip |
-| stretch ratio | 0.88~1.32 정상, 1.28 clamp | |
+| stretch ratio | 0.90~1.25 적용; 1.25~1.40 soft; >1.40 skip | 2026-06-19 |
 | `FRAME_STRIDE_SAMPLES` | 320 | @16kHz |
-| accurate chunk overlap | 2400 samples | |
+| accurate chunk overlap | 4000 samples (~250ms) | 2026-06-19: 2400→4000 |
+| 2패스 weight | 60% 줄 수 + 40% 글자 수 | 2026-06-19 |
 
 옵션 UI: `app/components/nrm/settings/NrmMelonSyncSettingsPanel.tsx` (`firstLineIntroCorrection`, quality 등).
 

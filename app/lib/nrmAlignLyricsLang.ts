@@ -10,31 +10,23 @@ import {
 
 export type MelonAlignLyricsLanguage = 'ko' | 'en';
 
-/** 자동 모드 — 영어 팩은 라틴이 한글보다 15% 이상 많을 때만 */
-const AUTO_EN_LATIN_BIAS = 1.15;
+/** 자동 모드 — 한글(가~힣)이 이 수를 넘으면 KO 팩, 아니면 EN 팩 */
+const AUTO_KO_HANGUL_THRESHOLD = 50;
 
 /**
- * 멜론 plain 가사에서 한글·라틴 문자 비율로 wav2vec2 KO/EN 팩을 고른다.
- * 동률·문자 없음 → ko (멜론 기본). 혼합곡은 한국어에 약간 유리.
+ * 멜론 plain 가사에서 한글 글자 수로 wav2vec2 KO/EN 팩을 고른다.
+ * 한글 > 50 → ko, 그 외(영문만·혼합·빈 문자열 포함) → en.
  */
 export function inferMelonAlignLyricsLanguage(plain: string): MelonAlignLyricsLanguage {
   let hangul = 0;
-  let latin = 0;
   for (const ch of plain) {
     const code = ch.codePointAt(0) ?? 0;
     if (code >= 0xac00 && code <= 0xd7a3) {
       hangul += 1;
-    } else if (
-      (code >= 0x41 && code <= 0x5a) ||
-      (code >= 0x61 && code <= 0x7a)
-    ) {
-      latin += 1;
+      if (hangul > AUTO_KO_HANGUL_THRESHOLD) return 'ko';
     }
   }
-  const total = hangul + latin;
-  if (total === 0) return 'ko';
-  if (latin > hangul * AUTO_EN_LATIN_BIAS) return 'en';
-  return 'ko';
+  return 'en';
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import {
   inferMelonAlignLyricsLanguage,
@@ -11,6 +11,7 @@ import {
 } from '@/lib/nrmAlignModelCatalog';
 import { loadAlignLyricsLangDetectionMode } from '@/lib/nrmAlignLyricsLangDetectionSettings';
 import { loadAlignModelPreference } from '@/lib/nrmDownloadSettings';
+import { choiceUser } from '@/lib/nrmUserNotify';
 
 export async function isWav2Vec2BaseAlignPreference(): Promise<boolean> {
   const pref = migrateAlignModelPreference(await loadAlignModelPreference());
@@ -18,22 +19,16 @@ export async function isWav2Vec2BaseAlignPreference(): Promise<boolean> {
 }
 
 function pickMelonAlignLanguageManual(plain: string): Promise<MelonAlignLyricsLanguage | null> {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web') {
-      resolve(inferMelonAlignLyricsLanguage(plain));
-      return;
-    }
-    Alert.alert(
-      '가사 언어 팩 선택',
-      '멜론 가사 싱크에 사용할 wav2vec2 언어 팩을 선택하세요.',
-      [
-        { text: '취소', style: 'cancel', onPress: () => resolve(null) },
-        { text: '한국어 팩', onPress: () => resolve('ko') },
-        { text: '영어 팩', onPress: () => resolve('en') },
-      ],
-      { cancelable: true, onDismiss: () => resolve(null) },
-    );
-  });
+  if (Platform.OS === 'web') {
+    return Promise.resolve(inferMelonAlignLyricsLanguage(plain));
+  }
+  return choiceUser<MelonAlignLyricsLanguage>(
+    '가사 생성 언어팩을 설정하세요',
+    [
+      { id: 'ko', label: '한국어 팩' },
+      { id: 'en', label: '영어 팩' },
+    ],
+  );
 }
 
 /**
