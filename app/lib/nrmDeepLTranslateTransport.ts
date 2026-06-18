@@ -16,6 +16,7 @@ import { isNativeDeepLTranslateAvailable, translateTextsViaNative } from '@/lib/
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
+import { getNrmUserAgent } from '@/lib/nrmAppBrand';
 import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
 
 const DEEPL_FREE_API = 'https://api-free.deepl.com/v2';
@@ -97,7 +98,7 @@ async function translateOneBatchDirect(
     ...authHeader(apiKey),
     'Content-Type': 'application/json',
     Accept: 'application/json',
-    'User-Agent': `NullReferenceMusic/${Constants.expoConfig?.version ?? '1.0'}`,
+    'User-Agent': getNrmUserAgent(Constants.expoConfig?.version ?? '1.0'),
   };
   let res = await fetchWithTimeout(
     `${DEEPL_FREE_API}/translate`,

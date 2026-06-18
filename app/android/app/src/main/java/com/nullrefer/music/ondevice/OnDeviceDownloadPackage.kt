@@ -17,7 +17,6 @@ class OnDeviceDownloadPackage : ReactPackage {
         NrmBackgroundWorkModule(reactContext),
         NrmProgressNotificationModule(reactContext),
         NrmDeepLModule(reactContext),
-        NrmLibreTranslateModule(reactContext),
         NrmNetworkModule(reactContext),
     )
   }

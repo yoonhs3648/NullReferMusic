@@ -183,10 +183,7 @@ object NrmMemoryGuard {
 
   fun shouldDeferForActiveDownload(context: Context): Boolean {
     val avail = availMemMb(context)
-    if (NrmBackgroundWorkCoordinator.hasDownloadTokens() && avail < LOW_AVAIL_MB) {
-      return true
-    }
-    return LibreTranslatePackageDownloader.hasActiveDownload() && avail < LOW_AVAIL_MB
+    return NrmBackgroundWorkCoordinator.hasDownloadTokens() && avail < LOW_AVAIL_MB
   }
 
   /** 청크·세그먼트 사이 GC. 여유 RAM이 충분하면 sleep·로그를 최소화한다. */
@@ -235,13 +232,6 @@ object NrmMemoryGuard {
   fun prepareForHeavyInference(context: Context, tag: String) {
     val availBefore = availMemMb(context)
     NrmFileLogger.log(tag, "mem_prepare availMb=$availBefore low=${availBefore < LOW_AVAIL_MB}")
-    if (LibreTranslatePackageDownloader.hasActiveDownload()) {
-      NrmFileLogger.warn(
-          tag,
-          "mem_prepare libretranslate_download_active availMb=$availBefore — 임시 다운로드 정리",
-      )
-      LibreTranslatePackageDownloader.trimInFlightDownloads(context)
-    }
     if (shouldDeferForActiveDownload(context)) {
       NrmFileLogger.warn(tag, "mem_prepare active_download_defer availMb=$availBefore")
     }

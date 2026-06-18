@@ -262,7 +262,6 @@ export async function applyTrackMetadataUpdate(
   async function saveLrc(
     lrcText: string,
     mode: Exclude<NrmLyricsUiMode, 'unset'>,
-    plainLyrics?: string | null,
   ): Promise<void> {
     const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
     const pureBody = lrcText.trim();
@@ -274,7 +273,6 @@ export async function applyTrackMetadataUpdate(
         pureBody,
         ext,
         mode,
-        plainLyrics,
       );
     } else {
       await persistLrcForSavedAudio(location, sidecarPayload);
@@ -366,10 +364,7 @@ export async function applyTrackMetadataUpdate(
   // generate-melon: Forced Alignment으로 멜론 가사 정렬
   if (lyricsAction.kind === 'generate-melon') {
     const plain = (
-      await resolveMelonPlainLyricsForEdit(
-        normalizeMelonTrackWebsite(metadata.website),
-        metadata.melonLyricsPlain,
-      )
+      await resolveMelonPlainLyricsForEdit(normalizeMelonTrackWebsite(metadata.website))
     ).trim();
     if (!plain) {
       nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
@@ -377,14 +372,27 @@ export async function applyTrackMetadataUpdate(
       return;
     }
     try {
+      const alignLang =
+        metadata.melonAlignLang === 'en' || metadata.melonAlignLang === 'ko'
+          ? metadata.melonAlignLang
+          : await (async () => {
+              const { resolveMelonAlignLanguageForPlain } = await import(
+                '@/lib/nrmPickMelonAlignLanguage'
+              );
+              return resolveMelonAlignLanguageForPlain(plain);
+            })();
+      if (!alignLang) {
+        nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        return;
+      }
       const workUri = await materializeToCache(location.audioUri, location.fileName);
       const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
       const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
       const melon = await runWhisperTranscribeSerial(displayLabel, () =>
-        transcribeMelonLyricsLrc(workUri, lyricsAction.mode, ext, plain),
+        transcribeMelonLyricsLrc(workUri, lyricsAction.mode, ext, plain, alignLang),
       );
       if (melon.lrcFull?.trim()) {
-        await saveLrc(melon.lrcFull, lyricsAction.mode, plain);
+        await saveLrc(melon.lrcFull, lyricsAction.mode);
         nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
       } else if (melon.lyricsMelonMemoryInsufficient) {
         nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');

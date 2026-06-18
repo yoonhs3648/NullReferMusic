@@ -4,6 +4,8 @@ globs:
   - app/package.json
   - app/app.config.ts
   - app/android/app/build.gradle
+  - app/scripts/assemble-android-release.mjs
+  - scripts/Invoke-NrmAndroidReleaseBuild.ps1
   - docs/RELEASE-APK-IPA-RULE.md
 alwaysApply: false
 ---
@@ -23,7 +25,15 @@ alwaysApply: false
 | `app/android/app/build.gradle` | `versionName` (및 필요 시 `versionCode` +1) |
 
 - `getNrmAppVersionLabel()` / 메뉴 **버전 정보** 오버레이는 `package.json`을 읽으므로 자동 반영된다.
-- 사용자에게 **「v1.3.3으로 말아줘」**처럼 따로 말하지 않아도, 빌드 산출물 파일명은 `NullReferenceMusic-v{versionName}.apk`이다.
+- 사용자에게 **「v1.3.3으로 말아줘」**처럼 따로 말하지 않아도, 빌드 산출물 파일명은 `{storageFolderName}-v{versionName}.apk`이다 (`app/nrm-brand.config.json` → `npm run sync:brand`).
+
+## 1-b. 브랜드(표시명) 커스터마이징
+
+친구용 APK·메인 로고 문구 변경 요청 시 **`app/nrm-brand.config.json`만** 수정한다. 상세는 `.cursor/rules/nrm-app-brand.mdc`, `docs/APP-BRAND.md`.
+
+- `displayName` — 로고·앱 이름·종료 확인·버전/저작권
+- `storageFolderName` — 다운로드 폴더·APK 파일명 접두 (공백 없음)
+- `npm run sync:brand` — Android `strings.xml`, `NrmBrand.kt` 동기화 (`android:release`·배치 파일에서 자동)
 
 ## 2. 네이티브 assets (릴리스 필수)
 
@@ -37,11 +47,11 @@ alwaysApply: false
 ## 3. 빌드 실행
 
 1. `docs/BUILD-VERIFY-RULE.md`에 따라 `cd app && npx tsc --noEmit` 실행 (실패 시 수정 후 재시도).
-2. **§6-1-b** — `cd app && npm run generate:music-quotes` 실행 (`data/nrm-music-quotes.xlsx` → `nrmMusicQuotes.generated.ts`). `npm run android:release`·`NullReferMusic-Build-Release-Apk.bat` 사용 시 **자동** 실행되나, `gradlew assembleRelease`만 직접 호출할 때는 수동 필수.
-3. Windows: 저장소 루트의 `NullReferMusic-Build-Release-Apk.bat` 또는 동일하게:
-   - `cd app && npm run android:release` (권장, pre-hook으로 generate 포함)
-   - 또는 `cd app/android && gradlew.bat assembleRelease --no-daemon` (**이 경우 2번을 먼저**)
-4. 산출물: `app/android/app/build/outputs/apk/release/NullReferenceMusic-v*.apk`
+2. **§6-1-b** — `cd app && npm run generate:music-quotes` 실행 (`data/nrm-music-quotes.xlsx` → `nrmMusicQuotes.generated.ts`). `npm run android:release`·`NullReferMusic-Build-Release-Apk.bat` 사용 시 **자동** 실행되나, Gradle만 직접 호출할 때는 수동 필수.
+3. **Windows APK 빌드 (필수)** — 아래 **금지·필수**를 따른다. 상세는 `docs/RELEASE-APK-IPA-RULE.md` **§6-3-a**.
+   - **금지:** `cd app/android && gradlew.bat assembleRelease` 직접 실행 (MAX_PATH로 CMake/ninja 실패 가능)
+   - **필수 (택1):** 저장소 루트 `NullReferMusic-Build-Release-Apk.bat` / `cd app && npm run android:release` / `powershell -File scripts/Invoke-NrmAndroidReleaseBuild.ps1`
+4. 산출물: `app/android/app/build/outputs/apk/release/{storageFolderName}-v*.apk` (`nrm-brand.config.json`의 `storageFolderName`)
 
 ## 4. 완료 보고
 

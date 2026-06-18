@@ -33,7 +33,7 @@ type NativeAudioMetadata = {
     lyricsMode?: string,
     plainLyrics?: string | null,
   ) => Promise<null>;
-  /** 싱크 내장(USLT/SYLT·©lyr)만 제거, plain 내장 유지 */
+  /** 싱크 내장(USLT/SYLT·©lyr)만 제거 */
   stripSyncedEmbeddedLyrics?: (audioUri: string, extension: string) => Promise<null>;
 };
 
@@ -122,7 +122,7 @@ export async function embedSyncedLyricsIntoAudio(
   lrcContent: string,
   extension: string,
   lyricsMode?: string,
-  plainLyrics?: string | null,
+  _plainLyrics?: string | null,
 ): Promise<void> {
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
@@ -132,33 +132,31 @@ export async function embedSyncedLyricsIntoAudio(
   const uri = audioUri.trim();
   if (!uri) return;
   const { parseLyricsModeFromLrcText } = await import('@/lib/nrmLrcUiMode');
-  const { normalizePlainLyricsForEmbed } = await import('@/lib/nrmPlainLyricsEmbed');
   const modeFromHeader = parseLyricsModeFromLrcText(lrcContent);
   const modeToken = (lyricsMode ?? modeFromHeader ?? '').trim();
   const playerLrc = stripNrmLrcModeLine(lrcContent);
-  const plain = normalizePlainLyricsForEmbed(plainLyrics);
-  if (!playerLrc.trim() && !modeToken && !plain) return;
+  if (!playerLrc.trim() && !modeToken) return;
   await mod.embedSyncedLyrics(
     uri,
     playerLrc,
     extension.replace(/^\./, ''),
     modeToken,
-    plain ?? '',
+    null,
   );
 }
 
-/** Android 전용: 멜론 plain 가사 원문만 TXXX / nrm_plain_lyrics에 내장 */
+/** @deprecated plain 가사는 파일 메타에 저장하지 않음 — 호출부 제거 예정 */
 export async function embedPlainLyricsIntoAudio(
-  audioUri: string,
-  extension: string,
-  plainLyrics: string,
+  _audioUri: string,
+  _extension: string,
+  _plainLyrics: string,
+  _lyricsMode?: string,
 ): Promise<void> {
-  await embedSyncedLyricsIntoAudio(audioUri, '', extension, undefined, plainLyrics);
+  /* no-op */
 }
 
 /**
  * Android 전용: 싱크 가사(USLT/SYLT·©lyr)와 앱 모드 태그만 제거.
- * plain 내장(NRM_PLAIN_LYRICS / nrm_plain_lyrics)은 유지한다.
  */
 export async function stripSyncedEmbeddedLyricsFromAudio(
   audioUri: string,

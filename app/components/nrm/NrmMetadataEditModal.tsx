@@ -20,7 +20,6 @@ import {
   loadDownloadFileNameFormat,
   type NrmDownloadFileNameFormat,
 } from '@/lib/nrmDownloadSettings';
-import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { loadNrmGenreTagCatalog } from '@/lib/nrmGenreTagSettings';
 import { resolveGenreDropdownSelection } from '@/lib/nrmGenreResolve';
@@ -32,8 +31,9 @@ import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 import {
   buildLyricsSentinel,
   extractMelonSongIdFromUrl,
+  fetchMelonPlainLyricsFromWebsite,
   isMelonLyricsUiMode,
-  isMelonPlainLyricsText,
+  isMelonTrackWebsite,
   normalizeMelonTrackWebsite,
   parseLyricsUiMode,
   resolveMelonPlainLyricsForEdit,
@@ -41,8 +41,11 @@ import {
 } from '@/lib/nrmMelonLyrics';
 import { isWhisperModelInstalled } from '@/lib/nrmWhisperModelNative';
 import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
-import { isNrmWav2Vec2BundleId } from '@/lib/nrmAlignModelCatalog';
-import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+import { inferMelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+import {
+  isWav2Vec2BaseAlignPreference,
+  resolveMelonAlignLanguageForPlain,
+} from '@/lib/nrmPickMelonAlignLanguage';
 import { loadAlignModelPreference } from '@/lib/nrmDownloadSettings';
 import { loadWhisperModelPreference } from '@/lib/nrmDownloadSettings';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
@@ -73,8 +76,8 @@ export type NrmMetadataEditModalProps = {
   initialMetadataFields?: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   /** trackEdit: LRC·내장 가사 플래그로 복원한 저장 모드 */
   initialStoredLyricsMode?: NrmLyricsUiMode;
-  /** trackEdit: TXXX·nrm_plain_lyrics 등 파일에 내장된 멜론 plain 원문 존재 */
-  initialHasEmbeddedPlainLyrics?: boolean;
+  /** trackEdit: 멜론 URL 크롤링으로 가사 존재 확인됨 */
+  initialMelonLyricsAvailable?: boolean;
   /** 초기 필드 로딩 중 (다운로드: API 선조회 / 트랙 편집: 파일에서 읽기) */
   busy?: boolean;
   /** download: 다운로드 / trackEdit: 저장된 트랙 편집 */
@@ -314,7 +317,7 @@ export function NrmMetadataEditModal({
   initialTitle,
   initialMetadataFields,
   initialStoredLyricsMode,
-  initialHasEmbeddedPlainLyrics = false,
+  initialMelonLyricsAvailable = false,
   busy = false,
   purpose = 'download',
   excludeFileStem,
@@ -348,6 +351,8 @@ export function NrmMetadataEditModal({
     'melon_translation',
   ]);
   const [melonPlainLyrics, setMelonPlainLyrics] = useState('');
+  const [melonLyricsAvailable, setMelonLyricsAvailable] = useState(false);
+  const [melonProbeLoading, setMelonProbeLoading] = useState(false);
   const [storedLyricsMode, setStoredLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const [whisperXAlignMissing, setWhisperXAlignMissing] = useState(false);
   const [translationOptionEnabled, setTranslationOptionEnabled] = useState(true);
@@ -419,10 +424,9 @@ export function NrmMetadataEditModal({
     setDiscNumber(normalizeString(m?.discNumber));
     setComposer(normalizeString(m?.composer));
     const rawLyrics = normalizeString(m?.lyrics);
-    const plainFromField = normalizeString(m?.melonLyricsPlain);
     const site = normalizeMelonTrackWebsite(normalizeString(m?.website));
-    const initialPlain = isMelonPlainLyricsText(rawLyrics) ? rawLyrics : plainFromField;
-    setMelonPlainLyrics(initialPlain);
+    setMelonPlainLyrics('');
+    setMelonLyricsAvailable(purpose === 'trackEdit' ? initialMelonLyricsAvailable : false);
     setWebsite(site);
     const storedMode =
       purpose === 'trackEdit'
@@ -448,13 +452,6 @@ export function NrmMetadataEditModal({
         : '',
     );
 
-    if (purpose === 'download' && extractMelonSongIdFromUrl(site)) {
-      void resolveMelonPlainLyricsForEdit(site, initialPlain).then((plain) => {
-        if (!plain) return;
-        setMelonPlainLyrics(plain);
-      });
-    }
-
     void loadNrmGenreTagCatalog().then((catalog) => {
       const names = catalog.categories.map((c) => c.name);
       setGenreCategoryNames(names);
@@ -462,7 +459,44 @@ export function NrmMetadataEditModal({
       setGenreSelection(resolved.selection);
       setGenreCustom(resolved.custom);
     });
-  }, [visible, item, purpose, metadataSource, initialArtist, initialTitle, initialMetadataFields, initialStoredLyricsMode]);
+  }, [visible, item, purpose, metadataSource, initialArtist, initialTitle, initialMetadataFields, initialStoredLyricsMode, initialMelonLyricsAvailable]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const site = normalizeMelonTrackWebsite(website);
+    const melonSource = purpose === 'download' && metadataSource === 'melon';
+    if (!isMelonTrackWebsite(site) && !melonSource) {
+      setMelonLyricsAvailable(false);
+      setMelonPlainLyrics('');
+      setMelonProbeLoading(false);
+      return;
+    }
+    if (!isMelonTrackWebsite(site)) {
+      setMelonLyricsAvailable(false);
+      setMelonPlainLyrics('');
+      setMelonProbeLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMelonProbeLoading(true);
+    void fetchMelonPlainLyricsFromWebsite(site)
+      .then((plain) => {
+        if (cancelled) return;
+        const ok = plain.trim().length > 0;
+        setMelonLyricsAvailable(ok);
+        setMelonPlainLyrics(ok ? plain : '');
+        setMelonProbeLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMelonLyricsAvailable(false);
+        setMelonPlainLyrics('');
+        setMelonProbeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, purpose, website, metadataSource]);
 
   useEffect(() => {
     if (!item || !visible) return;
@@ -496,9 +530,6 @@ export function NrmMetadataEditModal({
 
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmPayload | null>(null);
-  const [lyricsLangPick, setLyricsLangPick] = useState<{
-    resolve: (lang: MelonAlignLyricsLanguage | null) => void;
-  } | null>(null);
 
   const blocked = busy || deleting;
   const canSubmit =
@@ -507,13 +538,13 @@ export function NrmMetadataEditModal({
   const confirmLabel = purpose === 'trackEdit' ? '저장' : '다운로드';
 
   const submitWithMetadata = useCallback(
-    async (melonAlignLang?: MelonAlignLyricsLanguage) => {
+    async () => {
       if (!item) return;
       const site = normalizeMelonTrackWebsite(website);
       let melonPlainForSubmit = melonPlainLyrics.trim();
       const melonTrack = !!extractMelonSongIdFromUrl(site);
       if (melonTrack || isMelonLyricsUiMode(lyricsMode)) {
-        melonPlainForSubmit = (await resolveMelonPlainLyricsForEdit(site, melonPlainForSubmit)).trim();
+        melonPlainForSubmit = (await resolveMelonPlainLyricsForEdit(site)).trim();
         if (isMelonLyricsUiMode(lyricsMode) && !melonPlainForSubmit) {
           const { notifyUser } = await import('@/lib/nrmUserNotify');
           notifyUser('멜론 가사를 가져올 수 없습니다.');
@@ -523,6 +554,21 @@ export function NrmMetadataEditModal({
       const lyricsPayload = resolveLyricsForSubmit(
         isMelonLyricsUiMode(lyricsMode) ? melonPlainForSubmit : undefined,
       );
+      let melonAlignLang: 'ko' | 'en' | undefined;
+      if (
+        isMelonLyricsUiMode(lyricsMode) &&
+        melonPlainForSubmit &&
+        (purpose === 'download' ||
+          (purpose === 'trackEdit' && lyricsMode !== storedLyricsMode))
+      ) {
+        if (await isWav2Vec2BaseAlignPreference()) {
+          const picked = await resolveMelonAlignLanguageForPlain(melonPlainForSubmit);
+          if (!picked) return;
+          melonAlignLang = picked;
+        } else {
+          melonAlignLang = inferMelonAlignLyricsLanguage(melonPlainForSubmit);
+        }
+      }
       const metadata: NrmAudioFileMetadata = {
         artist: artist.trim(),
         title: title.trim(),
@@ -536,10 +582,7 @@ export function NrmMetadataEditModal({
         composer: composer.trim() || undefined,
         lyrics: lyricsPayload.lyrics,
         melonLyricsPlain: lyricsPayload.melonLyricsPlain ?? (melonPlainForSubmit || undefined),
-        melonAlignLang:
-          purpose === 'download' && isMelonLyricsUiMode(lyricsMode) && melonAlignLang
-            ? melonAlignLang
-            : undefined,
+        melonAlignLang,
         bpm: bpm.trim() || undefined,
         copyright: copyright.trim() || undefined,
         website: site || undefined,
@@ -580,24 +623,8 @@ export function NrmMetadataEditModal({
   );
 
   const handlePrimaryAction = useCallback(() => {
-    void (async () => {
-      if (!item || !canSubmitWithConflict) return;
-      if (purpose === 'download' && isMelonLyricsUiMode(lyricsMode)) {
-        const alignPref = await loadAlignModelPreference();
-        if (isNrmWav2Vec2BundleId(alignPref)) {
-          setLyricsLangPick({
-            resolve: (lang) => {
-              setLyricsLangPick(null);
-              if (!lang) return;
-              void submitWithMetadata(lang);
-            },
-          });
-          return;
-        }
-      }
-      void submitWithMetadata();
-    })();
-  }, [canSubmitWithConflict, item, lyricsMode, purpose, submitWithMetadata]);
+    void submitWithMetadata();
+  }, [submitWithMetadata]);
 
   const stackCoverColumn = cardMaxWidth < 400;
 
@@ -652,49 +679,18 @@ export function NrmMetadataEditModal({
     purpose === 'trackEdit' && isWhisperLyricsFamily(storedLyricsMode);
   const storedMelonFamily =
     purpose === 'trackEdit' && isMelonLyricsUiMode(storedLyricsMode);
-  const downloadMelonReady =
-    purpose !== 'trackEdit' &&
-    metadataSource === 'melon' &&
-    melonPlainLyrics.trim().length > 0;
 
+  const siteForMelon = normalizeMelonTrackWebsite(website);
   const isMelonContext = useMemo(() => {
-    if (purpose === 'download') return metadataSource === 'melon';
-    const modeFromEmbed = parseEmbeddedLyricsModeToken(
-      normalizeString(initialMetadataFields?.nrmLyricsMode),
-    );
-    return (
-      initialHasEmbeddedPlainLyrics ||
-      melonPlainLyrics.trim().length > 0 ||
-      (modeFromEmbed != null && isMelonLyricsUiMode(modeFromEmbed))
-    );
-  }, [
-    initialHasEmbeddedPlainLyrics,
-    initialMetadataFields?.nrmLyricsMode,
-    metadataSource,
-    melonPlainLyrics,
-    purpose,
-  ]);
+    if (purpose === 'download' && metadataSource === 'melon') return true;
+    return isMelonTrackWebsite(siteForMelon);
+  }, [metadataSource, purpose, siteForMelon]);
 
   const melonLyricsReady = useMemo(() => {
-    if (purpose === 'download') {
-      return isMelonContext && downloadMelonReady;
-    }
-    const modeFromEmbed = parseEmbeddedLyricsModeToken(
-      normalizeString(initialMetadataFields?.nrmLyricsMode),
-    );
-    return (
-      initialHasEmbeddedPlainLyrics ||
-      melonPlainLyrics.trim().length > 0 ||
-      (modeFromEmbed != null && isMelonLyricsUiMode(modeFromEmbed))
-    );
-  }, [
-    downloadMelonReady,
-    initialHasEmbeddedPlainLyrics,
-    initialMetadataFields?.nrmLyricsMode,
-    isMelonContext,
-    melonPlainLyrics,
-    purpose,
-  ]);
+    if (!isMelonContext) return false;
+    if (melonProbeLoading) return false;
+    return melonLyricsAvailable;
+  }, [isMelonContext, melonLyricsAvailable, melonProbeLoading]);
 
   useEffect(() => {
     if (!visible || lyricsUnsupported) {
@@ -844,6 +840,7 @@ export function NrmMetadataEditModal({
             ...opt,
             disabled:
               !isMelonContext ||
+              melonProbeLoading ||
               !melonLyricsReady ||
               (purpose === 'trackEdit'
                 ? (melonLyricsLocked || !translationOptionEnabled) && !storedMelonFamily
@@ -865,6 +862,7 @@ export function NrmMetadataEditModal({
             ...opt,
             disabled:
               !isMelonContext ||
+              melonProbeLoading ||
               !melonLyricsReady ||
               (purpose === 'trackEdit'
                 ? melonLyricsLocked && !storedMelonFamily
@@ -878,6 +876,7 @@ export function NrmMetadataEditModal({
       lyricsModeOrder,
       melonLyricsLocked,
       melonLyricsReady,
+      melonProbeLoading,
       purpose,
       storedMelonFamily,
       storedWhisperFamily,
@@ -886,14 +885,14 @@ export function NrmMetadataEditModal({
     ],
   );
 
-  // 비활성 모드가 선택돼 있으면 설정안함
+  // 비활성 모드가 선택돼 있으면 설정안함 (단, 트랙 편집에서 저장된 멜론/Whisper 패밀리는 유지)
   useEffect(() => {
     if (!visible || lyricsMode === 'unset') return;
     const selected = lyricsOptions.find((o) => o.value === lyricsMode);
-    if (selected?.disabled) {
-      setLyricsMode('unset');
-    }
-  }, [visible, lyricsMode, lyricsOptions]);
+    if (!selected?.disabled) return;
+    if (purpose === 'trackEdit' && lyricsMode === storedLyricsMode) return;
+    setLyricsMode('unset');
+  }, [visible, lyricsMode, lyricsOptions, purpose, storedLyricsMode]);
 
   useEffect(() => {
     if (!translationOptionEnabled && (lyricsMode === 'translation' || lyricsMode === 'melon_translation')) {
@@ -1096,19 +1095,29 @@ export function NrmMetadataEditModal({
                     </Text>
                   </View>
                 ) : (
-                  <MetadataInlineSelect
-                    label="가사"
-                    value={lyricsMode}
-                    options={lyricsOptions}
-                    onChange={(v) => setLyricsMode(v as NrmLyricsUiMode)}
-                    isDark={isDark}
-                    titleColor={titleColor}
-                    bodyColor={bodyColor}
-                    disabled={busy}
-                    hideSheetTitle
-                    scrollClassName={scrollClassName}
-                    scrollStyle={scrollInlineStyle}
-                  />
+                  <>
+                    <MetadataInlineSelect
+                      label="가사"
+                      value={lyricsMode}
+                      options={lyricsOptions}
+                      onChange={(v) => setLyricsMode(v as NrmLyricsUiMode)}
+                      isDark={isDark}
+                      titleColor={titleColor}
+                      bodyColor={bodyColor}
+                      disabled={busy || melonProbeLoading}
+                      hideSheetTitle
+                      scrollClassName={scrollClassName}
+                      scrollStyle={scrollInlineStyle}
+                    />
+                    {melonProbeLoading && isMelonContext ? (
+                      <View style={styles.melonProbeRow}>
+                        <ActivityIndicator size="small" color={nrmTokens.color.primary} />
+                        <Text style={[styles.melonProbeHint, { color: bodyColor }]}>
+                          멜론 가사 확인 중…
+                        </Text>
+                      </View>
+                    ) : null}
+                  </>
                 )}
               </View>
             </View>
@@ -1315,39 +1324,6 @@ export function NrmMetadataEditModal({
             />
           </View>
         ) : null}
-
-        {lyricsLangPick ? (
-          <View style={styles.confirmHost} pointerEvents="box-none">
-            <View style={[styles.lyricsLangCard, { borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline, backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas }]}>
-              <Text style={[styles.lyricsLangTitle, { color: titleColor }]}>가사의 언어를 선택하세요.</Text>
-              <View style={styles.lyricsLangActions}>
-                <Pressable
-                  onPress={() => lyricsLangPick.resolve('ko')}
-                  style={({ pressed }) => [styles.lyricsLangBtn, styles.lyricsLangBtnPrimary, pressed && styles.pressed]}
-                  accessibilityRole="button">
-                  <Text style={styles.lyricsLangBtnPrimaryLabel}>한국어</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => lyricsLangPick.resolve('en')}
-                  style={({ pressed }) => [styles.lyricsLangBtn, styles.lyricsLangBtnPrimary, pressed && styles.pressed]}
-                  accessibilityRole="button">
-                  <Text style={styles.lyricsLangBtnPrimaryLabel}>English</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => lyricsLangPick.resolve(null)}
-                  style={({ pressed }) => [
-                    styles.lyricsLangBtn,
-                    styles.lyricsLangBtnSecondary,
-                    { borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline },
-                    pressed && styles.pressed,
-                  ]}
-                  accessibilityRole="button">
-                  <Text style={[styles.lyricsLangBtnSecondaryLabel, { color: bodyColor }]}>취소</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        ) : null}
       </View>
     </Modal>
   );
@@ -1368,33 +1344,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  lyricsLangCard: {
-    borderRadius: nrmTokens.radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: nrmTokens.space.lg,
-    width: '88%',
-    maxWidth: 360,
-    gap: nrmTokens.space.md,
-  },
-  lyricsLangTitle: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  lyricsLangActions: { gap: nrmTokens.space.sm },
-  lyricsLangBtn: {
-    borderRadius: nrmTokens.radius.md,
-    paddingVertical: nrmTokens.space.md,
-    alignItems: 'center',
-  },
-  lyricsLangBtnPrimary: { backgroundColor: nrmTokens.color.primary },
-  lyricsLangBtnPrimaryLabel: {
-    color: nrmTokens.color.onPrimary,
-    fontSize: nrmTokens.font.body,
-    fontWeight: '600',
-  },
-  lyricsLangBtnSecondary: { borderWidth: StyleSheet.hairlineWidth },
-  lyricsLangBtnSecondaryLabel: { fontSize: nrmTokens.font.body, fontWeight: '500' },
   dim: { backgroundColor: 'rgba(0,0,0,0.45)' },
   card: {
     borderRadius: nrmTokens.radius.lg,
@@ -1470,6 +1419,18 @@ const styles = StyleSheet.create({
     minWidth: 0,
     fontSize: nrmTokens.font.caption,
     lineHeight: 20,
+    opacity: 0.85,
+  },
+  melonProbeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: nrmTokens.space.xs,
+    paddingLeft: 52 + nrmTokens.space.sm,
+    minHeight: 28,
+  },
+  melonProbeHint: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 18,
     opacity: 0.85,
   },
   inlineInput: {

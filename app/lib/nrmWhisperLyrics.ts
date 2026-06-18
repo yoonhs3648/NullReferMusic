@@ -1,3 +1,4 @@
+import { inferMelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { parseMelonLyricsMode, type NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 
@@ -61,11 +62,17 @@ export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
   if (whisperMode || melonMode) {
     delete ffmpegMetadata.lyrics;
   }
+  // melonLyricsPlain — 파이프라인 전용, ffmpeg 메타에는 넣지 않음
   delete ffmpegMetadata.melonLyricsPlain;
   delete ffmpegMetadata.melonAlignLang;
   delete ffmpegMetadata.platformGenreRaw;
   const plain = (meta.melonLyricsPlain ?? '').trim();
-  const melonAlignLang = meta.melonAlignLang === 'en' ? 'en' : 'ko';
+  const melonAlignLang: 'ko' | 'en' =
+    meta.melonAlignLang === 'en' || meta.melonAlignLang === 'ko'
+      ? meta.melonAlignLang
+      : plain
+        ? inferMelonAlignLyricsLanguage(plain)
+        : 'ko';
   return {
     ffmpegMetadata,
     whisperMode,

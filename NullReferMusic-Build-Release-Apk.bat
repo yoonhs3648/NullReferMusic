@@ -42,7 +42,15 @@ if errorlevel 1 (
 )
 
 cd /d "%APP%"
-echo [1/4] Typecheck...
+echo [1/5] Brand sync (nrm-brand.config.json)...
+call npm run sync:brand
+if errorlevel 1 (
+  echo sync:brand failed.
+  pause
+  exit /b 1
+)
+
+echo [2/5] Typecheck...
 call npx tsc --noEmit
 if errorlevel 1 (
   echo Typecheck failed.
@@ -50,7 +58,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/4] Music quotes from Excel (data\nrm-music-quotes.xlsx)...
+echo [3/5] Music quotes from Excel (data\nrm-music-quotes.xlsx)...
 call npm run generate:music-quotes
 if errorlevel 1 (
   echo generate:music-quotes failed.
@@ -58,20 +66,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/4] Gradle assembleRelease...
-set "GRADLE_USER_HOME=C:\g"
-if not exist "C:\g" mkdir "C:\g" 2>nul
-rem Windows 260-char path limit — short drive for CMake/ninja
-subst N: /d >nul 2>&1
-subst N: "%ROOT%"
-if exist "N:\app\android\gradlew.bat" (
-  cd /d "N:\app\android"
-) else (
-  cd /d "%ANDROID%"
-)
-call gradlew.bat assembleRelease --no-daemon
+echo [4/5] Gradle assembleRelease...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Invoke-NrmAndroidReleaseBuild.ps1" -RepoRoot "%ROOT%"
 set "GRADLE_EXIT=%ERRORLEVEL%"
-subst N: /d >nul 2>&1
 if not "%GRADLE_EXIT%"=="0" (
   echo Build failed.
   pause

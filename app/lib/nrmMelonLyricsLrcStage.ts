@@ -1,10 +1,10 @@
-import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
-
 import { Platform } from 'react-native';
 
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import type { NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
+import { resolveMelonAlignLanguageForPlain } from '@/lib/nrmPickMelonAlignLanguage';
+import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
 import type { WhisperLrcStageResult } from '@/lib/nrmWhisperLrcStage';
 
@@ -13,7 +13,7 @@ export async function transcribeMelonLyricsLrc(
   mode: NrmMelonLyricsMode,
   extension: string,
   melonLyricsPlain: string,
-  melonAlignLang: MelonAlignLyricsLanguage = 'ko',
+  alignLangOverride?: MelonAlignLyricsLanguage,
 ): Promise<WhisperLrcStageResult> {
   if (Platform.OS === 'web') {
     return { lyricsRequested: false, lyricsEmbedded: false };
@@ -25,11 +25,19 @@ export async function transcribeMelonLyricsLrc(
     return { lyricsRequested: true, lyricsEmbedded: false };
   }
 
+  const alignLang =
+    alignLangOverride ?? (await resolveMelonAlignLanguageForPlain(plain));
+  if (!alignLang) {
+    logDownloadStage('whisperx-align', 'skip_lang_cancelled', { mode, extension });
+    return { lyricsRequested: true, lyricsEmbedded: false, lyricsMelonAlignFailed: true };
+  }
+
   logDownloadStage('whisperx-align', 'align_start', {
     mode,
     extension,
     plainChars: plain.length,
     plainLines: plain.split(/\r?\n/).filter((l) => l.trim()).length,
+    alignLang,
     audioUri: fileUri.slice(0, 120),
   });
 
@@ -46,7 +54,7 @@ export async function transcribeMelonLyricsLrc(
       plain,
       mode,
       alignPref,
-      melonAlignLang,
+      alignLang,
     );
     lrc = normalizeWhisperLrc(aligned.lrc);
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;

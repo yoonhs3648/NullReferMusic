@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
+import com.nullrefer.music.NrmBrand
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -32,7 +33,6 @@ object NrmBackgroundWorkCoordinator {
       tokens.any {
         it == "model-install-queue" ||
             it.startsWith("whisper-model:") ||
-            it.startsWith("libretranslate-pack:") ||
             it.startsWith("whisperx-align-model")
       }
 
@@ -106,20 +106,6 @@ object NrmBackgroundWorkCoordinator {
             "Whisper 모델 «$label» 다운로드 중 ($pct%)"
           } else {
             "Whisper 모델 «$label» 다운로드 중"
-          },
-      )
-    }
-
-    val ltTokens = tokens.filter { it.startsWith("libretranslate-pack:") }.sorted()
-    for (token in ltTokens) {
-      val packageId = token.removePrefix("libretranslate-pack:").trim()
-      val label = LibreTranslatePackageCatalog.entryFor(packageId)?.label ?: packageId
-      val pct = LibreTranslatePackageDownloader.progressFor(packageId)
-      lines.add(
-          if (pct in 0..99) {
-            "오프라인 번역기 «$label» 다운로드 중 ($pct%)"
-          } else {
-            "오프라인 번역기 «$label» 다운로드 중"
           },
       )
     }
@@ -208,7 +194,7 @@ object NrmBackgroundWorkCoordinator {
     if (wakeLock?.isHeld == true) return
     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     val wl =
-        pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NullReferenceMusic:nrm-bg-work").apply {
+        pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "${NrmBrand.STORAGE_FOLDER_NAME}:nrm-bg-work").apply {
           setReferenceCounted(false)
         }
     wl.acquire()

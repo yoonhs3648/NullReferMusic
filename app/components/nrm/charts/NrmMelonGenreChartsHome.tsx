@@ -19,10 +19,12 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
+  createDefaultMelonGenreChartDateForKind,
   createInitialMelonGenreChartDate,
   MELON_DEFAULT_GENRE_ID,
   MELON_PERIOD_MAX_RANK,
   MELON_PERIOD_PAGE_SIZE,
+  type MelonGenreDateSelection,
   type MelonGenreId,
   type MelonPeriodChartKind,
 } from '@/lib/nrmMelonGenreChartCatalog';
@@ -53,6 +55,28 @@ export function NrmMelonGenreChartsHome({
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
   const [weekOfMonth, setWeekOfMonth] = useState(initial.weekOfMonth);
+
+  const kindSnapshotsRef = useRef<Partial<Record<MelonPeriodChartKind, MelonGenreDateSelection>>>({
+    weekly: initial,
+  });
+
+  useEffect(() => {
+    kindSnapshotsRef.current[kind] = { year, month, weekOfMonth };
+  }, [kind, year, month, weekOfMonth]);
+
+  const handleKindChange = useCallback(
+    (next: MelonPeriodChartKind) => {
+      if (next === kind) return;
+      kindSnapshotsRef.current[kind] = { year, month, weekOfMonth };
+      const saved = kindSnapshotsRef.current[next];
+      const nextDate = saved ?? createDefaultMelonGenreChartDateForKind(next);
+      setKind(next);
+      setYear(nextDate.year);
+      setMonth(nextDate.month);
+      setWeekOfMonth(nextDate.weekOfMonth);
+    },
+    [kind, year, month, weekOfMonth],
+  );
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
@@ -181,7 +205,7 @@ export function NrmMelonGenreChartsHome({
           month={month}
           weekOfMonth={weekOfMonth}
           pickerControl={pickerControl}
-          onKindChange={setKind}
+          onKindChange={handleKindChange}
           onGenreChange={setClassCd}
           onYearChange={setYear}
           onMonthChange={setMonth}

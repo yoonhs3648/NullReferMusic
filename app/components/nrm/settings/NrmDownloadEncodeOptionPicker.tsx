@@ -79,7 +79,9 @@ export function NrmDownloadEncodeOptionPicker({
                     </View>
                   ) : null}
                 </View>
-                <Text style={[styles.desc, { color: bodyColor }]}>{opt.description}</Text>
+                {opt.description ? (
+                  <Text style={[styles.desc, { color: bodyColor }]}>{opt.description}</Text>
+                ) : null}
               </View>
               {active ? (
                 <Ionicons

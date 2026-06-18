@@ -2,7 +2,7 @@
  * 다운로드 후처리 파이프라인 (단계 분리)
  *
  * 1. yt-dlp — 오디오 추출만 (nrmInnertubeYoutube / 서버 download)
- * 2. ffmpeg — 확장자 변환 + ID3/커버 메타 (Whisper sentinel·가사 태그 없음)
+ * 2. ffmpeg — 확장자 변환 + ID3/커버 메타 (+ 멜론 plain: TXXX / nrm_plain_lyrics)
  * 3. Whisper — LRC 사이드카 파일만 (2단계와 병렬, ffmpeg 가사 태그 없음)
  */
 import { Platform } from 'react-native';
@@ -46,7 +46,14 @@ export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string
   const path = uri.startsWith('file://') ? uri.slice(7) : uri;
   const wantExt = encode.extension.slice(1).toLowerCase();
   const haveExt = extensionFromLocalPath(path);
-  if (shouldSkipExtensionTranscode(encode.losslessMode, haveExt, wantExt)) return uri;
+  if (shouldSkipExtensionTranscode(encode.losslessMode, haveExt, wantExt)) {
+    logDownloadStage('ffmpeg', 'transcode_skip', {
+      haveExt,
+      wantExt,
+      losslessMode: encode.losslessMode,
+    });
+    return uri;
+  }
 
   const t0 = Date.now();
   const { path: outPath, format, fallbackReason } = await transcodeAudioOnDevice(
@@ -81,7 +88,7 @@ export async function applyFfmpegConversionAndMetadataStage(
   return applyFfmpegMetadataStage(uri, metadata);
 }
 
-/** 2단계: ffmpeg 메타데이터·커버만 (Whisper와 무관, 가사 태그 없음) */
+/** 2단계: ffmpeg 메타데이터·커버 (+ 멜론 plain 내장) */
 export async function applyFfmpegMetadataStage(
   fileUri: string,
   metadata?: NrmAudioFileMetadata,
@@ -98,6 +105,7 @@ export async function applyFfmpegMetadataStage(
   logDownloadStage('ffmpeg', 'meta_embed_start', {
     artist: normalized.artist,
     title: normalized.title,
+    plainChars: normalized.melonLyricsPlain?.length ?? 0,
   });
   try {
     const { applyAudioFileMetadata } = await import('@/lib/nrmApplyAudioMetadata');
@@ -145,12 +153,10 @@ export async function postProcessDownloadedAudio(
   let uri = fileUri;
   const split = metadata ? splitMetadataForDownloadStages(metadata) : null;
   const whisperMode = split?.whisperMode ?? null;
-  const melonPlain = split?.melonLyricsPlain ?? null;
 
   uri = await applyFfmpegMetadataStage(uri, metadata);
 
   let lyricsWarning: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' | undefined;
-  let plainAlreadyInLrcEmbed = false;
   if (whisperMode) {
     const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.whisper', {
@@ -165,9 +171,12 @@ export async function postProcessDownloadedAudio(
     const useEmbed = lyricsOutputMode === 'embed' && supportsEmbed;
 
     let whisperResult: WhisperLrcStageResult;
+    const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
     if (useEmbed) {
       // 임베드 모드: 전사 후 오디오 파일에 직접 임베드
-      whisperResult = await transcribeWhisperLrc(uri, whisperMode, extension);
+      whisperResult = await runWhisperTranscribeSerial('post-process', () =>
+        transcribeWhisperLrc(uri, whisperMode, extension),
+      );
       if (whisperResult.lrcFull?.trim()) {
         try {
           const { embedSyncedLyricsIntoAudio } = await import('@/lib/nrmApplyAudioMetadata.native');
@@ -176,10 +185,8 @@ export async function postProcessDownloadedAudio(
             whisperResult.lrcFull.trim(),
             extension,
             whisperMode,
-            melonPlain,
           );
           whisperResult = { ...whisperResult, lyricsEmbedded: true };
-          plainAlreadyInLrcEmbed = !!melonPlain;
         } catch (embedErr) {
           logNrmRunError('download.lrc', embedErr, { event: 'embed_lyrics_fail_sequential', extension });
           whisperResult = { ...whisperResult, lyricsEmbedded: false };
@@ -187,7 +194,9 @@ export async function postProcessDownloadedAudio(
       }
     } else {
       // 사이드카 모드: 기존 동작
-      whisperResult = await runWhisperLrcStage(uri, whisperMode, extension);
+      whisperResult = await runWhisperTranscribeSerial('post-process', () =>
+        runWhisperLrcStage(uri, whisperMode, extension),
+      );
     }
 
     lyricsWarning = whisperWarningFromResult(whisperResult);
@@ -201,15 +210,6 @@ export async function postProcessDownloadedAudio(
       lyricsWarning: lyricsWarning ?? null,
       lyricsOutputMode: useEmbed ? 'embed' : 'sidecar',
     });
-  }
-
-  if (melonPlain && !plainAlreadyInLrcEmbed) {
-    try {
-      const { persistPlainLyricsEmbedIfNeeded } = await import('@/lib/nrmPersistPlainLyricsEmbed');
-      await persistPlainLyricsEmbedIfNeeded(uri, extension, melonPlain);
-    } catch (embedErr) {
-      logNrmRunError('download.plain', embedErr, { event: 'embed_plain_fail_sequential', extension });
-    }
   }
 
   return { fileUri: uri, lyricsWarning };

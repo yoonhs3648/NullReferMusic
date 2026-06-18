@@ -3,6 +3,7 @@ package com.nullrefer.music.ondevice
 import android.content.Context
 import android.os.SystemClock
 import java.io.File
+import java.util.Locale
 import kotlin.math.max
 
 /**
@@ -66,8 +67,28 @@ object ForcedAlignEngine {
 
     try {
       NrmMemoryGuard.prepareForHeavyInference(context, "forced-align")
+      val sourceExt = audioFile.extension.lowercase(Locale.US).ifBlank { "unknown" }
+      val sourceBytes = audioFile.length()
+      val sourceDurationMs = probeSourceDurationMs(context, audioFile)
       convertTo16kMonoWav(context, audioFile, wav)
       durationMs = wavDurationMs(wav)
+      val durationDeltaMs =
+          if (sourceDurationMs != null) durationMs - sourceDurationMs else null
+      NrmStageLog.log(
+          "forced-align",
+          "fa_audio_probe",
+          mapOf(
+              "sourceExt" to sourceExt,
+              "sourceBytes" to sourceBytes,
+              "sourceDurationMs" to (sourceDurationMs ?: -1L),
+              "faWavDurationMs" to durationMs,
+              "durationDeltaMs" to (durationDeltaMs ?: -1L),
+          ),
+      )
+      NrmFileLogger.log(
+          "forced-align",
+          "fa_audio_probe ext=$sourceExt sourceMs=${sourceDurationMs ?: -1} faWavMs=$durationMs deltaMs=${durationDeltaMs ?: -1}",
+      )
 
       val alignT0 = SystemClock.elapsedRealtime()
       val result =
@@ -159,5 +180,47 @@ object ForcedAlignEngine {
     } catch (_: Exception) {
       180_000L
     }
+  }
+
+  /** ffmpeg -i 헤더만 읽어 Duration 파싱 (전체 디코드 없음). */
+  private fun probeSourceDurationMs(context: Context, file: File): Long? {
+    if (!file.isFile) return null
+    val paths = FfmpegExec.resolve(context) ?: return null
+    return try {
+      val (_, output) =
+          FfmpegExec.runCapture(
+              paths.binary,
+              paths.libDir,
+              listOf("-hide_banner", "-i", file.absolutePath),
+              tag = "ffmpeg-fa-probe",
+              timeoutSec = 20,
+          )
+      parseFfmpegDurationMs(output)
+    } catch (t: Throwable) {
+      NrmFileLogger.warn(
+          "forced-align",
+          "fa_audio_probe_fail file=${file.name} err=${t.message?.take(80)}",
+      )
+      null
+    }
+  }
+
+  private val FFMPEG_DURATION_RE =
+      Regex("""Duration:\s*(\d+):(\d{2}):(\d{2})(?:\.(\d+))?""")
+
+  private fun parseFfmpegDurationMs(output: String): Long? {
+    val m = FFMPEG_DURATION_RE.find(output) ?: return null
+    val h = m.groupValues[1].toLongOrNull() ?: return null
+    val min = m.groupValues[2].toLongOrNull() ?: return null
+    val sec = m.groupValues[3].toLongOrNull() ?: return null
+    val fracRaw = m.groupValues[4]
+    val fracMs =
+        when {
+          fracRaw.isEmpty() -> 0L
+          fracRaw.length == 1 -> (fracRaw.toLongOrNull() ?: 0L) * 100L
+          fracRaw.length == 2 -> (fracRaw.toLongOrNull() ?: 0L) * 10L
+          else -> fracRaw.take(3).toLongOrNull() ?: 0L
+        }
+    return h * 3_600_000L + min * 60_000L + sec * 1_000L + fracMs
   }
 }

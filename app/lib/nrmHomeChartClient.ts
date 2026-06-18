@@ -4,8 +4,8 @@ import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 
 export const NRM_HOME_CHART_TOP_N = 20;
 
-/** 홈 차트 메모리 캐시 TTL — 짧게 유지해 순위 정체 방지 */
-const HOME_CHART_CACHE_TTL_MS = 2 * 60 * 1000;
+/** 홈 차트 메모리 캐시 TTL — 메인 재진입 시 불필요한 재조회 방지 */
+const HOME_CHART_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 
 export type HomeChartSource = 'melon' | 'spotify';
 

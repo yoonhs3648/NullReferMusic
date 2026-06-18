@@ -492,7 +492,9 @@ export function NrmYoutubeHome({
       const session = downloadSessionsRef.current.get(videoId);
       if (session) {
         session.aborted = true;
-        void cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId));
+        void import('@/lib/nrmDownloadLyricsWorkGate')
+          .then((m) => m.registerDownloadPipelineEnd(videoId, 'abort_prefetch'))
+          .finally(() => cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId)));
       } else {
         clearDownloadSession(videoId);
       }
@@ -553,6 +555,9 @@ export function NrmYoutubeHome({
       notifyUser(mapDownloadUserMessage(e));
       setDownloadModalItem((cur) => (cur?.videoId === videoId ? null : cur));
       setDownloadModalInitialFields(undefined);
+      void import('@/lib/nrmDownloadLyricsWorkGate').then((m) =>
+        m.registerDownloadPipelineEnd(videoId, 'extract_fail'),
+      );
       clearDownloadSession(videoId);
     },
     [clearDownloadSession],
@@ -560,6 +565,9 @@ export function NrmYoutubeHome({
 
   const beginParallelExtraction = useCallback(
     (videoId: string) => {
+      void import('@/lib/nrmDownloadLyricsWorkGate').then((m) =>
+        m.registerDownloadPipelineStart(videoId),
+      );
       const session: DownloadSession = {
         extractionPromise: startAudioExtraction(videoId),
         aborted: false,
@@ -603,6 +611,14 @@ export function NrmYoutubeHome({
         nrmNotifyDownloadStarted(videoId, displayLabel);
       }
 
+      let pipelineEnded = false;
+      const endDownloadPipeline = async (reason: string) => {
+        if (pipelineEnded) return;
+        pipelineEnded = true;
+        const { registerDownloadPipelineEnd } = await import('@/lib/nrmDownloadLyricsWorkGate');
+        registerDownloadPipelineEnd(videoId, reason);
+      };
+
       try {
         const extraction = await session.extractionPromise;
         if (session.aborted) return;
@@ -610,6 +626,7 @@ export function NrmYoutubeHome({
           onAudioPersisted:
             Platform.OS !== 'web'
               ? () => {
+                  void endDownloadPipeline('audio_persisted');
                   nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
                   // 오디오 저장 완료 후 dl 토큰 해제 — 가사(Whisper/멜론)는 별도 native 토큰
                   nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
@@ -675,6 +692,8 @@ export function NrmYoutubeHome({
           notifyUser(mapDownloadUserMessage(e));
         }
         throw e;
+      } finally {
+        await endDownloadPipeline('finalize_done');
       }
     },
     [],
@@ -721,7 +740,9 @@ export function NrmYoutubeHome({
     const session = downloadSessionsRef.current.get(videoId);
     if (session) {
       session.aborted = true;
-      void cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId));
+      void import('@/lib/nrmDownloadLyricsWorkGate')
+        .then((m) => m.registerDownloadPipelineEnd(videoId, 'modal_close'))
+        .finally(() => cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId)));
       return;
     }
     clearDownloadSession(videoId);

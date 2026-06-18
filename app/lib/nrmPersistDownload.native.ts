@@ -27,17 +27,24 @@ import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
+import {
+  nrmPlainSidecarNameFromAudioFileName,
+  siblingNrmPlainUri,
+} from '@/lib/nrmMelonPlainSidecar';
+import { isMelonPlainLyricsText } from '@/lib/nrmMelonLyrics';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
   loadStoredSafGrant,
   requestNewSafDirUri,
 } from '@/lib/nrmDownloadSafGrant';
 import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
+import { NRM_BRAND_STORAGE_FOLDER_NAME } from '@/lib/nrmAppBrand';
 
-const NRM_FOLDER = 'NullReferenceMusic';
+const NRM_FOLDER = NRM_BRAND_STORAGE_FOLDER_NAME;
 
 /** SAF createDocument(text/plain) 시 `.lrc` → `.lrc.txt` / `.lrc.text` 로 바뀌는 문제 방지 */
 const LRC_SAF_MIME = 'application/octet-stream';
+const PLAIN_SAF_MIME = 'application/octet-stream';
 
 function toNativeLocalFileUri(uriOrPath: string): string {
   const trimmed = uriOrPath.trim();
@@ -644,6 +651,53 @@ export async function persistLrcForSavedAudio(
 export async function deletePersistedLrc(lrcUri: string): Promise<void> {
   const uri = lrcUri.trim();
   if (!uri) return;
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+}
+
+/** 멜론 plain 원문 — 오디오와 같은 폴더에 `.nrmplain` 저장 */
+export async function persistMelonPlainForSavedAudio(
+  location: PersistedAudioLocation,
+  plainText: string,
+): Promise<string | null> {
+  const trimmed = plainText.trim();
+  const plainName = nrmPlainSidecarNameFromAudioFileName(location.fileName);
+  if (!isMelonPlainLyricsText(trimmed)) {
+    return null;
+  }
+
+  const cacheRoot = FileSystem.cacheDirectory;
+  if (!cacheRoot) return null;
+
+  const tempUri = `${cacheRoot}nrm-plain-out-${Date.now()}.nrmplain`;
+  await FileSystem.writeAsStringAsync(tempUri, `${trimmed}\n`);
+
+  try {
+    let dest: string;
+    if (location.kind === 'saf') {
+      try {
+        dest = await writeLrcTextToSafTree(location.dirUri, plainName, trimmed);
+      } catch {
+        const plainSrc = toNativeLocalFileUri(tempUri);
+        dest = await copyLocalFileToSaf(
+          plainSrc,
+          location.dirUri,
+          plainName,
+          PLAIN_SAF_MIME,
+        );
+      }
+    } else {
+      dest = joinFolderFile(location.folderUri, plainName);
+      await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => {});
+      await FileSystem.copyAsync({ from: tempUri, to: dest });
+    }
+    return dest;
+  } finally {
+    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+  }
+}
+
+export async function deletePersistedMelonPlain(audioUri: string): Promise<void> {
+  const uri = siblingNrmPlainUri(audioUri);
   await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
 }
 

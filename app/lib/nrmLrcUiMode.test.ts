@@ -11,10 +11,10 @@ import {
   resolveLyricsSidecarAction,
   resolveStoredLyricsModeFromFlags,
   preparePureSidecarLrcText,
+  prepareSidecarLrcTextForPersist,
   stripNrmLrcModeLine,
   withNrmLyricsModeHeader,
 } from './nrmLrcUiMode';
-import { inferMelonLyricsUiModeFromContext } from './nrmMelonLyrics';
 
 function dualLineLrc(pairs: number): string {
   const lines: string[] = [];
@@ -69,9 +69,10 @@ assert.deepEqual(detectLyricsUiModeFromStoredText('__AUTO_FROM_MELON__:melon'), 
 assert.equal(resolveStoredLyricsModeFromFlags({}), 'unset');
 assert.equal(
   resolveStoredLyricsModeFromFlags({
-    embeddedPlainLyrics: '첫 줄\n둘째 줄',
+    hasSidecarLrc: true,
+    sidecarLrcText: withNrmLyricsModeHeader(singleLines, 'melon_translation'),
   }),
-  'unset',
+  'configured',
 );
 assert.equal(
   resolveStoredLyricsModeFromFlags({
@@ -97,36 +98,23 @@ assert.equal(
   resolveStoredLyricsModeFromFlags({
     hasSidecarLrc: true,
     sidecarLrcText: singleLines,
-    embeddedPlainLyrics: '첫 줄\n둘째 줄',
+    melonTrackUrl: 'https://www.melon.com/song/detail.htm?songId=12345',
   }),
   'melon',
 );
 assert.equal(
   resolveStoredLyricsModeFromFlags({
     embeddedSyncLyrics: singleLines,
-    embeddedPlainLyrics: '첫 줄\n둘째 줄',
+    melonTrackUrl: 'https://www.melon.com/song/detail.htm?songId=12345',
   }),
   'melon',
 );
-assert.equal(
-  resolveStoredLyricsModeFromFlags({
-    embeddedSyncLyrics: singleLines,
-    embeddedLyricsMode: 'melon',
-  }),
-  'melon',
-);
-assert.equal(
-  resolveStoredLyricsModeFromFlags({
-    embeddedPlainLyrics: '첫 줄\n둘째 줄',
-    embeddedLyricsMode: 'melon',
-  }),
-  'melon',
-);
+assert.equal(prepareSidecarLrcTextForPersist(singleLines, 'melon'), withNrmLyricsModeHeader(singleLines, 'melon'));
 assert.equal(
   resolveStoredLyricsModeFromFlags({
     hasSidecarLrc: true,
     sidecarLrcText: dualLineLrc(DUPLICATE_TS_TRANSLATION_THRESHOLD),
-    embeddedPlainLyrics: '첫 줄\n둘째 줄',
+    melonTrackUrl: 'https://www.melon.com/song/detail.htm?songId=12345',
   }),
   'melon_translation',
 );
@@ -139,15 +127,6 @@ assert.deepEqual(resolveLyricsSidecarAction('unset', 'melon_translation', null),
   kind: 'generate-melon',
   mode: 'melon_translation',
 });
-
-assert.equal(
-  inferMelonLyricsUiModeFromContext(
-    'translation',
-    '',
-    'https://www.melon.com/song/detail.htm?songId=123',
-  ),
-  'melon_translation',
-);
 
 assert.deepEqual(resolveLyricsSidecarAction('melon', 'melon', null), {
   kind: 'generate-melon',

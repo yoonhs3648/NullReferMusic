@@ -83,7 +83,7 @@ export function NrmMenuSearchPanels({
     return (
       <>
         <MenuBackRow onPress={onBackToRoot} />
-        <Text style={[styles.panelTitle, { color: titleColor }]}>검색</Text>
+        <Text style={[styles.panelTitle, { color: titleColor }]}>음악 검색</Text>
         {NRM_SEARCH_PLATFORM_ROWS.map((row) => (
           <Pressable
             key={row.id}

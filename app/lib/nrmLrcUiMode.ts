@@ -4,12 +4,11 @@ import type { NrmLyricsUiMode, NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 
 import {
   buildLyricsSentinel,
-  inferMelonLyricsUiModeFromContext,
   isMelonLyricsUiMode,
+  isMelonTrackWebsite,
   parseLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
 
-import { parseEmbeddedLyricsModeToken } from '@/lib/nrmEmbeddedLyricsMode';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export const DUPLICATE_TS_TRANSLATION_THRESHOLD = 10;
@@ -97,6 +96,16 @@ export function stripNrmLrcModeLine(lrcText: string): string {
 /** 외장 .lrc — 모드 플래그 줄만 제거하고 순수 싱크 가사 본문만 남긴다 */
 export function preparePureSidecarLrcText(lrcText: string): string {
   return stripNrmLrcModeLine(lrcText);
+}
+
+/** 외장 .lrc 저장용 — 본문 + `[re:NRM/…]` 모드 태그(선택) */
+export function prepareSidecarLrcTextForPersist(
+  lrcText: string,
+  mode: Exclude<NrmLyricsUiMode, 'unset'> | null | undefined,
+): string {
+  const body = preparePureSidecarLrcText(lrcText);
+  if (!body) return '';
+  return mode ? withNrmLyricsModeHeader(body, mode) : body;
 }
 
 export function withNrmLyricsModeHeader(
@@ -369,18 +378,17 @@ function isTranslationFromDuplicateTimestamps(lrcText: string): boolean {
 /**
  * 트랙 메타데이터 설정 — 가사 드롭다운 기본값.
  *
- * - unset: .lrc·싱크 내장·plain 내장·모드 태그 모두 없음, 또는 plain만 있고 싱크·모드 태그 없음
- * - configured/translation: 싱크 가사만, plain 내장 없음 (번역 = 동일 타임스탬프 ≥10)
- * - melon/melon_translation: 싱크 가사 + plain 내장, 또는 plain + nrm_lyrics_mode 태그
+ * - unset: 싱크 가사(.lrc·내장) 없음
+ * - configured/translation: 싱크만, plain(TXXX·nrm_plain_lyrics) 없음
+ * - melon/melon_translation: 싱크 + plain 내장
+ * - 번역지원: 동일 타임스탬프 2줄 이상인 구간이 10개 이상
  */
 export function resolveStoredLyricsModeFromFlags(input: {
   hasSidecarLrc?: boolean;
   sidecarLrcText?: string;
   embeddedSyncLyrics?: string;
-  /** TXXX NRM_PLAIN_LYRICS(mp3) 또는 m4a nrm_plain_lyrics */
-  embeddedPlainLyrics?: string;
-  /** TXXX NRM_LYRICS_MODE(mp3) 또는 m4a nrm_lyrics_mode */
-  embeddedLyricsMode?: string;
+  /** 멜론 곡 URL — 싱크 가사와 함께 있으면 멜론 패밀리로 복원 */
+  melonTrackUrl?: string;
 }): NrmLyricsUiMode {
   const sidecarText = (input.sidecarLrcText ?? '').trim();
   const hasSidecar = !!(input.hasSidecarLrc && sidecarText);
@@ -388,36 +396,22 @@ export function resolveStoredLyricsModeFromFlags(input: {
     ? (input.embeddedSyncLyrics ?? '').trim()
     : '';
   const hasEmbeddedSync = embeddedSync.length > 0;
-  const hasPlainEmbed = (input.embeddedPlainLyrics ?? '').trim().length > 0;
-  const embeddedMode = parseEmbeddedLyricsModeToken(input.embeddedLyricsMode);
-  const embeddedMelonMode = embeddedMode && isMelonLyricsUiMode(embeddedMode) ? embeddedMode : null;
+  const hasSync = hasSidecar || hasEmbeddedSync;
 
-  if (!hasSidecar && !hasEmbeddedSync && !hasPlainEmbed && !embeddedMode) {
+  if (!hasSync) {
     return 'unset';
   }
 
   const lrcForDup = pickLrcTextForModeDetection(sidecarText, embeddedSync);
   const isTranslation = isTranslationFromDuplicateTimestamps(lrcForDup);
 
-  if (!hasPlainEmbed) {
-    if (!hasSidecar && !hasEmbeddedSync) {
-      return 'unset';
-    }
-    if (embeddedMelonMode) {
-      return embeddedMelonMode;
-    }
-    return isTranslation ? 'translation' : 'configured';
-  }
+  const isMelon = isMelonTrackWebsite(input.melonTrackUrl);
 
-  if (hasPlainEmbed && (hasSidecar || hasEmbeddedSync)) {
+  if (isMelon) {
     return isTranslation ? 'melon_translation' : 'melon';
   }
 
-  if (hasPlainEmbed && embeddedMelonMode) {
-    return embeddedMelonMode;
-  }
-
-  return 'unset';
+  return isTranslation ? 'translation' : 'configured';
 }
 
 export function isWhisperLyricsFamily(mode: NrmLyricsUiMode): mode is NrmWhisperLyricsMode {

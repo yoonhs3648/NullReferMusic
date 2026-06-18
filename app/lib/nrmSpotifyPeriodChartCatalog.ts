@@ -404,6 +404,40 @@ export function createInitialSpotifyPeriodDate(
   };
 }
 
+export type SpotifyPeriodDateSelection = {
+  year: number;
+  month: number;
+  day: number;
+  weekOfMonth: number;
+};
+
+/** 탭별 첫 진입 기본값 (이후 탭 전환 시에는 저장된 선택 복원) */
+export function createDefaultSpotifyPeriodDateForKind(
+  kind: SpotifyPeriodChartKind,
+  snapshotDow: number = DEFAULT_WEEKLY_SNAPSHOT_DAY,
+  now: Date = new Date(),
+): SpotifyPeriodDateSelection {
+  const base = createInitialSpotifyPeriodDate(snapshotDow, now);
+  if (kind === 'daily') {
+    return base;
+  }
+  if (kind === 'weekly') {
+    return {
+      ...base,
+      weekOfMonth: defaultSpotifyWeekOfMonth(base.year, base.month, snapshotDow, now),
+    };
+  }
+  const { year } = getPeriodChartCurrentDate(now);
+  const months = listSpotifyMonthlySelectableMonths(year, snapshotDow, now);
+  const pickMonth = months.length > 0 ? months[months.length - 1]!.value : base.month;
+  return {
+    year,
+    month: pickMonth,
+    day: 1,
+    weekOfMonth: 1,
+  };
+}
+
 export {
   getPeriodChartCurrentDate,
   listPeriodChartSelectableYears,

@@ -126,20 +126,6 @@ export function NrmMelonGenreChartFilters({
       return;
     }
     onKindChange(next);
-    const allowedYears = listMelonSelectableYears(next, now);
-    let nextYear = year;
-    if (allowedYears.length > 0 && !allowedYears.includes(year)) {
-      nextYear = allowedYears[0]!;
-      onYearChange(nextYear);
-    }
-    let nextMonth = month;
-    if (next !== 'yearly') {
-      nextMonth = clampMelonMonth(nextYear, month, now, next);
-      if (nextMonth !== month) onMonthChange(nextMonth);
-    }
-    if (next === 'weekly') {
-      onWeekOfMonthChange(defaultMelonWeekOfMonth(nextYear, nextMonth, now));
-    }
     const nextGenre = clampMelonGenreForKind(classCd, next);
     if (nextGenre !== classCd) onGenreChange(nextGenre);
   };

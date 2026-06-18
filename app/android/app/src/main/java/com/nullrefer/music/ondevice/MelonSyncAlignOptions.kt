@@ -25,20 +25,20 @@ data class MelonSyncAlignOptions(
   fun trellisPlanMargin(): Double =
       when (quality) {
         QUALITY_FAST -> 0.85
-        QUALITY_STANDARD -> 0.90
-        else -> 0.96
+        QUALITY_STANDARD -> 0.92
+        else -> 0.98
       }
 
   fun chunkOverlapSamples(): Int =
       when (quality) {
         QUALITY_FAST -> 0
-        QUALITY_STANDARD -> 800
-        else -> 1_600
+        QUALITY_STANDARD -> 1_200
+        else -> 2_400
       }
 
   fun minIntroMs(): Int = if (firstLineIntroCorrection) 800 else 0
 
-  fun onsetProbeThreshold(): Float = if (isAccurate) 3.0f else 3.2f
+  fun onsetProbeThreshold(): Float = if (isAccurate) 2.8f else 3.2f
 
   companion object {
     const val QUALITY_ACCURATE = "accurate"

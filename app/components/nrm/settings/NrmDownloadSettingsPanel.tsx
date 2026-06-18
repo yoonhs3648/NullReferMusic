@@ -267,7 +267,7 @@ export function NrmDownloadSettingsPanel({
   const handlePickFolder = useCallback(async () => {
     setPicking(true);
     try {
-      const uri = await requestNewSafDirUri('NullReferenceMusic');
+      const uri = await requestNewSafDirUri();
       if (uri) setDirUri(uri);
     } finally {
       setPicking(false);
@@ -675,7 +675,7 @@ export function NrmDownloadSettingsPanel({
               iOS에서는 사용자가 고른 폴더(SAF) 대신 앱 전용 저장소에 파일을 둡니다.
             </Text>
             <Text style={[styles.pathHint, { color: bodyColor }]}>
-              «파일» 앱 → «내 iPhone» → NullReferenceMusic → «{NRM_DOWNLOAD_PUBLIC_FOLDER_NAME}»
+              «파일» 앱 → «내 iPhone» → 이 앱 → «{NRM_DOWNLOAD_PUBLIC_FOLDER_NAME}»
               폴더에서 확인할 수 있습니다. (설정에서 «파일» 공유가 켜져 있어야 합니다.)
             </Text>
           </View>

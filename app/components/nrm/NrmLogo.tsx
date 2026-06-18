@@ -1,6 +1,7 @@
 import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
+import { getNrmLogoWordmark } from '@/lib/nrmAppBrand';
 
 type Props = {
   compact?: boolean;
@@ -22,6 +23,7 @@ export function NrmLogo({
   markSize: markSizeProp,
   onPress,
 }: Props) {
+  const { primary: logoPrimary, accent: logoAccent } = getNrmLogoWordmark();
   const fontSize = compact ? 20 : nrmTokens.font.logo;
   const nullColor = disabled
     ? 'rgba(128,128,128,0.45)'
@@ -65,8 +67,14 @@ export function NrmLogo({
           { fontSize, lineHeight },
           androidTextPad,
         ]}>
-        <Text style={[styles.wordNull, { color: nullColor }]}>NullReference </Text>
-        <Text style={[styles.wordMusic, { color: musicColor }]}>Music</Text>
+        {logoAccent ? (
+          <>
+            <Text style={[styles.wordNull, { color: nullColor }]}>{logoPrimary}</Text>
+            <Text style={[styles.wordMusic, { color: musicColor }]}>{logoAccent}</Text>
+          </>
+        ) : (
+          <Text style={[styles.wordNull, { color: nullColor }]}>{logoPrimary}</Text>
+        )}
       </Text>
     </View>
   );

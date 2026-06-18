@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
-import { deletePersistedLrc } from '@/lib/nrmPersistDownload.native';
+import { deletePersistedLrc, deletePersistedMelonPlain } from '@/lib/nrmPersistDownload.native';
 import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 
@@ -19,6 +19,7 @@ export async function deleteDownloadTrack(track: NrmDownloadTrackItem): Promise<
   for (const lrcUri of lrcCandidates) {
     await deletePersistedLrc(lrcUri);
   }
+  await deletePersistedMelonPlain(audioUri);
 
   const info = await FileSystem.getInfoAsync(audioUri);
   if (!info.exists) {

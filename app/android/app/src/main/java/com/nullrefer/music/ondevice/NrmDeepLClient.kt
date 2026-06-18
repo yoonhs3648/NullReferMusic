@@ -11,8 +11,10 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 
 import java.net.URL
-
 import java.nio.charset.StandardCharsets
+
+import com.nullrefer.music.BuildConfig
+import com.nullrefer.music.NrmBrand
 
 import org.json.JSONArray
 
@@ -278,7 +280,7 @@ object NrmDeepLClient {
 
       conn.setRequestProperty("Accept", "application/json")
 
-      conn.setRequestProperty("User-Agent", "NullReferenceMusic/1.0")
+      conn.setRequestProperty("User-Agent", NrmBrand.userAgent(BuildConfig.VERSION_NAME))
 
       conn.doOutput = true
 

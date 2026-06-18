@@ -1,9 +1,11 @@
 import type { ExpoConfig } from 'expo/config';
 
+import brandConfig from './nrm-brand.config.json';
+
 const config: ExpoConfig = {
-  name: 'NullReferenceMusic',
+  name: brandConfig.displayName,
   slug: 'nullrefer-music',
-  version: '1.8.20',
+  version: '1.8.26',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',

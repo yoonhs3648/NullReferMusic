@@ -152,10 +152,29 @@ npm run generate:music-quotes
 
 **AI 에이전트:** APK 빌드·`assembleRelease` 실행 전 `generate:music-quotes`가 성공했는지 확인한다. 실패 시 빌드를 진행하지 않고 원인을 수정한다.
 
+### 6-1-c. 앱 브랜드(표시명) 동기화 (친구용 APK)
+
+앱 로고·런처 이름·다운로드 폴더·APK 파일명 접두를 바꿀 때는 **`app/nrm-brand.config.json`만** 수정한다.
+
+| 필드 | 용도 |
+|------|------|
+| `displayName` | 메인 로고, 앱 이름, 종료 확인, 버전/저작권, 알림 제목 |
+| `storageFolderName` | `Download/…` 폴더, 로그 경로, APK 파일명, User-Agent (공백 없음) |
+
+```bash
+cd app
+npm run sync:brand
+```
+
+- Android `strings.xml`, `NrmBrand.kt`, iOS `NrmBrand.generated.swift`, `build.gradle` APK 파일명을 갱신한다.
+- `npm run android:release` 및 `NullReferMusic-Build-Release-Apk.bat`는 **빌드 전에 자동 실행**한다.
+
+상세: `docs/APP-BRAND.md`, `.cursor/rules/nrm-app-brand.mdc`
+
 ### 6-2. 앱 메타데이터 확인
 | 항목 | 기준값 | 위치 |
 |------|--------|------|
-| 앱 이름 | `NullReferenceMusic` | `app/app.config.ts` → `name`, `android/app/src/main/res/values/strings.xml` → `app_name` |
+| 앱 표시명 | `nrm-brand.config.json` → `displayName` | `app.config.ts` → `name`, `strings.xml` → `app_name` (sync 후) |
 | 앱 아이콘 | `assets/images/icon.png` 기반 NRM CI 로고 | `mipmap-*/ic_launcher*.webp` |
 | Adaptive foreground | 투명 배경 + 흰색 로고 (`밝기→알파` 변환) | `mipmap-*/ic_launcher_foreground.webp` |
 | Adaptive 배경색 | `#0c0c12` (검정) | `android/app/src/main/res/values/colors.xml` → `iconBackground` |
@@ -173,22 +192,55 @@ node scripts/make-icons.mjs
 ```
 cd C:\NullReferMusic\app
 npx tsc --noEmit
-npm run generate:music-quotes
-cd android
-.\gradlew.bat assembleRelease --no-daemon
+npm run android:release
 ```
+
+또는 저장소 루트에서 `NullReferMusic-Build-Release-Apk.bat` (tsc·명언·Gradle 일괄).
 
 로컬 SDK 경로는 `app/android/local.properties` → `sdk.dir=C:/Users/yunhs/AppData/Local/Android/Sdk`
 
+### 6-3-a. Windows 경로 길이 제한 (필수 · AI 에이전트)
+
+**증상:** `gradlew assembleRelease` 중 CMake/ninja가 `Filename longer than 260 characters` 로 실패한다.
+
+**원인:** 저장소 경로(`D:\AIProj\CsTool\NullReferMusic\...`)가 길고, React Native 새 아키텍처 CMake가 Gradle 캐시·prefab 헤더까지 합쳐 Windows **MAX_PATH(260자)** 를 넘긴다.
+
+**금지 (에이전트·로컬 공통):**
+
+```
+cd app\android
+.\gradlew.bat assembleRelease
+```
+
+위처럼 **긴 실제 경로에서 Gradle을 직접 실행하지 않는다.** 실패 시 subst·짧은 캐시 경로를 수동으로 맞추며 재시도하지 말고, 아래 **필수** 진입점만 쓴다.
+
+**필수 (택1):**
+
+| 방법 | 설명 |
+|------|------|
+| `NullReferMusic-Build-Release-Apk.bat` | 저장소 루트, 대화형 완료 메시지 |
+| `cd app && npm run android:release` | `preandroid:release`로 명언 generate 포함 |
+| `powershell -File scripts/Invoke-NrmAndroidReleaseBuild.ps1` | Gradle 단계만 (tsc·명언은 별도) |
+
+**내부 동작 (빌드 스크립트 전용, 앱 런타임 무관):**
+
+1. `GRADLE_USER_HOME=C:\g` — Gradle 캐시를 짧은 경로에 둠
+2. `subst Z:` 등 가용 드라이브 문자로 저장소 루트를 매핑 — CMake/ninja 작업 경로 단축
+3. `Z:\app\android` 에서 `gradlew.bat assembleRelease --no-daemon` 실행 후 subst 해제
+
+구현: `scripts/Invoke-NrmAndroidReleaseBuild.ps1`, `app/scripts/assemble-android-release.mjs` (`package.json`의 `android:release`).
+
+**에이전트:** APK 요청 시 **반드시** §6-3-a 필수 진입점만 사용한다. `gradlew` 직접 호출·subst 수동 재시도 금지.
+
 ### 6-4. 산출물 위치 및 파일명 규칙
 
-APK 파일명은 **`NullReferenceMusic-v{버전}.apk`** 형식을 사용한다.
+APK 파일명은 **`{storageFolderName}-v{버전}.apk`** 형식을 사용한다 (`nrm-brand.config.json`의 `storageFolderName`, `npm run sync:brand`로 `build.gradle` 반영).
 
 ```
-app\android\app\build\outputs\apk\release\NullReferenceMusic-v1.3.3.apk
+app\android\app\build\outputs\apk\release\NullReferenceMusic-v1.8.22.apk
 ```
 
-파일명은 `android/app/build.gradle`의 `applicationVariants` 블록에서 자동으로 설정된다:
+파일명은 `android/app/build.gradle`의 `applicationVariants` 블록에서 자동으로 설정된다 (`sync-nrm-brand.mjs`가 갱신):
 ```groovy
 applicationVariants.all { variant ->
     variant.outputs.all { output ->

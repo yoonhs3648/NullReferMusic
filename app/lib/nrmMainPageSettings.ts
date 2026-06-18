@@ -4,19 +4,19 @@ export const NRM_MAIN_PAGE_MODE_OPTIONS = [
   {
     id: 'charts',
     label: 'Charts',
-    description: '메인에 실시간 차트 Top 20을 표시합니다.',
+    description: '',
     icon: 'bar-chart-outline' as const,
   },
   {
     id: 'quotation',
     label: 'Quotation',
-    description: '메인에 음악 명언을 표시합니다.',
+    description: '',
     icon: 'chatbubble-ellipses-outline' as const,
   },
   {
     id: 'none',
     label: 'None',
-    description: '로고와 검색창만 중앙에 표시합니다.',
+    description: '',
     icon: 'remove-circle-outline' as const,
   },
 ] as const;

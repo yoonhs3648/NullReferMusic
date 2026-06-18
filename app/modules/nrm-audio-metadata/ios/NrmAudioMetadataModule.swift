@@ -205,7 +205,7 @@ private enum MetadataApplier {
 
     var request = URLRequest(url: url)
     request.timeoutInterval = 30
-    request.setValue("NullReferenceMusic/1.0", forHTTPHeaderField: "User-Agent")
+    request.setValue(NrmBrand.userAgent(version: "1.0"), forHTTPHeaderField: "User-Agent")
     request.setValue("image/*", forHTTPHeaderField: "Accept")
 
     do {

@@ -260,15 +260,20 @@ async function finalizeNativeParallel(
       engine: melonMode ? 'whisperx-align' : 'whisper',
     });
     const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+    let plainForMelonAlign = melonLyricsPlain?.trim() ?? '';
+    if (melonMode && !plainForMelonAlign && embedMetadata?.website) {
+      const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
+      plainForMelonAlign = (await fetchMelonPlainLyricsFromWebsite(embedMetadata.website)).trim();
+    }
     try {
       const result = await runWhisperTranscribeSerial(safeName, () => {
-        if (melonMode && melonLyricsPlain) {
+        if (melonMode && plainForMelonAlign) {
           return import('@/lib/nrmMelonLyricsLrcStage').then((m) =>
             m.transcribeMelonLyricsLrc(
               whisperSourceUri,
               melonMode,
               extension,
-              melonLyricsPlain,
+              plainForMelonAlign,
               melonAlignLang,
             ),
           );
@@ -303,8 +308,8 @@ async function finalizeNativeParallel(
     lyricsModeActive && (whisperMode ?? melonMode)
       ? (whisperMode ?? melonMode!)
       : null;
-  const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
-  const lrcForSidecar = preparePureSidecarLrcText(lrcToPersist);
+  const { prepareSidecarLrcTextForPersist } = await import('@/lib/nrmLrcUiMode');
+  const lrcForSidecar = prepareSidecarLrcTextForPersist(lrcToPersist, persistedLyricsMode);
   const canPersistLrc = lrcToPersist.length > 0;
 
   if (canPersistLrc && whisperDone) {
@@ -328,7 +333,6 @@ async function finalizeNativeParallel(
           lrcToPersist,
           audioExt,
           persistedLyricsMode ?? undefined,
-          melonLyricsPlain,
         );
         whisperRef.result = { ...whisperDone, lyricsEmbedded: true };
         logNrmDev('download.lrc', {
@@ -397,37 +401,6 @@ async function finalizeNativeParallel(
       audioFileName: audioSaved.location.fileName,
       lyricsEmbedded: whisperRef.result.lyricsEmbedded,
     });
-  }
-
-  if (melonLyricsPlain) {
-    const plainAlreadyInLrcEmbed =
-      canPersistLrc &&
-      (await loadLyricsOutputMode()) === 'embed' &&
-      !!whisperDone?.lyricsEmbedded;
-    if (!plainAlreadyInLrcEmbed) {
-      try {
-        logNrmDev('download.plain', {
-          event: 'embed_plain_start',
-          audioFileName: audioSaved.location.fileName,
-          plainChars: melonLyricsPlain.length,
-        });
-        const { persistPlainLyricsEmbedIfNeeded } = await import('@/lib/nrmPersistPlainLyricsEmbed');
-        const embedded = await persistPlainLyricsEmbedIfNeeded(
-          audioSaved.location.audioUri,
-          extension,
-          melonLyricsPlain,
-        );
-        logNrmDev('download.plain', {
-          event: embedded ? 'embed_plain_ok' : 'embed_plain_skip',
-          audioFileName: audioSaved.location.fileName,
-        });
-      } catch (e) {
-        logNrmRunError('download.plain', e, {
-          event: 'embed_plain_fail',
-          audioFileName: audioSaved.location.fileName,
-        });
-      }
-    }
   }
 
   await deleteLocalAudioTemps(temps);

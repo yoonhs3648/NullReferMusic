@@ -2,12 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { NativeModules } from 'react-native';
 
+import { getNrmFileLogFolderDisplayPath } from '@/lib/nrmAppBrand';
+
 export const STORAGE_KEY = 'nrm_file_logging_enabled';
 
 /** APK 파일 로깅 사용자 설정 UI */
 export type NrmFileLoggingMode = 'off' | 'on';
 
-export const NRM_FILE_LOG_FOLDER_DISPLAY_PATH = 'Download/NullReferenceMusic/logs/';
+export const NRM_FILE_LOG_FOLDER_DISPLAY_PATH = getNrmFileLogFolderDisplayPath();
 
 export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}nrm-debug-YYYY-MM-DD.log`;
 

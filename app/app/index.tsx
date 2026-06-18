@@ -52,6 +52,7 @@ import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTra
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
 import { confirmUser } from '@/lib/nrmUserNotify';
+import { getNrmAppExitConfirmMessage } from '@/lib/nrmAppBrand';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 
@@ -67,7 +68,6 @@ import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import {
   fetchHomeChartTop20,
   homeChartDownloadSource,
-  invalidateHomeChartCache,
   peekHomeChartCache,
   type HomeChartSource,
 } from '@/lib/nrmHomeChartClient';
@@ -162,6 +162,8 @@ export default function HomeScreen() {
   /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
   const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
   const ytOverlayHistoryActiveRef = useRef(false);
+  const mainViewRef = useRef(mainView);
+  mainViewRef.current = mainView;
   const lastfmNavRef = useRef<LastfmSearchNavHandle>(null);
   const melonNavRef = useRef<MelonSearchNavHandle>(null);
   const [chartsBearerModalOpen, setChartsBearerModalOpen] = useState(false);
@@ -187,11 +189,6 @@ export default function HomeScreen() {
 
   const bumpQuoteRefresh = useCallback(() => {
     setQuoteRefreshKey((k) => k + 1);
-  }, []);
-
-  const bumpHomeChartRefresh = useCallback(() => {
-    invalidateHomeChartCache();
-    setHomeChartEpoch((k) => k + 1);
   }, []);
 
   useEffect(() => {
@@ -282,6 +279,10 @@ export default function HomeScreen() {
 
   const dismissYoutubeOverlay = useCallback((fromPopstate = false) => {
     setYoutubeOverlay(null);
+    if (mainViewRef.current === 'youtube') {
+      setLayoutPhase('welcome');
+      setHomeEpoch((v) => v + 1);
+    }
     if (
       Platform.OS === 'web' &&
       !fromPopstate &&
@@ -301,8 +302,7 @@ export default function HomeScreen() {
     setLayoutPhase('welcome');
     setHomeEpoch((v) => v + 1);
     bumpQuoteRefresh();
-    bumpHomeChartRefresh();
-  }, [dismissYoutubeOverlay, bumpQuoteRefresh, bumpHomeChartRefresh]);
+  }, [dismissYoutubeOverlay, bumpQuoteRefresh]);
 
   /** 차트·검색 트랙 클릭: 유튜브 오버레이 (원 플랫폼 화면은 마운트 유지) */
   const navigateToSearchFromChart = useCallback(
@@ -610,13 +610,12 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onPopState = () => {
       if (youtubeOverlay) {
-        ytOverlayHistoryActiveRef.current = false;
-        setYoutubeOverlay(null);
+        dismissYoutubeOverlay(true);
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [youtubeOverlay]);
+  }, [dismissYoutubeOverlay, youtubeOverlay]);
 
   useEffect(() => {
 
@@ -663,7 +662,7 @@ export default function HomeScreen() {
           return;
         }
         exitPromptOpenRef.current = true;
-        const ok = await confirmUser('NullReferenceMusic을 종료할까요?', {
+        const ok = await confirmUser(getNrmAppExitConfirmMessage(), {
           cancelLabel: '취소',
           confirmLabel: '종료',
         });
@@ -898,19 +897,21 @@ export default function HomeScreen() {
         refreshKey={quoteRefreshKey}
       />
     ) : showWelcomeChart ? (
-      <NrmHomeChartCarousel
-        key={`home-chart-${homeChartEpoch}-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
-        isDark={isDark}
-        items={homeChartState.status === 'ready' ? homeChartState.items : []}
-        loading={
-          homeChartState.status === 'loading' || homeChartState.status === 'idle'
-        }
-        onTrackPress={(item) => {
-          const source =
-            homeChartState.status === 'ready' ? homeChartState.source : 'melon';
-          navigateFromHomeChart(item, source);
-        }}
-      />
+      <View style={styles.homeChartShell}>
+        <NrmHomeChartCarousel
+          key={`home-chart-${homeChartEpoch}-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
+          isDark={isDark}
+          items={homeChartState.status === 'ready' ? homeChartState.items : []}
+          loading={
+            homeChartState.status === 'loading' || homeChartState.status === 'idle'
+          }
+          onTrackPress={(item) => {
+            const source =
+              homeChartState.status === 'ready' ? homeChartState.source : 'melon';
+            navigateFromHomeChart(item, source);
+          }}
+        />
+      </View>
     ) : null;
 
     return (
@@ -1137,6 +1138,12 @@ const styles = StyleSheet.create({
   },
 
   youtubeWelcomeBody: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
+
+  homeChartShell: {
     flex: 1,
     minHeight: 0,
     width: '100%',

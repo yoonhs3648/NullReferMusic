@@ -7,7 +7,9 @@ import {
   type NrmAudioExtension,
 } from '@/lib/nrmDownloadSettings';
 
-export const NRM_DOWNLOAD_DIR_NAME = 'NullReferenceMusic';
+import { NRM_DOWNLOAD_DIR_NAME } from '@/lib/nrmAppBrand';
+
+export { NRM_DOWNLOAD_DIR_NAME };
 
 function pickerTypesForExtension(ext: NrmAudioExtension) {
   return [

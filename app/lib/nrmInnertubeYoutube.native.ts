@@ -317,12 +317,20 @@ async function tagThenPersist(
   fileUri: string,
   safeName: string,
   metadata?: NrmAudioFileMetadata,
+  pipelineJobId?: string,
 ): Promise<{ savedLabel: string; lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient' }> {
+  const jobId = pipelineJobId?.trim() || `legacy-${Date.now()}`;
+  const { registerDownloadPipelineStart, registerDownloadPipelineEnd } =
+    await import('@/lib/nrmDownloadLyricsWorkGate');
+  registerDownloadPipelineStart(jobId);
   const { loadDownloadEncodeSettings, applyDownloadExtension } =
     await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
-  const { applyFfmpegTranscodeStage } = await import('@/lib/nrmDownloadAudioStages');
+  const { applyFfmpegTranscodeStage, applyFfmpegMetadataStage } =
+    await import('@/lib/nrmDownloadAudioStages');
   let uri = await applyFfmpegTranscodeStage(fileUri);
+  uri = await applyFfmpegMetadataStage(uri, metadata);
+  registerDownloadPipelineEnd(jobId, 'legacy_meta_done');
   const resolvedName = applyDownloadExtension(safeName, encode.extension);
   const { postProcessDownloadedAudio } = await import('@/lib/nrmDownloadAudioStages');
   const { fileUri: processedUri, lyricsWarning } = await postProcessDownloadedAudio(
@@ -377,17 +385,20 @@ async function extractAudioWithFallback(videoId: string): Promise<string> {
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
+    let raceCancelled = false;
     let failures = 0;
     const errors: unknown[] = [];
 
     const win = (lane: 'ytdlp' | 'innertube', fileUri: string) => {
       if (settled) return;
       settled = true;
+      raceCancelled = true;
       logDownloadStage('pipeline', 'extract_race_won', { videoId, lane });
       resolve(fileUri);
     };
 
     const lose = (lane: 'ytdlp' | 'innertube', err: unknown) => {
+      if (raceCancelled || err instanceof ExtractRaceCancelledError) return;
       errors.push(err);
       failures += 1;
       logNrmRunError(`download.${lane}.race_failed`, err, { videoId, failures });
@@ -402,7 +413,7 @@ async function extractAudioWithFallback(videoId: string): Promise<string> {
       .then((uri) => win('ytdlp', uri))
       .catch((e) => lose('ytdlp', e));
 
-    void extractWithInnertube(videoId)
+    void extractWithInnertube(videoId, () => raceCancelled)
       .then((uri) => win('innertube', uri))
       .catch((e) => lose('innertube', e));
   });
@@ -413,7 +424,17 @@ async function extractAudioWithFallback(videoId: string): Promise<string> {
  * iOS와 Android yt-dlp 실패 시 사용하는 youtubei.js 기반 다운로드.
  * Android → iOS → Web 클라이언트 타입 순으로 재시도합니다.
  */
-async function extractWithInnertube(videoId: string): Promise<string> {
+class ExtractRaceCancelledError extends Error {
+  constructor() {
+    super('EXTRACT_RACE_CANCELLED');
+    this.name = 'ExtractRaceCancelledError';
+  }
+}
+
+async function extractWithInnertube(
+  videoId: string,
+  isCancelled: () => boolean = () => false,
+): Promise<string> {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
     throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
@@ -426,9 +447,15 @@ async function extractWithInnertube(videoId: string): Promise<string> {
   const encode = await loadDownloadEncodeSettings();
 
   for (let i = 0; i < attempts.length; i++) {
+    if (isCancelled()) {
+      throw new ExtractRaceCancelledError();
+    }
     let tempUriForCleanup: string | undefined;
     try {
       const yt = await attempts[i]();
+      if (isCancelled()) {
+        throw new ExtractRaceCancelledError();
+      }
       const info = await yt.getBasicInfo(videoId);
       if (!info.streaming_data) {
         throw new Error('STREAMING_DATA_MISSING');
@@ -460,12 +487,18 @@ async function extractWithInnertube(videoId: string): Promise<string> {
       if (!formatUrl) {
         throw new Error('NO_STREAM_URL');
       }
+      if (isCancelled()) {
+        throw new ExtractRaceCancelledError();
+      }
       await downloadGooglevideoAudioToFileUri(
         formatUrl,
         info.cpn,
         tempUri,
         format,
       );
+      if (isCancelled()) {
+        throw new ExtractRaceCancelledError();
+      }
 
       logDownloadStage('innertube', 'download_ok', {
         videoId,
@@ -476,6 +509,12 @@ async function extractWithInnertube(videoId: string): Promise<string> {
 
       return tempUri;
     } catch (e) {
+      if (e instanceof ExtractRaceCancelledError) {
+        if (tempUriForCleanup) {
+          await FileSystem.deleteAsync(tempUriForCleanup, { idempotent: true }).catch(() => {});
+        }
+        throw e;
+      }
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {
           idempotent: true,

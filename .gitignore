@@ -23,6 +23,7 @@ app/dist/
 Thumbs.db
 
 # 루트 임시·테스트 파일
+/.build-release-apk-custom/
 /*.json
 /*.html
 

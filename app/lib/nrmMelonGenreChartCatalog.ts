@@ -290,6 +290,34 @@ export function createInitialMelonGenreChartDate(now: Date = new Date()) {
   };
 }
 
+export type MelonGenreDateSelection = {
+  year: number;
+  month: number;
+  weekOfMonth: number;
+};
+
+/** 탭별 첫 진입 기본값 (이후 탭 전환 시에는 저장된 선택 복원) */
+export function createDefaultMelonGenreChartDateForKind(
+  kind: MelonPeriodChartKind,
+  now: Date = new Date(),
+): MelonGenreDateSelection {
+  if (kind === 'weekly') {
+    return createInitialMelonGenreChartDate(now);
+  }
+  if (kind === 'monthly') {
+    const { year } = getPeriodChartCurrentDate(now);
+    const months = listMelonSelectableMonths(year, now, 'monthly');
+    const pickMonth = months.length > 0 ? months[months.length - 1]!.value : 1;
+    return { year, month: pickMonth, weekOfMonth: 1 };
+  }
+  const years = listMelonSelectableYears('yearly', now);
+  return {
+    year: years.length > 0 ? years[0]! : now.getFullYear() - 1,
+    month: 1,
+    weekOfMonth: 1,
+  };
+}
+
 export {
   getPeriodChartCurrentDate,
   listPeriodChartSelectableYears,

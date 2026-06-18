@@ -51,9 +51,11 @@ NullReferMusic-Build-Release-Apk.bat
 또는:
 
 ```powershell
-cd app\android
-.\gradlew.bat assembleRelease
+cd app
+npm run android:release
 ```
+
+Windows에서 `app\android`에서 `gradlew assembleRelease`를 직접 실행하면 경로 길이(MAX_PATH)로 실패할 수 있다. `docs/RELEASE-APK-IPA-RULE.md` §6-3-a 참고.
 
 산출물: `app\android\app\build\outputs\apk\release\NullReferenceMusic-v*.apk`
 

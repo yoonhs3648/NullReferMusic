@@ -9,6 +9,7 @@ import 'react-native-reanimated';
 
 import { NrmAppPermissionGate } from '@/components/nrm/NrmAppPermissionGate';
 import { NrmNotifyHost } from '@/components/nrm/NrmNotifyHost';
+import { NrmGoogleTranslateHost } from '@/components/nrm/NrmGoogleTranslateHost';
 import { NrmYoutubeCookieHarvester } from '@/components/nrm/NrmYoutubeCookieHarvester';
 import { NrmYoutubeDecipherHost } from '@/components/nrm/NrmYoutubeDecipherHost';
 import {
@@ -43,6 +44,7 @@ function RootLayoutInner() {
       {/* Android: YouTube 방문 → CookieManager에 쿠키 적재 → yt-dlp 403 회피 */}
       <NrmYoutubeCookieHarvester />
       <NrmYoutubeDecipherHost />
+      <NrmGoogleTranslateHost />
       <Stack
         screenOptions={{
           headerShown: false,

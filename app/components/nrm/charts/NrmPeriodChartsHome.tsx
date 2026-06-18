@@ -38,7 +38,9 @@ import {
 import { fetchPeriodChartPage } from '@/lib/nrmPeriodChartsClient';
 import {
   spotifyPeriodChartMaxRank,
+  createDefaultSpotifyPeriodDateForKind,
   type SpotifyPeriodChartKind,
+  type SpotifyPeriodDateSelection,
 } from '@/lib/nrmSpotifyPeriodChartCatalog';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { DEFAULT_WEEKLY_SNAPSHOT_DAY, loadWeeklySnapshotDay } from '@/lib/nrmWeeklySnapshotSettings';
@@ -88,6 +90,35 @@ export function NrmPeriodChartsHome({
   const [weekOfMonth, setWeekOfMonth] = useState(initialSpotify.weekOfMonth);
   const [snapshotDow, setSnapshotDow] = useState(DEFAULT_WEEKLY_SNAPSHOT_DAY);
   const [region, setRegion] = useState<PeriodChartRegion>('kr');
+
+  const spotifyKindSnapshotsRef = useRef<
+    Partial<Record<SpotifyPeriodChartKind, SpotifyPeriodDateSelection>>
+  >(
+    platform === 'spotify'
+      ? { daily: { year: initialSpotify.year, month: initialSpotify.month, day: initialSpotify.day, weekOfMonth: initialSpotify.weekOfMonth } }
+      : {},
+  );
+
+  useEffect(() => {
+    if (platform !== 'spotify') return;
+    spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth };
+  }, [platform, spotifyKind, year, month, day, weekOfMonth]);
+
+  const handleSpotifyKindChange = useCallback(
+    (next: SpotifyPeriodChartKind) => {
+      if (next === spotifyKind) return;
+      spotifyKindSnapshotsRef.current[spotifyKind] = { year, month, day, weekOfMonth };
+      const saved = spotifyKindSnapshotsRef.current[next];
+      const nextDate =
+        saved ?? createDefaultSpotifyPeriodDateForKind(next, snapshotDow);
+      setSpotifyKind(next);
+      setYear(nextDate.year);
+      setMonth(nextDate.month);
+      setDay(nextDate.day);
+      setWeekOfMonth(nextDate.weekOfMonth);
+    },
+    [spotifyKind, year, month, day, weekOfMonth, snapshotDow],
+  );
 
   const [items, setItems] = useState<ChartTrackItem[]>([]);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
@@ -265,7 +296,7 @@ export function NrmPeriodChartsHome({
         snapshotDow={snapshotDow}
         region={region}
         pickerControl={pickerControl}
-        onKindChange={setSpotifyKind}
+        onKindChange={handleSpotifyKindChange}
         onYearChange={setYear}
         onMonthChange={setMonth}
         onDayChange={setDay}

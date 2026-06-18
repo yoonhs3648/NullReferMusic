@@ -145,7 +145,7 @@ npm -v
    (폰 **단독**으로 yt-dlp/ffmpeg를 돌리는 기능은 네이티브 바이너리·권한 설계가 따로 필요하다.)
 
 4. **릴리스 APK (로컬 빌드 개요)**  
-   저장소에 `app/android/` 가 포함되어 있다. 빌드: `cd C:\NullReferMusic\app\android` 후 `.\gradlew.bat assembleDebug` 또는 `assembleRelease`. (`expo prebuild --clean` 을 쓰면 Gradle·Chaquopy·Kotlin 수정이 덮어쓰일 수 있으므로 주의.)
+   저장소에 `app/android/` 가 포함되어 있다. **릴리스 APK:** 저장소 루트 `NullReferMusic-Build-Release-Apk.bat` 또는 `cd app && npm run android:release` (Windows 경로 제한 대응 — `docs/RELEASE-APK-IPA-RULE.md` §6-3-a). 디버그: `cd app\android` 후 `.\gradlew.bat assembleDebug`. (`expo prebuild --clean` 을 쓰면 Gradle·Chaquopy·Kotlin 수정이 덮어쓰일 수 있으므로 주의.)
 
 ### Android 온디바이스 다운로드 (yt-dlp + FFmpeg)
 

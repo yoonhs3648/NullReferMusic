@@ -89,13 +89,10 @@ export function extractPlainLyricsFromLrcText(lrcText: string): string {
   return lines.length >= 2 ? plain : '';
 }
 
-/** 트랙 편집·저장 — 캐시된 plain 또는 website 재조회로 멜론 원문 가사 확보 */
+/** 트랙 편집·저장·다운로드 — website로 멜론 원문 가사 재조회 (파일 메타에는 저장하지 않음) */
 export async function resolveMelonPlainLyricsForEdit(
   website: string | undefined,
-  cachedPlain?: string,
 ): Promise<string> {
-  const cached = (cachedPlain ?? '').trim();
-  if (isMelonPlainLyricsText(cached)) return cached;
   return fetchMelonPlainLyricsFromWebsite(website);
 }
 
@@ -121,9 +118,16 @@ export function normalizeMelonTrackWebsite(url: string | undefined): string {
   return songId ? buildMelonTrackWebsite(songId) : (url ?? '').trim();
 }
 
-/** 트랙 메타 website가 멜론 곡인지 (가사 UI 멜론/일반 패밀리 구분) */
+/** 트랙 메타 website가 멜론 곡인지 (melon.com + songId) */
 export function isMelonTrackWebsite(website: string | undefined): boolean {
-  return !!extractMelonSongIdFromUrl(website);
+  const u = (website ?? '').trim();
+  if (!u || !extractMelonSongIdFromUrl(u)) return false;
+  try {
+    const host = new URL(u).hostname.toLowerCase();
+    return host === 'melon.com' || host.endsWith('.melon.com');
+  } catch {
+    return /melon\.com/i.test(u);
+  }
 }
 
 /**
@@ -146,15 +150,9 @@ export function applyWebsiteLyricsFamily(
  */
 export function inferMelonLyricsUiModeFromContext(
   detected: NrmLyricsUiMode,
-  melonPlain: string,
   website: string | undefined,
 ): NrmLyricsUiMode {
-  const fromWebsite = applyWebsiteLyricsFamily(detected, website);
-  if (fromWebsite !== 'unset') return fromWebsite;
-  if (isMelonTrackWebsite(website) && isMelonPlainLyricsText(melonPlain)) {
-    return 'melon';
-  }
-  return 'unset';
+  return applyWebsiteLyricsFamily(detected, website);
 }
 
 /** 트랙 편집 — 메타 website로 멜론 원문 가사 재조회 */

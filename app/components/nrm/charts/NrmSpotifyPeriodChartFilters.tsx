@@ -16,9 +16,8 @@ import type { PeriodChartRegion } from '@/lib/nrmPeriodChartCatalog';
 import {
   clampSpotifyPeriodChartDay,
   clampSpotifyPeriodChartMonth,
-  clampSpotifyWeekOfMonth,
-  createInitialSpotifyPeriodDate,
   defaultSpotifyWeekOfMonth,
+  createInitialSpotifyPeriodDate,
   listPeriodChartSelectableYears,
   listSpotifyPeriodChartSelectableDays,
   listSpotifyPeriodChartSelectableMonths,
@@ -131,15 +130,6 @@ export function NrmSpotifyPeriodChartFilters({
       return;
     }
     onKindChange(next);
-    const m = clampSpotifyPeriodChartMonth(year, month, next, snapshotDow, now);
-    if (m !== month) onMonthChange(m);
-    if (next === 'weekly') {
-      onWeekOfMonthChange(
-        clampSpotifyWeekOfMonth(year, m, weekOfMonth, snapshotDow, now),
-      );
-    } else if (next === 'daily') {
-      onDayChange(clampSpotifyPeriodChartDay(year, m, day, now));
-    }
   };
 
   const applyRegion = (next: PeriodChartRegion) => {

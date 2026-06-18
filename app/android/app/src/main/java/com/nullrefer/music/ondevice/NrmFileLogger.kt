@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import com.nullrefer.music.BuildConfig
+import com.nullrefer.music.NrmBrand
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -19,7 +20,7 @@ import java.util.TimeZone
 /**
  * 사용자가 파일 관리자에서 바로 열 수 있는 경로에 디버그 로그를 기록합니다.
  *
- * 경로: Download/NullReferenceMusic/logs/nrm-debug-YYYY-MM-DD.log
+ * 경로: Download/{@link NrmBrand#STORAGE_FOLDER_NAME}/logs/nrm-debug-YYYY-MM-DD.log
  * (Android/data 아래가 아님)
  *
  * on/off — SharedPreferences `nrm_file_logging` / JS AsyncStorage 와 동기화. 기본 off.
@@ -31,7 +32,7 @@ object NrmFileLogger {
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_PREFIX = "nrm-debug-"
   private const val LOG_FILE_SUFFIX = ".log"
-  private const val FOLDER = "NullReferenceMusic/logs"
+  private val folderRelPath = "${NrmBrand.STORAGE_FOLDER_NAME}/logs"
   private const val FAILURE_PAD = "\n\n\n"
 
   @Volatile private var appContext: Context? = null
@@ -41,7 +42,7 @@ object NrmFileLogger {
   private var legacyLogFile: File? = null
   private var activeLogDateKey: String? = null
   private var displayPath: String =
-    "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER/${LOG_FILE_PREFIX}YYYY-MM-DD$LOG_FILE_SUFFIX"
+    "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath/${LOG_FILE_PREFIX}YYYY-MM-DD$LOG_FILE_SUFFIX"
 
   fun init(context: Context) {
     if (appContext != null) return
@@ -161,7 +162,7 @@ object NrmFileLogger {
       legacyLogFile = null
       activeLogDateKey = null
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER"
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
         val selection =
@@ -180,7 +181,7 @@ object NrmFileLogger {
         val dir =
             File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                FOLDER,
+                folderRelPath,
             )
         if (dir.isDirectory) {
           dir.listFiles()?.forEach { f ->
@@ -236,7 +237,7 @@ object NrmFileLogger {
 
   private fun updateDisplayPath() {
     displayPath =
-        "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER/${logFileNameForDate(todayKey())}"
+        "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath/${logFileNameForDate(todayKey())}"
   }
 
   private fun write(level: String, tag: String, message: String, throwable: Throwable?) {
@@ -314,7 +315,7 @@ object NrmFileLogger {
       val dir =
           File(
               Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-              FOLDER,
+              folderRelPath,
           )
       if (!dir.exists() && !dir.mkdirs()) {
         Log.w(LOG_TAG, "legacy log dir create failed: ${dir.absolutePath}")
@@ -328,7 +329,7 @@ object NrmFileLogger {
 
   private fun resolveOrCreateMediaStoreUri(fileName: String): Uri? {
     val ctx = appContext ?: return null
-    val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER"
+    val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
     val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val projection = arrayOf(MediaStore.MediaColumns._ID)
     val selection =

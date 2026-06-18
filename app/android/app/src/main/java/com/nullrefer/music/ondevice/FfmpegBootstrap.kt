@@ -6,6 +6,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import com.nullrefer.music.BuildConfig
+import com.nullrefer.music.NrmBrand
 
 /**
  * Android arm64-v8a용 FFmpeg (ffmpeg + libffmpeg.so).
@@ -174,7 +176,7 @@ object FfmpegBootstrap {
       connectTimeout = 60_000
       readTimeout = 600_000
       instanceFollowRedirects = true
-      setRequestProperty("User-Agent", "NullReferenceMusic/1.0")
+      setRequestProperty("User-Agent", NrmBrand.userAgent(BuildConfig.VERSION_NAME))
     }
     conn.connect()
     if (conn.responseCode !in 200..299) {

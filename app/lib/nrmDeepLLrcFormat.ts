@@ -83,7 +83,7 @@ export function collectLrcTranslationTargets(lines: string[]): LrcTranslationTar
   }));
 }
 
-/** DeepL·LibreTranslate 응답은 가사만 온다고 가정 (구버전 `[타임] …` 응답도 파싱) */
+/** DeepL·Google Translate 응답은 가사만 온다고 가정 (구버전 `[타임] …` 응답도 파싱) */
 export function normalizeDeepLLyricTranslation(
   deeplResponse: string,
   requestLyric?: string,

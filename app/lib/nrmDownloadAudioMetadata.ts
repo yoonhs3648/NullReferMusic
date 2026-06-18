@@ -28,8 +28,7 @@ export type NrmAudioFileMetadata = {
    */
   nrmLyricsMode?: string;
   /**
-   * 다운로드 파이프라인 전용 — 멜론 원문 가사(plain).
-   * ffmpeg/파일 태그에는 기록하지 않는다.
+   * 다운로드 파이프라인 전용 — 멜론 싱크 생성 시 메모리에서만 사용 (파일 메타에 기록하지 않음).
    */
   melonLyricsPlain?: string;
   /**

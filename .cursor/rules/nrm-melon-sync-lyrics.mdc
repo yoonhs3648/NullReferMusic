@@ -1,0 +1,24 @@
+---
+description: 멜론 싱크 가사(forced alignment) 개선 요청 시 필수 참조 문서
+globs:
+  - "**/Wav2Vec2CtcForcedAligner.kt"
+  - "**/ForcedAlignEngine.kt"
+  - "**/AeneasForcedAligner.kt"
+  - "**/MelonSyncAlignOptions.kt"
+  - "**/nrmMelonLyricsLrcStage.ts"
+  - "**/nrmAlignModelNative.ts"
+  - "**/nrmMelonSyncSettings.ts"
+  - "**/NrmMelonSyncSettingsPanel.tsx"
+alwaysApply: false
+---
+
+# 멜론 싱크 가사 개선 규칙
+
+사용자가 **싱크 가사·멜론 LRC·forced align·wav2vec2 정렬** 개선, 또는 **로그+mp3/m4a 샘플**로 싱크·성능·생성 시간 개선을 요청하면:
+
+1. **`docs/NRM-MELON-SYNC-LYRICS.md`를 먼저 읽는다** (문제 히스토리·로그 해석·원칙·튜닝 상수).
+2. 사용자 로그가 있으면 문서 3절 태그로 grep 후 4절 유사 사례와 대조한다.
+3. 변경 후 문서 **「5. 개선 히스토리」**에 날짜·원인·변경·검증을追加한다.
+4. Kotlin 수정 시 `cd app/android && .\gradlew.bat :app:compileDebugKotlin`까지 통과시킨다.
+
+**품질:** 기존보다 나빠지면 안 됨. **시간:** 약간 느려져도 되나 과도한 ONNX 반복 금지.

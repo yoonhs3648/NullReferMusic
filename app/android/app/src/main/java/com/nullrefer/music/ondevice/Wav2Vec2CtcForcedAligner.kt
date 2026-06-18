@@ -9,6 +9,7 @@ import java.nio.ByteBuffer
 import java.nio.FloatBuffer
 import java.nio.ShortBuffer
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
@@ -335,6 +336,10 @@ object Wav2Vec2CtcForcedAligner {
                 session = session,
                 cachedVocab = cachedVocab,
                 options = options,
+                applyFirstLineIntroCorrection =
+                    idx == 0 &&
+                        segment.weightStart < 0.02 &&
+                        options.firstLineIntroCorrection,
             )
           } catch (t: Throwable) {
             if (t is OutOfMemoryError || t.cause is OutOfMemoryError) {
@@ -388,7 +393,26 @@ object Wav2Vec2CtcForcedAligner {
             throw t
           }
       if (part.lrc.isNotBlank()) {
-        sb.append(part.lrc).append('\n')
+        var segLrc =
+            stretchLrcTimestampsToVocalEnd(
+                part.lrc,
+                VocalRange(startMs, endMs),
+                durationMs,
+                segmentScoped = true,
+            )
+        if (idx > 0) {
+          val prevLastMs = lastTimestampMsInLrc(sb.toString())
+          if (prevLastMs >= 0) {
+            segLrc =
+                closeSegmentBoundaryGap(
+                    segLrc,
+                    prevLastMs,
+                    segmentStartMs = startMs,
+                    options.vocabKind(),
+                )
+          }
+        }
+        sb.append(segLrc).append('\n')
         aligned += part.alignedLines
       }
       totalLines += segment.lines.size
@@ -398,8 +422,19 @@ object Wav2Vec2CtcForcedAligner {
       )
       NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
     }
+    val stitched = sb.toString().trim()
+    val finalLrc =
+        if (segments.size > 1) {
+          NrmFileLogger.log(
+              "whisperx-align",
+              "ctc_fa_stitch segments=${segments.size} globalStretch=true vocalMs=${vocal.startMs}-${vocal.endMs}",
+          )
+          stretchLrcTimestampsToVocalEnd(stitched, vocal, durationMs, segmentScoped = false)
+        } else {
+          stretchLrcTimestampsToVocalEnd(stitched, vocal, durationMs)
+        }
     return AlignResult(
-        lrc = sb.toString().trim(),
+        lrc = finalLrc,
         alignedLines = aligned,
         totalLines = totalLines,
     )
@@ -623,6 +658,7 @@ object Wav2Vec2CtcForcedAligner {
       session: OrtSession,
       cachedVocab: Vocab? = null,
       options: MelonSyncAlignOptions,
+      applyFirstLineIntroCorrection: Boolean = options.firstLineIntroCorrection,
   ): AlignResult {
     if (audio.isEmpty() || melonLines.isEmpty()) {
       return AlignResult(lrc = "", alignedLines = 0, totalLines = melonLines.size)
@@ -641,7 +677,12 @@ object Wav2Vec2CtcForcedAligner {
     if (logProbs.isEmpty()) {
       throw IllegalStateException("empty_logits")
     }
-    val frameMs = audioDurationMs.toDouble() / logProbs.size.toDouble()
+    val frameMs =
+        if (logProbs.isEmpty()) 0.0
+        else {
+          val actualDurationMs = audio.size.toDouble() * 1000.0 / SAMPLE_RATE.toDouble()
+          actualDurationMs / logProbs.size.toDouble()
+        }
     val lineCharStarts = IntArray(melonLines.size)
     val full = StringBuilder()
     for (i in melonLines.indices) {
@@ -668,7 +709,7 @@ object Wav2Vec2CtcForcedAligner {
     val charToToken = charToTokenIndex.charToToken
     val tokenStartFrames = forcedAlignTokenStarts(logProbs, tokens, blankId, trellisLimit)
     val firstLineOnsetMs =
-        if (options.firstLineIntroCorrection) {
+        if (applyFirstLineIntroCorrection && options.firstLineIntroCorrection) {
           estimateFirstLineOnsetMs(
               logProbs,
               tokens,
@@ -692,28 +733,39 @@ object Wav2Vec2CtcForcedAligner {
           else tokenStartFrames.lastOrNull() ?: 0
       rawMs[i] = timeOffsetMs + (frame * frameMs).toInt().coerceAtLeast(0)
     }
-    if (melonLines.isNotEmpty() && options.firstLineIntroCorrection && firstLineOnsetMs >= 0) {
+    if (melonLines.isNotEmpty() && applyFirstLineIntroCorrection && options.firstLineIntroCorrection && firstLineOnsetMs >= 0) {
       val minFirst = timeOffsetMs + firstLineOnsetMs
       if (rawMs[0] < minFirst) {
         val delta = minFirst - rawMs[0]
+        val msFromSegmentStart = rawMs[0] - timeOffsetMs
         val adjusted =
-            if (delta > 12_000) {
-              rawMs[0] + (delta * 2) / 3
-            } else {
-              minFirst
+            when {
+              // CTC가 세그먼트 시작 근처인데 onset 프로브만 뒤로 밀 때 — 인트로 오탐 방지
+              msFromSegmentStart < 6_000 && delta > 10_000 ->
+                  (timeOffsetMs + options.minIntroMs()).coerceAtLeast(rawMs[0])
+              delta > 12_000 -> rawMs[0] + (delta * 2) / 3
+              else -> minFirst
             }
-        NrmFileLogger.log(
-            "whisperx-align",
-            "ctc_fa_first_line_bump before=${rawMs[0]} after=$adjusted delta=$delta",
-        )
-        rawMs[0] = adjusted
+        if (adjusted != rawMs[0]) {
+          NrmFileLogger.log(
+              "whisperx-align",
+              "ctc_fa_first_line_bump before=${rawMs[0]} after=$adjusted delta=$delta fromSegStart=$msFromSegmentStart",
+          )
+          rawMs[0] = adjusted
+        }
       }
     }
-    for (i in 1 until rawMs.size) {
-      if (rawMs[i] <= rawMs[i - 1]) {
-        rawMs[i] = rawMs[i - 1] + 65
-      }
-    }
+    spreadCollapsedLineTimestamps(
+        rawMs,
+        melonLines,
+        lineCharStarts,
+        charToToken,
+        tokenStartFrames,
+        frameMs,
+        timeOffsetMs,
+        options.vocabKind(),
+    )
+    enforceMonotonicAdaptive(rawMs, melonLines, options.vocabKind())
     val sb = StringBuilder()
     for (i in melonLines.indices) {
       sb.append(formatLrcTimestamp(rawMs[i])).append(melonLines[i]).append('\n')
@@ -1117,6 +1169,291 @@ object Wav2Vec2CtcForcedAligner {
     }
     return tokenStarts
   }
+
+  /**
+   * CTC가 동일 프레임에 여러 줄을 붙이면(특히 영어·인트로 직후) 한꺼번에 뭉친다.
+   * 토큰 종료 프레임까지 글자 수 비율로 펼친다 — ONNX 추가 없음.
+   */
+  private fun spreadCollapsedLineTimestamps(
+      rawMs: IntArray,
+      lines: List<String>,
+      lineCharStarts: IntArray,
+      charToToken: IntArray,
+      tokenStartFrames: IntArray,
+      frameMs: Double,
+      timeOffsetMs: Int,
+      vocabKind: MelonSyncVocabKind,
+  ) {
+    if (lines.size < 2 || frameMs <= 0.0) return
+    val collapseWindowMs = if (vocabKind == MelonSyncVocabKind.EN) 120 else 95
+    var i = 0
+    while (i < lines.size) {
+      var j = i + 1
+      while (j < lines.size && rawMs[j] - rawMs[i] < collapseWindowMs) j++
+      if (j - i < 2) {
+        i = j
+        continue
+      }
+      val startMs = rawMs[i]
+      val lastInRun = j - 1
+      val lastChar = lineCharStarts[lastInRun].coerceIn(0, charToToken.size - 1)
+      val lastTok = charToToken[lastChar].coerceAtLeast(0)
+      var endFrame = tokenStartFrames.getOrElse(lastTok) { tokenStartFrames.lastOrNull() ?: 0 }
+      if (j < lines.size) {
+        val nextChar = lineCharStarts[j].coerceIn(0, charToToken.size - 1)
+        val nextTok = charToToken[nextChar].coerceAtLeast(0)
+        endFrame = max(endFrame, tokenStartFrames.getOrElse(nextTok) { endFrame })
+      }
+      var endMs = timeOffsetMs + (endFrame * frameMs).toInt()
+      if (endMs <= startMs + collapseWindowMs) {
+        endMs = startMs + collapseWindowMs * (j - i)
+      }
+      val weights = IntArray(j - i) { k ->
+        normalizeLine(lines[i + k], vocabKind).length.coerceAtLeast(1)
+      }
+      val totalW = weights.sum().coerceAtLeast(1)
+      var cum = 0
+      for (k in 1 until j - i) {
+        cum += weights[k]
+        rawMs[i + k] = startMs + ((endMs - startMs) * cum / totalW)
+      }
+      NrmFileLogger.log(
+          "whisperx-align",
+          "ctc_fa_spread_run start=$i end=${j - 1} lines=${j - i} windowMs=${endMs - startMs}",
+      )
+      i = j
+    }
+  }
+
+  private fun enforceMonotonicAdaptive(
+      rawMs: IntArray,
+      lines: List<String>,
+      vocabKind: MelonSyncVocabKind,
+  ) {
+    for (i in 1 until rawMs.size) {
+      val minGap = minGapForLine(lines[i], vocabKind)
+      if (rawMs[i] < rawMs[i - 1] + minGap) {
+        rawMs[i] = rawMs[i - 1] + minGap
+      }
+    }
+  }
+
+  private fun minGapForLine(line: String, vocabKind: MelonSyncVocabKind): Int {
+    val chars = normalizeLine(line, vocabKind).length.coerceAtLeast(1)
+    val perChar = if (vocabKind == MelonSyncVocabKind.EN) 38 else 34
+    return max(52, min(480, chars * perChar))
+  }
+
+  /**
+   * CTC는 후반으로 갈수록 프레임 누적 오차가 난다.
+   * 첫 줄은 고정, 마지막 줄을 보컬(또는 세그먼트) 끝에 맞춰 선형 보정한다.
+   */
+  private fun stretchLrcTimestampsToVocalEnd(
+      lrc: String,
+      vocal: VocalRange,
+      durationMs: Long,
+      segmentScoped: Boolean = false,
+  ): String {
+    val parsed = parseLrcTimestampLines(lrc)
+    if (parsed.size < 4) {
+      logStretchSkip(
+          segmentScoped,
+          "too_few_lines",
+          parsed.size,
+          vocal,
+          durationMs,
+          drift = null,
+          ratio = null,
+          firstMs = parsed.firstOrNull()?.ms,
+          lastMs = parsed.lastOrNull()?.ms,
+          targetEnd = null,
+      )
+      return lrc
+    }
+    val firstMs = parsed.first().ms
+    val lastMs = parsed.last().ms
+    val span = (lastMs - firstMs).coerceAtLeast(1)
+    val outroPadMs =
+        when {
+          segmentScoped -> 320L
+          parsed.size >= 28 -> 2_600L
+          else -> 1_600L
+        }
+    val targetEnd =
+        (vocal.endMs - outroPadMs).coerceIn(
+            (firstMs + 12_000).toLong(),
+            (durationMs - 400L).coerceAtLeast((firstMs + 1).toLong()),
+        )
+    val drift = targetEnd - lastMs
+    if (abs(drift) < 900) {
+      logStretchSkip(
+          segmentScoped,
+          "drift_below_threshold",
+          parsed.size,
+          vocal,
+          durationMs,
+          drift = drift,
+          ratio = null,
+          firstMs = firstMs,
+          lastMs = lastMs,
+          targetEnd = targetEnd,
+      )
+      return lrc
+    }
+    val rawRatio = (targetEnd - firstMs).toDouble() / span.toDouble()
+    val ratio =
+        when {
+          rawRatio < 0.88 -> return lrc.also {
+            logStretchSkip(
+                segmentScoped,
+                "ratio_out_of_range",
+                parsed.size,
+                vocal,
+                durationMs,
+                drift = drift,
+                ratio = rawRatio,
+                firstMs = firstMs,
+                lastMs = lastMs,
+                targetEnd = targetEnd,
+            )
+          }
+          rawRatio > 1.32 ->
+              if (drift > 0 && rawRatio <= 1.50) {
+                NrmFileLogger.log(
+                    "whisperx-align",
+                    "ctc_fa_stretch_clamp rawRatio=${"%.3f".format(Locale.US, rawRatio)} applied=1.28",
+                )
+                1.28
+              } else {
+                return lrc.also {
+                  logStretchSkip(
+                      segmentScoped,
+                      "ratio_out_of_range",
+                      parsed.size,
+                      vocal,
+                      durationMs,
+                      drift = drift,
+                      ratio = rawRatio,
+                      firstMs = firstMs,
+                      lastMs = lastMs,
+                      targetEnd = targetEnd,
+                  )
+                }
+              }
+          else -> rawRatio
+        }
+    val scaledMs = IntArray(parsed.size)
+    scaledMs[0] = firstMs
+    for (i in 1 until parsed.size) {
+      val offset = parsed[i].ms - firstMs
+      scaledMs[i] =
+          (firstMs + offset * ratio).toInt().coerceAtLeast(scaledMs[i - 1] + 50)
+    }
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_stretch_applied segment=$segmentScoped lines=${parsed.size} first=$firstMs last=$lastMs targetEnd=$targetEnd drift=$drift ratio=${"%.3f".format(Locale.US, ratio)} rawRatio=${"%.3f".format(Locale.US, rawRatio)} vocalEnd=${vocal.endMs}",
+    )
+    val sb = StringBuilder()
+    for (i in parsed.indices) {
+      sb.append(formatLrcTimestamp(scaledMs[i])).append(parsed[i].text).append('\n')
+    }
+    return sb.toString().trim()
+  }
+
+  private fun logStretchSkip(
+      segmentScoped: Boolean,
+      reason: String,
+      lineCount: Int,
+      vocal: VocalRange,
+      durationMs: Long,
+      drift: Long?,
+      ratio: Double?,
+      firstMs: Int?,
+      lastMs: Int?,
+      targetEnd: Long?,
+  ) {
+    val ratioText =
+        ratio?.let { "%.3f".format(Locale.US, it) } ?: "n/a"
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_stretch_skip reason=$reason segment=$segmentScoped lines=$lineCount first=$firstMs last=$lastMs targetEnd=$targetEnd drift=$drift ratio=$ratioText vocalMs=${vocal.startMs}-${vocal.endMs} durMs=$durationMs",
+    )
+  }
+
+  private data class LrcTimestampLine(val ms: Int, val text: String)
+
+  private fun lastTimestampMsInLrc(lrc: String): Int {
+    val parsed = parseLrcTimestampLines(lrc)
+    return parsed.lastOrNull()?.ms ?: -1
+  }
+
+  /**
+   * 2패스 분할 시 후반 세그먼트 첫 줄이 first_line_bump 등으로 과도하게 밀리면
+   * 이전 세그먼트 마지막 줄과의 간격이 비정상적으로 벌어진다. 오디오 경계에 맞춰 당긴다.
+   */
+  private fun closeSegmentBoundaryGap(
+      segLrc: String,
+      prevLastMs: Int,
+      segmentStartMs: Long,
+      vocabKind: MelonSyncVocabKind,
+  ): String {
+    val parsed = parseLrcTimestampLines(segLrc)
+    if (parsed.isEmpty()) return segLrc
+    val firstNew = parsed.first().ms
+    val minGap = minGapForLine(parsed.first().text, vocabKind)
+    val targetFirst =
+        max(
+            prevLastMs + minGap,
+            segmentStartMs.toInt() + MIN_INTRO_MS,
+        )
+    val excessGap = firstNew - targetFirst
+    if (excessGap < 6_000) return segLrc
+    val shift = excessGap.coerceAtMost(firstNew - segmentStartMs.toInt())
+    if (shift <= 0) return segLrc
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_boundary_close prevLast=$prevLastMs first=$firstNew target=$targetFirst shift=$shift segStart=$segmentStartMs",
+    )
+    return shiftLrcTimestampsMs(segLrc, -shift)
+  }
+
+  private fun shiftLrcTimestampsMs(lrc: String, deltaMs: Int): String {
+    if (deltaMs == 0) return lrc
+    val parsed = parseLrcTimestampLines(lrc)
+    if (parsed.isEmpty()) return lrc
+    val sb = StringBuilder()
+    var prev = 0
+    for (line in parsed) {
+      val ms = max(prev + 40, line.ms + deltaMs)
+      prev = ms
+      sb.append(formatLrcTimestamp(ms)).append(line.text).append('\n')
+    }
+    return sb.toString().trim()
+  }
+
+  private fun parseLrcTimestampLines(lrc: String): List<LrcTimestampLine> {
+    val pattern = Regex("""^\[(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?\](.*)$""")
+    val out = mutableListOf<LrcTimestampLine>()
+    for (line in lrc.lineSequence()) {
+      val trimmed = line.trim()
+      if (trimmed.isEmpty()) continue
+      val m = pattern.matchEntire(trimmed) ?: continue
+      val min = m.groupValues[1].toIntOrNull() ?: continue
+      val sec = m.groupValues[2].toIntOrNull() ?: continue
+      val fracRaw = m.groupValues[3]
+      val fracMs =
+          when {
+            fracRaw.isEmpty() -> 0
+            fracRaw.length == 1 -> fracRaw.toIntOrNull()?.times(100) ?: 0
+            fracRaw.length == 2 -> fracRaw.toIntOrNull()?.times(10) ?: 0
+            else -> fracRaw.take(3).toIntOrNull() ?: 0
+          }
+      val ms = min * 60_000 + sec * 1_000 + fracMs
+      out += LrcTimestampLine(ms, m.groupValues[4])
+    }
+    return out
+  }
+
   private fun formatLrcTimestamp(startMs: Int): String {
     val totalCs = max(0, startMs / 10)
     val cs = totalCs % 100

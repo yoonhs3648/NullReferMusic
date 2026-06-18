@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 110
-        versionName "1.8.20"
+        versionCode 116
+        versionName "1.8.26"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -190,9 +190,6 @@ android {
             def checks = [
                 [file: new File(repoRoot, "app/android/app/src/main/assets/whisper/whisper-cli"), min: 500000L, hint: "scripts/Build-Whisper-AndroidCli.ps1"],
                 [file: new File(repoRoot, "app/android/app/src/main/assets/shine/shineenc"), min: 40000L, hint: "scripts/Setup-AndroidShine.ps1"],
-                [file: new File(repoRoot, "app/android/app/src/main/assets/libretranslate/arm64-v8a/nrm-argos-translate"), min: 200000L, hint: "scripts/Build-ArgosTranslate-Android.ps1"],
-                [file: new File(repoRoot, "app/android/app/src/main/assets/libretranslate/nrm-argos-translate"), min: 200000L, hint: "scripts/Build-ArgosTranslate-Android.ps1"],
-                [file: new File(repoRoot, "app/android/app/src/main/assets/libretranslate/libctranslate2.so"), min: 1000000L, hint: "scripts/Build-ArgosTranslate-Android.ps1"],
             ]
             def errors = []
             checks.each { c ->

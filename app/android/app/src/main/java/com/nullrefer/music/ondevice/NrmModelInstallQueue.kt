@@ -7,7 +7,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 오프라인 번역기·Whisper·wav2vec2 등 대용량 모델 설치를 **한 번에 하나씩** 직렬 처리합니다.
+ * Whisper·wav2vec2 등 대용량 모델 설치를 **한 번에 하나씩** 직렬 처리합니다.
  * 오디오 다운로드(dl:*)·가사 생성(whisper-lrc:* 등)과는 별도로 동작합니다.
  */
 object NrmModelInstallQueue {

@@ -6,6 +6,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
 
+import { NRM_BRAND_STORAGE_FOLDER_NAME } from '@/lib/nrmAppBrand';
+
 const SAF_GRANT_KEY = 'nrm_saf_download_dir_v2';
 
 /**
@@ -66,7 +68,9 @@ export async function loadStoredSafGrant(): Promise<string | null> {
  * 저장된 허가가 있으면 반환, 없으면 폴더 선택 UI를 띄워 새로 받습니다.
  * 사용자가 취소하면 null 반환.
  */
-export async function acquireSafDirUri(folderHint = 'NullReferenceMusic'): Promise<string | null> {
+export async function acquireSafDirUri(
+  folderHint = NRM_BRAND_STORAGE_FOLDER_NAME,
+): Promise<string | null> {
   const existing = await loadStoredSafGrant();
   if (existing) return existing;
   return requestNewSafDirUri(folderHint);
@@ -77,7 +81,9 @@ export async function acquireSafDirUri(folderHint = 'NullReferenceMusic'): Promi
  * 설정 화면에서 경로를 변경할 때 사용합니다.
  * 사용자가 취소하면 null 반환.
  */
-export async function requestNewSafDirUri(folderHint = 'NullReferenceMusic'): Promise<string | null> {
+export async function requestNewSafDirUri(
+  folderHint = NRM_BRAND_STORAGE_FOLDER_NAME,
+): Promise<string | null> {
   // getUriForDirectoryInRoot 은 tree/ URI를 반환해 삼성 피커가 "S20 FE" 기기 루트로 열림.
   // document/primary: 형식을 쓰면 "내장 저장공간" 루트로 바로 열린다.
   const hint = folderHint
