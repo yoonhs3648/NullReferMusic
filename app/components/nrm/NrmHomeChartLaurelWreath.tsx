@@ -72,6 +72,19 @@ type Props = {
   width: number;
 };
 
+function pointedLeafPath(cx: number, cy: number, s: number): string {
+  const top = cy - s;
+  const bottom = cy + s * 0.22;
+  const half = s * 0.4;
+  // react-native-svg: C 명령마다 제어점 2개 + 끝점 1개(총 6개 숫자) 필수
+  return (
+    `M ${cx} ${top} ` +
+    `C ${cx + half} ${cy - s * 0.5} ${cx + half * 0.7} ${bottom} ${cx} ${bottom} ` +
+    `C ${cx - half * 0.7} ${bottom} ${cx - half} ${cy - s * 0.5} ${cx} ${top} ` +
+    'Z'
+  );
+}
+
 function PointedLeaf({
   cx,
   cy,
@@ -88,7 +101,7 @@ function PointedLeaf({
   palette: LaurelPalette;
 }) {
   const s = size;
-  const d = `M${cx} ${cy - s} C${cx + s * 0.42} ${cy - s * 0.55}, ${cx + s * 0.38} ${cy - s * 0.08}, ${cx + s * 0.22} ${cy + s * 0.12} C${cx} ${cy + s * 0.28}, ${cx - s * 0.22} ${cy + s * 0.12}, ${cx - s * 0.38} ${cy - s * 0.08} C${cx - s * 0.42} ${cy - s * 0.55}, ${cx} ${cy - s} Z`;
+  const d = pointedLeafPath(cx, cy, s);
   return (
     <G rotation={rotation} origin={`${cx}, ${cy}`}>
       <Path d={d} fill={`url(#${gradId})`} stroke={palette.stem} strokeWidth={0.3} />
