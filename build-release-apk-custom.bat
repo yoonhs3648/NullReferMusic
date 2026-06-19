@@ -55,9 +55,7 @@ if /i "%DO_CUSTOM%"=="Y" (
 
 echo.
 if defined CUSTOMIZE_FLAG (
-  for /f "usebackq delims=" %%A in ("%WORK%\display-name.txt") do (
-    echo Building release APK with temporary display name: %%A
-  )
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$n = [IO.File]::ReadAllText('%WORK%\display-name.txt').Trim(); Write-Host ('Building release APK with temporary display name: ' + $n)"
 ) else (
   echo Building release APK with default branding ^(NullReference Music^)...
 )

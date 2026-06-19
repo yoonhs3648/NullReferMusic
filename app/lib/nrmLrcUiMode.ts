@@ -261,19 +261,24 @@ function lyricsGenerationActionForMode(
   return { kind: 'generate', mode: 'translation' };
 }
 
-export function resolveLyricsSidecarAction(
-
-  initial: NrmLyricsUiMode,
-
-  next: NrmLyricsUiMode,
-
+function hasExistingSyncLyrics(
   existingLrcUri?: string | null,
+  hasEmbeddedSyncLyrics?: boolean,
+): boolean {
+  return !!(existingLrcUri?.trim()) || !!hasEmbeddedSyncLyrics;
+}
 
+export function resolveLyricsSidecarAction(
+  initial: NrmLyricsUiMode,
+  next: NrmLyricsUiMode,
+  existingLrcUri?: string | null,
+  hasEmbeddedSyncLyrics?: boolean,
 ): LyricsSidecarAction {
+  const hasExistingLrc = hasExistingSyncLyrics(existingLrcUri, hasEmbeddedSyncLyrics);
 
   if (initial === next) {
     // UI 모드는 같지만 LRC가 아직 없으면(멜론 정렬 실패 등) 저장 시 생성을 허용
-    if (next !== 'unset' && !existingLrcUri?.trim()) {
+    if (next !== 'unset' && !hasExistingLrc) {
       return lyricsGenerationActionForMode(next);
     }
     return { kind: 'none' };
@@ -281,72 +286,44 @@ export function resolveLyricsSidecarAction(
 
   if (next === 'unset') return { kind: 'delete' };
 
-
-
   if (isMelonLyricsUiMode(next)) {
-
     if (next === 'melon') {
-
       if (
-
         (initial === 'melon_translation' || initial === 'translation') &&
-
-        existingLrcUri
-
+        hasExistingLrc
       ) {
-
         return { kind: 'strip-translation' };
-
       }
-
       return { kind: 'generate-melon', mode: 'melon' };
-
     }
 
-    if (initial === 'melon' && existingLrcUri) {
-
+    if (initial === 'melon' && hasExistingLrc) {
       return { kind: 'translate-lrc' };
-
     }
 
-    if (initial === 'configured' && existingLrcUri) {
-
+    if (initial === 'configured' && hasExistingLrc) {
       return { kind: 'translate-lrc' };
-
     }
 
     return { kind: 'generate-melon', mode: 'melon_translation' };
-
   }
-
-
 
   if (next === 'configured') {
-
-    if (existingLrcUri) {
-
+    if (hasExistingLrc) {
       return { kind: 'strip-translation' };
-
     }
-
     return { kind: 'generate', mode: 'configured' };
-
   }
 
-  if (initial === 'configured' && existingLrcUri) {
-
+  if (initial === 'configured' && hasExistingLrc) {
     return { kind: 'translate-lrc' };
-
   }
 
-  if (initial === 'melon' && existingLrcUri) {
-
+  if (initial === 'melon' && hasExistingLrc) {
     return { kind: 'translate-lrc' };
-
   }
 
   return { kind: 'generate', mode: 'translation' };
-
 }
 
 /**
@@ -387,6 +364,8 @@ export function resolveStoredLyricsModeFromFlags(input: {
   hasSidecarLrc?: boolean;
   sidecarLrcText?: string;
   embeddedSyncLyrics?: string;
+  /** MP3 TXXX / m4a nrm_lyrics_mode — LRC 본문 복원 실패 시 UI 모드 힌트 */
+  embeddedLyricsMode?: string;
   /** 멜론 곡 URL — 싱크 가사와 함께 있으면 멜론 패밀리로 복원 */
   melonTrackUrl?: string;
 }): NrmLyricsUiMode {
@@ -399,6 +378,23 @@ export function resolveStoredLyricsModeFromFlags(input: {
   const hasSync = hasSidecar || hasEmbeddedSync;
 
   if (!hasSync) {
+    const modeToken = (input.embeddedLyricsMode ?? '').trim().toLowerCase();
+    if (
+      modeToken === 'melon' ||
+      modeToken === 'melon_translation' ||
+      modeToken === 'configured' ||
+      modeToken === 'translation'
+    ) {
+      const isMelon = isMelonTrackWebsite(input.melonTrackUrl);
+      if (isMelon) {
+        return modeToken === 'melon_translation' || modeToken === 'translation'
+          ? 'melon_translation'
+          : 'melon';
+      }
+      return modeToken === 'translation' || modeToken === 'melon_translation'
+        ? 'translation'
+        : 'configured';
+    }
     return 'unset';
   }
 

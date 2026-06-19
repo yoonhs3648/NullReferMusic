@@ -35,8 +35,10 @@ import {
   nrmNotifyDownloadWorkEnded,
 } from '@/lib/nrmMobileDownloadNotifications';
 import {
+  nrmBackgroundWorkAcquire,
   nrmBackgroundWorkRelease,
   nrmDownloadBackgroundWorkToken,
+  nrmLyricsBackgroundWorkToken,
 } from '@/lib/nrmBackgroundWork';
 import {
   normalizeDownloadMetadata,
@@ -636,12 +638,14 @@ export function NrmYoutubeHome({
             Platform.OS !== 'web'
               ? () => {
                   nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
+                  nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
                 }
               : undefined,
           onLyricsStageEnded:
             Platform.OS !== 'web'
               ? () => {
                   nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+                  nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
                 }
               : undefined,
           onLyricsPersisted:

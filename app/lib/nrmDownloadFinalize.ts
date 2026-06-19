@@ -249,7 +249,9 @@ async function finalizeNativeParallel(
   options?.onAudioPersisted?.(audioSaved.savedLabel);
 
   // ── 3단계: 가사 생성 (오디오가 저장된 뒤) ───────────────────────────────────
+  let lyricsStageStarted = false;
   if (lyricsModeActive) {
+    lyricsStageStarted = true;
     const activeMode = whisperMode ?? melonMode!;
     options?.onLyricsStageStarted?.();
     logNrmDev('download.lyrics', {
@@ -297,8 +299,6 @@ async function finalizeNativeParallel(
         lyricsEmbedded: false,
         ...(melonMode ? { lyricsMelonAlignFailed: true } : {}),
       };
-    } finally {
-      options?.onLyricsStageEnded?.();
     }
   }
 
@@ -401,6 +401,10 @@ async function finalizeNativeParallel(
       audioFileName: audioSaved.location.fileName,
       lyricsEmbedded: whisperRef.result.lyricsEmbedded,
     });
+  }
+
+  if (lyricsStageStarted) {
+    options?.onLyricsStageEnded?.();
   }
 
   await deleteLocalAudioTemps(temps);

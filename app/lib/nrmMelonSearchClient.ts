@@ -57,6 +57,7 @@ import {
   enrichMelonTrackDetail,
   enrichMelonTrackSearchHits,
 } from '@/lib/nrmMelonSearchEnrich';
+import { readMelonHtmlCache, writeMelonHtmlCache } from '@/lib/nrmMelonHtmlCache';
 
 const MELON_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -73,6 +74,10 @@ function requireQuery(query: string): string | null {
 }
 
 async function melonFetchHtml(url: string, referer = `${MELON_BASE}/`): Promise<string | null> {
+  const cached = readMelonHtmlCache(url);
+  if (cached !== null) {
+    return cached;
+  }
   try {
     const res = await nrmDirectFetch(
       url,
@@ -87,7 +92,9 @@ async function melonFetchHtml(url: string, referer = `${MELON_BASE}/`): Promise<
       'melon-search',
     );
     if (!res.ok) return null;
-    return await res.text();
+    const html = await res.text();
+    writeMelonHtmlCache(url, html);
+    return html;
   } catch {
     return null;
   }

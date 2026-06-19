@@ -19,22 +19,29 @@ import {
   resolveMelonPlainLyricsForEdit,
 } from '@/lib/nrmMelonLyrics';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
-import { resolveLyricsSidecarAction } from '@/lib/nrmLrcUiMode';
+import { resolveLyricsSidecarAction, isEmbeddedSyncLyricsText } from '@/lib/nrmLrcUiMode';
 import {
   deletePersistedLrc,
   persistLrcForSavedAudio,
   type PersistedAudioLocation,
 } from '@/lib/nrmPersistDownload.native';
 import { copyLocalFileToSaf } from '@/lib/onDeviceDownload';
+import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
 import { transcribeWhisperLrc } from '@/lib/nrmWhisperLrcStage';
 import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadStarted,
 } from '@/lib/nrmMobileDownloadNotifications.native';
+import {
+  nrmBackgroundWorkAcquire,
+  nrmBackgroundWorkRelease,
+  nrmLyricsBackgroundWorkToken,
+} from '@/lib/nrmBackgroundWork';
 import { loadLyricsOutputMode } from '@/lib/nrmDownloadSettings';
 import { notifyUser } from '@/lib/nrmUserNotify';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
+import { invalidateAudioMetadataCache } from '@/lib/nrmReadAudioMetadata';
 
 const LRC_SAF_MIME = 'application/octet-stream';
 
@@ -204,7 +211,35 @@ export type ApplyTrackMetadataUpdateInput = {
   metadata: NrmAudioFileMetadata;
   initialLyricsMode: NrmLyricsUiMode;
   newLyricsMode: NrmLyricsUiMode;
+  /** 사이드카 없이 mp3/m4a 내장 SYLT·©lyr 등에만 싱크 가사가 있는 경우 */
+  hasEmbeddedSyncLyrics?: boolean;
 };
+
+async function readExistingSyncLrcText(
+  track: NrmDownloadTrackItem,
+  audioUri: string,
+  fileName: string,
+): Promise<string | null> {
+  if (track.lrcUri) {
+    try {
+      const sidecar = await FileSystem.readAsStringAsync(track.lrcUri, {
+        encoding: EncodingType.UTF8,
+      });
+      if (sidecar.trim()) return sidecar.trim();
+    } catch {
+      /* sidecar 읽기 실패 → 내장 가사 시도 */
+    }
+  }
+  try {
+    invalidateAudioMetadataCache(audioUri);
+    const meta = await readAudioFileMetadata(audioUri, fileName);
+    const embedded = (meta.lyrics ?? '').trim();
+    if (isEmbeddedSyncLyricsText(embedded)) return embedded;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 
 export async function applyTrackMetadataUpdate(
   input: ApplyTrackMetadataUpdateInput,
@@ -213,9 +248,15 @@ export async function applyTrackMetadataUpdate(
     throw new Error('트랙 메타데이터 설정은 앱에서만 사용할 수 있습니다.');
   }
 
-  const { track, newFileName, metadata, initialLyricsMode, newLyricsMode } = input;
+  const { track, newFileName, metadata, initialLyricsMode, newLyricsMode, hasEmbeddedSyncLyrics } =
+    input;
   const { ffmpegMetadata } = splitMetadataForDownloadStages(metadata);
-  const lyricsAction = resolveLyricsSidecarAction(initialLyricsMode, newLyricsMode, track.lrcUri);
+  const lyricsAction = resolveLyricsSidecarAction(
+    initialLyricsMode,
+    newLyricsMode,
+    track.lrcUri,
+    hasEmbeddedSyncLyrics,
+  );
   const displayLabel = `${metadata.artist.trim()} - ${metadata.title.trim()}`;
   const jobId = lyricsJobId(track);
 
@@ -279,39 +320,31 @@ export async function applyTrackMetadataUpdate(
     }
   }
 
-  // translate-lrc / strip-translation은 기존 LRC 내용이 필요하므로 삭제 전에 미리 읽기
+  // translate-lrc / strip-translation은 기존 LRC(사이드카·내장) 내용이 필요하므로 삭제 전에 읽기
   let preReadLrcText: string | null = null;
-  if (
-    (lyricsAction.kind === 'translate-lrc' || lyricsAction.kind === 'strip-translation') &&
-    track.lrcUri
-  ) {
-    try {
-      preReadLrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
-        encoding: EncodingType.UTF8,
-      });
-    } catch {
-      preReadLrcText = null;
-    }
+  if (lyricsAction.kind === 'translate-lrc' || lyricsAction.kind === 'strip-translation') {
+    preReadLrcText = await readExistingSyncLrcText(track, location.audioUri, location.fileName);
   }
 
   if (lrcUri) await deletePersistedLrc(lrcUri);
 
   nrmNotifyDownloadStarted(jobId, displayLabel, 'lyrics');
+  nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(jobId));
+  let lyricsWorkFinished = false;
+  const finishLyricsWork = (ok: boolean) => {
+    if (lyricsWorkFinished) return;
+    lyricsWorkFinished = true;
+    nrmNotifyDownloadFinished(jobId, displayLabel, ok, 'lyrics');
+    nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(jobId));
+  };
 
   // configured → translation: Whisper 재실행 없이 기존 LRC를 DeepL로 번역
   if (lyricsAction.kind === 'translate-lrc') {
     const existingLrcText = preReadLrcText?.trim() ?? '';
     if (!existingLrcText) {
-      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      finishLyricsWork(false);
       throw new Error('기존 가사 파일을 읽을 수 없습니다.');
     }
-    let notified = false;
-    const notify = (ok: boolean) => {
-      if (!notified) {
-        notified = true;
-        nrmNotifyDownloadFinished(jobId, displayLabel, ok, 'lyrics');
-      }
-    };
     try {
       const { translateLrcToKorean } = await import('@/lib/nrmTranslationClient');
       const translated = await translateLrcToKorean(existingLrcText);
@@ -321,7 +354,7 @@ export async function applyTrackMetadataUpdate(
           existingLrcText,
           initialLyricsMode !== 'unset' ? initialLyricsMode : 'configured',
         );
-        notify(false);
+        finishLyricsWork(false);
         const isExhausted = (translated.message ?? '').includes('사용량이 초과');
         throw new Error(
           isExhausted
@@ -330,13 +363,13 @@ export async function applyTrackMetadataUpdate(
         );
       }
       if (newLyricsMode === 'unset') {
-        notify(false);
+        finishLyricsWork(false);
         throw new Error('가사 모드를 확인할 수 없습니다.');
       }
       await saveLrc(translated.lrc, newLyricsMode);
-      notify(true);
+      finishLyricsWork(true);
     } catch (e) {
-      notify(false);
+      finishLyricsWork(false);
       throw e;
     }
     return;
@@ -354,9 +387,9 @@ export async function applyTrackMetadataUpdate(
         }
         await saveLrc(stripped || existingLrcText, newLyricsMode);
       }
-      nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
+      finishLyricsWork(true);
     } catch {
-      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      finishLyricsWork(false);
     }
     return;
   }
@@ -367,7 +400,7 @@ export async function applyTrackMetadataUpdate(
       await resolveMelonPlainLyricsForEdit(normalizeMelonTrackWebsite(metadata.website))
     ).trim();
     if (!plain) {
-      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      finishLyricsWork(false);
       notifyUser('멜론 가사를 가져올 수 없습니다.');
       return;
     }
@@ -382,7 +415,7 @@ export async function applyTrackMetadataUpdate(
               return resolveMelonAlignLanguageForPlain(plain);
             })();
       if (!alignLang) {
-        nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        finishLyricsWork(false);
         return;
       }
       const workUri = await materializeToCache(location.audioUri, location.fileName);
@@ -393,17 +426,17 @@ export async function applyTrackMetadataUpdate(
       );
       if (melon.lrcFull?.trim()) {
         await saveLrc(melon.lrcFull, lyricsAction.mode);
-        nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
+        finishLyricsWork(true);
       } else if (melon.lyricsMelonMemoryInsufficient) {
-        nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        finishLyricsWork(false);
         notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
       } else {
-        nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+        finishLyricsWork(false);
         notifyUser('멜론가사 생성에 실패했습니다.');
       }
       await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
     } catch {
-      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      finishLyricsWork(false);
       notifyUser('가사 생성 중 오류가 발생했습니다.');
     }
     return;
@@ -418,14 +451,14 @@ export async function applyTrackMetadataUpdate(
     );
     if (whisper.lrcFull?.trim()) {
       await saveLrc(whisper.lrcFull, lyricsAction.mode);
-      nrmNotifyDownloadFinished(jobId, displayLabel, true, 'lyrics');
+      finishLyricsWork(true);
     } else {
-      nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+      finishLyricsWork(false);
       notifyUser('가사 생성에 실패했습니다. 오디오는 저장되어 있습니다.');
     }
     await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
   } catch {
-    nrmNotifyDownloadFinished(jobId, displayLabel, false, 'lyrics');
+    finishLyricsWork(false);
     notifyUser('가사 생성 중 오류가 발생했습니다.');
   }
 }

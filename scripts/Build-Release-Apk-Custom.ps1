@@ -122,7 +122,7 @@ try {
     Invoke-Npm @('run', 'generate:music-quotes')
 
     Write-Host "[4/5] Gradle assembleRelease..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkSuffix '-custom'
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'
     }

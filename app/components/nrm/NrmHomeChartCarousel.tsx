@@ -2,77 +2,96 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
-  PanResponder,
+  FlatList,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type StyleProp,
+  type ViewStyle,
+  type ViewToken,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
-import { NrmHomeChartRankCrown, homeChartPodiumTextColors } from '@/components/nrm/NrmHomeChartRankCrown';
+import { NrmHomeChartLaurelWreath } from '@/components/nrm/NrmHomeChartLaurelWreath';
+import {
+  NrmHomeChartRankCrown,
+  homeChartCrownClearanceInset,
+  homeChartPodiumTextColors,
+  homeChartPodiumTier,
+} from '@/components/nrm/NrmHomeChartRankCrown';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { homeChartItemsFingerprint } from '@/lib/nrmHomeChartClient';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
+
+const AUTO_ADVANCE_MS = 5000;
+/** TOP 라벨 + 숫자 블록 높이 — 위치 고정 */
+const RANK_HERO_BLOCK_HEIGHT = 72;
 
 type Props = {
   isDark: boolean;
   items: ChartTrackItem[];
   loading?: boolean;
+  initialIndex?: number;
+  onIndexChange?: (index: number) => void;
   onTrackPress: (item: ChartTrackItem) => void;
 };
 
-/** 메뉴 좌측 스와이프 영역과 겹치지 않도록 여유를 둔 시작 X (px) */
-function menuSwipeGuardPx(insetsLeft: number): number {
-  const base = Platform.OS === 'web' ? 36 : 32;
-  return base + insetsLeft;
-}
-
-function modIndex(i: number, count: number): number {
+function wrapIndex(i: number, count: number): number {
   if (count <= 0) return 0;
   return ((i % count) + count) % count;
+}
+
+function clampIndex(i: number, count: number): number {
+  if (count <= 0) return 0;
+  return Math.min(Math.max(i, 0), count - 1);
+}
+
+function toPhysicalIndex(logical: number, count: number): number {
+  if (count <= 1) return clampIndex(logical, count);
+  return count + wrapIndex(logical, count);
+}
+
+function toLogicalIndex(physical: number, count: number): number {
+  if (count <= 0) return 0;
+  return wrapIndex(physical, count);
+}
+
+/** 마지막→첫·첫→마지막 래핑 시 FlatList가 중간 페이지를 모두 지나가는 것을 방지 */
+function isLoopWrap(from: number, to: number, count: number, direction: number): boolean {
+  if (count <= 1) return false;
+  if (direction > 0) return from === count - 1 && to === 0;
+  if (direction < 0) return from === 0 && to === count - 1;
+  return false;
 }
 
 type CarouselSlideProps = {
   item: ChartTrackItem;
   index: number;
+  pageWidth: number;
   coverSize: number;
-  isDark: boolean;
-  ink: string;
-  muted: string;
+  trackInset: number;
   onPress: () => void;
 };
 
-function CarouselSlide({
-  item,
-  index,
-  coverSize,
-  isDark,
-  ink,
-  muted,
-  onPress,
-}: CarouselSlideProps) {
+function CarouselSlide({ item, index, pageWidth, coverSize, trackInset, onPress }: CarouselSlideProps) {
   const rank = item.rank > 0 ? item.rank : index + 1;
-  const podiumColors = homeChartPodiumTextColors(rank, isDark);
-  const rankTopLabelColor = podiumColors?.label ?? muted;
-  const rankNumberColor = podiumColors?.number ?? ink;
 
   return (
-    <View style={[styles.slide, { width: coverSize }]}>
-      <View style={styles.rankHero} accessibilityLabel={`탑 ${rank}`}>
-        <Text style={[styles.rankTopLabel, { color: rankTopLabelColor }]}>TOP</Text>
-        <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{rank}</Text>
-      </View>
+    <View style={[styles.page, { width: pageWidth }]}>
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
           styles.coverPress,
-          { width: coverSize, height: coverSize },
+          {
+            width: coverSize,
+            height: coverSize,
+            marginTop: trackInset,
+          },
           pressed && styles.coverPressed,
         ]}
         accessibilityRole="button"
@@ -84,7 +103,6 @@ function CarouselSlide({
               {
                 width: coverSize,
                 height: coverSize,
-                shadowColor: isDark ? '#000' : '#1d1d1f',
               },
             ]}>
             <NrmChartTrackArt
@@ -101,133 +119,363 @@ function CarouselSlide({
   );
 }
 
+type ChartNavButtonProps = {
+  direction: 'prev' | 'next';
+  disabled: boolean;
+  isDark: boolean;
+  onPress: () => void;
+  style: StyleProp<ViewStyle>;
+};
+
+function ChartNavButton({ direction, disabled, isDark, onPress, style }: ChartNavButtonProps) {
+  const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const bg = isDark ? 'rgba(255,255,255,0.06)' : nrmTokens.color.canvas;
+  const iconColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+  const pressedBg = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={{ top: 8, bottom: 8, left: direction === 'prev' ? 4 : 8, right: direction === 'next' ? 4 : 8 }}
+      style={({ pressed }) => [
+        styles.navBtn,
+        {
+          backgroundColor: pressed ? pressedBg : bg,
+          borderColor,
+          opacity: disabled ? 0 : 1,
+        },
+        style,
+        disabled && styles.navBtnHidden,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={direction === 'prev' ? '이전 순위' : '다음 순위'}>
+      <Ionicons
+        name={direction === 'prev' ? 'chevron-back' : 'chevron-forward'}
+        size={20}
+        color={iconColor}
+      />
+    </Pressable>
+  );
+}
+
 export function NrmHomeChartCarousel({
   isDark,
   items,
   loading = false,
+  initialIndex = 0,
+  onIndexChange,
   onTrackPress,
 }: Props) {
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-  const [index, setIndex] = useState(0);
-  const indexRef = useRef(0);
+  const listRef = useRef<FlatList<ChartTrackItem>>(null);
+  const [index, setIndex] = useState(() => clampIndex(initialIndex, items.length));
+  const indexRef = useRef(index);
   indexRef.current = index;
 
+  const countRef = useRef(items.length);
+  countRef.current = items.length;
+  const loopEnabledRef = useRef(items.length > 1);
+  loopEnabledRef.current = items.length > 1;
+
+  const userDraggingRef = useRef(false);
+  const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+  const repositioningRef = useRef(false);
+  const onIndexChangeRef = useRef(onIndexChange);
+  onIndexChangeRef.current = onIndexChange;
+
   const coverSize = Math.min(Math.round(width * 0.74), 340);
-  const arrowW = 38;
-  const arrowH = 48;
-  const arrowGap = 10;
-  const slideGap = Math.round(coverSize * 0.08);
-  const slideStride = coverSize + slideGap;
+  const trackInset = homeChartCrownClearanceInset(coverSize);
+  const slideHeight = trackInset + coverSize;
+  const navBtnSize = 40;
+  const navBtnGap = 6;
+  const pageWidth = coverSize;
 
   const ink = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const muted = isDark ? 'rgba(255,255,255,0.58)' : nrmTokens.color.inkMuted48;
   const accent = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
-  const arrowBg = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.045)';
-  const arrowPressedBg = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)';
 
   const count = items.length;
+  const loopEnabled = count > 1;
   const itemsFingerprint = useMemo(() => homeChartItemsFingerprint(items), [items]);
   const prevFingerprintRef = useRef(itemsFingerprint);
 
-  const translateX = useRef(new Animated.Value(0)).current;
-  const dragX = useRef(new Animated.Value(0)).current;
-  const animatingRef = useRef(false);
+  const loopData = useMemo(() => {
+    if (!loopEnabled) return items;
+    return [...items, ...items, ...items];
+  }, [items, loopEnabled]);
+
+  const current = count > 0 ? items[clampIndex(index, count)] : null;
+  const currentRank = current ? (current.rank > 0 ? current.rank : index + 1) : 0;
+  const podiumTier = homeChartPodiumTier(currentRank);
+  const podiumColors = homeChartPodiumTextColors(currentRank, isDark);
+  const rankTopLabelColor = podiumColors?.label ?? muted;
+  const rankNumberColor = podiumColors?.number ?? ink;
+
+  const syncIndex = useCallback((nextIndex: number, force = false) => {
+    const c = countRef.current;
+    if (c <= 0) return;
+    const logical = wrapIndex(nextIndex, c);
+    if (!force && logical === indexRef.current) return;
+    indexRef.current = logical;
+    setIndex(logical);
+    onIndexChangeRef.current?.(logical);
+  }, []);
+
+  const scrollToOffset = useCallback(
+    (physical: number, animated: boolean) => {
+      listRef.current?.scrollToOffset({
+        offset: physical * pageWidth,
+        animated,
+      });
+    },
+    [pageWidth],
+  );
+
+  const recenterIfNeeded = useCallback(
+    (physical: number) => {
+      const c = countRef.current;
+      if (!loopEnabledRef.current || repositioningRef.current || c <= 1) return physical;
+      let target = physical;
+      if (physical < c) target = physical + c;
+      else if (physical >= c * 2) target = physical - c;
+      if (target !== physical) {
+        repositioningRef.current = true;
+        requestAnimationFrame(() => {
+          scrollToOffset(target, false);
+          repositioningRef.current = false;
+          syncIndex(toLogicalIndex(target, c), true);
+        });
+      }
+      return target;
+    },
+    [scrollToOffset, syncIndex],
+  );
+
+  const scrollToLogicalIndex = useCallback(
+    (logicalIndex: number, animated = true) => {
+      const c = countRef.current;
+      if (c <= 0) return;
+      const from = indexRef.current;
+      const logical = wrapIndex(logicalIndex, c);
+      const direction = logicalIndex - from;
+      const wraps = isLoopWrap(from, logical, c, direction);
+      const useAnimated = animated && !wraps;
+      const physical = toPhysicalIndex(logical, c);
+
+      syncIndex(logical, true);
+      scrollToOffset(physical, useAnimated);
+    },
+    [scrollToOffset, syncIndex],
+  );
+
+  const clearAutoAdvance = useCallback(() => {
+    if (autoTimerRef.current) {
+      clearInterval(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleAutoAdvance = useCallback(() => {
+    clearAutoAdvance();
+    if (!loopEnabledRef.current) return;
+    autoTimerRef.current = setInterval(() => {
+      if (!mountedRef.current || userDraggingRef.current) return;
+      scrollToLogicalIndex(indexRef.current + 1, true);
+    }, AUTO_ADVANCE_MS);
+  }, [clearAutoAdvance, scrollToLogicalIndex]);
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 55,
+    minimumViewTime: 0,
+  }).current;
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (repositioningRef.current || viewableItems.length === 0) return;
+      const token = viewableItems.find((v) => v.isViewable) ?? viewableItems[0];
+      if (token?.index == null) return;
+      const c = countRef.current;
+      const logical = loopEnabledRef.current ? toLogicalIndex(token.index, c) : token.index;
+      syncIndex(logical);
+    },
+  ).current;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearAutoAdvance();
+    };
+  }, [clearAutoAdvance]);
+
+  useEffect(() => {
+    scheduleAutoAdvance();
+    return clearAutoAdvance;
+  }, [index, count, scheduleAutoAdvance, clearAutoAdvance]);
 
   useEffect(() => {
     if (prevFingerprintRef.current === itemsFingerprint) return;
     prevFingerprintRef.current = itemsFingerprint;
-    setIndex(0);
-    translateX.setValue(0);
-    dragX.setValue(0);
-  }, [itemsFingerprint, translateX, dragX]);
+    syncIndex(0, true);
+    requestAnimationFrame(() => {
+      scrollToOffset(toPhysicalIndex(0, count), false);
+    });
+  }, [count, itemsFingerprint, scrollToOffset, syncIndex]);
 
-  const current = count > 0 ? items[modIndex(index, count)] : null;
-  const prevItem = count > 1 ? items[modIndex(index - 1, count)] : null;
-  const nextItem = count > 1 ? items[modIndex(index + 1, count)] : null;
+  useEffect(() => {
+    if (count <= 0) return;
+    const logical = wrapIndex(initialIndex, count);
+    if (logical === indexRef.current) return;
+    scrollToLogicalIndex(logical, false);
+  }, [initialIndex, count, scrollToLogicalIndex]);
 
-  const settleTo = useCallback(
-    (nextIndex: number, direction: -1 | 0 | 1) => {
-      if (count <= 1 || animatingRef.current) return;
-      if (direction === 0) {
-        Animated.spring(dragX, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 140,
-          friction: 18,
-        }).start();
+  const resolveScrollIndex = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const x = e.nativeEvent.contentOffset.x;
+      const physical = Math.round(x / pageWidth);
+      const logical = toLogicalIndex(physical, count);
+      syncIndex(logical, true);
+      recenterIfNeeded(physical);
+    },
+    [count, pageWidth, recenterIfNeeded, syncIndex],
+  );
+
+  const onScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (repositioningRef.current) return;
+      userDraggingRef.current = false;
+      resolveScrollIndex(e);
+      scheduleAutoAdvance();
+    },
+    [resolveScrollIndex, scheduleAutoAdvance],
+  );
+
+  const onScrollEndDrag = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const velocity = e.nativeEvent.velocity?.x ?? 0;
+      if (Math.abs(velocity) <= 0.05) {
+        onScrollEnd(e);
         return;
       }
-      animatingRef.current = true;
-      Animated.timing(dragX, {
-        toValue: direction * -slideStride,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (!finished) {
-          animatingRef.current = false;
-          dragX.setValue(0);
-          return;
-        }
-        setIndex(nextIndex);
-        dragX.setValue(0);
-        animatingRef.current = false;
-      });
+      userDraggingRef.current = false;
+      scheduleAutoAdvance();
     },
-    [count, dragX, slideStride],
+    [onScrollEnd, scheduleAutoAdvance],
   );
 
   const goPrev = useCallback(() => {
-    if (count <= 1 || animatingRef.current) return;
-    settleTo(modIndex(indexRef.current - 1, count), 1);
-  }, [count, settleTo]);
+    if (!loopEnabled) return;
+    clearAutoAdvance();
+    scrollToLogicalIndex(indexRef.current - 1, true);
+    scheduleAutoAdvance();
+  }, [clearAutoAdvance, loopEnabled, scheduleAutoAdvance, scrollToLogicalIndex]);
 
   const goNext = useCallback(() => {
-    if (count <= 1 || animatingRef.current) return;
-    settleTo(modIndex(indexRef.current + 1, count), -1);
-  }, [count, settleTo]);
+    if (!loopEnabled) return;
+    clearAutoAdvance();
+    scrollToLogicalIndex(indexRef.current + 1, true);
+    scheduleAutoAdvance();
+  }, [clearAutoAdvance, loopEnabled, scheduleAutoAdvance, scrollToLogicalIndex]);
 
-  const edgeGuard = menuSwipeGuardPx(insets.left);
+  const onScrollBeginDrag = useCallback(() => {
+    userDraggingRef.current = true;
+    clearAutoAdvance();
+  }, [clearAutoAdvance]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (evt, g) => {
-          if (animatingRef.current || count <= 1) return false;
-          if (evt.nativeEvent.pageX < edgeGuard) return false;
-          return Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.15;
-        },
-        onPanResponderMove: (_, g) => {
-          if (animatingRef.current) return;
-          const maxDrag = slideStride * 0.92;
-          const clamped = Math.max(-maxDrag, Math.min(maxDrag, g.dx));
-          dragX.setValue(clamped);
-        },
-        onPanResponderRelease: (_, g) => {
-          if (animatingRef.current) return;
-          const threshold = slideStride * 0.22;
-          if (g.dx > threshold) {
-            settleTo(modIndex(indexRef.current - 1, count), 1);
-          } else if (g.dx < -threshold) {
-            settleTo(modIndex(indexRef.current + 1, count), -1);
-          } else {
-            settleTo(indexRef.current, 0);
-          }
-        },
-        onPanResponderTerminate: () => {
-          if (!animatingRef.current) settleTo(indexRef.current, 0);
-        },
-      }),
-    [count, edgeGuard, dragX, settleTo, slideStride],
+  const getItemLayout = useCallback(
+    (_: ArrayLike<ChartTrackItem> | null | undefined, i: number) => ({
+      length: pageWidth,
+      offset: pageWidth * i,
+      index: i,
+    }),
+    [pageWidth],
+  );
+
+  const renderItem = useCallback(
+    ({ item, index: itemIndex }: { item: ChartTrackItem; index: number }) => (
+      <CarouselSlide
+        item={item}
+        index={loopEnabled ? toLogicalIndex(itemIndex, count) : itemIndex}
+        pageWidth={pageWidth}
+        coverSize={coverSize}
+        trackInset={trackInset}
+        onPress={() => onTrackPress(item)}
+      />
+    ),
+    [count, coverSize, loopEnabled, onTrackPress, pageWidth, trackInset],
+  );
+
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem, i: number) => `chart-${i}-${item.trackId}-${item.rank}`,
+    [],
   );
 
   const onPressTrack = useCallback(() => {
     if (current) onTrackPress(current);
   }, [current, onTrackPress]);
 
-  const trackTranslateX = Animated.add(translateX, dragX);
+  const navBtnTop = RANK_HERO_BLOCK_HEIGHT + slideHeight / 2 - navBtnSize / 2;
+  const initialPhysical = toPhysicalIndex(clampIndex(initialIndex, count), count);
+
+  const carouselBlock = (
+    <View style={[styles.carouselViewport, { width: coverSize, height: slideHeight }]}>
+      <FlatList
+        ref={listRef}
+        data={loopData}
+        horizontal
+        pagingEnabled
+        bounces={loopEnabled}
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        getItemLayout={getItemLayout}
+        initialScrollIndex={loopEnabled ? initialPhysical : clampIndex(initialIndex, count)}
+        onScrollToIndexFailed={(info) => {
+          requestAnimationFrame(() => {
+            scrollToOffset(info.index, false);
+          });
+        }}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onMomentumScrollEnd={onScrollEnd}
+        onScrollEndDrag={onScrollEndDrag}
+        scrollEventThrottle={16}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
+        style={{ width: pageWidth }}
+        contentContainerStyle={{ alignItems: 'flex-start' }}
+        extraData={itemsFingerprint}
+      />
+    </View>
+  );
+
+  const metaBlock = (
+    <Pressable
+      onPress={onPressTrack}
+      style={({ pressed }) => [
+        styles.metaPress,
+        podiumTier ? styles.metaPressPodium : null,
+        pressed && styles.metaPressed,
+      ]}
+      accessibilityRole="button">
+      <Text style={[styles.artist, { color: muted }]} numberOfLines={2}>
+        {current?.artists || '—'}
+      </Text>
+      <Text style={[styles.title, { color: ink }]} numberOfLines={2}>
+        {current?.title || '—'}
+      </Text>
+      {podiumTier ? <NrmHomeChartLaurelWreath rank={currentRank} width={coverSize} /> : null}
+    </Pressable>
+  );
+
+  const trackBody = (
+    <View style={styles.plainTrackBody}>
+      {carouselBlock}
+      {metaBlock}
+    </View>
+  );
 
   if (loading) {
     return (
@@ -241,116 +489,49 @@ export function NrmHomeChartCarousel({
   if (!current) return null;
 
   return (
-    <View style={styles.root} accessibilityRole="adjustable" {...panResponder.panHandlers}>
+    <View style={styles.root} accessibilityRole="adjustable">
       <View style={styles.content}>
         <View
           style={[
             styles.coverStage,
             {
               width: coverSize,
-              height: coverSize + 72,
+              height: RANK_HERO_BLOCK_HEIGHT + slideHeight,
             },
           ]}>
-          <Pressable
-            onPress={goPrev}
-            disabled={count <= 1}
-            style={({ pressed }) => [
-              styles.navBtn,
-              {
-                width: arrowW,
-                height: arrowH,
-                backgroundColor: pressed && count > 1 ? arrowPressedBg : arrowBg,
-                top: (coverSize + 72) / 2 - arrowH / 2,
-                left: -(arrowW + arrowGap),
-              },
-              count <= 1 && styles.navBtnHidden,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="이전 순위">
-            <Ionicons name="chevron-back" size={20} color={ink} style={styles.navIcon} />
-          </Pressable>
-
-          <View style={[styles.carouselViewport, { width: coverSize, height: coverSize + 72 }]}>
-            <Animated.View
-              style={[
-                styles.carouselTrack,
-                {
-                  width: slideStride * 3 - slideGap,
-                  transform: [{ translateX: trackTranslateX }],
-                  marginLeft: -slideStride,
-                },
-              ]}>
-              {prevItem ? (
-                <CarouselSlide
-                  item={prevItem}
-                  index={modIndex(index - 1, count)}
-                  coverSize={coverSize}
-                  isDark={isDark}
-                  ink={ink}
-                  muted={muted}
-                  onPress={() => onTrackPress(prevItem)}
-                />
-              ) : (
-                <View style={{ width: coverSize }} />
-              )}
-              <View style={{ width: slideGap }} />
-              <CarouselSlide
-                item={current}
-                index={modIndex(index, count)}
-                coverSize={coverSize}
-                isDark={isDark}
-                ink={ink}
-                muted={muted}
-                onPress={onPressTrack}
-              />
-              <View style={{ width: slideGap }} />
-              {nextItem ? (
-                <CarouselSlide
-                  item={nextItem}
-                  index={modIndex(index + 1, count)}
-                  coverSize={coverSize}
-                  isDark={isDark}
-                  ink={ink}
-                  muted={muted}
-                  onPress={() => onTrackPress(nextItem)}
-                />
-              ) : (
-                <View style={{ width: coverSize }} />
-              )}
-            </Animated.View>
+          <View style={[styles.rankHero, { height: RANK_HERO_BLOCK_HEIGHT }]} accessibilityLabel={`탑 ${currentRank}`}>
+            <Text style={[styles.rankTopLabel, { color: rankTopLabelColor }]}>TOP</Text>
+            <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{currentRank}</Text>
           </View>
 
-          <Pressable
-            onPress={goNext}
-            disabled={count <= 1}
-            style={({ pressed }) => [
-              styles.navBtn,
-              {
-                width: arrowW,
-                height: arrowH,
-                backgroundColor: pressed && count > 1 ? arrowPressedBg : arrowBg,
-                top: (coverSize + 72) / 2 - arrowH / 2,
-                left: coverSize + arrowGap,
-              },
-              count <= 1 && styles.navBtnHidden,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="다음 순위">
-            <Ionicons name="chevron-forward" size={20} color={ink} style={styles.navIcon} />
-          </Pressable>
-        </View>
+          <ChartNavButton
+            direction="prev"
+            disabled={!loopEnabled}
+            isDark={isDark}
+            onPress={goPrev}
+            style={{
+              width: navBtnSize,
+              height: navBtnSize,
+              top: navBtnTop,
+              left: navBtnGap,
+            }}
+          />
 
-        <Pressable
-          onPress={onPressTrack}
-          style={({ pressed }) => [styles.metaPress, pressed && styles.metaPressed]}
-          accessibilityRole="button">
-          <Text style={[styles.artist, { color: muted }]} numberOfLines={2}>
-            {current.artists || '—'}
-          </Text>
-          <Text style={[styles.title, { color: ink }]} numberOfLines={2}>
-            {current.title || '—'}
-          </Text>
-        </Pressable>
+          {trackBody}
+
+          <ChartNavButton
+            direction="next"
+            disabled={!loopEnabled}
+            isDark={isDark}
+            onPress={goNext}
+            style={{
+              width: navBtnSize,
+              height: navBtnSize,
+              top: navBtnTop,
+              left: coverSize - navBtnSize - navBtnGap,
+            }}
+          />
+        </View>
       </View>
     </View>
   );
@@ -370,17 +551,21 @@ const styles = StyleSheet.create({
   content: {
     width: '100%',
     alignItems: 'center',
-    gap: nrmTokens.space.md,
   },
   loadingText: {
     marginTop: nrmTokens.space.sm,
     fontSize: nrmTokens.font.caption,
     textAlign: 'center',
   },
+  page: {
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
   rankHero: {
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: 2,
-    marginBottom: nrmTokens.space.xs,
+    paddingBottom: nrmTokens.space.xs,
   },
   rankTopLabel: {
     fontSize: 11,
@@ -398,35 +583,33 @@ const styles = StyleSheet.create({
   coverStage: {
     position: 'relative',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     minHeight: 0,
     overflow: 'visible',
+  },
+  plainTrackBody: {
+    width: '100%',
+    alignItems: 'center',
   },
   carouselViewport: {
     overflow: 'hidden',
   },
-  carouselTrack: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  slide: {
-    alignItems: 'center',
-  },
   navBtn: {
     position: 'absolute',
-    zIndex: 2,
-    borderRadius: nrmTokens.radius.md,
+    zIndex: 55,
+    borderRadius: nrmTokens.radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 3,
       },
       android: {
-        elevation: 2,
+        elevation: 55,
       },
       default: {},
     }),
@@ -434,9 +617,6 @@ const styles = StyleSheet.create({
   navBtnHidden: {
     opacity: 0,
     pointerEvents: 'none',
-  },
-  navIcon: {
-    opacity: 0.88,
   },
   coverPress: {
     alignItems: 'center',
@@ -454,6 +634,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
+        shadowColor: '#1d1d1f',
         shadowOffset: { width: 0, height: 12 },
         shadowOpacity: 0.24,
         shadowRadius: 20,
@@ -469,7 +650,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: nrmTokens.space.sm,
-    paddingTop: nrmTokens.space.xs,
+    paddingTop: nrmTokens.space.md,
+    paddingBottom: nrmTokens.space.sm,
+  },
+  metaPressPodium: {
+    paddingTop: nrmTokens.space.sm,
+    paddingBottom: nrmTokens.space.md,
   },
   metaPressed: {
     opacity: 0.88,

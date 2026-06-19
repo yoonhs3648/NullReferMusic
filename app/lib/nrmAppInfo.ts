@@ -1,6 +1,6 @@
 import packageJson from '../package.json';
 
-import { NRM_BRAND_DISPLAY_NAME, NRM_VERSION_INFO_PRODUCT_NAME, getNrmVersionInfoCustomizingLine } from '@/lib/nrmAppBrand';
+import { NRM_VERSION_INFO_PRODUCT_NAME, getNrmVersionInfoCustomizingLine } from '@/lib/nrmAppBrand';
 
 export { getNrmVersionInfoCustomizingLine };
 
@@ -17,10 +17,10 @@ export function getNrmAppVersionLabel(): string {
   return `${NRM_VERSION_INFO_PRODUCT_NAME} v${getNrmAppVersion()}`;
 }
 
-/** 앱 정보 화면용 저작권 한 줄(연도 자동) */
+/** 앱 정보 화면용 저작권 한 줄(연도 자동) — 커스텀 displayName과 무관 */
 export function getNrmAppCopyrightNotice(): string {
   const year = new Date().getFullYear();
-  return `© ${year} ${NRM_BRAND_DISPLAY_NAME}. All rights reserved.`;
+  return `© ${year} ${NRM_VERSION_INFO_PRODUCT_NAME}. All rights reserved.`;
 }
 
 /** 제작자 표기 */

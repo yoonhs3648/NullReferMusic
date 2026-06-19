@@ -114,6 +114,8 @@ type Props = {
   onRequestChartsBearerWebView?: () => Promise<boolean>;
   /** 앱 — Last.fm API Key 미설정·오류 오버레이 */
   onShowLastfmAuthInvalid?: (code?: 'auth_failed' | 'not_configured') => void;
+  /** 메인 차트 좌측 네비 버튼 영역 — 스와이프 캡처에서 제외 (px, 화면 왼쪽 기준) */
+  leftEdgeSwipeReserve?: number;
 };
 
 export type NrmAppMenuHandle = {
@@ -184,6 +186,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onNavigateMelonTrackSearch,
     onRequestChartsBearerWebView,
     onShowLastfmAuthInvalid,
+    leftEdgeSwipeReserve,
   },
   ref,
 ) {
@@ -590,6 +593,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   ).current;
 
   const mobileSwipeEdgeWidth = MOBILE_SWIPE_EDGE_WIDTH + insets.left;
+  /** 차트 네비 버튼과 겹치지 않는 좁은 물리 가장자리 스와이프 */
+  const mobileEdgeStripWidth = 16;
 
   const mobileEdgePanHandlers = useMemo(
     () =>
@@ -1921,15 +1926,27 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
           pointerEvents="box-none"
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants">
-          <View
-            style={[
-              styles.mobileSwipeEdge,
-              { width: mobileSwipeEdgeWidth },
-            ]}
-            collapsable={false}
-            pointerEvents="auto"
-            {...mobileEdgePanHandlers.panHandlers}
-          />
+          {leftEdgeSwipeReserve != null && leftEdgeSwipeReserve > 0 ? (
+            <View
+              style={[
+                styles.mobileSwipeEdge,
+                { left: 0, width: mobileEdgeStripWidth },
+              ]}
+              collapsable={false}
+              pointerEvents="auto"
+              {...mobileEdgePanHandlers.panHandlers}
+            />
+          ) : (
+            <View
+              style={[
+                styles.mobileSwipeEdge,
+                { width: mobileSwipeEdgeWidth },
+              ]}
+              collapsable={false}
+              pointerEvents="auto"
+              {...mobileEdgePanHandlers.panHandlers}
+            />
+          )}
         </View>
       ) : null}
     </>

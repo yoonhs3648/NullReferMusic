@@ -1,6 +1,13 @@
 /**
- * 숨김 WebView(translate.google.com)에서 Google Translate 웹 API를 호출해 배치 번역합니다.
+ * Android/iOS: gtx 네이티브 fetch(배치) 우선, 실패 시 숨김 WebView fallback.
  */
+import { logNrmDev } from '@/lib/nrmDevLog';
+import {
+  GTX_BATCH_DELAY_MS,
+  GTX_BATCH_SIZE,
+  translateTextsViaGtxBatched,
+} from '@/lib/nrmGoogleTranslateGtx';
+
 type InjectedWebView = {
   injectJavaScript: (script: string) => void;
 };
@@ -39,34 +46,65 @@ function buildTranslateInject(jobId: string, texts: string[]): string {
 (function(){
   var jobId = ${JSON.stringify(jobId)};
   var texts = ${JSON.stringify(texts)};
+  var batchSize = ${GTX_BATCH_SIZE};
+  var batchDelayMs = ${GTX_BATCH_DELAY_MS};
+  var fetchTimeoutMs = 15000;
+  function parseOne(segments) {
+    if (!segments || !segments.length) return '';
+    var out = '';
+    for (var j = 0; j < segments.length; j++) {
+      out += segments[j][0] || '';
+    }
+    return out;
+  }
+  function fetchJson(url) {
+    return new Promise(function(resolve, reject) {
+      var timer = setTimeout(function() { reject(new Error('fetch timeout')); }, fetchTimeoutMs);
+      fetch(url).then(function(res) {
+        clearTimeout(timer);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      }).then(resolve).catch(function(e) {
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
+  function buildUrl(batchTexts) {
+    var params = 'client=gtx&sl=auto&tl=ko&dt=t';
+    for (var i = 0; i < batchTexts.length; i++) {
+      params += '&q=' + encodeURIComponent(batchTexts[i]);
+    }
+    return 'https://translate.googleapis.com/translate_a/single?' + params;
+  }
   (async function() {
-    var results = [];
-    var sourceLangs = [];
+    var results = new Array(texts.length).fill('');
+    var sourceLangs = new Array(texts.length).fill('');
+    var slots = [];
     try {
       for (var i = 0; i < texts.length; i++) {
         var text = texts[i];
-        if (!text || !String(text).trim()) {
-          results.push('');
-          sourceLangs.push('');
-          continue;
-        }
-        var url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q='
-          + encodeURIComponent(String(text));
-        var res = await fetch(url);
-        if (!res.ok) {
-          throw new Error('HTTP ' + res.status);
-        }
-        var data = await res.json();
-        var translated = '';
-        if (data && data[0]) {
-          for (var j = 0; j < data[0].length; j++) {
-            translated += data[0][j][0];
+        if (!text || !String(text).trim()) continue;
+        slots.push({ index: i, text: String(text).trim() });
+      }
+      for (var b = 0; b < slots.length; b += batchSize) {
+        var batch = slots.slice(b, b + batchSize);
+        var batchTexts = batch.map(function(s) { return s.text; });
+        var data = await fetchJson(buildUrl(batchTexts));
+        var src = (data && data[2]) ? String(data[2]).toUpperCase() : 'EN';
+        if (batch.length === 1) {
+          var segs = data && data[0];
+          results[batch[0].index] = parseOne(segs);
+          sourceLangs[batch[0].index] = src;
+        } else {
+          var rows = data && data[0];
+          for (var k = 0; k < batch.length; k++) {
+            results[batch[k].index] = parseOne(rows && rows[k]);
+            sourceLangs[batch[k].index] = src;
           }
         }
-        results.push(translated);
-        sourceLangs.push((data && data[2]) ? String(data[2]).toUpperCase() : 'EN');
-        if (i + 1 < texts.length) {
-          await new Promise(function(r) { setTimeout(r, 60); });
+        if (b + batchSize < slots.length) {
+          await new Promise(function(r) { setTimeout(r, batchDelayMs); });
         }
       }
       window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -142,12 +180,9 @@ async function waitForWebViewReady(timeoutMs: number): Promise<void> {
   }
 }
 
-export async function translateTextsViaGoogleTranslateWeb(
+async function translateViaWebView(
   texts: string[],
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {
-  if (texts.length === 0) {
-    return { texts: [], sourceLangs: [] };
-  }
   await waitForWebViewReady(20_000);
   if (!webView) {
     throw new Error('Google Translate WebView가 없습니다.');
@@ -157,4 +192,34 @@ export async function translateTextsViaGoogleTranslateWeb(
     translateQueue.push({ jobId, texts, resolve, reject });
     drainTranslateQueue();
   });
+}
+
+async function translateViaNativeFetch(
+  texts: string[],
+): Promise<{ texts: string[]; sourceLangs: string[] }> {
+  return translateTextsViaGtxBatched(texts, globalThis.fetch.bind(globalThis));
+}
+
+export async function translateTextsViaGoogleTranslateWeb(
+  texts: string[],
+): Promise<{ texts: string[]; sourceLangs: string[] }> {
+  if (texts.length === 0) {
+    return { texts: [], sourceLangs: [] };
+  }
+  try {
+    const out = await translateViaNativeFetch(texts);
+    logNrmDev('lyrics.translate', {
+      event: 'googletranslate_native_ok',
+      lineCount: texts.length,
+    });
+    return out;
+  } catch (nativeErr) {
+    const msg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
+    logNrmDev('lyrics.translate', {
+      event: 'googletranslate_native_fallback',
+      message: msg.slice(0, 120),
+      lineCount: texts.length,
+    });
+    return translateViaWebView(texts);
+  }
 }

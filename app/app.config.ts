@@ -5,7 +5,7 @@ import brandConfig from './nrm-brand.config.json';
 const config: ExpoConfig = {
   name: brandConfig.displayName,
   slug: 'nullrefer-music',
-  version: '1.9.1',
+  version: '1.9.5',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',

@@ -26,10 +26,10 @@ if (!storageFolderName || /\s/.test(storageFolderName)) {
 
 const stringsXml = `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">${escapeXml(displayName)}</string>
+  <string name="app_name">${escapeAndroidStringResource(displayName)}</string>
   <string name="nrm_bg_work_channel_name">백그라운드 작업</string>
   <string name="nrm_bg_work_channel_desc">다운로드·가사 생성이 백그라운드에서 계속 진행됩니다.</string>
-  <string name="nrm_bg_work_notification_title">${escapeXml(displayName)} — 작업 진행 중</string>
+  <string name="nrm_bg_work_notification_title">${escapeAndroidStringResource(`${displayName} — 작업 진행 중`)}</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
 </resources>
@@ -77,11 +77,11 @@ fs.writeFileSync(kotlinPath, nrmBrandKt, 'utf8');
 fs.writeFileSync(swiftPath, nrmBrandSwift, 'utf8');
 
 let gradle = fs.readFileSync(buildGradlePath, 'utf8');
-const apkLine = `outputFileName = "${storageFolderName}-v\${variant.versionName}.apk"`;
-if (!gradle.includes(apkLine)) {
+const apkLine = `            outputFileName = "${storageFolderName}-v\${variant.versionName}\${findProperty('nrmApkSuffix') ?: ''}.apk"`;
+if (!gradle.includes(apkLine.trim())) {
   const replaced = gradle.replace(
-    /outputFileName = "[^"]*-v\$\{variant\.versionName\}\.apk"/,
-    apkLine,
+    /outputFileName = "[^"]*-v\$\{variant\.versionName\}(?:\$\{findProperty\('nrmApkSuffix'\) \?: ''\})?\.apk"/,
+    apkLine.trim(),
   );
   if (replaced === gradle) {
     console.error('sync-nrm-brand: could not patch android/app/build.gradle APK outputFileName');
@@ -91,6 +91,23 @@ if (!gradle.includes(apkLine)) {
 }
 
 console.log(`sync-nrm-brand: ok displayName="${displayName}" storageFolderName="${storageFolderName}"`);
+
+function escapeAndroidStringResource(s) {
+  let out = s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+  // Android strings.xml: 본문에 ' 가 있으면 \"...\" 로 감싸거나 \' 로 이스케이프해야 AAPT2 통과
+  if (out.includes("'")) {
+    out = out.replace(/"/g, '\\"');
+    return `"${out}"`;
+  }
+  return out;
+}
 
 function escapeXml(s) {
   return s

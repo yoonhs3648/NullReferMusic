@@ -156,6 +156,7 @@ export default function HomeScreen() {
   const [homeEpoch, setHomeEpoch] = useState(0);
   const [quoteRefreshKey, setQuoteRefreshKey] = useState(0);
   const [homeChartEpoch, setHomeChartEpoch] = useState(0);
+  const [homeChartIndex, setHomeChartIndex] = useState(0);
   const [mainPageMode, setMainPageMode] = useState<NrmMainPageMode>(DEFAULT_MAIN_PAGE_MODE);
   const [homeChartState, setHomeChartState] = useState<HomeChartState>({ status: 'idle' });
   const [searchViewEpoch, setSearchViewEpoch] = useState(0);
@@ -196,6 +197,15 @@ export default function HomeScreen() {
     registerMainPageModeListener(setMainPageMode);
     return () => registerMainPageModeListener(null);
   }, []);
+
+  const homeChartSource =
+    homeChartState.status === 'ready' ? homeChartState.source : null;
+
+  useEffect(() => {
+    if (homeChartSource) {
+      setHomeChartIndex(0);
+    }
+  }, [homeChartSource]);
 
   useEffect(() => {
     if (mainPageMode !== 'charts' || layoutPhase !== 'welcome' || youtubeOverlay !== null) {
@@ -266,6 +276,18 @@ export default function HomeScreen() {
   const showYoutubeOverlay = youtubeOverlay !== null;
   const showFeatureFullScreen = isFullScreenFeature;
   const showYoutubeHome = mainView === 'youtube' && !showFeatureFullScreen;
+
+  const homeChartCoverSize = Math.min(Math.round(width * 0.74), 340);
+  const homeChartContentWidth = width - 2 * pad;
+  const homeChartCoverLeft =
+    pad + Math.max(0, (homeChartContentWidth - homeChartCoverSize) / 2);
+  const homeChartLeftNavRight = homeChartCoverLeft + 6 + 40 + 4;
+  const showHomeWelcomeChart =
+    showYoutubeHome &&
+    layoutPhase !== 'browsing' &&
+    !showYoutubeOverlay &&
+    mainPageMode === 'charts' &&
+    homeChartState.status !== 'failed';
 
   const openYoutubeOverlay = useCallback((payload: YoutubeOverlayState) => {
     setYoutubeOverlay(payload);
@@ -899,12 +921,14 @@ export default function HomeScreen() {
     ) : showWelcomeChart ? (
       <View style={styles.homeChartShell}>
         <NrmHomeChartCarousel
-          key={`home-chart-${homeChartEpoch}-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
+          key={`home-chart-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
           isDark={isDark}
           items={homeChartState.status === 'ready' ? homeChartState.items : []}
           loading={
             homeChartState.status === 'loading' || homeChartState.status === 'idle'
           }
+          initialIndex={homeChartIndex}
+          onIndexChange={setHomeChartIndex}
           onTrackPress={(item) => {
             const source =
               homeChartState.status === 'ready' ? homeChartState.source : 'melon';
@@ -996,6 +1020,7 @@ export default function HomeScreen() {
           isDark={isDark}
 
           paddingHorizontal={pad}
+          leftEdgeSwipeReserve={showHomeWelcomeChart ? homeChartLeftNavRight : undefined}
 
           onNavigateAppleMusicCharts={openAppleMusicCharts}
           onNavigateSpotifyChartsOfficial={openSpotifyChartsOfficial}

@@ -24,7 +24,10 @@ object NrmBackgroundWorkCoordinator {
 
   fun hasLyricsTokens(): Boolean =
       tokens.any {
-        it.startsWith("whisper-lrc:") || it.startsWith("whisperx-align:")
+        it.startsWith("lyrics:") ||
+            it.startsWith("whisper-lrc:") ||
+            it.startsWith("whisperx-align:") ||
+            it.startsWith("forced-align:")
       }
 
   fun hasBlockingExitWork(): Boolean = hasDownloadTokens() || hasLyricsTokens()
@@ -138,13 +141,16 @@ object NrmBackgroundWorkCoordinator {
       )
     }
 
+    val lyricsJs = tokens.count { it.startsWith("lyrics:") }
     val whisperLrc = tokens.count { it.startsWith("whisper-lrc:") }
-    if (whisperLrc > 0) {
+    val forcedAlign = tokens.count { it.startsWith("forced-align:") }
+    val lyricsBusy = lyricsJs + whisperLrc + forcedAlign
+    if (lyricsBusy > 0) {
       lines.add(
-          if (whisperLrc == 1) {
+          if (lyricsBusy == 1) {
             "가사(LRC) 생성 중"
           } else {
-            "가사(LRC) 생성 중 (${whisperLrc}곡 대기)"
+            "가사(LRC) 생성 중 (${lyricsBusy}곡 대기)"
           },
       )
     }

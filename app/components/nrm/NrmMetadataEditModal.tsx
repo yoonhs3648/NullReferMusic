@@ -59,8 +59,8 @@ import {
   NRM_LYRICS_MODE_LABELS,
   type NrmLyricsModeOrderId,
 } from '@/lib/nrmLyricsOrderSettings';
-import { isWhisperLyricsFamily } from '@/lib/nrmLrcUiMode';
-import type { ConfirmPayload } from '@/lib/nrmUserNotify';
+import { isWhisperLyricsFamily, resolveLyricsSidecarAction } from '@/lib/nrmLrcUiMode';
+import type { ChoiceOption, ChoicePayload, ConfirmPayload } from '@/lib/nrmUserNotify';
 
 export type NrmMetadataEditModalProps = {
   visible: boolean;
@@ -78,6 +78,10 @@ export type NrmMetadataEditModalProps = {
   initialStoredLyricsMode?: NrmLyricsUiMode;
   /** trackEdit: 멜론 URL 크롤링으로 가사 존재 확인됨 */
   initialMelonLyricsAvailable?: boolean;
+  /** trackEdit: 사이드카 .lrc URI (있으면) */
+  initialTrackLrcUri?: string;
+  /** trackEdit: mp3/m4a 내장 싱크 가사 존재 */
+  initialHasEmbeddedSyncLyrics?: boolean;
   /** 초기 필드 로딩 중 (다운로드: API 선조회 / 트랙 편집: 파일에서 읽기) */
   busy?: boolean;
   /** download: 다운로드 / trackEdit: 저장된 트랙 편집 */
@@ -318,6 +322,8 @@ export function NrmMetadataEditModal({
   initialMetadataFields,
   initialStoredLyricsMode,
   initialMelonLyricsAvailable = false,
+  initialTrackLrcUri,
+  initialHasEmbeddedSyncLyrics = false,
   busy = false,
   purpose = 'download',
   excludeFileStem,
@@ -512,6 +518,10 @@ export function NrmMetadataEditModal({
     if (!visible) setDeleteConfirm(null);
   }, [visible]);
 
+  useEffect(() => {
+    if (!visible) setLocalChoice(null);
+  }, [visible]);
+
   const genreOptions = useMemo(() => {
     const fromSettings = genreCategoryNames.map((name) => ({ value: name, label: name }));
     return [{ value: GENRE_MANUAL_VALUE, label: '직접입력' }, ...fromSettings];
@@ -530,6 +540,23 @@ export function NrmMetadataEditModal({
 
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmPayload | null>(null);
+  const [localChoice, setLocalChoice] = useState<ChoicePayload | null>(null);
+
+  const choiceInModal = useCallback(
+    <T extends string>(message: string, options: ChoiceOption<T>[], cancelLabel = '취소') =>
+      new Promise<T | null>((resolve) => {
+        setLocalChoice({
+          message,
+          options,
+          cancelLabel,
+          resolve: (value) => {
+            setLocalChoice(null);
+            resolve(value as T | null);
+          },
+        });
+      }),
+    [],
+  );
 
   const blocked = busy || deleting;
   const canSubmit =
@@ -555,18 +582,37 @@ export function NrmMetadataEditModal({
         isMelonLyricsUiMode(lyricsMode) ? melonPlainForSubmit : undefined,
       );
       let melonAlignLang: 'ko' | 'en' | undefined;
-      if (
+      const melonModeChanged =
         isMelonLyricsUiMode(lyricsMode) &&
         melonPlainForSubmit &&
         (purpose === 'download' ||
-          (purpose === 'trackEdit' && lyricsMode !== storedLyricsMode))
-      ) {
-        if (await isWav2Vec2BaseAlignPreference()) {
-          const picked = await resolveMelonAlignLanguageForPlain(melonPlainForSubmit);
-          if (!picked) return;
-          melonAlignLang = picked;
-        } else {
-          melonAlignLang = inferMelonAlignLyricsLanguage(melonPlainForSubmit);
+          (purpose === 'trackEdit' && lyricsMode !== storedLyricsMode));
+      if (melonModeChanged) {
+        const sidecarAction =
+          purpose === 'trackEdit'
+            ? resolveLyricsSidecarAction(
+                storedLyricsMode,
+                lyricsMode,
+                initialTrackLrcUri,
+                initialHasEmbeddedSyncLyrics,
+              )
+            : { kind: 'generate-melon' as const, mode: lyricsMode as 'melon' | 'melon_translation' };
+        if (sidecarAction.kind === 'generate-melon') {
+          if (await isWav2Vec2BaseAlignPreference()) {
+            const picked = await resolveMelonAlignLanguageForPlain(
+              melonPlainForSubmit,
+              undefined,
+              () =>
+                choiceInModal('가사 생성 언어팩을 설정하세요', [
+                  { id: 'ko', label: '한국어 팩' },
+                  { id: 'en', label: '영어 팩' },
+                ]),
+            );
+            if (!picked) return;
+            melonAlignLang = picked;
+          } else {
+            melonAlignLang = inferMelonAlignLyricsLanguage(melonPlainForSubmit);
+          }
         }
       }
       const metadata: NrmAudioFileMetadata = {
@@ -608,6 +654,9 @@ export function NrmMetadataEditModal({
       fileNameFormat,
       item,
       lyricsMode,
+      initialHasEmbeddedSyncLyrics,
+      initialTrackLrcUri,
+      choiceInModal,
       melonPlainLyrics,
       onConfirm,
       producer,
@@ -615,6 +664,7 @@ export function NrmMetadataEditModal({
       releaseDate,
       remixer,
       resolvedGenre,
+      storedLyricsMode,
       title,
       trackNumber,
       website,
@@ -1312,14 +1362,25 @@ export function NrmMetadataEditModal({
           </View>
         </View>
 
-        {deleteConfirm ? (
+        {deleteConfirm || localChoice ? (
           <View style={styles.confirmHost} pointerEvents="box-none">
             <NrmUserNotifyOverlay
-              overlay={{ kind: 'confirm', payload: deleteConfirm }}
+              overlay={
+                deleteConfirm
+                  ? { kind: 'confirm', payload: deleteConfirm }
+                  : { kind: 'choice', payload: localChoice! }
+              }
               isDark={isDark}
               onClose={() => {
-                deleteConfirm.resolve(false);
-                setDeleteConfirm(null);
+                if (deleteConfirm) {
+                  deleteConfirm.resolve(false);
+                  setDeleteConfirm(null);
+                  return;
+                }
+                if (localChoice) {
+                  localChoice.resolve(null);
+                  setLocalChoice(null);
+                }
               }}
             />
           </View>

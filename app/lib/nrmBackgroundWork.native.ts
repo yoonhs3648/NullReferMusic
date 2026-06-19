@@ -12,6 +12,11 @@ export function nrmDownloadBackgroundWorkToken(videoId: string): string {
   return `dl:${videoId}`;
 }
 
+/** JS 가사 파이프라인(align 시작 전 대기·persist 포함) — native forced-align 토큰과 별도 */
+export function nrmLyricsBackgroundWorkToken(jobId: string): string {
+  return `lyrics:${jobId.trim()}`;
+}
+
 /** 다운로드·Whisper 세션 시작 — Android Foreground Service + WakeLock 유지 */
 export function nrmBackgroundWorkAcquire(token: string): void {
   if (Platform.OS !== 'android') return;

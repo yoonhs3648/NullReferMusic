@@ -33,6 +33,10 @@ object ForcedAlignEngine {
             "mode" to mode,
             "engine" to alignModelId,
             "plainChars" to lyricsPlain.length,
+            "syncQuality" to syncOptions.quality,
+            "syncIntro" to syncOptions.firstLineIntroCorrection,
+            "syncVocalDetect" to syncOptions.vocalRangeAutoDetect,
+            "syncLang" to syncOptions.lyricsLang,
         ),
     )
 

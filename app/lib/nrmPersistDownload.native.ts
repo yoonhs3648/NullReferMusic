@@ -68,10 +68,7 @@ async function writeLrcTextToSafTree(
     await FileSystem.writeAsStringAsync(lrcDest, body, {
       encoding: EncodingType.UTF8,
     });
-    const info = await FileSystem.getInfoAsync(lrcDest);
-    if (info.exists && 'size' in info && (info.size ?? 0) > 0) {
-      return lrcDest;
-    }
+    return lrcDest;
   } catch {
     /* UTF-8 직접 쓰기 실패 → 네이티브 스트리밍 */
   }
@@ -579,26 +576,30 @@ export async function persistLrcForSavedAudio(
   try {
     let lrcDest: string;
     if (location.kind === 'saf') {
+      const lrcSrc = toNativeLocalFileUri(tempLrcUri);
       try {
-        lrcDest = await writeLrcTextToSafTree(location.dirUri, lrcName, trimmed);
+        lrcDest = await copyLocalFileToSaf(
+          lrcSrc,
+          location.dirUri,
+          lrcName,
+          LRC_SAF_MIME,
+        );
         logLrcPersist('persist_via', {
           audioFileName: location.fileName,
-          method: 'saf_create_write',
+          method: 'native_copy',
         });
       } catch (e1) {
         logLrcPersist(
           'persist_retry',
-          { audioFileName: location.fileName, method: 'native_copy' },
+          { audioFileName: location.fileName, method: 'saf_create_write' },
           e1,
         );
-        const lrcSrc = toNativeLocalFileUri(tempLrcUri);
         try {
-          lrcDest = await copyLocalFileToSaf(
-            lrcSrc,
-            location.dirUri,
-            lrcName,
-            LRC_SAF_MIME,
-          );
+          lrcDest = await writeLrcTextToSafTree(location.dirUri, lrcName, trimmed);
+          logLrcPersist('persist_via', {
+            audioFileName: location.fileName,
+            method: 'saf_create_write',
+          });
         } catch (e2) {
           logLrcPersist(
             'persist_retry',
@@ -674,16 +675,16 @@ export async function persistMelonPlainForSavedAudio(
   try {
     let dest: string;
     if (location.kind === 'saf') {
+      const plainSrc = toNativeLocalFileUri(tempUri);
       try {
-        dest = await writeLrcTextToSafTree(location.dirUri, plainName, trimmed);
-      } catch {
-        const plainSrc = toNativeLocalFileUri(tempUri);
         dest = await copyLocalFileToSaf(
           plainSrc,
           location.dirUri,
           plainName,
           PLAIN_SAF_MIME,
         );
+      } catch {
+        dest = await writeLrcTextToSafTree(location.dirUri, plainName, trimmed);
       }
     } else {
       dest = joinFolderFile(location.folderUri, plainName);

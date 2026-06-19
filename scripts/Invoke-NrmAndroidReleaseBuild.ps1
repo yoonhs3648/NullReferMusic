@@ -2,7 +2,8 @@
 # Does not modify app/runtime code. Safe to call from NullReferMusic-Build-Release-Apk.bat and npm android:release.
 param(
     [string]$RepoRoot = "",
-    [switch]$NoDaemon = $true
+    [switch]$NoDaemon = $true,
+    [string]$ApkSuffix = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,12 +45,18 @@ Use NullReferMusic-Build-Release-Apk.bat or see docs/RELEASE-APK-IPA-RULE.md sec
 
 Write-Host "[nrm] GRADLE_USER_HOME=$gradleUserHome"
 Write-Host "[nrm] subst $substDrive -> $RepoRoot"
+if ($ApkSuffix) {
+    Write-Host "[nrm] APK suffix: $ApkSuffix"
+}
 
 try {
     Push-Location "$substDrive\app\android"
     $gradleArgs = @('assembleRelease')
     if ($NoDaemon) {
         $gradleArgs += '--no-daemon'
+    }
+    if ($ApkSuffix) {
+        $gradleArgs += "-PnrmApkSuffix=$ApkSuffix"
     }
     & .\gradlew.bat @gradleArgs
     exit $LASTEXITCODE

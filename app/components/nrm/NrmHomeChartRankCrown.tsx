@@ -40,6 +40,18 @@ export function homeChartPodiumTextColors(
   return HOME_CHART_PODIUM_TEXT[tier][isDark ? 'dark' : 'light'];
 }
 
+export function homeChartPodiumTier(rank: number): HomeChartPodiumTier | null {
+  if (rank < 1 || rank > 3) return null;
+  return rank as HomeChartPodiumTier;
+}
+
+/** 왕관이 TOP 숫자 영역과 겹치지 않도록 커버 상단 여백 (px) */
+export function homeChartCrownClearanceInset(coverSize: number): number {
+  const crownW = Math.max(52, Math.round(coverSize * 0.28));
+  const crownH = Math.round(crownW * 0.78);
+  return Math.round(crownH * 0.56);
+}
+
 const CROWN_PALETTE: Record<
   CrownTier,
   {

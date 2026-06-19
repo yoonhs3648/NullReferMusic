@@ -119,6 +119,21 @@ assert.equal(
   'melon_translation',
 );
 
+assert.deepEqual(resolveLyricsSidecarAction('melon', 'melon_translation', null, true), {
+  kind: 'translate-lrc',
+});
+assert.deepEqual(resolveLyricsSidecarAction('melon_translation', 'melon', null, true), {
+  kind: 'strip-translation',
+});
+
+assert.equal(
+  resolveStoredLyricsModeFromFlags({
+    embeddedLyricsMode: 'melon',
+    melonTrackUrl: 'https://www.melon.com/song/detail.htm?songId=12345',
+  }),
+  'melon',
+);
+
 assert.deepEqual(resolveLyricsSidecarAction('unset', 'melon', null), {
   kind: 'generate-melon',
   mode: 'melon',

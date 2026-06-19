@@ -223,10 +223,8 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           if (embeddedMode.isEmpty()) {
             readNrmLyricsModeFromMp3(inFile)?.let { out.putString("nrmLyricsMode", it) }
           }
-          if (!out.hasKey("lyrics")) {
-            val embeddedLrc = readEmbeddedLyricsFromMp3(inFile)
-            if (embeddedLrc != null) out.putString("lyrics", embeddedLrc)
-          }
+          // probe lyrics는 USLT/SYLT보다 우선하지 않음 (sentinel·깨진 텍스트로 내장 가사 읽기가 막히는 문제 방지)
+          readEmbeddedLyricsFromMp3(inFile)?.let { out.putString("lyrics", it) }
         } else if (extLower in setOf("m4a", "mp4", "aac", "mov")) {
           val ffmeta = readM4aCustomFieldsFromFfmetadata(inFile, paths)
           if (embeddedMode.isEmpty()) {

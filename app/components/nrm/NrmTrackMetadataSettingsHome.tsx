@@ -144,6 +144,7 @@ export function NrmTrackMetadataSettingsHome({
   >(EMPTY_METADATA_FIELDS);
   const [initialLyricsMode, setInitialLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const [initialMelonLyricsAvailable, setInitialMelonLyricsAvailable] = useState(false);
+  const [initialHasEmbeddedSyncLyrics, setInitialHasEmbeddedSyncLyrics] = useState(false);
   const savingTracksRef = useRef<Set<string>>(new Set());
 
   const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -257,6 +258,7 @@ export function NrmTrackMetadataSettingsHome({
     setInitialFields(EMPTY_METADATA_FIELDS);
     setInitialLyricsMode('unset');
     setInitialMelonLyricsAvailable(false);
+    setInitialHasEmbeddedSyncLyrics(false);
     try {
       const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
       const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
@@ -283,11 +285,13 @@ export function NrmTrackMetadataSettingsHome({
         hasSidecarLrc: !!track.lrcUri && lrcText.trim().length > 0,
         sidecarLrcText: lrcText,
         embeddedSyncLyrics: embeddedSync,
+        embeddedLyricsMode: meta.nrmLyricsMode,
         melonTrackUrl: isMelonTrackWebsite(normalizedWebsite) ? normalizedWebsite : undefined,
       });
 
       setInitialLyricsMode(lyricsMode);
       setInitialMelonLyricsAvailable(melonLyricsAvailable);
+      setInitialHasEmbeddedSyncLyrics(embeddedSync.length > 0);
       const { artist, title } = resolveEditableArtistTitle(
         meta.artist,
         meta.title,
@@ -314,6 +318,7 @@ export function NrmTrackMetadataSettingsHome({
 
       const track = editTrack;
       const lyricsModeAtOpen = initialLyricsMode;
+      const hasEmbeddedSyncAtOpen = initialHasEmbeddedSyncLyrics;
       setEditTrack(null);
 
       void (async () => {
@@ -365,6 +370,7 @@ export function NrmTrackMetadataSettingsHome({
             metadata,
             initialLyricsMode: lyricsModeAtOpen,
             newLyricsMode: effectiveNewLyricsMode,
+            hasEmbeddedSyncLyrics: hasEmbeddedSyncAtOpen,
           });
           await reload();
         } catch (e) {
@@ -374,7 +380,7 @@ export function NrmTrackMetadataSettingsHome({
         }
       })();
     },
-    [editTrack, initialLyricsMode, reload],
+    [editTrack, initialHasEmbeddedSyncLyrics, initialLyricsMode, reload],
   );
 
   const onDeleteTrack = useCallback(async () => {
@@ -527,6 +533,8 @@ export function NrmTrackMetadataSettingsHome({
         initialMetadataFields={initialFields}
         initialStoredLyricsMode={initialLyricsMode}
         initialMelonLyricsAvailable={initialMelonLyricsAvailable}
+        initialTrackLrcUri={editTrack?.lrcUri}
+        initialHasEmbeddedSyncLyrics={initialHasEmbeddedSyncLyrics}
         busy={modalBusy}
         deleteFileName={editTrack?.fileName}
         onDelete={editTrack ? onDeleteTrack : undefined}

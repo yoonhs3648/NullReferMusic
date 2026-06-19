@@ -688,23 +688,6 @@ object Wav2Vec2CtcForcedAligner {
     val vocabKind = options.vocabKind()
     val vocab = cachedVocab ?: loadVocab(File(alignDir, "vocab.json"))
     val blankId = vocab.charToId["<pad>"] ?: vocab.charToId["|"] ?: 0
-    val logProbs =
-        inferLogProbsForAudio(
-            context,
-            session,
-            audio,
-            chunkSamples,
-            options.chunkOverlapSamples(),
-        )
-    if (logProbs.isEmpty()) {
-      throw IllegalStateException("empty_logits")
-    }
-    val frameMs =
-        if (logProbs.isEmpty()) 0.0
-        else {
-          val actualDurationMs = audio.size.toDouble() * 1000.0 / SAMPLE_RATE.toDouble()
-          actualDurationMs / logProbs.size.toDouble()
-        }
     val lineCharStarts = IntArray(melonLines.size)
     val full = StringBuilder()
     for (i in melonLines.indices) {
@@ -724,6 +707,28 @@ object Wav2Vec2CtcForcedAligner {
       throw IllegalStateException("empty_tokens")
     }
     val trellisLimit = maxTrellisCells(context, options)
+    val estimatedFrames = estimateFrameCount(audio.size)
+    val estimatedTrellisCells = estimatedFrames.toLong() * (tokens.size * 2L + 1L)
+    if (estimatedTrellisCells > trellisLimit) {
+      throw IllegalStateException("trellis_too_large cells=$estimatedTrellisCells")
+    }
+    val logProbs =
+        inferLogProbsForAudio(
+            context,
+            session,
+            audio,
+            chunkSamples,
+            options.chunkOverlapSamples(),
+        )
+    if (logProbs.isEmpty()) {
+      throw IllegalStateException("empty_logits")
+    }
+    val frameMs =
+        if (logProbs.isEmpty()) 0.0
+        else {
+          val actualDurationMs = audio.size.toDouble() * 1000.0 / SAMPLE_RATE.toDouble()
+          actualDurationMs / logProbs.size.toDouble()
+        }
     val trellisCells = logProbs.size.toLong() * (tokens.size * 2L + 1L)
     if (trellisCells > trellisLimit) {
       throw IllegalStateException("trellis_too_large cells=$trellisCells")

@@ -38,6 +38,7 @@ function pickMelonAlignLanguageManual(plain: string): Promise<MelonAlignLyricsLa
 export async function resolveMelonAlignLanguageForPlain(
   plain: string,
   alignPref?: NrmAlignModelId,
+  pickManual?: () => Promise<MelonAlignLyricsLanguage | null>,
 ): Promise<MelonAlignLyricsLanguage | null> {
   const pref = migrateAlignModelPreference(
     alignPref ?? (await loadAlignModelPreference()),
@@ -48,6 +49,9 @@ export async function resolveMelonAlignLanguageForPlain(
   const mode = await loadAlignLyricsLangDetectionMode();
   if (mode === 'auto') {
     return inferMelonAlignLyricsLanguage(plain);
+  }
+  if (pickManual) {
+    return pickManual();
   }
   return pickMelonAlignLanguageManual(plain);
 }
