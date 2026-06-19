@@ -27,6 +27,7 @@ import {
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { appendActivityHistory } from '@/lib/nrmActivityHistory';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 import {
@@ -247,6 +248,7 @@ async function finalizeNativeParallel(
   const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
   const audioSaved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
   options?.onAudioPersisted?.(audioSaved.savedLabel);
+  void appendActivityHistory({ fileName: audioSaved.savedLabel, kind: 'download' });
 
   // ── 3단계: 가사 생성 (오디오가 저장된 뒤) ───────────────────────────────────
   let lyricsStageStarted = false;
@@ -404,6 +406,14 @@ async function finalizeNativeParallel(
   }
 
   if (lyricsStageStarted) {
+    if (canPersistLrc && whisperRef.result) {
+      const isTranslation =
+        persistedLyricsMode === 'translation' || persistedLyricsMode === 'melon_translation';
+      void appendActivityHistory({
+        fileName: audioSaved.savedLabel,
+        kind: isTranslation ? 'lyrics_translation' : 'lyrics',
+      });
+    }
     options?.onLyricsStageEnded?.();
   }
 

@@ -50,13 +50,18 @@ import { NrmSpotifyArtistSearchHome } from '@/components/nrm/search/NrmSpotifyAr
 import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTrackSearchHome';
 
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
+import { NrmAppNotificationDrawer } from '@/components/nrm/NrmAppNotificationDrawer';
+import { NrmAppTopBar } from '@/components/nrm/NrmAppTopBar';
+import { NrmHomeBottomTabBar, type NrmHomeTab } from '@/components/nrm/NrmHomeBottomTabBar';
+import { NrmHomeFavoritePlaceholder } from '@/components/nrm/NrmHomeFavoritePlaceholder';
+import { NrmHomeHistoryScreen } from '@/components/nrm/NrmHomeHistoryScreen';
+import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
 import { confirmUser } from '@/lib/nrmUserNotify';
 import { getNrmAppExitConfirmMessage } from '@/lib/nrmAppBrand';
 
-import { NrmLogo } from '@/components/nrm/NrmLogo';
-
-import { NrmHomeChartCarousel } from '@/components/nrm/NrmHomeChartCarousel';
+import { NrmHomeChartCarousel, homeChartStageMetrics } from '@/components/nrm/NrmHomeChartCarousel';
+import { homeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
 import { NrmMusicQuotePanel } from '@/components/nrm/NrmMusicQuotePanel';
 import { NrmYoutubeHome } from '@/components/nrm/NrmYoutubeHome';
 
@@ -83,9 +88,6 @@ import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import type { LastfmSearchErrorCode } from '@/lib/nrmLastfmSearchTypes';
 
-
-
-const LOGO_TOP_FRAC = 0.1;
 
 
 
@@ -143,7 +145,7 @@ export default function HomeScreen() {
 
   const { isDark } = useNrmUiAppearance();
 
-  const { width, height: winH } = useWindowDimensions();
+  const { width } = useWindowDimensions();
 
   const [mainView, setMainView] = useState<MainView>('youtube');
 
@@ -162,6 +164,10 @@ export default function HomeScreen() {
   const [searchViewEpoch, setSearchViewEpoch] = useState(0);
   /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
   const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
+  const [homeTab, setHomeTab] = useState<NrmHomeTab>('home');
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const homeTabRef = useRef(homeTab);
+  homeTabRef.current = homeTab;
   const ytOverlayHistoryActiveRef = useRef(false);
   const mainViewRef = useRef(mainView);
   mainViewRef.current = mainView;
@@ -183,8 +189,6 @@ export default function HomeScreen() {
 
 
   const pad = width >= 900 ? nrmTokens.space.xxl : nrmTokens.space.lg;
-
-  const logoPadTop = Math.max(0, winH * LOGO_TOP_FRAC);
 
   const rootBackground = getNrmRootBackgroundColor(isDark);
 
@@ -208,7 +212,7 @@ export default function HomeScreen() {
   }, [homeChartSource]);
 
   useEffect(() => {
-    if (mainPageMode !== 'charts' || layoutPhase !== 'welcome' || youtubeOverlay !== null) {
+    if (mainPageMode !== 'charts' || layoutPhase !== 'welcome' || youtubeOverlay !== null || homeTab !== 'home') {
       return;
     }
     const ac = new AbortController();
@@ -236,7 +240,7 @@ export default function HomeScreen() {
       }
     });
     return () => ac.abort();
-  }, [mainPageMode, layoutPhase, youtubeOverlay, homeChartEpoch]);
+  }, [homeTab, mainPageMode, layoutPhase, youtubeOverlay, homeChartEpoch]);
 
   const isAppleMusicCharts = mainView === 'appleMusicCharts';
   const isSpotifyChartsOfficial = mainView === 'spotifyChartsOfficial';
@@ -277,17 +281,30 @@ export default function HomeScreen() {
   const showFeatureFullScreen = isFullScreenFeature;
   const showYoutubeHome = mainView === 'youtube' && !showFeatureFullScreen;
 
-  const homeChartCoverSize = Math.min(Math.round(width * 0.74), 340);
+  const homeChartMetrics = homeChartStageMetrics(width);
   const homeChartContentWidth = width - 2 * pad;
-  const homeChartCoverLeft =
-    pad + Math.max(0, (homeChartContentWidth - homeChartCoverSize) / 2);
-  const homeChartLeftNavRight = homeChartCoverLeft + 6 + 40 + 4;
+  const homeChartStageLeft =
+    pad + Math.max(0, (homeChartContentWidth - homeChartMetrics.stageWidth) / 2);
+  const homeChartLeftNavRight = homeChartStageLeft + homeChartMetrics.navBtnSize;
   const showHomeWelcomeChart =
     showYoutubeHome &&
+    homeTab === 'home' &&
     layoutPhase !== 'browsing' &&
     !showYoutubeOverlay &&
     mainPageMode === 'charts' &&
     homeChartState.status !== 'failed';
+
+  const homePodiumTier = useMemo(() => {
+    if (homeTab !== 'home' || homeChartState.status !== 'ready') return null;
+    const item = homeChartState.items[homeChartIndex];
+    if (!item) return null;
+    const rank = item.rank > 0 ? item.rank : homeChartIndex + 1;
+    return homeChartPodiumTier(rank);
+  }, [homeChartIndex, homeChartState, homeTab]);
+
+  const showHomeChrome = showYoutubeHome && !showFeatureFullScreen;
+  const showBottomTabBar =
+    showHomeChrome && layoutPhase === 'welcome' && youtubeOverlay === null;
 
   const openYoutubeOverlay = useCallback((payload: YoutubeOverlayState) => {
     setYoutubeOverlay(payload);
@@ -322,9 +339,26 @@ export default function HomeScreen() {
     dismissYoutubeOverlay();
     setMainView('youtube');
     setLayoutPhase('welcome');
+    setHomeTab('home');
     setHomeEpoch((v) => v + 1);
     bumpQuoteRefresh();
   }, [dismissYoutubeOverlay, bumpQuoteRefresh]);
+
+  const onHomeTabChange = useCallback(
+    (tab: NrmHomeTab) => {
+      if (tab === 'home') {
+        resetToYoutubeHome();
+        return;
+      }
+      setHomeTab(tab);
+      setYoutubeOverlay(null);
+      if (tab === 'search') {
+        setLayoutPhase('welcome');
+        setHomeEpoch((v) => v + 1);
+      }
+    },
+    [resetToYoutubeHome],
+  );
 
   /** 차트·검색 트랙 클릭: 유튜브 오버레이 (원 플랫폼 화면은 마운트 유지) */
   const navigateToSearchFromChart = useCallback(
@@ -667,6 +701,13 @@ export default function HomeScreen() {
         return true;
       }
 
+      if (showYoutubeHome && homeTabRef.current !== 'home') {
+        setHomeTab('home');
+        setLayoutPhase('welcome');
+        setYoutubeOverlay(null);
+        return true;
+      }
+
       if (layoutPhase !== 'welcome') {
 
         resetToYoutubeHome();
@@ -870,30 +911,18 @@ export default function HomeScreen() {
   };
 
   const renderYoutubePanel = (overlay: YoutubeOverlayState | null) => {
-    const youtubeBrowsing = !!overlay || layoutPhase === 'browsing';
+    const showSearchUi = homeTab === 'search' || !!overlay;
+    const youtubeBrowsing = !!overlay || (showSearchUi && layoutPhase === 'browsing');
     const chartLoadFailed =
       mainPageMode === 'charts' && homeChartState.status === 'failed';
-    const useCenteredWelcomeLayout =
-      !youtubeBrowsing &&
-      (mainPageMode === 'none' || (mainPageMode === 'charts' && chartLoadFailed));
+    const useCenteredSearchWelcome = showSearchUi && !youtubeBrowsing;
     const showWelcomeQuote =
-      !youtubeBrowsing && mainPageMode === 'quotation';
+      homeTab === 'home' && !youtubeBrowsing && mainPageMode === 'quotation';
     const showWelcomeChart =
+      homeTab === 'home' &&
       !youtubeBrowsing &&
       mainPageMode === 'charts' &&
       !chartLoadFailed;
-
-    const logoBlock = (
-      <View
-        style={[
-          styles.logoWrap,
-          !useCenteredWelcomeLayout && styles.logoWrapBrowsing,
-          useCenteredWelcomeLayout && styles.logoWrapCentered,
-          !useCenteredWelcomeLayout && { paddingTop: logoPadTop },
-        ]}>
-        <NrmLogo tone={isDark ? 'dark' : 'light'} onPress={onMainLogoPress} />
-      </View>
-    );
 
     const youtubeHome = (
       <NrmYoutubeHome
@@ -913,30 +942,48 @@ export default function HomeScreen() {
       />
     );
 
-    const welcomeBottom = showWelcomeQuote ? (
-      <NrmMusicQuotePanel
-        isDark={isDark}
-        refreshKey={quoteRefreshKey}
-      />
-    ) : showWelcomeChart ? (
-      <View style={styles.homeChartShell}>
-        <NrmHomeChartCarousel
-          key={`home-chart-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
+    let bodyContent = null;
+    if (showSearchUi) {
+      bodyContent = youtubeHome;
+    } else if (homeTab === 'library') {
+      bodyContent = (
+        <NrmTrackMetadataSettingsHome
           isDark={isDark}
-          items={homeChartState.status === 'ready' ? homeChartState.items : []}
-          loading={
-            homeChartState.status === 'loading' || homeChartState.status === 'idle'
-          }
-          initialIndex={homeChartIndex}
-          onIndexChange={setHomeChartIndex}
-          onTrackPress={(item) => {
-            const source =
-              homeChartState.status === 'ready' ? homeChartState.source : 'melon';
-            navigateFromHomeChart(item, source);
-          }}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          onBack={() => onHomeTabChange('home')}
+          hideBack
         />
-      </View>
-    ) : null;
+      );
+    } else if (homeTab === 'favorite') {
+      bodyContent = <NrmHomeFavoritePlaceholder isDark={isDark} />;
+    } else if (homeTab === 'history') {
+      bodyContent = <NrmHomeHistoryScreen isDark={isDark} />;
+    } else if (showWelcomeQuote) {
+      bodyContent = (
+        <NrmMusicQuotePanel isDark={isDark} refreshKey={quoteRefreshKey} />
+      );
+    } else if (showWelcomeChart) {
+      bodyContent = (
+        <View style={styles.homeChartShell}>
+          <NrmHomeChartCarousel
+            key={`home-chart-${homeChartState.status === 'ready' ? homeChartState.source : 'pending'}`}
+            isDark={isDark}
+            items={homeChartState.status === 'ready' ? homeChartState.items : []}
+            loading={
+              homeChartState.status === 'loading' || homeChartState.status === 'idle'
+            }
+            initialIndex={homeChartIndex}
+            onIndexChange={setHomeChartIndex}
+            onTrackPress={(item) => {
+              const source =
+                homeChartState.status === 'ready' ? homeChartState.source : 'melon';
+              navigateFromHomeChart(item, source);
+            }}
+          />
+        </View>
+      );
+    }
 
     return (
       <KeyboardAvoidingView
@@ -952,22 +999,20 @@ export default function HomeScreen() {
             styles.centerColumn,
             youtubeBrowsing
               ? styles.youtubeBrowsingColumn
-              : useCenteredWelcomeLayout
+              : useCenteredSearchWelcome
                 ? styles.youtubeWelcomeColumnCentered
                 : styles.youtubeWelcomeColumn,
             { paddingHorizontal: pad },
           ]}>
-          {logoBlock}
           <View
             style={
               youtubeBrowsing
                 ? styles.youtubeHomeShell
-                : useCenteredWelcomeLayout
+                : useCenteredSearchWelcome
                   ? styles.youtubeWelcomeBodyCentered
                   : styles.youtubeWelcomeBody
             }>
-            {youtubeHome}
-            {welcomeBottom}
+            {bodyContent}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -983,11 +1028,20 @@ export default function HomeScreen() {
       <StatusBar style={isDark ? 'light' : 'dark'} />
 
       <SafeAreaView
-
         style={[styles.safe, { backgroundColor: rootBackground }]}
+        edges={showBottomTabBar ? ['top'] : ['top', 'bottom']}>
 
-        edges={['top', 'bottom']}>
+        {showHomeChrome ? (
+          <NrmAppTopBar
+            isDark={isDark}
+            onMenuPress={() => menuRef.current?.openMenu()}
+            onNotificationPress={() => setNotificationOpen(true)}
+            onLogoPress={onMainLogoPress}
+            podiumTier={homePodiumTier}
+          />
+        ) : null}
 
+        <View style={styles.mainBody}>
         {showFeatureFullScreen ? (
           <View
             style={[
@@ -1014,12 +1068,23 @@ export default function HomeScreen() {
         ) : showYoutubeHome ? (
           renderYoutubePanel(null)
         ) : null}
+        </View>
+
+        {showBottomTabBar ? (
+          <NrmHomeBottomTabBar isDark={isDark} active={homeTab} onChange={onHomeTabChange} />
+        ) : null}
+
+        <NrmAppNotificationDrawer
+          isDark={isDark}
+          open={notificationOpen}
+          onOpenChange={setNotificationOpen}
+        />
 
         <NrmAppMenu
           ref={menuRef}
           isDark={isDark}
-
           paddingHorizontal={pad}
+          hideMenuFab={showHomeChrome}
           leftEdgeSwipeReserve={showHomeWelcomeChart ? homeChartLeftNavRight : undefined}
 
           onNavigateAppleMusicCharts={openAppleMusicCharts}
@@ -1091,11 +1156,13 @@ const styles = StyleSheet.create({
   },
 
   safe: {
-
     flex: 1,
-
     position: 'relative',
+  },
 
+  mainBody: {
+    flex: 1,
+    minHeight: 0,
   },
 
   stackLayer: {

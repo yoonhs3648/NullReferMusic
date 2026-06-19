@@ -62,6 +62,7 @@ type Props = {
   titleColor: string;
   bodyColor: string;
   onBack: () => void;
+  hideBack?: boolean;
 };
 
 function stemOf(fileName: string): string {
@@ -122,6 +123,7 @@ export function NrmTrackMetadataSettingsHome({
   titleColor,
   bodyColor,
   onBack,
+  hideBack = false,
 }: Props) {
   const row = nrmChartTrackListStyles;
   const sectionListRef = useRef<SectionList<NrmDownloadTrackItem, TrackListSection>>(null);
@@ -427,10 +429,12 @@ export function NrmTrackMetadataSettingsHome({
 
   return (
     <View style={styles.wrap}>
-      <Pressable onPress={onBack} style={styles.backRow} accessibilityRole="button">
-        <Ionicons name="chevron-back" size={22} color={nrmTokens.color.primary} />
-        <Text style={[styles.backLabel, { color: nrmTokens.color.primary }]}>뒤로</Text>
-      </Pressable>
+      {hideBack ? null : (
+        <Pressable onPress={onBack} style={styles.backRow} accessibilityRole="button">
+          <Ionicons name="chevron-back" size={22} color={nrmTokens.color.primary} />
+          <Text style={[styles.backLabel, { color: nrmTokens.color.primary }]}>뒤로</Text>
+        </Pressable>
+      )}
 
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>

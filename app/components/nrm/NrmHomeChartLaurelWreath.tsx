@@ -1,50 +1,121 @@
 import { StyleSheet, View } from 'react-native';
 import Svg, {
   Defs,
+  Ellipse,
+  G,
   LinearGradient as SvgGradient,
   Path,
+  RadialGradient,
   Stop,
 } from 'react-native-svg';
 
-import { homeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
+import { homeChartPodiumTier, type HomeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
 
-type LaurelTier = 1 | 2 | 3;
+type LaurelTier = HomeChartPodiumTier;
 
-const LAUREL_PALETTE: Record<
-  LaurelTier,
-  { leaf: [string, string, string]; stem: string; highlight: string }
-> = {
+type LaurelPalette = {
+  leaf: [string, string, string];
+  stem: string;
+  highlight: string;
+  lampCore: string;
+  lampHalo: string;
+};
+
+const LAUREL_PALETTE: Record<LaurelTier, LaurelPalette> = {
   1: {
-    leaf: ['#FFF0A8', '#E8C547', '#B8860B'],
+    leaf: ['#FFF6C8', '#F0C63A', '#B8860B'],
     stem: '#9A7209',
-    highlight: '#FFF8DC',
+    highlight: '#FFFBE0',
+    lampCore: '#FFE566',
+    lampHalo: '#FFF0A8',
   },
   2: {
-    leaf: ['#F8FBFF', '#C8D4E0', '#8E9DAD'],
+    leaf: ['#FFFFFF', '#D0DCE8', '#8E9DAD'],
     stem: '#6B7D8F',
     highlight: '#FFFFFF',
+    lampCore: '#E8F2FA',
+    lampHalo: '#F8FBFF',
   },
   3: {
-    leaf: ['#D9A574', '#A86F45', '#6B4423'],
+    leaf: ['#F0C89A', '#C4895A', '#7A4E2A'],
     stem: '#5C3A1E',
-    highlight: '#E8BE98',
+    highlight: '#FFD9B8',
+    lampCore: '#E8BE98',
+    lampHalo: '#F5D4B0',
   },
 };
+
+type LeafSpec = [number, number, number, number];
+
+const LEFT_LEAVES: LeafSpec[] = [
+  [32, 32, 5.2, -62],
+  [42, 25, 4.8, -52],
+  [52, 18, 4.5, -42],
+  [62, 12, 4.2, -32],
+  [72, 8, 3.9, -22],
+  [84, 5, 3.6, -12],
+  [94, 3, 3.2, -4],
+];
+
+const RIGHT_LEAVES: LeafSpec[] = [
+  [168, 32, 5.2, 62],
+  [158, 25, 4.8, 52],
+  [148, 18, 4.5, 42],
+  [138, 12, 4.2, 32],
+  [128, 8, 3.9, 22],
+  [116, 5, 3.6, 12],
+  [106, 3, 3.2, 4],
+];
 
 type Props = {
   rank: number;
-  /** 앨범 커버와 동일한 폭 */
   width: number;
 };
 
-/** TOP 1·2·3 트랙 제목 아래 장식용 월계관 */
+function PointedLeaf({
+  cx,
+  cy,
+  size,
+  rotation,
+  gradId,
+  palette,
+}: {
+  cx: number;
+  cy: number;
+  size: number;
+  rotation: number;
+  gradId: string;
+  palette: LaurelPalette;
+}) {
+  const s = size;
+  const d = `M${cx} ${cy - s} C${cx + s * 0.42} ${cy - s * 0.55}, ${cx + s * 0.38} ${cy - s * 0.08}, ${cx + s * 0.22} ${cy + s * 0.12} C${cx} ${cy + s * 0.28}, ${cx - s * 0.22} ${cy + s * 0.12}, ${cx - s * 0.38} ${cy - s * 0.08} C${cx - s * 0.42} ${cy - s * 0.55}, ${cx} ${cy - s} Z`;
+  return (
+    <G rotation={rotation} origin={`${cx}, ${cy}`}>
+      <Path d={d} fill={`url(#${gradId})`} stroke={palette.stem} strokeWidth={0.3} />
+      <Path
+        d={`M${cx} ${cy - s * 0.88} L${cx} ${cy + s * 0.05}`}
+        fill="none"
+        stroke={palette.highlight}
+        strokeWidth={0.45}
+        strokeLinecap="round"
+        opacity={0.55}
+      />
+    </G>
+  );
+}
+
+const CENTER_RAYS = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+
+/** TOP 1·2·3 트랙 제목 아래 U형 월계관 — 중앙 램프 광원 포함 */
 export function NrmHomeChartLaurelWreath({ rank, width }: Props) {
   const tier = homeChartPodiumTier(rank);
   if (!tier) return null;
 
   const palette = LAUREL_PALETTE[tier];
-  const height = Math.round(width * 0.2);
-  const gradId = `laurel-${tier}`;
+  const height = Math.round(width * 0.24);
+  const gradId = `laurel-caption-${tier}`;
+  const lampId = `laurel-lamp-${tier}`;
+  const burstId = `laurel-burst-${tier}`;
 
   return (
     <View
@@ -52,80 +123,83 @@ export function NrmHomeChartLaurelWreath({ rank, width }: Props) {
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants">
-      <Svg width={width} height={height} viewBox="0 0 200 44">
+      <Svg width={width} height={height} viewBox="0 0 200 52">
         <Defs>
-          <SvgGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <SvgGradient id={gradId} x1="0.15" y1="0" x2="0.85" y2="1">
             <Stop offset="0" stopColor={palette.leaf[0]} />
-            <Stop offset="0.45" stopColor={palette.leaf[1]} />
+            <Stop offset="0.48" stopColor={palette.leaf[1]} />
             <Stop offset="1" stopColor={palette.leaf[2]} />
           </SvgGradient>
+          <RadialGradient id={lampId} cx="50%" cy="90%" rx="38%" ry="46%" fx="50%" fy="94%">
+            <Stop offset="0" stopColor={palette.lampCore} stopOpacity={1} />
+            <Stop offset="0.28" stopColor={palette.lampHalo} stopOpacity={0.62} />
+            <Stop offset="0.62" stopColor={palette.lampHalo} stopOpacity={0.16} />
+            <Stop offset="1" stopColor={palette.lampHalo} stopOpacity={0} />
+          </RadialGradient>
+          <RadialGradient id={burstId} cx="50%" cy="50%" r="50%">
+            <Stop offset="0" stopColor={palette.highlight} stopOpacity={1} />
+            <Stop offset="0.45" stopColor={palette.lampCore} stopOpacity={0.55} />
+            <Stop offset="1" stopColor={palette.lampCore} stopOpacity={0} />
+          </RadialGradient>
         </Defs>
 
-        <Path
-          d="M100 38 C94 37, 88 35, 82 32 C72 26, 64 18, 58 8 C56 12, 58 18, 62 22 C66 26, 72 28, 76 26 C74 30, 70 34, 64 36 C58 38, 52 38, 48 36 C52 38, 58 39, 64 39 C70 39, 76 37, 82 35 C88 33, 94 31, 100 28"
-          fill={`url(#${gradId})`}
-          stroke={palette.stem}
-          strokeWidth={0.65}
-          strokeLinejoin="round"
-        />
-        {[
-          [58, 12, 54, 6, 60, 8],
-          [64, 18, 60, 12, 66, 14],
-          [70, 24, 66, 18, 72, 20],
-          [76, 28, 72, 22, 78, 24],
-          [82, 31, 78, 25, 84, 27],
-          [88, 33, 84, 27, 90, 29],
-          [94, 34, 90, 28, 96, 30],
-        ].map(([x1, y1, x2, y2, x3, y3], i) => (
-          <Path
-            key={`l-${i}`}
-            d={`M${x1} ${y1} L${x2} ${y2} L${x3} ${y3} Z`}
-            fill={`url(#${gradId})`}
-            stroke={palette.stem}
-            strokeWidth={0.35}
-          />
-        ))}
+        <Ellipse cx={100} cy={44} rx={62} ry={20} fill={`url(#${lampId})`} />
 
         <Path
-          d="M100 38 C106 37, 112 35, 118 32 C128 26, 136 18, 142 8 C144 12, 142 18, 138 22 C134 26, 128 28, 124 26 C126 30, 130 34, 136 36 C142 38, 148 38, 152 36 C148 38, 142 39, 136 39 C130 39, 124 37, 118 35 C112 33, 106 31, 100 28"
-          fill={`url(#${gradId})`}
-          stroke={palette.stem}
-          strokeWidth={0.65}
-          strokeLinejoin="round"
-        />
-        {[
-          [142, 12, 146, 6, 140, 8],
-          [136, 18, 140, 12, 134, 14],
-          [130, 24, 134, 18, 128, 20],
-          [124, 28, 128, 22, 122, 24],
-          [118, 31, 122, 25, 116, 27],
-          [112, 33, 116, 27, 110, 29],
-          [106, 34, 110, 28, 104, 30],
-        ].map(([x1, y1, x2, y2, x3, y3], i) => (
-          <Path
-            key={`r-${i}`}
-            d={`M${x1} ${y1} L${x2} ${y2} L${x3} ${y3} Z`}
-            fill={`url(#${gradId})`}
-            stroke={palette.stem}
-            strokeWidth={0.35}
-          />
-        ))}
-
-        <Path
-          d="M92 38 C96 40, 104 40, 108 38 M88 40 C92 42, 108 42, 112 40"
+          d="M100 44 C86 42, 70 35, 56 24 C44 15, 32 9, 20 6"
           fill="none"
           stroke={palette.stem}
           strokeWidth={1.1}
           strokeLinecap="round"
         />
         <Path
-          d="M94 36 L100 32 L106 36"
+          d="M100 44 C114 42, 130 35, 144 24 C156 15, 168 9, 180 6"
           fill="none"
-          stroke={palette.highlight}
-          strokeWidth={0.75}
+          stroke={palette.stem}
+          strokeWidth={1.1}
           strokeLinecap="round"
-          opacity={0.7}
         />
+
+        {LEFT_LEAVES.map(([cx, cy, size, rot], i) => (
+          <PointedLeaf
+            key={`ll-${i}`}
+            cx={cx}
+            cy={cy}
+            size={size}
+            rotation={rot}
+            gradId={gradId}
+            palette={palette}
+          />
+        ))}
+        {RIGHT_LEAVES.map(([cx, cy, size, rot], i) => (
+          <PointedLeaf
+            key={`rl-${i}`}
+            cx={cx}
+            cy={cy}
+            size={size}
+            rotation={rot}
+            gradId={gradId}
+            palette={palette}
+          />
+        ))}
+
+        {CENTER_RAYS.map((deg) => (
+          <Path
+            key={`ray-${deg}`}
+            d="M100 44 L100 36"
+            fill="none"
+            stroke={palette.highlight}
+            strokeWidth={deg % 90 === 0 ? 1.1 : 0.55}
+            strokeLinecap="round"
+            opacity={deg % 90 === 0 ? 0.9 : 0.45}
+            rotation={deg}
+            origin="100, 44"
+          />
+        ))}
+
+        <Ellipse cx={100} cy={44} rx={8} ry={5} fill={`url(#${burstId})`} />
+        <Ellipse cx={100} cy={43.5} rx={4.5} ry={2.6} fill={palette.lampCore} opacity={0.95} />
+        <Ellipse cx={100} cy={43} rx={2.2} ry={1.3} fill={palette.highlight} opacity={0.92} />
       </Svg>
     </View>
   );
@@ -133,8 +207,10 @@ export function NrmHomeChartLaurelWreath({ rank, width }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
+    zIndex: 1,
   },
 });

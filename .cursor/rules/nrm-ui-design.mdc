@@ -6,6 +6,7 @@ alwaysApply: false
 
 # NRM UI (nullferenceMusicDesign)
 
+- **Main page visual reference (mockup):** `docs/design-reference/MainPage.png` — 메인 홈(상단 바·TOP 차트·하단 탭) UI 작업 시 이 이미지를 기준으로 레이아웃·색·계층을 맞춘다.
 - **Source of truth in repo:** `app/constants/nrmTokens.ts` — colors, spacing, radii, type scale, layout. Extend these tokens; do not introduce ad-hoc hex accents.
 - **Single interactive color:** Action Blue `#0066cc` (`primary`); on dark tiles use `primaryOnDark` for links. No second brand accent.
 - **Chrome:** No decorative CSS gradients. No box-shadow on cards, buttons, or nav — only `nrmShadow.productImage` for photographic/product weight. Surfaces and 1px hairlines create hierarchy.

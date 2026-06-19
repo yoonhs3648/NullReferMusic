@@ -47,55 +47,66 @@ export function homeChartPodiumTier(rank: number): HomeChartPodiumTier | null {
 
 /** 왕관이 TOP 숫자 영역과 겹치지 않도록 커버 상단 여백 (px) */
 export function homeChartCrownClearanceInset(coverSize: number): number {
-  const crownW = Math.max(52, Math.round(coverSize * 0.28));
-  const crownH = Math.round(crownW * 0.78);
-  return Math.round(crownH * 0.56);
+  const crownW = Math.max(56, Math.round(coverSize * 0.32));
+  const crownH = Math.round(crownW * 0.82);
+  return Math.round(crownH * 0.54);
 }
 
 const CROWN_PALETTE: Record<
   CrownTier,
   {
-    body: [string, string];
+    body: [string, string, string];
+    shade: string;
     highlight: string;
     stroke: string;
     glow: string;
     band: [string, string];
+    bandInner: string;
     jewel: string;
     orb: string;
+    specular: string;
   }
 > = {
   1: {
-    body: ['#FFE566', '#D4A017'],
-    highlight: '#FFF4B8',
-    stroke: '#9A7209',
-    glow: 'rgba(255, 214, 80, 0.48)',
-    band: ['#F0C63A', '#B8860B'],
-    jewel: '#C9920A',
-    orb: '#FFF0A8',
+    body: ['#FFF4B0', '#F0C63A', '#B8860B'],
+    shade: '#8A6508',
+    highlight: '#FFFBE6',
+    stroke: '#8A6508',
+    glow: 'rgba(255, 214, 80, 0.55)',
+    band: ['#FFE566', '#C9920A'],
+    bandInner: '#9A7209',
+    jewel: '#E8C547',
+    orb: '#FFF8DC',
+    specular: '#FFFFFF',
   },
   2: {
-    body: ['#F2F6FA', '#9AABB8'],
+    body: ['#FFFFFF', '#D8E4EE', '#8E9DAD'],
+    shade: '#5E6F80',
     highlight: '#FFFFFF',
-    stroke: '#6B7D8F',
-    glow: 'rgba(176, 190, 206, 0.42)',
-    band: ['#E2EAF2', '#8E9DAD'],
-    jewel: '#7A8C9E',
-    orb: '#F8FBFF',
+    stroke: '#5E6F80',
+    glow: 'rgba(200, 214, 228, 0.48)',
+    band: ['#F4FAFF', '#9AABB8'],
+    bandInner: '#6B7D8F',
+    jewel: '#C8D8E8',
+    orb: '#FFFFFF',
+    specular: '#FFFFFF',
   },
   3: {
-    body: ['#C4895A', '#7A4E2A'],
-    highlight: '#D9A574',
-    stroke: '#5C3A1E',
-    glow: 'rgba(122, 78, 42, 0.42)',
-    band: ['#A86F45', '#6B4423'],
-    jewel: '#5C3A1E',
-    orb: '#C9956A',
+    body: ['#E8BE98', '#B8733F', '#6B4423'],
+    shade: '#4A2C14',
+    highlight: '#F0D0B0',
+    stroke: '#4A2C14',
+    glow: 'rgba(200, 140, 90, 0.45)',
+    band: ['#D9A574', '#8B5A2B'],
+    bandInner: '#5C3A1E',
+    jewel: '#C4895A',
+    orb: '#F0C89A',
+    specular: '#FFE8D0',
   },
 };
 
 type Props = {
   rank: number;
-  /** 앨범 커버 한 변 길이 */
   coverSize: number;
 };
 
@@ -103,8 +114,8 @@ export function NrmHomeChartRankCrown({ rank, coverSize }: Props) {
   if (rank < 1 || rank > 3) return null;
   const tier = rank as CrownTier;
   const palette = CROWN_PALETTE[tier];
-  const crownW = Math.max(52, Math.round(coverSize * 0.28));
-  const crownH = Math.round(crownW * 0.78);
+  const crownW = Math.max(56, Math.round(coverSize * 0.32));
+  const crownH = Math.round(crownW * 0.82);
   const left = (coverSize - crownW) / 2;
 
   return (
@@ -115,87 +126,116 @@ export function NrmHomeChartRankCrown({ rank, coverSize }: Props) {
           width: crownW,
           height: crownH,
           left,
-          top: -(crownH * 0.52),
+          top: -(crownH * 0.5),
           shadowColor: palette.glow,
         },
       ]}
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants">
-      <Svg width={crownW} height={crownH} viewBox="0 0 64 50">
+      <Svg width={crownW} height={crownH} viewBox="0 0 72 58">
         <Defs>
-          <SvgGradient id={`crownBody-${tier}`} x1="0.2" y1="0" x2="0.8" y2="1">
+          <SvgGradient id={`crownBody-${tier}`} x1="0.15" y1="0" x2="0.85" y2="1">
             <Stop offset="0" stopColor={palette.body[0]} />
-            <Stop offset="0.55" stopColor={palette.body[0]} />
-            <Stop offset="1" stopColor={palette.body[1]} />
+            <Stop offset="0.5" stopColor={palette.body[1]} />
+            <Stop offset="1" stopColor={palette.body[2]} />
           </SvgGradient>
-          <SvgGradient id={`crownBand-${tier}`} x1="0" y1="0" x2="1" y2="0">
+          <SvgGradient id={`crownShade-${tier}`} x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor={palette.shade} stopOpacity={0.45} />
+            <Stop offset="0.45" stopColor={palette.shade} stopOpacity={0.08} />
+            <Stop offset="1" stopColor={palette.shade} stopOpacity={0} />
+          </SvgGradient>
+          <SvgGradient id={`crownBand-${tier}`} x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0" stopColor={palette.band[0]} />
             <Stop offset="1" stopColor={palette.band[1]} />
           </SvgGradient>
-          <RadialGradient id={`crownOrb-${tier}`} cx="50%" cy="35%" r="55%">
-            <Stop offset="0" stopColor={palette.orb} />
-            <Stop offset="1" stopColor={palette.body[1]} />
+          <RadialGradient id={`crownOrb-${tier}`} cx="35%" cy="30%" r="65%">
+            <Stop offset="0" stopColor={palette.specular} />
+            <Stop offset="0.35" stopColor={palette.orb} />
+            <Stop offset="1" stopColor={palette.body[2]} />
           </RadialGradient>
         </Defs>
 
-        {/* 하단 밴드 */}
-        <Path
-          d="M7 38 C16 42, 48 42, 57 38 L57 44 C48 47, 16 47, 7 44 Z"
-          fill={`url(#crownBand-${tier})`}
-          stroke={palette.stroke}
-          strokeWidth={1.1}
-        />
+        <Ellipse cx={36} cy={54} rx={29} ry={3.8} fill="#000000" opacity={0.28} />
+        <Ellipse cx={36} cy={53} rx={22} ry={2.2} fill="#000000" opacity={0.12} />
 
-        {/* 왕관 본체 — 5개 봉우리 */}
         <Path
-          d="M6 38 L11 24 L16 30 L22 16 L28 26 L32 10 L36 26 L42 16 L48 30 L53 24 L58 38 Z"
+          d="M8 44 C18 48, 54 48, 64 44 L64 50 C54 53, 18 53, 8 50 Z"
+          fill={`url(#crownBand-${tier})`}
+          stroke={palette.bandInner}
+          strokeWidth={1}
+        />
+        <Path d="M10 44 L62 44 L60 47 L12 47 Z" fill={palette.bandInner} opacity={0.35} />
+
+        <Path
+          d="M7 44 L13 27 L19 33 L26 18 L33 29 L36 11 L39 29 L46 18 L53 33 L59 27 L65 44 Z"
           fill={`url(#crownBody-${tier})`}
           stroke={palette.stroke}
-          strokeWidth={1.35}
+          strokeWidth={1.2}
           strokeLinejoin="round"
         />
-
-        {/* 상단 하이라이트 */}
         <Path
-          d="M12 27 L22 18 L32 13 L42 18 L50 27"
-          fill="none"
-          stroke={palette.highlight}
-          strokeWidth={1.2}
-          strokeLinecap="round"
-          opacity={0.55}
+          d="M7 44 L13 27 L19 33 L26 18 L33 29 L36 11 L39 29 L46 18 L53 33 L59 27 L65 44 Z"
+          fill={`url(#crownShade-${tier})`}
         />
 
-        {/* 봉우리 구슬 */}
+        <Path
+          d="M14 30 L26 19 L36 14 L46 19 L58 30"
+          fill="none"
+          stroke={palette.highlight}
+          strokeWidth={1.35}
+          strokeLinecap="round"
+          opacity={0.72}
+        />
+        <Path
+          d="M18 38 L54 38"
+          fill="none"
+          stroke={palette.highlight}
+          strokeWidth={0.8}
+          strokeLinecap="round"
+          opacity={0.35}
+        />
+
         {[
-          [11, 22],
-          [22, 14],
-          [32, 8],
-          [42, 14],
-          [53, 22],
-        ].map(([cx, cy], i) => (
+          [13, 25, 3.2],
+          [26, 16, 3.4],
+          [36, 9, 3.8],
+          [46, 16, 3.4],
+          [59, 25, 3.2],
+        ].map(([cx, cy, r], i) => (
           <Circle
             key={`orb-${i}`}
             cx={cx}
             cy={cy}
-            r={2.6}
+            r={r}
             fill={`url(#crownOrb-${tier})`}
             stroke={palette.stroke}
-            strokeWidth={0.7}
+            strokeWidth={0.65}
           />
         ))}
 
-        {/* 밴드 보석 */}
-        {[18, 32, 46].map((cx, i) => (
+        {[
+          [13, 25],
+          [36, 9],
+          [59, 25],
+        ].map(([cx, cy], i) => (
+          <Circle key={`spec-${i}`} cx={cx - 0.8} cy={cy - 0.9} r={0.9} fill={palette.specular} opacity={0.85} />
+        ))}
+
+        {[
+          [20, 46, 2.5, 2.1],
+          [36, 46.5, 2.8, 2.2],
+          [52, 46, 2.5, 2.1],
+        ].map(([cx, cy, rx, ry], i) => (
           <Ellipse
             key={`jewel-${i}`}
             cx={cx}
-            cy={40.5}
-            rx={2.4}
-            ry={2}
+            cy={cy}
+            rx={rx}
+            ry={ry}
             fill={palette.jewel}
             stroke={palette.stroke}
-            strokeWidth={0.6}
+            strokeWidth={0.55}
           />
         ))}
       </Svg>
@@ -211,12 +251,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...Platform.select({
       ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.42,
-        shadowRadius: 7,
+        shadowOffset: { width: 0, height: 7 },
+        shadowOpacity: 0.62,
+        shadowRadius: 12,
       },
       android: {
-        elevation: 6,
+        elevation: 10,
       },
       default: {},
     }),

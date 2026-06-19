@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 122
-        versionName "1.9.5"
+        versionCode 125
+        versionName "2.1.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -205,10 +205,12 @@ android {
         }
     }
     tasks.named("preBuild").configure { dependsOn(verifyReleaseNativeAssets) }
-    // APK 파일명: {storageFolderName}-v{versionName}[-suffix].apk (suffix: -PnrmApkSuffix=-custom)
+    // APK 파일명: {storageFolderName}-v{version}.apk | {storageFolderName}-custom-v{version}.apk (-PnrmApkVariant=custom)
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            outputFileName = "NullReferenceMusic-v${variant.versionName}${findProperty('nrmApkSuffix') ?: ''}.apk"
+            outputFileName = findProperty('nrmApkVariant') == 'custom'
+                ? "NullReferenceMusic-custom-v${variant.versionName}.apk"
+                : "NullReferenceMusic-v${variant.versionName}.apk"
         }
     }
 }

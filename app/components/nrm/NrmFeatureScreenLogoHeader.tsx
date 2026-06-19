@@ -20,7 +20,7 @@ export function NrmFeatureScreenLogoHeader({
 }: Props) {
   return (
     <View style={styles.headerRow}>
-      <NrmLogo compact={compact} tone={isDark ? 'dark' : 'light'} onPress={onPressHome} />
+      <NrmLogo layout="stacked" compact={compact} tone={isDark ? 'dark' : 'light'} onPress={onPressHome} />
     </View>
   );
 }

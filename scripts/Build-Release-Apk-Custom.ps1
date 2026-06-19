@@ -83,6 +83,7 @@ try {
         Write-Host ""
         Write-Host "[brand] Temporary display name for this build: $name"
         Write-Host "[brand] Version info customizing line: customizing : $name"
+        Write-Host "[brand] Note: version label product name stays versionInfoProductName (default NullReference Music)."
     }
     else {
         Write-Host ""
@@ -121,8 +122,14 @@ try {
     Write-Host "[3/5] Music quotes from Excel (data\nrm-music-quotes.xlsx)..."
     Invoke-Npm @('run', 'generate:music-quotes')
 
-    Write-Host "[4/5] Gradle assembleRelease..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkSuffix '-custom'
+    if ($Customize) {
+        Write-Host "[4/5] Gradle assembleRelease (force rebundle for custom branding)..."
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'custom' -ForceRebundle
+    }
+    else {
+        Write-Host "[4/5] Gradle assembleRelease..."
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot
+    }
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'
     }

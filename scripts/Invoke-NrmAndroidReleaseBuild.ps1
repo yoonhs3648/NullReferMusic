@@ -3,7 +3,9 @@
 param(
     [string]$RepoRoot = "",
     [switch]$NoDaemon = $true,
-    [string]$ApkSuffix = ""
+    [string]$ApkVariant = "",
+    # 브랜드(displayName) 변경 후 이전 release JS·리소스 캐시를 무시하고 다시 번들
+    [switch]$ForceRebundle = $false
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,18 +47,60 @@ Use NullReferMusic-Build-Release-Apk.bat or see docs/RELEASE-APK-IPA-RULE.md sec
 
 Write-Host "[nrm] GRADLE_USER_HOME=$gradleUserHome"
 Write-Host "[nrm] subst $substDrive -> $RepoRoot"
-if ($ApkSuffix) {
-    Write-Host "[nrm] APK suffix: $ApkSuffix"
+if ($ApkVariant) {
+    Write-Host "[nrm] APK variant: $ApkVariant"
+}
+if ($ForceRebundle) {
+    Write-Host "[nrm] ForceRebundle: clearing stale release JS/resource caches"
+}
+
+function Clear-NrmAndroidReleaseBrandOutputs {
+    param([string]$AndroidRoot, [string]$AppRoot)
+    $relPaths = @(
+        'app\build\generated\assets\createBundleReleaseJsAndAssets'
+        'app\build\intermediates\assets\release'
+        'app\build\intermediates\compressed_assets\release'
+        'app\build\intermediates\merged_res\release'
+        'app\build\intermediates\packaged_res\release'
+        'app\build\intermediates\incremental\release\mergeReleaseResources'
+        'app\src\main\assets\index.android.bundle'
+    )
+    foreach ($rel in $relPaths) {
+        $full = Join-Path $AndroidRoot $rel
+        if (Test-Path -LiteralPath $full) {
+            Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "[nrm] cleared: $rel"
+        }
+    }
+    $metroCache = Join-Path $AppRoot 'node_modules\.cache'
+    if (Test-Path -LiteralPath $metroCache) {
+        Remove-Item -LiteralPath $metroCache -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "[nrm] cleared: app\node_modules\.cache (Metro)"
+    }
 }
 
 try {
     Push-Location "$substDrive\app\android"
+    if ($ForceRebundle) {
+        Clear-NrmAndroidReleaseBrandOutputs -AndroidRoot (Get-Location).Path -AppRoot "$substDrive\app"
+        $bundleArgs = @(':app:createBundleReleaseJsAndAssets', '--rerun-tasks')
+        if ($NoDaemon) {
+            $bundleArgs += '--no-daemon'
+        }
+        if ($ApkVariant) {
+            $bundleArgs += "-PnrmApkVariant=$ApkVariant"
+        }
+        & .\gradlew.bat @bundleArgs
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
     $gradleArgs = @('assembleRelease')
     if ($NoDaemon) {
         $gradleArgs += '--no-daemon'
     }
-    if ($ApkSuffix) {
-        $gradleArgs += "-PnrmApkSuffix=$ApkSuffix"
+    if ($ApkVariant) {
+        $gradleArgs += "-PnrmApkVariant=$ApkVariant"
     }
     & .\gradlew.bat @gradleArgs
     exit $LASTEXITCODE

@@ -77,17 +77,27 @@ fs.writeFileSync(kotlinPath, nrmBrandKt, 'utf8');
 fs.writeFileSync(swiftPath, nrmBrandSwift, 'utf8');
 
 let gradle = fs.readFileSync(buildGradlePath, 'utf8');
-const apkLine = `            outputFileName = "${storageFolderName}-v\${variant.versionName}\${findProperty('nrmApkSuffix') ?: ''}.apk"`;
-if (!gradle.includes(apkLine.trim())) {
+const apkLine = `            outputFileName = findProperty('nrmApkVariant') == 'custom'
+                ? "${storageFolderName}-custom-v\${variant.versionName}.apk"
+                : "${storageFolderName}-v\${variant.versionName}.apk"`;
+if (!gradle.includes('nrmApkVariant') || !gradle.includes(`${storageFolderName}-custom-v`)) {
   const replaced = gradle.replace(
-    /outputFileName = "[^"]*-v\$\{variant\.versionName\}(?:\$\{findProperty\('nrmApkSuffix'\) \?: ''\})?\.apk"/,
+    /outputFileName = findProperty\('nrmApkVariant'\)[\s\S]*?\.apk"/,
     apkLine.trim(),
   );
   if (replaced === gradle) {
-    console.error('sync-nrm-brand: could not patch android/app/build.gradle APK outputFileName');
-    process.exit(1);
+    const legacy = gradle.replace(
+      /outputFileName = "[^"]*\.apk"/,
+      apkLine.trim(),
+    );
+    if (legacy === gradle) {
+      console.error('sync-nrm-brand: could not patch android/app/build.gradle APK outputFileName');
+      process.exit(1);
+    }
+    fs.writeFileSync(buildGradlePath, legacy, 'utf8');
+  } else {
+    fs.writeFileSync(buildGradlePath, replaced, 'utf8');
   }
-  fs.writeFileSync(buildGradlePath, replaced, 'utf8');
 }
 
 console.log(`sync-nrm-brand: ok displayName="${displayName}" storageFolderName="${storageFolderName}"`);

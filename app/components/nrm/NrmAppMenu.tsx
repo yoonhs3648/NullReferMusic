@@ -41,9 +41,10 @@ import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiMan
 import { NrmTranslationSettingsPanel } from '@/components/nrm/settings/NrmTranslationSettingsPanel';
 import { NrmLyricsOrderSettingsPanel } from '@/components/nrm/settings/NrmLyricsOrderSettingsPanel';
 import { NrmAlignLyricsLangDetectionPanel } from '@/components/nrm/settings/NrmAlignLyricsLangDetectionPanel';
+import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
+import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmMainPageSettingsPanel } from '@/components/nrm/settings/NrmMainPageSettingsPanel';
-import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { hasLastfmCredentials } from '@/lib/nrmLastfmApiSettings';
 import {
   ensureLastfmChartAccess,
@@ -116,9 +117,12 @@ type Props = {
   onShowLastfmAuthInvalid?: (code?: 'auth_failed' | 'not_configured') => void;
   /** 메인 차트 좌측 네비 버튼 영역 — 스와이프 캡처에서 제외 (px, 화면 왼쪽 기준) */
   leftEdgeSwipeReserve?: number;
+  /** 상단 바에서 메뉴 버튼을 렌더할 때 내장 FAB 숨김 */
+  hideMenuFab?: boolean;
 };
 
 export type NrmAppMenuHandle = {
+  openMenu: () => void;
   openChartsSession: () => void;
   openLastfmTokenSettings: () => void;
   openSpotifyTokenSettings: () => void;
@@ -157,8 +161,8 @@ type Panel =
   | 'downloadLyricsSyncerSettings'
   | 'downloadLyricsOutputSettings'
   | 'mainPageSettings'
+  | 'historyManagementSettings'
   | 'fileLoggingSettings'
-  | 'trackMetadataSettings'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -187,6 +191,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onRequestChartsBearerWebView,
     onShowLastfmAuthInvalid,
     leftEdgeSwipeReserve,
+    hideMenuFab = false,
   },
   ref,
 ) {
@@ -314,11 +319,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   useImperativeHandle(
     ref,
     () => ({
+      openMenu,
       openChartsSession: openSpotifyChartsSessionSettings,
       openLastfmTokenSettings,
       openSpotifyTokenSettings,
     }),
-    [openLastfmTokenSettings, openSpotifyChartsSessionSettings, openSpotifyTokenSettings],
+    [openMenu, openLastfmTokenSettings, openSpotifyChartsSessionSettings, openSpotifyTokenSettings],
   );
 
   const openDownloadSettingsFromGlobal = useCallback(() => {
@@ -634,29 +640,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   return (
     <>
-      {IS_NATIVE_MOBILE && !open ? (
+      {IS_NATIVE_MOBILE && !open && !hideMenuFab ? (
         <Pressable
           onPress={openMenu}
+          hitSlop={8}
           style={({ pressed }) => [
             styles.menuFab,
             {
               left: menuFabLeft,
               top: menuFabTop,
-              backgroundColor: pressed
-                ? isDark
-                  ? 'rgba(255,255,255,0.12)'
-                  : 'rgba(0,0,0,0.06)'
-                : isDark
-                  ? 'rgba(255,255,255,0.08)'
-                  : 'rgba(0,0,0,0.04)',
             },
+            pressed && styles.menuFabPressed,
           ]}
           accessibilityRole="button"
           accessibilityLabel="메뉴">
-          <Ionicons
-            name="menu"
-            size={26}
+          <NrmHamburgerIcon
             color={isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink}
+            size={22}
           />
         </Pressable>
       ) : null}
@@ -743,7 +743,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <View style={styles.menuLogoGap}>
-                  <NrmLogo compact tone={isDark ? 'dark' : 'light'} />
+                  <NrmLogo layout="stacked" compact tone={isDark ? 'dark' : 'light'} />
                 </View>
                 <Pressable
                   onPress={() => pushPanel('charts')}
@@ -843,21 +843,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     가사 관리
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
-                  onPress={() => pushPanel('trackMetadataSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    트랙 메타데이터 설정
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -986,6 +971,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     장르 태그 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('historyManagementSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    History 관리
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1462,6 +1462,19 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               </DrawerShell>
             ) : null}
 
+            {panel === 'historyManagementSettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmActivityHistorySettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
             {panel === 'fileLoggingSettings' ? (
               <DrawerShell
                 titleColor={titleColor}
@@ -1552,20 +1565,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmDownloadSettingsPanel
                   section="filename"
-                  titleColor={titleColor}
-                  bodyColor={bodyColor}
-                  onBack={popPanel}
-                />
-              </DrawerShell>
-            ) : null}
-
-            {panel === 'trackMetadataSettings' ? (
-              <DrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <NrmTrackMetadataSettingsHome
-                  isDark={isDark}
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   onBack={popPanel}
@@ -1959,9 +1958,11 @@ const styles = StyleSheet.create({
     zIndex: 52,
     width: 44,
     height: 44,
-    borderRadius: nrmTokens.radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  menuFabPressed: {
+    opacity: 0.72,
   },
   mobileSwipeLayer: {
     ...StyleSheet.absoluteFillObject,

@@ -18,6 +18,8 @@ import {
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
 import { NrmHomeChartLaurelWreath } from '@/components/nrm/NrmHomeChartLaurelWreath';
+import { NrmHomeChartPodiumLampGlow } from '@/components/nrm/NrmHomeChartPodiumLampGlow';
+import { NrmHomeChartRankSparkle } from '@/components/nrm/NrmHomeChartRankSparkle';
 import {
   NrmHomeChartRankCrown,
   homeChartCrownClearanceInset,
@@ -31,6 +33,24 @@ import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 const AUTO_ADVANCE_MS = 5000;
 /** TOP 라벨 + 숫자 블록 높이 — 위치 고정 */
 const RANK_HERO_BLOCK_HEIGHT = 72;
+/** 슬라이드 메타(가수·제목·월계) 영역 — 스와이프에 포함 */
+const SLIDE_META_MIN_HEIGHT = 136;
+
+export const HOME_CHART_COVER_WIDTH_FRAC = 0.56;
+export const HOME_CHART_COVER_MAX = 260;
+export const HOME_CHART_NAV_BTN_SIZE = 36;
+export const HOME_CHART_NAV_OUTSIDE_GAP = 10;
+const CHART_NAV_CHEVRON = '#C9A227';
+const CHART_NAV_BG = 'rgba(18, 18, 20, 0.38)';
+const CHART_NAV_BG_PRESSED = 'rgba(18, 18, 20, 0.52)';
+
+export function homeChartStageMetrics(windowWidth: number) {
+  const coverSize = Math.min(Math.round(windowWidth * HOME_CHART_COVER_WIDTH_FRAC), HOME_CHART_COVER_MAX);
+  const navBtnSize = HOME_CHART_NAV_BTN_SIZE;
+  const navOutsideGap = HOME_CHART_NAV_OUTSIDE_GAP;
+  const stageWidth = coverSize + 2 * (navBtnSize + navOutsideGap);
+  return { coverSize, navBtnSize, navOutsideGap, stageWidth };
+}
 
 type Props = {
   isDark: boolean;
@@ -75,46 +95,92 @@ type CarouselSlideProps = {
   pageWidth: number;
   coverSize: number;
   trackInset: number;
+  slidePageHeight: number;
+  isDark: boolean;
+  ink: string;
+  muted: string;
   onPress: () => void;
 };
 
-function CarouselSlide({ item, index, pageWidth, coverSize, trackInset, onPress }: CarouselSlideProps) {
+function CarouselSlide({
+  item,
+  index,
+  pageWidth,
+  coverSize,
+  trackInset,
+  slidePageHeight,
+  isDark,
+  ink,
+  muted,
+  onPress,
+}: CarouselSlideProps) {
   const rank = item.rank > 0 ? item.rank : index + 1;
+  const podiumTier = homeChartPodiumTier(rank);
 
   return (
-    <View style={[styles.page, { width: pageWidth }]}>
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.coverPress,
-          {
-            width: coverSize,
-            height: coverSize,
-            marginTop: trackInset,
-          },
-          pressed && styles.coverPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`${item.artists} ${item.title}`}>
-        <View style={[styles.coverFrame, { width: coverSize, height: coverSize }]}>
-          <View
-            style={[
-              styles.coverShadow,
-              {
-                width: coverSize,
-                height: coverSize,
-              },
-            ]}>
-            <NrmChartTrackArt
-              imageUrl={item.imageUrl}
-              size={coverSize}
-              borderRadius={nrmTokens.radius.lg}
-              cacheKey={`${item.trackId}-${rank}`}
-            />
+    <View style={[styles.page, { width: pageWidth, minHeight: slidePageHeight }]}>
+      {podiumTier ? (
+        <NrmHomeChartPodiumLampGlow
+          tier={podiumTier}
+          isDark={isDark}
+          width={pageWidth}
+          height={slidePageHeight}
+        />
+      ) : null}
+
+      <View style={styles.slideForeground}>
+        <Pressable
+          onPress={onPress}
+          style={({ pressed }) => [
+            styles.coverPress,
+            {
+              width: coverSize,
+              height: coverSize,
+              marginTop: trackInset,
+            },
+            pressed && styles.coverPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.artists} ${item.title}`}>
+          <View style={[styles.coverFrame, { width: coverSize, height: coverSize }]}>
+            <View
+              style={[
+                styles.coverShadow,
+                {
+                  width: coverSize,
+                  height: coverSize,
+                },
+              ]}>
+              <NrmChartTrackArt
+                imageUrl={item.imageUrl}
+                size={coverSize}
+                borderRadius={nrmTokens.radius.lg}
+                cacheKey={`${item.trackId}-${rank}`}
+              />
+            </View>
+            <NrmHomeChartRankCrown rank={rank} coverSize={coverSize} />
           </View>
-          <NrmHomeChartRankCrown rank={rank} coverSize={coverSize} />
-        </View>
-      </Pressable>
+        </Pressable>
+
+        <Pressable
+          onPress={onPress}
+          style={({ pressed }) => [
+            styles.metaPress,
+            podiumTier ? styles.metaPressPodium : null,
+            pressed && styles.metaPressed,
+          ]}
+          accessibilityRole="button">
+          <View style={styles.metaTextLayer}>
+            <Text style={[styles.artist, { color: muted }]} numberOfLines={2}>
+              {item.artists || '—'}
+            </Text>
+            <Text style={[styles.title, { color: ink }]} numberOfLines={2}>
+              {item.title || '—'}
+            </Text>
+          </View>
+          {podiumTier ? <NrmHomeChartLaurelWreath rank={rank} width={coverSize} /> : null}
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -122,17 +188,11 @@ function CarouselSlide({ item, index, pageWidth, coverSize, trackInset, onPress 
 type ChartNavButtonProps = {
   direction: 'prev' | 'next';
   disabled: boolean;
-  isDark: boolean;
   onPress: () => void;
   style: StyleProp<ViewStyle>;
 };
 
-function ChartNavButton({ direction, disabled, isDark, onPress, style }: ChartNavButtonProps) {
-  const borderColor = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
-  const bg = isDark ? 'rgba(255,255,255,0.06)' : nrmTokens.color.canvas;
-  const iconColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
-  const pressedBg = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)';
-
+function ChartNavButton({ direction, disabled, onPress, style }: ChartNavButtonProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -141,9 +201,7 @@ function ChartNavButton({ direction, disabled, isDark, onPress, style }: ChartNa
       style={({ pressed }) => [
         styles.navBtn,
         {
-          backgroundColor: pressed ? pressedBg : bg,
-          borderColor,
-          opacity: disabled ? 0 : 1,
+          backgroundColor: pressed ? CHART_NAV_BG_PRESSED : CHART_NAV_BG,
         },
         style,
         disabled && styles.navBtnHidden,
@@ -152,8 +210,8 @@ function ChartNavButton({ direction, disabled, isDark, onPress, style }: ChartNa
       accessibilityLabel={direction === 'prev' ? '이전 순위' : '다음 순위'}>
       <Ionicons
         name={direction === 'prev' ? 'chevron-back' : 'chevron-forward'}
-        size={20}
-        color={iconColor}
+        size={18}
+        color={CHART_NAV_CHEVRON}
       />
     </Pressable>
   );
@@ -185,12 +243,12 @@ export function NrmHomeChartCarousel({
   const onIndexChangeRef = useRef(onIndexChange);
   onIndexChangeRef.current = onIndexChange;
 
-  const coverSize = Math.min(Math.round(width * 0.74), 340);
+  const { coverSize, navBtnSize, navOutsideGap, stageWidth } = homeChartStageMetrics(width);
   const trackInset = homeChartCrownClearanceInset(coverSize);
   const slideHeight = trackInset + coverSize;
-  const navBtnSize = 40;
-  const navBtnGap = 6;
+  const slidePageHeight = slideHeight + SLIDE_META_MIN_HEIGHT;
   const pageWidth = coverSize;
+  const carouselLeft = navBtnSize + navOutsideGap;
 
   const ink = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const muted = isDark ? 'rgba(255,255,255,0.58)' : nrmTokens.color.inkMuted48;
@@ -401,10 +459,14 @@ export function NrmHomeChartCarousel({
         pageWidth={pageWidth}
         coverSize={coverSize}
         trackInset={trackInset}
+        slidePageHeight={slidePageHeight}
+        isDark={isDark}
+        ink={ink}
+        muted={muted}
         onPress={() => onTrackPress(item)}
       />
     ),
-    [count, coverSize, loopEnabled, onTrackPress, pageWidth, trackInset],
+    [count, coverSize, ink, isDark, loopEnabled, muted, onTrackPress, pageWidth, slidePageHeight, trackInset],
   );
 
   const keyExtractor = useCallback(
@@ -412,15 +474,15 @@ export function NrmHomeChartCarousel({
     [],
   );
 
-  const onPressTrack = useCallback(() => {
-    if (current) onTrackPress(current);
-  }, [current, onTrackPress]);
-
-  const navBtnTop = RANK_HERO_BLOCK_HEIGHT + slideHeight / 2 - navBtnSize / 2;
+  const navBtnTop = RANK_HERO_BLOCK_HEIGHT + trackInset + coverSize / 2 - navBtnSize / 2;
   const initialPhysical = toPhysicalIndex(clampIndex(initialIndex, count), count);
 
   const carouselBlock = (
-    <View style={[styles.carouselViewport, { width: coverSize, height: slideHeight }]}>
+    <View
+      style={[
+        styles.carouselViewport,
+        { width: coverSize, height: slidePageHeight, marginLeft: carouselLeft },
+      ]}>
       <FlatList
         ref={listRef}
         data={loopData}
@@ -444,36 +506,10 @@ export function NrmHomeChartCarousel({
         scrollEventThrottle={16}
         viewabilityConfig={viewabilityConfig}
         onViewableItemsChanged={onViewableItemsChanged}
-        style={{ width: pageWidth }}
+        style={{ width: pageWidth, height: slidePageHeight }}
         contentContainerStyle={{ alignItems: 'flex-start' }}
         extraData={itemsFingerprint}
       />
-    </View>
-  );
-
-  const metaBlock = (
-    <Pressable
-      onPress={onPressTrack}
-      style={({ pressed }) => [
-        styles.metaPress,
-        podiumTier ? styles.metaPressPodium : null,
-        pressed && styles.metaPressed,
-      ]}
-      accessibilityRole="button">
-      <Text style={[styles.artist, { color: muted }]} numberOfLines={2}>
-        {current?.artists || '—'}
-      </Text>
-      <Text style={[styles.title, { color: ink }]} numberOfLines={2}>
-        {current?.title || '—'}
-      </Text>
-      {podiumTier ? <NrmHomeChartLaurelWreath rank={currentRank} width={coverSize} /> : null}
-    </Pressable>
-  );
-
-  const trackBody = (
-    <View style={styles.plainTrackBody}>
-      {carouselBlock}
-      {metaBlock}
     </View>
   );
 
@@ -495,40 +531,43 @@ export function NrmHomeChartCarousel({
           style={[
             styles.coverStage,
             {
-              width: coverSize,
-              height: RANK_HERO_BLOCK_HEIGHT + slideHeight,
+              width: stageWidth,
+              height: RANK_HERO_BLOCK_HEIGHT + slidePageHeight,
             },
           ]}>
-          <View style={[styles.rankHero, { height: RANK_HERO_BLOCK_HEIGHT }]} accessibilityLabel={`탑 ${currentRank}`}>
+          <View
+            style={[styles.rankHero, { height: RANK_HERO_BLOCK_HEIGHT, width: stageWidth }]}
+            accessibilityLabel={`탑 ${currentRank}`}>
             <Text style={[styles.rankTopLabel, { color: rankTopLabelColor }]}>TOP</Text>
-            <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{currentRank}</Text>
+            <View style={styles.rankNumberWrap}>
+              {podiumTier ? <NrmHomeChartRankSparkle tier={podiumTier} /> : null}
+              <Text style={[styles.rankHeroNumber, { color: rankNumberColor }]}>{currentRank}</Text>
+            </View>
           </View>
 
           <ChartNavButton
             direction="prev"
             disabled={!loopEnabled}
-            isDark={isDark}
             onPress={goPrev}
             style={{
               width: navBtnSize,
               height: navBtnSize,
               top: navBtnTop,
-              left: navBtnGap,
+              left: 0,
             }}
           />
 
-          {trackBody}
+          {carouselBlock}
 
           <ChartNavButton
             direction="next"
             disabled={!loopEnabled}
-            isDark={isDark}
             onPress={goNext}
             style={{
               width: navBtnSize,
               height: navBtnSize,
               top: navBtnTop,
-              left: coverSize - navBtnSize - navBtnGap,
+              left: stageWidth - navBtnSize,
             }}
           />
         </View>
@@ -558,14 +597,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   page: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'flex-start',
+  },
+  slideForeground: {
+    width: '100%',
+    alignItems: 'center',
+    zIndex: 1,
   },
   rankHero: {
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 2,
     paddingBottom: nrmTokens.space.xs,
+    zIndex: 10,
+    ...Platform.select({
+      android: {
+        elevation: 10,
+      },
+      default: {},
+    }),
+  },
+  rankNumberWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 72,
+    minHeight: 52,
   },
   rankTopLabel: {
     fontSize: 11,
@@ -579,6 +638,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1.2,
     lineHeight: 48,
     fontVariant: ['tabular-nums'],
+    zIndex: 2,
   },
   coverStage: {
     position: 'relative',
@@ -587,18 +647,21 @@ const styles = StyleSheet.create({
     minHeight: 0,
     overflow: 'visible',
   },
-  plainTrackBody: {
+  metaPress: {
+    position: 'relative',
     width: '100%',
+    minHeight: SLIDE_META_MIN_HEIGHT,
     alignItems: 'center',
-  },
-  carouselViewport: {
-    overflow: 'hidden',
+    paddingHorizontal: nrmTokens.space.sm,
+    paddingTop: nrmTokens.space.md,
+    paddingBottom: nrmTokens.space.sm,
   },
   navBtn: {
     position: 'absolute',
     zIndex: 55,
     borderRadius: nrmTokens.radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201, 162, 39, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
     ...Platform.select({
@@ -645,13 +708,20 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  metaPress: {
+  carouselViewport: {
+    overflow: 'hidden',
+  },
+  metaTextLayer: {
     width: '100%',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: nrmTokens.space.sm,
-    paddingTop: nrmTokens.space.md,
-    paddingBottom: nrmTokens.space.sm,
+    zIndex: 2,
+    ...Platform.select({
+      android: {
+        elevation: 2,
+      },
+      default: {},
+    }),
   },
   metaPressPodium: {
     paddingTop: nrmTokens.space.sm,
