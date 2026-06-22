@@ -38,6 +38,32 @@ export function normalizeCoverArtUrl(url: string | undefined | null): string {
   return u;
 }
 
+/** 화면 표시 크기에 맞춰 커버 URL 해상도 상향 (홈 히어로 등) */
+export function coverArtUrlForDisplaySize(url: string | undefined | null, minSidePx: number): string {
+  let u = normalizeCoverArtUrl(url);
+  if (!u || minSidePx <= 0) return u;
+
+  const target = Math.min(1200, Math.max(500, Math.ceil(minSidePx)));
+
+  if (u.includes('cdnimg.melon.co.kr') || u.includes('melon.co.kr')) {
+    u = u.replace(/\/melon\/resize\/\d+/g, `/melon/resize/${target}`);
+  }
+
+  if (u.includes('mzstatic.com')) {
+    u = u
+      .replace(/\d+x\d+bb/gi, `${target}x${target}bb`)
+      .replace(/\d+x\d+/gi, `${target}x${target}`);
+  }
+
+  if (u.includes('lastfm') || u.includes('freetls.fastly.net')) {
+    u = u
+      .replace(/\/\d+x\d+-/g, `/${target}x${target}-`)
+      .replace(/\/\d+s\//g, `/${target}s/`);
+  }
+
+  return u;
+}
+
 /** Melon 기본(noAlbum/noArtist) placeholder */
 export function isMelonPlaceholderCoverUrl(url: string | undefined | null): boolean {
   const u = (url ?? '').trim();

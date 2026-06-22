@@ -25,6 +25,8 @@ export const nrmTokens = {
     canvasParchment: '#f5f5f7',
     surfacePearl: '#fafafc',
     surfaceTile1: '#272729',
+    /** 메인 홈 charts 모드 — 왕관 PNG 투명 가장자리와 어울리는 거의 검은 회색 */
+    surfaceChartsHome: '#141416',
     surfaceTile2: '#2a2a2c',
     surfaceTile3: '#252527',
     surfaceBlack: '#000000',

@@ -718,7 +718,7 @@ export function NrmMetadataEditModal({
 
   const whisperChecksEnabled =
     !lyricsUnsupported &&
-    (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+    (isStandaloneAndroid() || usesPcBackendInDev());
 
   const whisperLyricsLocked =
     whisperChecksEnabled && (whisperGateLoading || whisperModelMissing);

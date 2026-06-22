@@ -186,7 +186,7 @@ async function persistAudioOnWeb(
 export async function persistAudioAfterServerJob(
   apiBase: string,
   jobId: string,
-  options: { fileName: string; lrcText?: string },
+  options: { fileName: string; lrcText?: string; metadata?: import('@/lib/nrmDownloadAudioMetadata').NrmAudioFileMetadata },
 ): Promise<{ savedLabel: string }> {
   const base = normalizedApiBase(apiBase);
   const url = `${base}/api/download/file?jobId=${encodeURIComponent(jobId)}`;
@@ -195,18 +195,47 @@ export async function persistAudioAfterServerJob(
   const lrcName = suggestedName.replace(/\.[^.]+$/, '.lrc');
   const lrcUrl = `${base}/api/download/lrc?jobId=${encodeURIComponent(jobId)}`;
 
-  const mode = await persistAudioOnWeb(
-    url,
-    suggestedName,
-    lrcUrl,
-    lrcName,
-    options.lrcText,
-  );
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`파일을 받지 못했습니다 (HTTP ${res.status})`);
+  }
+  const blob = await res.blob();
+
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = suggestedName;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(objectUrl);
+  if (lrcName && (options.lrcText?.trim() || lrcUrl)) {
+    await downloadLrcOnWeb(lrcName, lrcUrl, options.lrcText);
+  }
+
+  const { registerWebDownloadTrack } = await import('@/lib/nrmWebDownloadTrackCatalog');
+  const dot = suggestedName.lastIndexOf('.');
+  const extension = dot >= 0 ? suggestedName.slice(dot).toLowerCase() : ext;
+  const stem = dot > 0 ? suggestedName.slice(0, dot) : suggestedName;
+  await registerWebDownloadTrack({
+    fileName: suggestedName,
+    extension,
+    displayLabel: stem,
+    metadata: options.metadata ?? {
+      artist: '',
+      title: stem,
+      album: '',
+      genre: '',
+      releaseDate: '',
+      coverUrl: '',
+    },
+    audioBlob: blob,
+    lrcText: options.lrcText,
+  });
+
   await cleanupServerJobArtifacts(base, jobId);
   return {
-    savedLabel:
-      mode === 'download_fallback'
-        ? '브라우저 기본 다운로드로 저장했습니다. (보통 다운로드 폴더)'
-        : '브라우저 기본 다운로드로 저장했습니다. (보통 다운로드 폴더)',
+    savedLabel: '브라우저 다운로드 폴더와 앱 라이브러리에 저장했습니다.',
   };
 }

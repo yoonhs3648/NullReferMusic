@@ -2,6 +2,7 @@ import type { GranularPermission } from 'expo-media-library';
 import * as MediaLibrary from 'expo-media-library';
 import { Platform } from 'react-native';
 
+import { isExpoGo } from '@/lib/nrmDevRuntime';
 import {
   getPermissionsAsync as getNotificationPermissionsAsync,
   requestPermissionsAsync as requestNotificationPermissionsAsync,
@@ -12,11 +13,11 @@ export type NrmRequiredPermissionState = {
   saf: boolean;
 };
 
-/** APK/IPA·Expo Go 동일: Android 13+ 에서 스탠드얼론과 같은 세분 오디오 권한 요청 */
+/** 스탠드얼론 APK: Android 13+ 세분 오디오 권한. Expo Go는 자체 매니페스트라 audio 미선언. */
 export function getAndroidMediaGranularPermissions():
   | GranularPermission[]
   | undefined {
-  if (Platform.OS !== 'android') return undefined;
+  if (Platform.OS !== 'android' || isExpoGo()) return undefined;
   return ['audio'];
 }
 
@@ -46,11 +47,16 @@ async function checkNotificationPermission(): Promise<boolean> {
 }
 
 async function checkMediaPermission(): Promise<boolean> {
-  const { status } = await MediaLibrary.getPermissionsAsync(
-    false,
-    getAndroidMediaGranularPermissions(),
-  );
-  return status === 'granted';
+  if (isExpoGo()) return true;
+  try {
+    const { status } = await MediaLibrary.getPermissionsAsync(
+      false,
+      getAndroidMediaGranularPermissions(),
+    );
+    return status === 'granted';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -70,11 +76,18 @@ export async function requestAllRequiredPermissions(): Promise<NrmRequiredPermis
     return { notifications: false, media, saf: true };
   }
 
-  const mediaRes = await MediaLibrary.requestPermissionsAsync(
-    false,
-    getAndroidMediaGranularPermissions(),
-  );
-  const media = mediaRes.status === 'granted';
+  let media = true;
+  if (!isExpoGo()) {
+    try {
+      const mediaRes = await MediaLibrary.requestPermissionsAsync(
+        false,
+        getAndroidMediaGranularPermissions(),
+      );
+      media = mediaRes.status === 'granted';
+    } catch {
+      media = false;
+    }
+  }
   if (!media) {
     return { notifications: true, media: false, saf: true };
   }

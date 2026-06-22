@@ -151,6 +151,7 @@ public class YoutubeSearchService {
     }
     List<String> cmd = new ArrayList<>();
     cmd.add(paths.getYtDlpPath().toString());
+    cmd.add("--no-warnings");
     cmd.add("--dump-single-json");
     cmd.add("--skip-download");
     cmd.add("--flat-playlist");
@@ -170,7 +171,7 @@ public class YoutubeSearchService {
       if (raw == null || raw.isBlank()) {
         return List.of();
       }
-      JsonNode root = objectMapper.readTree(raw);
+      JsonNode root = objectMapper.readTree(extractJsonPayload(raw));
       JsonNode entries = root.path("entries");
       if (!entries.isArray()) {
         return List.of();
@@ -198,6 +199,21 @@ public class YoutubeSearchService {
       log.warn("yt-dlp search parse failed", e);
       throw new IllegalStateException("youtube_parse_error");
     }
+  }
+
+  private static String extractJsonPayload(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return raw == null ? "" : raw;
+    }
+    int start = raw.indexOf('{');
+    if (start < 0) {
+      return raw.trim();
+    }
+    int end = raw.lastIndexOf('}');
+    if (end <= start) {
+      return raw.substring(start).trim();
+    }
+    return raw.substring(start, end + 1);
   }
 
   private static String readAll(Process p, Charset cs) throws Exception {

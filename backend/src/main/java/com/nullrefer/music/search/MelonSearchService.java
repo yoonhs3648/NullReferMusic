@@ -1088,7 +1088,10 @@ public class MelonSearchService {
       return null;
     }
     Matcher m = pattern.matcher(text);
-    return m.find() ? m.group(1) : null;
+    if (!m.find()) {
+      return null;
+    }
+    return m.groupCount() >= 1 ? m.group(1) : m.group(0);
   }
 
   private static String firstMatchGroup(String text, Pattern pattern) {

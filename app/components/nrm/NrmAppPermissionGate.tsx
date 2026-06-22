@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
+import { isExpoGo } from '@/lib/nrmDevRuntime';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import {
   checkRequiredPermissions,
@@ -89,7 +90,7 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
   );
 
   useEffect(() => {
-    if (Platform.OS !== 'android') {
+    if (Platform.OS !== 'android' || isExpoGo()) {
       onGranted();
       return;
     }

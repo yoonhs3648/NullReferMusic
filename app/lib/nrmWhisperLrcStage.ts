@@ -9,6 +9,7 @@ import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { normalizeWhisperLrc, type NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 
 export type WhisperLrcStageResult = {
   /** 가사(LRC) 생성을 요청했는지 */
@@ -41,7 +42,7 @@ async function writeLrcSidecar(audioPath: string, lrc: string): Promise<boolean>
   }
 }
 
-async function transcribeAudioToLrc(fileUri: string): Promise<string> {
+async function transcribeAudioToLrc(fileUri: string, fileName?: string): Promise<string> {
   if (Platform.OS === 'web') {
     const m = await import('@/lib/nrmWhisperTranscribe.web');
     return m.transcribeAudioToLrcWeb(fileUri);
@@ -50,13 +51,18 @@ async function transcribeAudioToLrc(fileUri: string): Promise<string> {
   return m.transcribeAudioToLrcNative(fileUri);
 }
 
+function canTranscribeOnPlatform(): boolean {
+  if (Platform.OS === 'android') return true;
+  return usesPcBackendInDev();
+}
+
 /** 전사·번역 → LRC 텍스트 (파일 쓰기는 호출 측 persistLrcTextToDestination 등) */
 export async function transcribeWhisperLrc(
   fileUri: string,
   mode: NrmWhisperLyricsMode,
   extension: string,
 ): Promise<WhisperLrcStageResult> {
-  if (Platform.OS === 'web') {
+  if (!canTranscribeOnPlatform()) {
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
 

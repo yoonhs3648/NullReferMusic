@@ -190,8 +190,6 @@ export default function HomeScreen() {
 
   const pad = width >= 900 ? nrmTokens.space.xxl : nrmTokens.space.lg;
 
-  const rootBackground = getNrmRootBackgroundColor(isDark);
-
   const bumpQuoteRefresh = useCallback(() => {
     setQuoteRefreshKey((k) => k + 1);
   }, []);
@@ -280,6 +278,18 @@ export default function HomeScreen() {
   const showYoutubeOverlay = youtubeOverlay !== null;
   const showFeatureFullScreen = isFullScreenFeature;
   const showYoutubeHome = mainView === 'youtube' && !showFeatureFullScreen;
+
+  const isChartsHomeBackground =
+    isDark &&
+    showYoutubeHome &&
+    homeTab === 'home' &&
+    layoutPhase === 'welcome' &&
+    !showYoutubeOverlay &&
+    mainPageMode === 'charts';
+
+  const rootBackground = getNrmRootBackgroundColor(isDark, {
+    chartsHome: isChartsHomeBackground,
+  });
 
   const homeChartMetrics = homeChartStageMetrics(width);
   const homeChartContentWidth = width - 2 * pad;
@@ -384,8 +394,11 @@ export default function HomeScreen() {
 
 
   const onMainLogoPress = useCallback(() => {
+    if (mainPageMode === 'charts') {
+      setHomeChartIndex(0);
+    }
     resetToYoutubeHome();
-  }, [resetToYoutubeHome]);
+  }, [mainPageMode, resetToYoutubeHome]);
 
 
 
@@ -1071,7 +1084,12 @@ export default function HomeScreen() {
         </View>
 
         {showBottomTabBar ? (
-          <NrmHomeBottomTabBar isDark={isDark} active={homeTab} onChange={onHomeTabChange} />
+          <NrmHomeBottomTabBar
+            isDark={isDark}
+            active={homeTab}
+            onChange={onHomeTabChange}
+            backgroundColor={rootBackground}
+          />
         ) : null}
 
         <NrmAppNotificationDrawer
@@ -1158,11 +1176,13 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     position: 'relative',
+    overflow: 'visible',
   },
 
   mainBody: {
     flex: 1,
     minHeight: 0,
+    overflow: 'visible',
   },
 
   stackLayer: {
@@ -1202,6 +1222,7 @@ const styles = StyleSheet.create({
   youtubeWelcomeRoot: {
     flex: 1,
     minHeight: 0,
+    overflow: 'visible',
   },
 
   youtubeBrowsingColumn: {
@@ -1218,6 +1239,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: nrmTokens.layout.maxContentWidth,
     alignSelf: 'center',
+    overflow: 'visible',
   },
 
   youtubeWelcomeColumnCentered: {
@@ -1233,12 +1255,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     width: '100%',
+    overflow: 'visible',
   },
 
   homeChartShell: {
     flex: 1,
     minHeight: 0,
     width: '100%',
+    justifyContent: 'flex-start',
+    overflow: 'visible',
   },
 
   youtubeWelcomeBodyCentered: {

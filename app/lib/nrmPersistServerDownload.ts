@@ -8,7 +8,11 @@ export { NRM_DOWNLOAD_DIR_NAME };
 export async function persistAudioAfterServerJob(
   apiBase: string,
   jobId: string,
-  options: { fileName: string; lrcText?: string },
+  options: {
+    fileName: string;
+    lrcText?: string;
+    metadata?: import('@/lib/nrmDownloadAudioMetadata').NrmAudioFileMetadata;
+  },
 ): Promise<{ savedLabel: string }> {
   if (Platform.OS === 'web') {
     const { persistAudioAfterServerJob: impl } = await import(

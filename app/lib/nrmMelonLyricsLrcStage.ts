@@ -6,6 +6,7 @@ import type { NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 import { resolveMelonAlignLanguageForPlain } from '@/lib/nrmPickMelonAlignLanguage';
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import type { WhisperLrcStageResult } from '@/lib/nrmWhisperLrcStage';
 
 export async function transcribeMelonLyricsLrc(
@@ -15,7 +16,12 @@ export async function transcribeMelonLyricsLrc(
   melonLyricsPlain: string,
   alignLangOverride?: MelonAlignLyricsLanguage,
 ): Promise<WhisperLrcStageResult> {
-  if (Platform.OS === 'web') {
+  const canUseBackend = usesPcBackendInDev();
+  const canUseNative = Platform.OS === 'android';
+  if (!canUseBackend && !canUseNative) {
+    return { lyricsRequested: false, lyricsEmbedded: false };
+  }
+  if (Platform.OS === 'web' && !canUseBackend) {
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
 

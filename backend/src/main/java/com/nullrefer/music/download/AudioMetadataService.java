@@ -41,14 +41,22 @@ public class AudioMetadataService {
       });
   private final NrmPaths paths;
   private final WhisperLyricsService whisperLyricsService;
+  private final AlignLyricsService alignLyricsService;
 
-  public AudioMetadataService(NrmPaths paths, WhisperLyricsService whisperLyricsService) {
+  public AudioMetadataService(
+      NrmPaths paths,
+      WhisperLyricsService whisperLyricsService,
+      AlignLyricsService alignLyricsService) {
     this.paths = paths;
     this.whisperLyricsService = whisperLyricsService;
+    this.alignLyricsService = alignLyricsService;
   }
 
-  /** 2단계 + 3단계 병렬 실행. Whisper 실패해도 ffmpeg 결과는 유지 */
+  /** 2단계 + 3단계 병렬 실행. Whisper/Melon 실패해도 ffmpeg 결과는 유지 */
   public ApplyMetadataResult applyToJobFile(String jobId, AudioMetadataRequest req) {
+    if (AlignLyricsService.isAutoMelonLyrics(trim(req.lyrics))) {
+      return applyMelonPostProcessToJobFileParallel(jobId, req);
+    }
     if (!isAutoWhisperLyrics(trim(req.lyrics))) {
       return applyFfmpegMetadataToJobFile(jobId, req);
     }
@@ -92,6 +100,60 @@ public class AudioMetadataService {
         whisper.whisperModelMissing(),
         whisper.lyricsSidecarWritten() || ffmpeg.lyricsSidecarWritten(),
         whisper.lrcText());
+  }
+
+  /** ffmpeg 메타·커버 + 멜론 forced alignment 병렬 */
+  public ApplyMetadataResult applyMelonPostProcessToJobFileParallel(
+      String jobId, AudioMetadataRequest req) {
+    log.info("[post-process-melon] PARALLEL START jobId={}", jobId);
+    CompletableFuture<ApplyMetadataResult> ffmpegFuture =
+        CompletableFuture.supplyAsync(
+            () -> applyFfmpegMetadataToJobFile(jobId, req), POST_PROCESS_EXECUTOR);
+    CompletableFuture<ApplyMetadataResult> alignFuture =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                return applyMelonAlignToJobFile(jobId, req);
+              } catch (Exception e) {
+                log.warn("[post-process-melon] align FAIL jobId={} error={}", jobId, e.getMessage());
+                return new ApplyMetadataResult(true, false, false, "", "", false);
+              }
+            },
+            POST_PROCESS_EXECUTOR);
+    ApplyMetadataResult ffmpeg = ffmpegFuture.join();
+    ApplyMetadataResult align = alignFuture.join();
+    return new ApplyMetadataResult(
+        align.lyricsRequested(),
+        align.lyricsEmbedded(),
+        align.lyricsTranslationFailed(),
+        "",
+        "",
+        align.lyricsSidecarWritten() || ffmpeg.lyricsSidecarWritten(),
+        align.lrcText());
+  }
+
+  /** 3단계: 멜론 plain → forced alignment LRC */
+  public ApplyMetadataResult applyMelonAlignToJobFile(String jobId, AudioMetadataRequest req) {
+    if (jobId == null || !jobId.matches("[a-zA-Z0-9_-]+")) {
+      throw new IllegalArgumentException("invalid_job_id");
+    }
+    if (!AlignLyricsService.isAutoMelonLyrics(trim(req.lyrics))) {
+      return new ApplyMetadataResult(false, false, false, "", "", false);
+    }
+    AlignLyricsService.MelonAlignResult aligned = alignLyricsService.alignJobFileMelonLyrics(jobId, req);
+    String lrc = trim(aligned.lrc());
+    if (lrc.isEmpty()) {
+      return new ApplyMetadataResult(true, false, aligned.lyricsTranslationFailed(), "", "", false);
+    }
+    alignLyricsService.writeJobLrcSidecar(jobId, lrc);
+    return new ApplyMetadataResult(
+        true,
+        false,
+        aligned.lyricsTranslationFailed(),
+        "",
+        "",
+        true,
+        lrc);
   }
 
   /** 2단계: ffmpeg 메타·커버만 (Whisper sentinel 무시) */

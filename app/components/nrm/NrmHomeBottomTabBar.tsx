@@ -28,10 +28,12 @@ type Props = {
   isDark: boolean;
   active: NrmHomeTab;
   onChange: (tab: NrmHomeTab) => void;
+  /** 미지정 시 다크/라이트 기본 surface */
+  backgroundColor?: string;
 };
 
 /** 메인 홈 하단 탭 — Library · Search · Home · Favorite · History */
-export function NrmHomeBottomTabBar({ isDark, active, onChange }: Props) {
+export function NrmHomeBottomTabBar({ isDark, active, onChange, backgroundColor }: Props) {
   const insets = useSafeAreaInsets();
   const inactive = isDark ? TAB_INACTIVE_DARK : TAB_INACTIVE_LIGHT;
 
@@ -42,7 +44,8 @@ export function NrmHomeBottomTabBar({ isDark, active, onChange }: Props) {
         {
           paddingBottom: Math.max(insets.bottom, nrmTokens.space.xs),
           borderTopColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
-          backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas,
+          backgroundColor:
+            backgroundColor ?? (isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas),
         },
       ]}>
       {TABS.map((tab) => {

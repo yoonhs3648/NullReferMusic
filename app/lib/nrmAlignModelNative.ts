@@ -21,6 +21,7 @@ import {
   melonSyncSettingsToNativePayload,
 } from '@/lib/nrmMelonSyncSettings';
 import { resolveAlignModelForMelonSync } from '@/lib/nrmAlignLyricsLang';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 
 export type Wav2Vec2BundlePackProgress = {
   step: 1 | 2;
@@ -59,6 +60,10 @@ type NrmWhisperNative = {
 
 const mod = NativeModules.NrmWhisper as NrmWhisperNative | undefined;
 
+function usesAlignBackendBridge(): boolean {
+  return usesPcBackendInDev() && !(Platform.OS === 'android' && !!mod?.getAlignModelStatuses);
+}
+
 function packProgressFromRows(
   byId: Map<string, NativeAlignStatus>,
 ): Wav2Vec2BundlePackProgress | undefined {
@@ -81,10 +86,15 @@ function packProgressFromRows(
 }
 
 export function isAlignModelNativeAvailable(): boolean {
-  return Platform.OS === 'android' && !!mod?.getAlignModelStatuses;
+  if (Platform.OS === 'android' && !!mod?.getAlignModelStatuses) return true;
+  return usesPcBackendInDev();
 }
 
 export async function fetchAlignModelStatuses(): Promise<AlignModelStatusRow[]> {
+  if (usesAlignBackendBridge()) {
+    const { fetchAlignModelStatusesFromBackend } = await import('@/lib/nrmAlignModelBackend');
+    return fetchAlignModelStatusesFromBackend();
+  }
   if (!isAlignModelNativeAvailable() || !mod?.getAlignModelStatuses) {
     return [];
   }
@@ -124,6 +134,10 @@ async function isPackInstalled(packId: NrmAlignModelPackId): Promise<boolean> {
 }
 
 export async function isAlignModelInstalled(modelId: NrmAlignModelId): Promise<boolean> {
+  if (usesAlignBackendBridge()) {
+    const { isAlignModelInstalledOnBackend } = await import('@/lib/nrmAlignModelBackend');
+    return isAlignModelInstalledOnBackend(modelId);
+  }
   if (!isAlignModelNativeAvailable()) return false;
   if (modelId === NRM_ALIGN_WAV2VEC2_BASE_ID) {
     const [ko, en] = await Promise.all([
@@ -141,6 +155,10 @@ export async function isAlignModelInstalled(modelId: NrmAlignModelId): Promise<b
 }
 
 export async function isAnyAlignModelInstalled(): Promise<boolean> {
+  if (usesAlignBackendBridge()) {
+    const { isAnyAlignModelInstalledOnBackend } = await import('@/lib/nrmAlignModelBackend');
+    return isAnyAlignModelInstalledOnBackend();
+  }
   if (!isAlignModelNativeAvailable()) return false;
   if (mod?.isAnyAlignModelInstalled) {
     return mod.isAnyAlignModelInstalled();
@@ -173,6 +191,10 @@ function waitForPackDownload(packId: NrmAlignModelPackId): Promise<'complete' | 
 }
 
 export async function startAlignModelDownload(modelId: NrmAlignModelId): Promise<boolean> {
+  if (usesAlignBackendBridge()) {
+    const { startAlignModelDownloadOnBackend } = await import('@/lib/nrmAlignModelBackend');
+    return startAlignModelDownloadOnBackend(modelId);
+  }
   if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return false;
   if (!isNrmAlignModelId(modelId)) return false;
   try {
@@ -211,6 +233,13 @@ export function subscribeAlignModelDownloadEvents(
     bundlePackProgress?: Wav2Vec2BundlePackProgress;
   }) => void,
 ): () => void {
+  if (usesAlignBackendBridge()) {
+    let unsub: (() => void) | undefined;
+    void import('@/lib/nrmAlignModelBackend').then(({ subscribeAlignModelDownloadEventsOnBackend }) => {
+      unsub = subscribeAlignModelDownloadEventsOnBackend(onEvent);
+    });
+    return () => unsub?.();
+  }
   if (!isAlignModelNativeAvailable() || !mod) {
     return () => {};
   }
@@ -254,16 +283,20 @@ export async function alignMelonLyricsToLrcNative(
   alignModelPreference: NrmAlignModelId = DEFAULT_ALIGN_MODEL_PREFERENCE,
   lyricsLang: MelonAlignLyricsLanguage = 'ko',
 ): Promise<MelonAlignNativeResult> {
-  if (!mod?.alignMelonLyricsToLrc) {
-    return { lrc: '', alignFailed: true, alignMemoryInsufficient: false };
-  }
-  const fsPath = audioPath.startsWith('file://') ? audioPath.slice(7) : audioPath;
   const pref = resolveAlignModelForMelonSync(
     isNrmAlignModelId(alignModelPreference)
       ? alignModelPreference
       : DEFAULT_ALIGN_MODEL_PREFERENCE,
     lyricsLang,
   );
+  if (usesAlignBackendBridge()) {
+    const { alignMelonLyricsViaBackend } = await import('@/lib/nrmAlignModelBackend');
+    return alignMelonLyricsViaBackend(audioPath, lyricsPlain, mode, pref, lyricsLang);
+  }
+  if (!mod?.alignMelonLyricsToLrc) {
+    return { lrc: '', alignFailed: true, alignMemoryInsufficient: false };
+  }
+  const fsPath = audioPath.startsWith('file://') ? audioPath.slice(7) : audioPath;
   try {
     const syncSettings = await loadMelonSyncSettings();
     const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang);

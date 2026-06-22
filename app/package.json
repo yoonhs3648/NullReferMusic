@@ -1,7 +1,7 @@
 {
   "name": "nullrefer-music-app",
   "main": "index",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "scripts": {
     "start": "expo start --lan",
     "start:plain": "expo start",
@@ -16,6 +16,7 @@
     "postinstall": "patch-package",
     "generate:notification-icon": "node scripts/generate-android-notification-icon.mjs",
     "generate:music-quotes": "node scripts/build-music-quotes.mjs",
+    "generate:home-chart-assets": "node scripts/tint-home-chart-assets.mjs",
     "sync:brand": "node scripts/sync-nrm-brand.mjs",
     "preandroid:release": "npm run sync:brand && npm run generate:music-quotes"
   },

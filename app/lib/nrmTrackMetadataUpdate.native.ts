@@ -250,6 +250,9 @@ export async function applyTrackMetadataUpdate(
 
   const { track, newFileName, metadata, initialLyricsMode, newLyricsMode, hasEmbeddedSyncLyrics } =
     input;
+  if (track.location.kind === 'web') {
+    throw new Error('웹 트랙은 웹 환경에서 편집하세요.');
+  }
   const { ffmpegMetadata } = splitMetadataForDownloadStages(metadata);
   const lyricsAction = resolveLyricsSidecarAction(
     initialLyricsMode,
@@ -260,12 +263,13 @@ export async function applyTrackMetadataUpdate(
   const displayLabel = `${metadata.artist.trim()} - ${metadata.title.trim()}`;
   const jobId = lyricsJobId(track);
 
+  const nativeLocation = track.location;
   const cacheUri = await materializeToCache(track.audioUri, track.fileName);
   const editedUri = await applyAudioFileMetadata(cacheUri, ffmpegMetadata);
 
   let location = await overwriteAudioAtLocation(
     editedUri,
-    track.location,
+    nativeLocation,
     newFileName,
     ffmpegMetadata,
   );

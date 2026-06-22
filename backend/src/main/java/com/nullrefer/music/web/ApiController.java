@@ -15,6 +15,8 @@ import com.nullrefer.music.chart.SpotifyChartService;
 import com.nullrefer.music.chart.SpotifyTokenProvider;
 import com.nullrefer.music.chart.SpotifyTokenResponse;
 import com.nullrefer.music.config.NrmPaths;
+import com.nullrefer.music.download.AlignLyricsService;
+import com.nullrefer.music.download.AlignModelStatusService;
 import com.nullrefer.music.download.AudioMetadataRequest;
 import com.nullrefer.music.download.AudioMetadataService;
 import com.nullrefer.music.download.WhisperLyricsService;
@@ -49,6 +51,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 public class ApiController {
@@ -61,6 +64,8 @@ public class ApiController {
   private final AudioMetadataService audioMetadataService;
   private final WhisperLyricsService whisperLyricsService;
   private final WhisperModelStatusService whisperModelStatusService;
+  private final AlignModelStatusService alignModelStatusService;
+  private final AlignLyricsService alignLyricsService;
   private final YoutubeSearchService youtubeSearchService;
   private final SpotifyChartService spotifyChartService;
   private final LastfmChartService lastfmChartService;
@@ -79,6 +84,8 @@ public class ApiController {
       AudioMetadataService audioMetadataService,
       WhisperLyricsService whisperLyricsService,
       WhisperModelStatusService whisperModelStatusService,
+      AlignModelStatusService alignModelStatusService,
+      AlignLyricsService alignLyricsService,
       YoutubeSearchService youtubeSearchService,
       SpotifyChartService spotifyChartService,
       LastfmChartService lastfmChartService,
@@ -95,6 +102,8 @@ public class ApiController {
     this.audioMetadataService = audioMetadataService;
     this.whisperLyricsService = whisperLyricsService;
     this.whisperModelStatusService = whisperModelStatusService;
+    this.alignModelStatusService = alignModelStatusService;
+    this.alignLyricsService = alignLyricsService;
     this.youtubeSearchService = youtubeSearchService;
     this.spotifyChartService = spotifyChartService;
     this.lastfmChartService = lastfmChartService;
@@ -114,7 +123,14 @@ public class ApiController {
     java.util.Map<String, Object> body = new java.util.LinkedHashMap<>(downloadService.health());
     body.put("whisper", whisperLyricsService.isAvailable());
     body.put("whisperModels", whisperModelStatusService.listStatuses());
+    body.put("alignModels", alignModelStatusService.listStatuses());
     return body;
+  }
+
+  /** PC forced alignment 모델 (aeneas + wav2vec2 팩 상태) */
+  @GetMapping("/api/align/models")
+  public List<Map<String, Object>> alignModelStatuses() {
+    return alignModelStatusService.listStatuses();
   }
 
   /** PC `library/whisper` 설치·다운로드 모델 (웹·5종 카탈로그) */
@@ -1198,6 +1214,107 @@ public class ApiController {
       String code = e.getMessage() != null ? e.getMessage() : "post_process_failed";
       log.warn("[api] POST /api/download/post-process FAIL jobId={} error={}", req.jobId, code);
       return ResponseEntity.status(500).body(Map.of("error", code));
+    }
+  }
+
+  @PostMapping("/api/download/melon-align")
+  public ResponseEntity<Map<String, Object>> applyDownloadMelonAlign(
+      @RequestBody AudioMetadataRequest req) {
+    if (req.jobId == null || !SAFE_JOB_ID.matcher(req.jobId).matches()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "invalid_job_id"));
+    }
+    log.info(
+        "[api] POST /api/download/melon-align jobId={} mode={} plainChars={}",
+        req.jobId,
+        req.lyrics,
+        req.melonLyricsPlain != null ? req.melonLyricsPlain.length() : 0);
+    try {
+      var result = audioMetadataService.applyMelonAlignToJobFile(req.jobId, req);
+      java.util.Map<String, Object> body = metadataResultBody(result);
+      log.info("[api] POST /api/download/melon-align OK jobId={} body={}", req.jobId, body);
+      return ResponseEntity.ok(body);
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "melon_align_failed";
+      log.warn("[api] POST /api/download/melon-align FAIL jobId={} error={}", req.jobId, code);
+      return ResponseEntity.status(500).body(Map.of("error", code));
+    }
+  }
+
+  /** 업로드 오디오 Whisper 전사 (웹·Expo Go 트랙 편집용) */
+  @PostMapping("/api/whisper/transcribe")
+  public ResponseEntity<Map<String, Object>> transcribeUploadedAudio(
+      @RequestParam("file") MultipartFile file,
+      @RequestParam(value = "whisperModelPreference", required = false) String modelPref) {
+    if (file == null || file.isEmpty()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "empty_file"));
+    }
+    Path temp = null;
+    try {
+      String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "audio.mp3";
+      String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')) : ".mp3";
+      temp = paths.getOutputDir().resolve("nrm-upload-" + System.currentTimeMillis() + ext);
+      Files.write(temp, file.getBytes());
+      var result =
+          whisperLyricsService.transcribeToLrcDetailed(temp, false, modelPref != null ? modelPref : "");
+      java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+      body.put("ok", !result.lrc().isBlank());
+      body.put("lrcText", result.lrc());
+      if (!result.modelFile().isEmpty()) body.put("whisperModelFile", result.modelFile());
+      if (!result.missingPreference().isEmpty()) {
+        body.put("whisperModelMissing", result.missingPreference());
+      }
+      return ResponseEntity.ok(body);
+    } catch (Exception e) {
+      log.warn("[api] POST /api/whisper/transcribe FAIL error={}", e.getMessage());
+      return ResponseEntity.status(500).body(Map.of("error", "transcribe_failed"));
+    } finally {
+      if (temp != null) {
+        try {
+          Files.deleteIfExists(temp);
+        } catch (Exception ignored) {
+          // ignore
+        }
+      }
+    }
+  }
+
+  /** 업로드 오디오 멜론 forced alignment (웹·Expo Go 트랙 편집용) */
+  @PostMapping("/api/align/melon")
+  public ResponseEntity<Map<String, Object>> alignUploadedMelonLyrics(
+      @RequestParam("file") MultipartFile file,
+      @RequestParam("lyricsPlain") String lyricsPlain,
+      @RequestParam(value = "mode", defaultValue = "melon") String mode) {
+    if (file == null || file.isEmpty()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "empty_file"));
+    }
+    if (lyricsPlain == null || lyricsPlain.isBlank()) {
+      return ResponseEntity.badRequest().body(Map.of("error", "empty_lyrics"));
+    }
+    Path temp = null;
+    try {
+      String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "audio.mp3";
+      String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')) : ".mp3";
+      temp = paths.getOutputDir().resolve("nrm-align-upload-" + System.currentTimeMillis() + ext);
+      Files.write(temp, file.getBytes());
+      var result = alignLyricsService.alignAudioFileMelonLyrics(temp, lyricsPlain, mode, "");
+      java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+      body.put("ok", !result.lrc().isBlank());
+      body.put("lrcText", result.lrc());
+      body.put("alignFailed", result.alignFailed());
+      body.put("alignMemoryInsufficient", result.alignMemoryInsufficient());
+      body.put("lyricsTranslationFailed", result.lyricsTranslationFailed());
+      return ResponseEntity.ok(body);
+    } catch (Exception e) {
+      log.warn("[api] POST /api/align/melon FAIL error={}", e.getMessage());
+      return ResponseEntity.status(500).body(Map.of("error", "align_failed"));
+    } finally {
+      if (temp != null) {
+        try {
+          Files.deleteIfExists(temp);
+        } catch (Exception ignored) {
+          // ignore
+        }
+      }
     }
   }
 

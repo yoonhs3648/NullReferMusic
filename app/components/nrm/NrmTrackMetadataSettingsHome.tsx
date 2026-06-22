@@ -339,7 +339,7 @@ export function NrmTrackMetadataSettingsHome({
           let effectiveNewLyricsMode = newLyricsMode;
           const lyricsEditable =
             (track.extension === '.mp3' || track.extension === '.m4a') &&
-            (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+            (isStandaloneAndroid() || usesPcBackendInDev());
           if (lyricsEditable) {
             const alignPref = await loadAlignModelPreference();
             const [whisperReady, alignReady] = await Promise.all([

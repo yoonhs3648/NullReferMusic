@@ -2,6 +2,7 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 import type { NrmWhisperModelId } from '@/lib/nrmWhisperCatalog';
 import { getWhisperCatalogEntry } from '@/lib/nrmWhisperCatalog';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 
 export type WhisperModelStatusRow = {
   modelId: NrmWhisperModelId;
@@ -25,11 +26,20 @@ type NrmWhisperNative = {
 
 const mod = NativeModules.NrmWhisper as NrmWhisperNative | undefined;
 
+function usesWhisperBackendBridge(): boolean {
+  return usesPcBackendInDev() && !(Platform.OS === 'android' && !!mod?.getModelStatuses);
+}
+
 export function isWhisperModelNativeAvailable(): boolean {
-  return Platform.OS === 'android' && !!mod?.getModelStatuses;
+  if (Platform.OS === 'android' && !!mod?.getModelStatuses) return true;
+  return usesPcBackendInDev();
 }
 
 export async function fetchWhisperModelStatuses(): Promise<WhisperModelStatusRow[]> {
+  if (usesWhisperBackendBridge()) {
+    const { fetchWhisperModelStatusesFromBackend } = await import('@/lib/nrmWhisperModelBackend');
+    return fetchWhisperModelStatusesFromBackend();
+  }
   if (!isWhisperModelNativeAvailable() || !mod?.getModelStatuses) {
     return [];
   }
@@ -50,14 +60,21 @@ export async function fetchWhisperModelStatuses(): Promise<WhisperModelStatusRow
 }
 
 export async function hasAnyWhisperModelOnDevice(): Promise<boolean> {
+  if (usesWhisperBackendBridge()) {
+    const { hasAnyWhisperModelOnBackend } = await import('@/lib/nrmWhisperModelBackend');
+    return hasAnyWhisperModelOnBackend();
+  }
   if (!isWhisperModelNativeAvailable() || !mod?.hasAnyModelInstalled) {
     return false;
   }
   return mod.hasAnyModelInstalled();
 }
 
-/** 선택한 모델이 100% 설치됐을 때만 true (다운로드 중이면 false) */
 export async function isWhisperModelInstalled(modelId: NrmWhisperModelId): Promise<boolean> {
+  if (usesWhisperBackendBridge()) {
+    const { isWhisperModelInstalledOnBackend } = await import('@/lib/nrmWhisperModelBackend');
+    return isWhisperModelInstalledOnBackend(modelId);
+  }
   if (!isWhisperModelNativeAvailable()) {
     return false;
   }
@@ -69,6 +86,11 @@ export async function isWhisperModelInstalled(modelId: NrmWhisperModelId): Promi
 export async function startWhisperModelDownloadOnDevice(
   modelId: NrmWhisperModelId,
 ): Promise<void> {
+  if (usesWhisperBackendBridge()) {
+    const { startWhisperModelDownloadOnBackend } = await import('@/lib/nrmWhisperModelBackend');
+    await startWhisperModelDownloadOnBackend(modelId);
+    return;
+  }
   if (!isWhisperModelNativeAvailable() || !mod?.startModelDownload) return;
   await mod.startModelDownload(modelId);
 }
@@ -80,6 +102,15 @@ export function subscribeWhisperModelDownloadEvents(
     progress: number;
   }) => void,
 ): () => void {
+  if (usesWhisperBackendBridge()) {
+    let unsub: (() => void) | undefined;
+    void import('@/lib/nrmWhisperModelBackend').then(
+      ({ subscribeWhisperModelDownloadEventsOnBackend }) => {
+        unsub = subscribeWhisperModelDownloadEventsOnBackend(onEvent);
+      },
+    );
+    return () => unsub?.();
+  }
   if (!isWhisperModelNativeAvailable() || !mod) {
     return () => {};
   }

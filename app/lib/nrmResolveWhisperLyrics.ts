@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import {
   buildAutoWhisperLyricsSentinel,
@@ -37,9 +38,13 @@ async function transcribeAudioToLrc(
   fileUri: string,
   _mode: NrmWhisperLyricsMode,
 ): Promise<string> {
-  if (Platform.OS === 'web') {
-    const m = await import('@/lib/nrmWhisperTranscribe.web');
-    return m.transcribeAudioToLrcWeb(fileUri);
+  if (Platform.OS === 'web' || usesPcBackendInDev()) {
+    if (Platform.OS === 'web') {
+      const m = await import('@/lib/nrmWhisperTranscribe.web');
+      return m.transcribeAudioToLrcWeb(fileUri);
+    }
+    const { transcribeAudioViaBackend } = await import('@/lib/nrmWhisperTranscribeBackend');
+    return transcribeAudioViaBackend(fileUri);
   }
   const m = await import('@/lib/nrmWhisperTranscribe.native');
   return m.transcribeAudioToLrcNative(fileUri);

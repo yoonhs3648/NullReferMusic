@@ -82,15 +82,17 @@ async function finalizeServerJobParallel(
   const encode = await loadDownloadEncodeSettings();
   const safeName = applyDownloadExtension(fileName, encode.extension);
 
-  let lyricsWarning: 'not_embedded' | 'translation_failed' | undefined;
+  let lyricsWarning: 'not_embedded' | 'translation_failed' | 'melon_align_failed' | undefined;
 
   let lrcText: string | undefined;
 
   if (embedMetadata) {
-    const { ffmpegMetadata, whisperMode } = splitMetadataForDownloadStages(embedMetadata);
+    const { ffmpegMetadata, whisperMode, melonMode, melonLyricsPlain } =
+      splitMetadataForDownloadStages(embedMetadata);
     const {
       applyServerJobFfmpegMetadata,
       applyServerJobPostProcess,
+      applyServerJobMelonAlign,
     } = await import('@/lib/nrmApplyAudioMetadata.web');
 
     const needsTranslation = whisperMode === 'translation';
@@ -104,8 +106,11 @@ async function finalizeServerJobParallel(
     const whisperModelPreference = whisperMode
       ? await (await import('@/lib/nrmDownloadSettings')).loadWhisperModelPreference()
       : undefined;
+    const alignModelPreference = melonMode
+      ? await (await import('@/lib/nrmDownloadSettings')).loadAlignModelPreference()
+      : undefined;
 
-    const applyWhisperWarnings = (applied: {
+    const applyLyricsWarnings = (applied: {
       lyricsRequested: boolean;
       lyricsEmbedded: boolean;
       lyricsTranslationFailed?: boolean;
@@ -122,9 +127,29 @@ async function finalizeServerJobParallel(
       }
     };
 
-    if (whisperMode) {
+    if (melonMode) {
       try {
-        applyWhisperWarnings(
+        let plainForMelon = melonLyricsPlain?.trim() ?? '';
+        if (!plainForMelon && embedMetadata.website) {
+          const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
+          plainForMelon = (await fetchMelonPlainLyricsFromWebsite(embedMetadata.website)).trim();
+        }
+        if (hasEmbeddableAudioMetadata(ffmpegMetadata)) {
+          await applyServerJobFfmpegMetadata(jobId, ffmpegMetadata);
+        }
+        applyLyricsWarnings(
+          await applyServerJobMelonAlign(jobId, embedMetadata, {
+            melonLyricsPlain: plainForMelon,
+            alignModelPreference,
+            deeplApiKey,
+          }),
+        );
+      } catch {
+        lyricsWarning = 'melon_align_failed';
+      }
+    } else if (whisperMode) {
+      try {
+        applyLyricsWarnings(
           await applyServerJobPostProcess(jobId, embedMetadata, {
             deeplApiKey,
             whisperModelPreference,
@@ -143,6 +168,7 @@ async function finalizeServerJobParallel(
   const out = await persistAudioAfterServerJob(apiBase, jobId, {
     fileName: safeName,
     lrcText,
+    metadata: embedMetadata,
   });
   return { ...out, lyricsWarning };
 }

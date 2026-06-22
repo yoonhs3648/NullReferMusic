@@ -1,6 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 
 type NrmWhisperNative = {
   transcribeToLrc: (
@@ -14,11 +15,12 @@ function toFsPath(fileUri: string): string {
 }
 
 export async function transcribeAudioToLrcNative(fileUri: string): Promise<string> {
-  if (Platform.OS !== 'android') {
-    return '';
-  }
   const mod = NativeModules.NrmWhisper as NrmWhisperNative | undefined;
-  if (!mod?.transcribeToLrc) {
+  if (Platform.OS !== 'android' || !mod?.transcribeToLrc) {
+    if (usesPcBackendInDev()) {
+      const { transcribeAudioViaBackend } = await import('@/lib/nrmWhisperTranscribeBackend');
+      return transcribeAudioViaBackend(fileUri);
+    }
     return '';
   }
   const { loadWhisperModelPreference } = await import('@/lib/nrmDownloadSettings');

@@ -58,7 +58,7 @@ const showAlignInstallUi =
 
   isAlignModelNativeAvailable() &&
 
-  (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+  (isStandaloneAndroid() || usesPcBackendInDev());
 
 
 

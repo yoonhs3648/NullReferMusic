@@ -105,6 +105,41 @@ export async function applyServerJobPostProcess(
   };
 }
 
+/** 3단계: 멜론 forced alignment LRC */
+export async function applyServerJobMelonAlign(
+  jobId: string,
+  metadata: NrmAudioFileMetadata,
+  options?: {
+    melonLyricsPlain?: string;
+    alignModelPreference?: string;
+    deeplApiKey?: string;
+  },
+): Promise<ServerWhisperLyricsResult> {
+  const base = await getResolvedApiBaseUrl();
+  if (!base) {
+    return { lyricsRequested: false, lyricsEmbedded: false };
+  }
+  const body = await postJson<ServerWhisperLyricsResult & { ok?: boolean }>(
+    `${base}/api/download/melon-align`,
+    {
+      jobId,
+      lyrics: metadata.lyrics,
+      melonLyricsPlain: options?.melonLyricsPlain ?? metadata.melonLyricsPlain,
+      melonAlignLang: metadata.melonAlignLang,
+      alignModelPreference: options?.alignModelPreference?.trim() || undefined,
+      deeplApiKey: options?.deeplApiKey?.trim() || undefined,
+      website: metadata.website,
+    },
+    1_800_000,
+  );
+  return {
+    lyricsRequested: !!body.lyricsRequested,
+    lyricsEmbedded: !!body.lyricsEmbedded,
+    lyricsTranslationFailed: !!body.lyricsTranslationFailed,
+    lrcText: typeof body.lrcText === 'string' ? body.lrcText : undefined,
+  };
+}
+
 /** PC 백엔드: 2단계 → 3단계 (Whisper 실패해도 2단계는 유지) */
 export async function applyServerJobMetadata(
   jobId: string,

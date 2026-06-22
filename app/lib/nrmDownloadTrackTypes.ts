@@ -10,6 +10,12 @@ export type PersistedAudioLocation =
       audioUri: string;
       folderUri: string;
       fileName: string;
+    }
+  | {
+      kind: 'web';
+      trackId: string;
+      audioUri: string;
+      fileName: string;
     };
 
 export type NrmDownloadTrackItem = {

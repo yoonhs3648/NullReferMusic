@@ -25,6 +25,7 @@ import {
 import { syncMediaStoreAudioTags } from '@/lib/nrmApplyAudioMetadata.native';
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { isExpoGo } from '@/lib/nrmDevRuntime';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcFsPath, siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import {
@@ -161,6 +162,7 @@ async function triggerMediaStoreScan(
   safDocUri: string,
   metadata?: NrmAudioFileMetadata,
 ): Promise<void> {
+  if (isExpoGo()) return;
   try {
     const ML = require('expo-media-library') as typeof import('expo-media-library');
 

@@ -36,9 +36,9 @@ type Props = {
 /** 하단 U형 월계수 램프에서 좌우·상단으로 퍼지는 배경 글로우 */
 export function NrmHomeChartPodiumLampGlow({ tier, isDark, width, height }: Props) {
   const rgb = PODIUM_LAMP_RGB[tier];
-  const core = isDark ? 0.3 : 0.2;
-  const mid = isDark ? 0.13 : 0.085;
-  const wash = isDark ? 0.038 : 0.024;
+  const core = isDark ? 0.38 : 0.26;
+  const mid = isDark ? 0.17 : 0.11;
+  const wash = isDark ? 0.05 : 0.032;
 
   return (
     <View

@@ -26,7 +26,7 @@ import { notifyUser } from '@/lib/nrmUserNotify';
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 const showWhisperInstallUi =
   isWhisperModelNativeAvailable() &&
-  (isStandaloneAndroid() || (Platform.OS === 'web' && usesPcBackendInDev()));
+  (isStandaloneAndroid() || usesPcBackendInDev());
 
 type Props = {
   value: NrmWhisperModelId;

@@ -18,6 +18,11 @@ public class AudioMetadataRequest {
   public String discNumber;
   public String composer;
   public String lyrics;
+  /** 멜론 plain 가사 (forced alignment 입력) */
+  public String melonLyricsPlain;
+  /** ko | en */
+  public String melonAlignLang;
+  public String alignModelPreference;
   public String bpm;
   public String copyright;
   public String website;
