@@ -21,7 +21,7 @@ if not exist "%ANDROID%\gradlew.bat" (
 echo ======================================================
 echo NullReferMusic RELEASE APK ^(custom branding optional^)
 echo - Standalone APK ^(no Metro / PC dev server^)
-echo - Custom: two-word app name, user name, serial number
+echo - Custom: GitHub PAT, two-word app name, user name, serial number
 echo ======================================================
 echo.
 
