@@ -10,6 +10,7 @@ import {
   registerChoiceListener,
   registerConfirmListener,
   registerNotifyListener,
+  registerPromptListener,
 } from '@/lib/nrmUserNotify';
 
 export function NrmNotifyHost() {
@@ -22,10 +23,12 @@ export function NrmNotifyHost() {
     registerNotifyListener((p) => setOverlay({ kind: 'notify', payload: p }));
     registerConfirmListener((p) => setOverlay({ kind: 'confirm', payload: p }));
     registerChoiceListener((p) => setOverlay({ kind: 'choice', payload: p }));
+    registerPromptListener((p) => setOverlay({ kind: 'prompt', payload: p }));
     return () => {
       registerNotifyListener(null);
       registerConfirmListener(null);
       registerChoiceListener(null);
+      registerPromptListener(null);
     };
   }, []);
 
@@ -37,7 +40,14 @@ export function NrmNotifyHost() {
       transparent
       animationType="fade"
       onRequestClose={() => {
-        if (overlay?.kind !== 'confirm' && overlay?.kind !== 'choice') close();
+        if (overlay?.kind === 'notify' && overlay.payload.blocking) return;
+        if (
+          overlay?.kind !== 'confirm' &&
+          overlay?.kind !== 'choice' &&
+          overlay?.kind !== 'prompt'
+        ) {
+          close();
+        }
       }}
       statusBarTranslucent>
       {overlay ? (

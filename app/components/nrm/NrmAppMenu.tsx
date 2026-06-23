@@ -41,6 +41,11 @@ import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiMan
 import { NrmTranslationSettingsPanel } from '@/components/nrm/settings/NrmTranslationSettingsPanel';
 import { NrmLyricsOrderSettingsPanel } from '@/components/nrm/settings/NrmLyricsOrderSettingsPanel';
 import { NrmAlignLyricsLangDetectionPanel } from '@/components/nrm/settings/NrmAlignLyricsLangDetectionPanel';
+import { NrmMelonAdultAuthPanel } from '@/components/nrm/settings/NrmMelonAdultAuthPanel';
+import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAlarmRegisterPanel';
+import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
+import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
+import { NrmInquiryPanel } from '@/components/nrm/settings/NrmInquiryPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
@@ -83,6 +88,10 @@ import {
   pushMenuPanel,
   resetMenuPanelStack,
 } from '@/lib/nrmMenuPanelStack';
+import {
+  isAdminSessionActive,
+  registerAdminSessionListener,
+} from '@/lib/nrmAdminSession';
 import {
   getYoutubeSearchSuffixMode,
   listYoutubeSearchSuffixModes,
@@ -149,6 +158,7 @@ type Panel =
   | 'genreTagSettings'
   | 'weeklySnapshotSettings'
   | 'lyricsManage'
+  | 'melonAdultAuth'
   | 'downloadManage'
   | 'downloadPathSettings'
   | 'downloadExtensionSettings'
@@ -163,6 +173,11 @@ type Panel =
   | 'mainPageSettings'
   | 'historyManagementSettings'
   | 'fileLoggingSettings'
+  | 'inquirySettings'
+  | 'adminPage'
+  | 'adminAlarmRegister'
+  | 'adminUserBanList'
+  | 'adminUserBanRegister'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -216,6 +231,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   );
   const panel = peekMenuPanel(panelStack);
   const [versionOverlayOpen, setVersionOverlayOpen] = useState(false);
+  const [adminSessionActive, setAdminSessionActive] = useState(false);
 
   const resetMenuPanels = useCallback((next: Panel = 'root') => {
     setPanelStack(resetMenuPanelStack(next));
@@ -237,6 +253,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const [lastfmEntryScreen, setLastfmEntryScreen] = useState<
     'manage' | 'issue'
   >('issue');
+
+  useEffect(() => {
+    void isAdminSessionActive().then(setAdminSessionActive);
+    registerAdminSessionListener(setAdminSessionActive);
+    return () => registerAdminSessionListener(null);
+  }, []);
 
   useEffect(() => {
     if (panel !== 'searchSettings') return;
@@ -850,6 +872,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                {adminSessionActive ? (
+                  <Pressable
+                    onPress={() => pushPanel('adminPage')}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed && { backgroundColor: rowHover },
+                    ]}>
+                    <Text style={[styles.rowLabel, { color: titleColor }]}>
+                      관리자페이지
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={bodyColor}
+                    />
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => setVersionOverlayOpen(true)}
                   style={({ pressed }) => [
@@ -1001,6 +1040,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
                     로깅
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('inquirySettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    문의하기
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1446,6 +1500,35 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('melonAdultAuth')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    멜론 성인인증
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'melonAdultAuth' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmMelonAdultAuthPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={popPanel}
+                />
               </DrawerShell>
             ) : null}
 
@@ -1457,6 +1540,116 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmMainPageSettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminPage' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <Pressable
+                  onPress={popPanel}
+                  style={styles.backRow}
+                  accessibilityRole="button"
+                  accessibilityLabel="뒤로">
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={nrmTokens.color.primary}
+                  />
+                  <Text style={styles.backText}>뒤로</Text>
+                </Pressable>
+                <Text style={[styles.panelTitle, { color: titleColor }]}>
+                  관리자페이지
+                </Text>
+                <Pressable
+                  onPress={() => pushPanel('adminAlarmRegister')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    알림 등록
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminUserBanList')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    사용자 블랙리스트
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminUserBanRegister')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    사용자 블랙리스트 등록
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminAlarmRegister' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminAlarmRegisterPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminUserBanList' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminUserBanListPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminUserBanRegister' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminUserBanRegisterPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
                   onBack={popPanel}
                 />
               </DrawerShell>
@@ -1483,6 +1676,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmFileLoggingSettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'inquirySettings' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmInquiryPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
                   onBack={popPanel}
                 />
               </DrawerShell>

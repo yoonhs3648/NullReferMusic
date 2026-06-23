@@ -1,0 +1,20 @@
+{
+	"userBanList": [
+		{
+			"id": 1,
+			"userName": "윤현상",
+			"SerialNo": "01027523648",
+			"content": "괘씸죄로 추방",
+			"isBanned": true,
+			"date": "2026-06-23"
+		},
+		{
+			"id": 2,
+			"userName": "김김김",
+			"SerialNo": "01027531348",
+			"content": "",
+			"isBanned": false,
+			"date": "2026-06-23"
+		}
+	]
+}

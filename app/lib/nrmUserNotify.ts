@@ -1,5 +1,10 @@
 export type NotifyPayload = {
   message: string;
+  /** 기본 '알겠어요' */
+  actionLabel?: string;
+  onAction?: () => void;
+  /** true면 배경 탭으로 닫기 불가 */
+  blocking?: boolean;
 };
 
 export type ConfirmPayload = {
@@ -23,9 +28,18 @@ export type ChoicePayload<T extends string = string> = {
   resolve: (value: T | null) => void;
 };
 
+export type PromptPayload = {
+  message: string;
+  secure?: boolean;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  resolve: (value: string | null) => void;
+};
+
 type NotifyListener = (p: NotifyPayload) => void;
 type ConfirmListener = (p: ConfirmPayload) => void;
 type ChoiceListener = (p: ChoicePayload) => void;
+type PromptListener = (p: PromptPayload) => void;
 
 let notifyListener: NotifyListener | null = null;
 let confirmListener: ConfirmListener | null = null;
@@ -33,6 +47,8 @@ let choiceListener: ChoiceListener | null = null;
 let menuNotifyListener: NotifyListener | null = null;
 let menuConfirmListener: ConfirmListener | null = null;
 let menuChoiceListener: ChoiceListener | null = null;
+let promptListener: PromptListener | null = null;
+let menuPromptListener: PromptListener | null = null;
 
 export function registerNotifyListener(fn: NotifyListener | null): void {
   notifyListener = fn;
@@ -44,6 +60,10 @@ export function registerConfirmListener(fn: ConfirmListener | null): void {
 
 export function registerChoiceListener(fn: ChoiceListener | null): void {
   choiceListener = fn;
+}
+
+export function registerPromptListener(fn: PromptListener | null): void {
+  promptListener = fn;
 }
 
 /** 메뉴 드로어가 열려 있을 때 — 알림이 메뉴 Modal 위에 보이도록 */
@@ -59,13 +79,21 @@ export function registerMenuChoiceListener(fn: ChoiceListener | null): void {
   menuChoiceListener = fn;
 }
 
-export function notifyUser(message: string): void {
+export function registerMenuPromptListener(fn: PromptListener | null): void {
+  menuPromptListener = fn;
+}
+
+export function notifyUser(
+  message: string,
+  options?: Pick<NotifyPayload, 'actionLabel' | 'onAction' | 'blocking'>,
+): void {
   const body = message.trim() || ' ';
+  const payload: NotifyPayload = { message: body, ...options };
   if (menuNotifyListener) {
-    menuNotifyListener({ message: body });
+    menuNotifyListener(payload);
     return;
   }
-  notifyListener?.({ message: body });
+  notifyListener?.(payload);
 }
 
 /** 예/아니오 확인 오버레이(NrmNotifyHost). 리스너가 없으면 `false`. */
@@ -106,6 +134,31 @@ export function choiceUser<T extends string>(
       options,
       cancelLabel,
       resolve: (value) => resolve(value as T | null),
+    });
+  });
+}
+
+/** 텍스트 입력 팝업(NrmNotifyHost). 취소 시 `null`. */
+export function promptUser(
+  message: string,
+  options?: {
+    secure?: boolean;
+    confirmLabel?: string;
+    cancelLabel?: string;
+  },
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const listener = menuPromptListener ?? promptListener;
+    if (!listener) {
+      resolve(null);
+      return;
+    }
+    listener({
+      message: message.trim() || ' ',
+      secure: options?.secure === true,
+      confirmLabel: options?.confirmLabel ?? '확인',
+      cancelLabel: options?.cancelLabel ?? '취소',
+      resolve,
     });
   });
 }

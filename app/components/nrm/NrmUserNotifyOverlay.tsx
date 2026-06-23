@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -6,12 +6,14 @@ import {
   getNrmModalScrimColor,
   getNrmRootBackgroundColor,
 } from '@/lib/nrmUiAppearanceColors';
-import type { ChoicePayload, ConfirmPayload, NotifyPayload } from '@/lib/nrmUserNotify';
+import type { ChoicePayload, ConfirmPayload, NotifyPayload, PromptPayload } from '@/lib/nrmUserNotify';
+import { useEffect, useState } from 'react';
 
 export type UserNotifyOverlayMode =
   | { kind: 'notify'; payload: NotifyPayload }
   | { kind: 'confirm'; payload: ConfirmPayload }
-  | { kind: 'choice'; payload: ChoicePayload };
+  | { kind: 'choice'; payload: ChoicePayload }
+  | { kind: 'prompt'; payload: PromptPayload };
 
 type Props = {
   overlay: UserNotifyOverlayMode;
@@ -26,9 +28,17 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const msgColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const highlightColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+  const inputColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const isConfirm = overlay.kind === 'confirm';
   const isChoice = overlay.kind === 'choice';
-  const blocksBackdropClose = isConfirm || isChoice;
+  const isPrompt = overlay.kind === 'prompt';
+  const [promptValue, setPromptValue] = useState('');
+  const blocksBackdropClose =
+    isConfirm || isChoice || isPrompt || (overlay.kind === 'notify' && overlay.payload.blocking);
+
+  useEffect(() => {
+    if (isPrompt) setPromptValue('');
+  }, [isPrompt, overlay.kind === 'prompt' ? overlay.payload.message : '']);
 
   return (
     <View style={[styles.wrap, { backgroundColor: rootBg }]} pointerEvents="box-none">
@@ -58,6 +68,24 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
             {overlay.payload.message}
           </Text>
         )}
+        {isPrompt && overlay.kind === 'prompt' ? (
+          <TextInput
+            value={promptValue}
+            onChangeText={setPromptValue}
+            secureTextEntry={overlay.payload.secure === true}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[
+              styles.promptInput,
+              {
+                color: inputColor,
+                borderColor: cardBorder,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
+              },
+            ]}
+            placeholderTextColor={msgColor}
+          />
+        ) : null}
         {isConfirm && overlay.kind === 'confirm' ? (
           <View style={styles.confirmRow}>
             <Pressable
@@ -127,12 +155,53 @@ export function NrmUserNotifyOverlay({ overlay, isDark, onClose }: Props) {
               </Text>
             </Pressable>
           </View>
+        ) : isPrompt && overlay.kind === 'prompt' ? (
+          <View style={styles.confirmRow}>
+            <Pressable
+              onPress={() => {
+                overlay.payload.resolve(null);
+                onClose();
+              }}
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                styles.confirmBtnSecondary,
+                { borderColor: cardBorder },
+                pressed && styles.confirmBtnPressed,
+              ]}
+              accessibilityRole="button">
+              <Text style={[styles.confirmBtnSecondaryLabel, { color: msgColor }]}>
+                {overlay.payload.cancelLabel ?? '취소'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                overlay.payload.resolve(promptValue);
+                onClose();
+              }}
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                styles.confirmBtnPrimary,
+                pressed && styles.confirmBtnPressed,
+              ]}
+              accessibilityRole="button">
+              <Text style={styles.confirmBtnPrimaryLabel}>
+                {overlay.payload.confirmLabel ?? '확인'}
+              </Text>
+            </Pressable>
+          </View>
         ) : (
           <Pressable
-            onPress={onClose}
+            onPress={() => {
+              if (overlay.kind === 'notify') overlay.payload.onAction?.();
+              onClose();
+            }}
             style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
             accessibilityRole="button">
-            <Text style={styles.ctaLabel}>알겠어요</Text>
+            <Text style={styles.ctaLabel}>
+              {overlay.kind === 'notify' && overlay.payload.actionLabel
+                ? overlay.payload.actionLabel
+                : '알겠어요'}
+            </Text>
           </Pressable>
         )}
       </View>
@@ -169,6 +238,15 @@ const styles = StyleSheet.create({
   },
   messageHighlight: {
     fontWeight: '700',
+  },
+  promptInput: {
+    marginTop: nrmTokens.space.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.md,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingVertical: nrmTokens.space.sm,
+    fontSize: nrmTokens.font.body,
+    minHeight: 44,
   },
   cta: {
     marginTop: nrmTokens.space.xl,

@@ -9,6 +9,7 @@ import 'react-native-reanimated';
 
 import { NrmAppPermissionGate } from '@/components/nrm/NrmAppPermissionGate';
 import { NrmNotifyHost } from '@/components/nrm/NrmNotifyHost';
+import { NrmUserBanGate } from '@/components/nrm/NrmUserBanGate';
 import { NrmGoogleTranslateHost } from '@/components/nrm/NrmGoogleTranslateHost';
 import { NrmYoutubeCookieHarvester } from '@/components/nrm/NrmYoutubeCookieHarvester';
 import { NrmYoutubeDecipherHost } from '@/components/nrm/NrmYoutubeDecipherHost';
@@ -45,13 +46,15 @@ function RootLayoutInner() {
       <NrmYoutubeCookieHarvester />
       <NrmYoutubeDecipherHost />
       <NrmGoogleTranslateHost />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: rootBackground },
-        }}>
-        <Stack.Screen name="index" />
-      </Stack>
+      <NrmUserBanGate>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: rootBackground },
+          }}>
+          <Stack.Screen name="index" />
+        </Stack>
+      </NrmUserBanGate>
       {/* 마지막에 두어 웹에서 다른 Modal(메뉴 드로어)보다 알림이 위에 쌓이게 함 */}
       <NrmNotifyHost />
     </ThemeProvider>

@@ -55,10 +55,11 @@ function OverlayContent({
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const msgColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const isConfirm = overlay.kind === 'confirm';
+  const isBlockingNotify = overlay.kind === 'notify' && overlay.payload.blocking;
 
   return (
     <View style={[styles.wrap, { backgroundColor: rootBg }]}>
-      {!isConfirm ? (
+      {!isConfirm && !isBlockingNotify ? (
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
           onPress={onClose}
@@ -111,10 +112,17 @@ function OverlayContent({
           </View>
         ) : (
           <Pressable
-            onPress={onClose}
+            onPress={() => {
+              if (overlay.kind === 'notify') overlay.payload.onAction?.();
+              onClose();
+            }}
             style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
             accessibilityRole="button">
-            <Text style={styles.ctaLabel}>알겠어요</Text>
+            <Text style={styles.ctaLabel}>
+              {overlay.kind === 'notify' && overlay.payload.actionLabel
+                ? overlay.payload.actionLabel
+                : '알겠어요'}
+            </Text>
           </Pressable>
         )}
       </View>
