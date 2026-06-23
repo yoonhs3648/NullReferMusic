@@ -141,6 +141,7 @@ export type MelonTrackInfo = {
   likeCount: number;
   url: string;
   lyrics: string;
+  lyricsAdultAuthRequired?: boolean;
   credits: MelonTrackCredits;
 };
 

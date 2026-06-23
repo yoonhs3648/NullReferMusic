@@ -2,7 +2,7 @@ import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 
 
 
-/** 우측 인덱스 바 라벨 (한글 초성 전체 + 영문 그룹 + #) */
+/** 우측 인덱스 바 라벨 (한글 초성 전체 + 영문 A~Z + #) */
 
 export const TRACK_LIST_INDEX_LABELS = [
 
@@ -35,21 +35,30 @@ export const TRACK_LIST_INDEX_LABELS = [
   'ㅎ',
 
   'A',
-
+  'B',
+  'C',
   'D',
-
+  'E',
+  'F',
   'G',
-
+  'H',
+  'I',
   'J',
-
+  'K',
+  'L',
   'M',
-
+  'N',
+  'O',
   'P',
-
+  'Q',
+  'R',
   'S',
-
+  'T',
+  'U',
   'V',
-
+  'W',
+  'X',
+  'Y',
   'Z',
 
   '#',
@@ -184,31 +193,7 @@ const JAMO_SET = new Set<string>([
 
 
 
-function englishJumpBucket(upper: string): TrackListIndexLabel {
-
-  if (upper <= 'C') return 'A';
-
-  if (upper <= 'F') return 'D';
-
-  if (upper <= 'I') return 'G';
-
-  if (upper <= 'L') return 'J';
-
-  if (upper <= 'O') return 'M';
-
-  if (upper <= 'R') return 'P';
-
-  if (upper <= 'U') return 'S';
-
-  if (upper <= 'X') return 'V';
-
-  return 'Z';
-
-}
-
-
-
-/** 우측 빠른 이동 바용 버킷 (영문은 A·D·G… 그룹) */
+/** 우측 빠른 이동 바용 버킷 (영문은 A~Z 개별) */
 
 export function getTrackListJumpBucket(label: string): TrackListIndexLabel {
 
@@ -244,7 +229,7 @@ export function getTrackListJumpBucket(label: string): TrackListIndexLabel {
 
   if (upper >= 'A' && upper <= 'Z') {
 
-    return englishJumpBucket(upper);
+    return upper as TrackListIndexLabel;
 
   }
 

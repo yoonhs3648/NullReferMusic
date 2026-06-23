@@ -35,3 +35,7 @@ export function writeMelonHtmlCache(url: string, html: string): void {
   cache.set(url, { html, at: now });
   pruneMelonHtmlCache(now);
 }
+
+export function clearMelonHtmlCache(): void {
+  cache.clear();
+}

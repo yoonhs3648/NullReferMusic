@@ -93,7 +93,41 @@ export function extractPlainLyricsFromLrcText(lrcText: string): string {
 export async function resolveMelonPlainLyricsForEdit(
   website: string | undefined,
 ): Promise<string> {
-  return fetchMelonPlainLyricsFromWebsite(website);
+  const probe = await probeMelonPlainLyricsFromWebsite(website);
+  return probe.plain;
+}
+
+export type MelonPlainLyricsProbe = {
+  plain: string;
+  /** 가사 섹션 HTML 기준 — 성인인증 때문에 가사를 못 가져온 경우만 true */
+  adultAuthRequired: boolean;
+};
+
+/** 멜론 곡 가사 조회 + 성인인증 필요 여부 (다운로드 팝업 안내용) */
+export async function probeMelonPlainLyricsFromWebsite(
+  website: string | undefined,
+): Promise<MelonPlainLyricsProbe> {
+  const songId = extractMelonSongIdFromUrl(website);
+  if (!songId) return { plain: '', adultAuthRequired: false };
+  try {
+    const { fetchMelonTrackDetail } = await import('@/lib/nrmMelonSearchClient');
+    const r = await fetchMelonTrackDetail(songId, { enrich: false });
+    if (!r.ok) return { plain: '', adultAuthRequired: false };
+    const plain = (r.data.info.lyrics ?? '').trim();
+    const okPlain = isMelonPlainLyricsText(plain) ? plain : '';
+    const adultAuthRequired = !!r.data.info.lyricsAdultAuthRequired && !okPlain;
+    return { plain: okPlain, adultAuthRequired };
+  } catch {
+    return { plain: '', adultAuthRequired: false };
+  }
+}
+
+/** 트랙 편집 — 메타 website로 멜론 원문 가사 재조회 */
+export async function fetchMelonPlainLyricsFromWebsite(
+  website: string | undefined,
+): Promise<string> {
+  const probe = await probeMelonPlainLyricsFromWebsite(website);
+  return probe.plain;
 }
 
 /** ffmetadata·일부 태그 리더가 이스케이프한 메타값 복원 (= → \= 등) */
@@ -169,21 +203,4 @@ export function inferMelonLyricsUiModeFromContext(
   website: string | undefined,
 ): NrmLyricsUiMode {
   return applyWebsiteLyricsFamily(detected, website);
-}
-
-/** 트랙 편집 — 메타 website로 멜론 원문 가사 재조회 */
-export async function fetchMelonPlainLyricsFromWebsite(
-  website: string | undefined,
-): Promise<string> {
-  const songId = extractMelonSongIdFromUrl(website);
-  if (!songId) return '';
-  try {
-    const { fetchMelonTrackDetail } = await import('@/lib/nrmMelonSearchClient');
-    const r = await fetchMelonTrackDetail(songId, { enrich: false });
-    if (!r.ok) return '';
-    const plain = (r.data.info.lyrics ?? '').trim();
-    return isMelonPlainLyricsText(plain) ? plain : '';
-  } catch {
-    return '';
-  }
 }

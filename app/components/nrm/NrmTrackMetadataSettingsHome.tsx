@@ -16,6 +16,7 @@ import {
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
 import { nrmChartTrackListStyles } from '@/components/nrm/charts/nrmChartTrackListStyles';
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
+import { NrmTrackListSectionIndex } from '@/components/nrm/NrmTrackListSectionIndex';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import {
@@ -36,7 +37,9 @@ import { resolveEditableArtistTitle } from '@/lib/nrmAudioMetadataTitle';
 import {
   buildTrackListSections,
   filterTracksByQuery,
+  resolveSectionIndexForIndexLabel,
   sortTracksForList,
+  type TrackListIndexLabel,
   type TrackListSection,
 } from '@/lib/nrmTrackListIndex';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
@@ -252,6 +255,19 @@ export function NrmTrackMetadataSettingsHome({
     setSearchQuery('');
   }, []);
 
+  const onSelectIndexLabel = useCallback(
+    (label: TrackListIndexLabel, animated = true) => {
+      const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
+      if (sectionIndex < 0) return;
+      sectionListRef.current?.scrollToLocation({
+        sectionIndex,
+        itemIndex: 0,
+        animated,
+      });
+    },
+    [sections],
+  );
+
   const openEditor = useCallback(async (track: NrmDownloadTrackItem) => {
     setEditTrack(track);
     setModalBusy(true);
@@ -412,7 +428,12 @@ export function NrmTrackMetadataSettingsHome({
             {item.displayLabel}
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={bodyColor} />
+        <Ionicons
+          name="chevron-forward"
+          size={18}
+          color={bodyColor}
+          style={styles.rowChevron}
+        />
       </Pressable>
       );
     },
@@ -436,10 +457,8 @@ export function NrmTrackMetadataSettingsHome({
         </Pressable>
       )}
 
-      <View style={styles.titleRow}>
-        <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>
-          트랙 메타데이터 설정
-        </Text>
+      <View style={styles.topActionRow}>
+        <View style={styles.topActionSpacer} />
         <Pressable
           onPress={searchOpen ? closeSearch : openSearch}
           style={({ pressed }) => [
@@ -481,48 +500,57 @@ export function NrmTrackMetadataSettingsHome({
       )}
 
       <View style={styles.listArea}>
-        {searchOpen ? (
-          <FlatList
-            style={styles.listFlex}
-            data={searchFlatData}
-            keyExtractor={(item) => item.audioUri}
-            renderItem={({ item }) => renderTrackRow(item)}
-            ListEmptyComponent={() => listEmpty}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            viewabilityConfig={viewabilityConfig}
-            onViewableItemsChanged={onSearchViewableItemsChanged}
+        <View style={styles.listColumn}>
+          {searchOpen ? (
+            <FlatList
+              style={styles.listFlex}
+              data={searchFlatData}
+              keyExtractor={(item) => item.audioUri}
+              renderItem={({ item }) => renderTrackRow(item)}
+              ListEmptyComponent={() => listEmpty}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              viewabilityConfig={viewabilityConfig}
+              onViewableItemsChanged={onSearchViewableItemsChanged}
+            />
+          ) : (
+            <SectionList
+              ref={sectionListRef}
+              style={styles.listFlex}
+              sections={sections}
+              keyExtractor={(item) => item.audioUri}
+              renderItem={({ item }) => renderTrackRow(item)}
+              renderSectionHeader={({ section }) => (
+                <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
+                  <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
+                    {section.title}
+                  </Text>
+                </View>
+              )}
+              ListEmptyComponent={() => listEmpty}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              stickySectionHeadersEnabled
+              viewabilityConfig={viewabilityConfig}
+              onViewableItemsChanged={onSectionViewableItemsChanged}
+              onScrollToIndexFailed={() => {
+                sectionListRef.current?.scrollToLocation({
+                  sectionIndex: 0,
+                  itemIndex: 0,
+                  animated: true,
+                });
+              }}
+            />
+          )}
+        </View>
+        {!searchOpen && sections.length > 0 ? (
+          <NrmTrackListSectionIndex
+            onSelect={onSelectIndexLabel}
+            mutedColor={bodyColor}
+            isDark={isDark}
           />
-        ) : (
-          <SectionList
-            ref={sectionListRef}
-            style={styles.listFlex}
-            sections={sections}
-            keyExtractor={(item) => item.audioUri}
-            renderItem={({ item }) => renderTrackRow(item)}
-            renderSectionHeader={({ section }) => (
-              <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
-                <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
-                  {section.title}
-                </Text>
-              </View>
-            )}
-            ListEmptyComponent={() => listEmpty}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            stickySectionHeadersEnabled
-            viewabilityConfig={viewabilityConfig}
-            onViewableItemsChanged={onSectionViewableItemsChanged}
-            onScrollToIndexFailed={() => {
-              sectionListRef.current?.scrollToLocation({
-                sectionIndex: 0,
-                itemIndex: 0,
-                animated: true,
-              });
-            }}
-          />
-        )}
+        ) : null}
       </View>
 
       <NrmMetadataEditModal
@@ -558,16 +586,15 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.sm,
   },
   backLabel: { fontSize: nrmTokens.font.body, fontWeight: '600' },
-  titleRow: {
+  topActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: nrmTokens.space.sm,
+    justifyContent: 'space-between',
     marginBottom: nrmTokens.space.xs,
   },
-  title: {
-    flex: 1,
-    fontSize: nrmTokens.font.lead,
-    fontWeight: '700',
+  topActionSpacer: {
+    width: nrmTokens.layout.touchMin,
+    height: nrmTokens.layout.touchMin,
   },
   searchToggle: {
     width: nrmTokens.layout.touchMin,
@@ -604,7 +631,12 @@ const styles = StyleSheet.create({
   },
   listArea: {
     flex: 1,
-    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  listColumn: {
+    flex: 1,
+    minWidth: 0,
   },
   listFlex: {
     flex: 1,
@@ -612,6 +644,10 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: nrmTokens.space.xxl,
     flexGrow: 1,
+    paddingRight: nrmTokens.space.xxs,
+  },
+  rowChevron: {
+    marginRight: nrmTokens.space.sm,
   },
   sectionHeader: {
     paddingHorizontal: nrmTokens.space.xs,

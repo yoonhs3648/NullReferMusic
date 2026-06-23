@@ -13,7 +13,7 @@ export type NrmActivityHistoryDisplayDays =
 
 const STORAGE_KEY = 'nrm_activity_history_display_days_v1';
 
-export const DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS: NrmActivityHistoryDisplayDays = '90';
+export const DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS: NrmActivityHistoryDisplayDays = '7';
 
 export function isNrmActivityHistoryDisplayDays(v: string): v is NrmActivityHistoryDisplayDays {
   return NRM_ACTIVITY_HISTORY_DISPLAY_OPTIONS.some((o) => o.id === v);

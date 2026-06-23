@@ -14,6 +14,8 @@ const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
 const displayName = String(raw.displayName ?? '').trim();
 const storageFolderName = String(raw.storageFolderName ?? '').trim();
+const serialNo = String(raw.serialNo ?? '').trim();
+const userName = String(raw.userName ?? '').trim();
 
 if (!displayName) {
   console.error('sync-nrm-brand: displayName is required in nrm-brand.config.json');
@@ -44,6 +46,10 @@ const nrmBrandKt = `package com.nullrefer.music
 object NrmBrand {
     const val DISPLAY_NAME: String = ${kotlinString(displayName)}
     const val STORAGE_FOLDER_NAME: String = ${kotlinString(storageFolderName)}
+    /** Custom APK only — embedded for future licensing logic; not shown in version UI */
+    const val SERIAL_NO: String = ${kotlinString(serialNo)}
+    /** Custom APK only — inquiry registration; not shown in version UI */
+    const val USER_NAME: String = ${kotlinString(userName)}
     val STORAGE_LOGS_PATH: String get() = "\$STORAGE_FOLDER_NAME/logs"
     fun userAgent(version: String): String = "\$STORAGE_FOLDER_NAME/\$version"
 }

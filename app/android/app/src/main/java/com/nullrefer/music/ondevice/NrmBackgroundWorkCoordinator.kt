@@ -23,20 +23,16 @@ object NrmBackgroundWorkCoordinator {
   fun hasDownloadTokens(): Boolean = tokens.any { it.startsWith("dl:") }
 
   fun hasLyricsTokens(): Boolean =
-      tokens.any {
-        it.startsWith("lyrics:") ||
-            it.startsWith("whisper-lrc:") ||
-            it.startsWith("whisperx-align:") ||
-            it.startsWith("forced-align:")
-      }
+      tokens.any { it.startsWith("lyrics:") || it.startsWith("whisper-lrc:") }
 
-  fun hasBlockingExitWork(): Boolean = hasDownloadTokens() || hasLyricsTokens()
+  fun hasBlockingExitWork(): Boolean =
+      hasDownloadTokens() || hasLyricsTokens() || hasModelInstallTokens()
 
   fun hasModelInstallTokens(): Boolean =
       tokens.any {
         it == "model-install-queue" ||
             it.startsWith("whisper-model:") ||
-            it.startsWith("whisperx-align-model")
+            it.startsWith("forced-align:")
       }
 
   fun hasModelTokens(): Boolean = hasModelInstallTokens()
@@ -120,6 +116,21 @@ object NrmBackgroundWorkCoordinator {
             "Forced Alignment 모델 설치 중 ($pct%)"
           } else {
             "Forced Alignment 모델 설치 중"
+          },
+      )
+    }
+
+    val forcedAlignDownloads = tokens.filter { it.startsWith("forced-align:") }.sorted()
+    for (token in forcedAlignDownloads) {
+      val modelId = token.removePrefix("forced-align:").trim()
+      val entry = AlignModelCatalog.entryById(modelId)
+      val label = entry?.label ?: modelId
+      val pct = AlignModelDownloader.progressFor(modelId)
+      lines.add(
+          if (pct in 0..99) {
+            "«$label» 모델 다운로드 중 ($pct%)"
+          } else {
+            "«$label» 모델 다운로드 중"
           },
       )
     }

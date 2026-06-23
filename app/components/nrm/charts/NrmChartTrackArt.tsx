@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Image, PixelRatio, StyleSheet, View } from 'react-native';
 
 import { nrmChartTrackListStyles } from '@/components/nrm/charts/nrmChartTrackListStyles';
@@ -27,8 +28,13 @@ export function NrmChartTrackArt({
   const uri = imageUrl?.trim() ?? '';
   const artStyle = [row.art, { width: size, height: size, borderRadius }];
   const targetPx = minPixelSize ?? Math.ceil(size * PixelRatio.get());
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  if (uri) {
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [uri, cacheKey]);
+
+  if (uri && !loadFailed) {
     const displayUri = coverArtUrlForDisplaySize(uri, targetPx);
     return (
       <Image
@@ -36,6 +42,7 @@ export function NrmChartTrackArt({
         source={{ uri: displayUri }}
         style={artStyle}
         resizeMode="cover"
+        onError={() => setLoadFailed(true)}
       />
     );
   }

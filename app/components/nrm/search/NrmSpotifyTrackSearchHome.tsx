@@ -142,7 +142,6 @@ export function NrmSpotifyTrackSearchHome({
     !detail &&
     !heroError &&
     !inlineError;
-
   const openDetail = useCallback(async (hit: SpotifyTrackSearchHit) => {
     const req = ++reqRef.current;
     setDetailLoading(true);

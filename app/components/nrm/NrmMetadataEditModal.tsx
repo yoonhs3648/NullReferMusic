@@ -31,7 +31,7 @@ import type { YoutubeSearchItem } from '@/lib/youtubeSearchClient';
 import {
   buildLyricsSentinel,
   extractMelonSongIdFromUrl,
-  fetchMelonPlainLyricsFromWebsite,
+  probeMelonPlainLyricsFromWebsite,
   isMelonLyricsUiMode,
   isMelonTrackWebsite,
   normalizeMelonTrackWebsite,
@@ -90,6 +90,8 @@ export type NrmMetadataEditModalProps = {
   excludeFileStem?: string;
   /** trackEdit: 트랙 확장자 고정 (.mp3 등) */
   fixedExtension?: string;
+  /** download(melon): 곡 ID — website 미설정 시 가사 조회용 */
+  melonSongId?: string;
   /** trackEdit: 삭제 확인에 표시할 실제 파일명 */
   deleteFileName?: string;
   /** trackEdit: 확인 후 물리 파일 삭제 */
@@ -329,6 +331,7 @@ export function NrmMetadataEditModal({
   excludeFileStem,
   fixedExtension,
   deleteFileName,
+  melonSongId,
   onDelete,
   onClose,
   onConfirm,
@@ -358,6 +361,7 @@ export function NrmMetadataEditModal({
   ]);
   const [melonPlainLyrics, setMelonPlainLyrics] = useState('');
   const [melonLyricsAvailable, setMelonLyricsAvailable] = useState(false);
+  const [melonAdultAuthRequired, setMelonAdultAuthRequired] = useState(false);
   const [melonProbeLoading, setMelonProbeLoading] = useState(false);
   const [storedLyricsMode, setStoredLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const [whisperXAlignMissing, setWhisperXAlignMissing] = useState(false);
@@ -473,36 +477,45 @@ export function NrmMetadataEditModal({
     const melonSource = purpose === 'download' && metadataSource === 'melon';
     if (!isMelonTrackWebsite(site) && !melonSource) {
       setMelonLyricsAvailable(false);
+      setMelonAdultAuthRequired(false);
       setMelonPlainLyrics('');
       setMelonProbeLoading(false);
       return;
     }
-    if (!isMelonTrackWebsite(site)) {
+    const songId =
+      extractMelonSongIdFromUrl(site) || (melonSongId ?? '').trim();
+    if (!isMelonTrackWebsite(site) && !songId) {
       setMelonLyricsAvailable(false);
+      setMelonAdultAuthRequired(false);
       setMelonPlainLyrics('');
       setMelonProbeLoading(false);
       return;
     }
     let cancelled = false;
     setMelonProbeLoading(true);
-    void fetchMelonPlainLyricsFromWebsite(site)
-      .then((plain) => {
+    const probeUrl = isMelonTrackWebsite(site)
+      ? site
+      : `https://www.melon.com/song/detail.htm?songId=${songId}`;
+    void probeMelonPlainLyricsFromWebsite(probeUrl)
+      .then((probe) => {
         if (cancelled) return;
-        const ok = plain.trim().length > 0;
+        const ok = probe.plain.trim().length > 0;
         setMelonLyricsAvailable(ok);
-        setMelonPlainLyrics(ok ? plain : '');
+        setMelonAdultAuthRequired(!ok && probe.adultAuthRequired);
+        setMelonPlainLyrics(ok ? probe.plain : '');
         setMelonProbeLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
         setMelonLyricsAvailable(false);
+        setMelonAdultAuthRequired(false);
         setMelonPlainLyrics('');
         setMelonProbeLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [visible, purpose, website, metadataSource]);
+  }, [visible, purpose, website, metadataSource, melonSongId]);
 
   useEffect(() => {
     if (!item || !visible) return;
@@ -867,6 +880,12 @@ export function NrmMetadataEditModal({
       }
     };
   }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
+
+  const showMelonLyricsUnavailableHint =
+    purpose === 'download' &&
+    isMelonContext &&
+    !melonProbeLoading &&
+    !melonLyricsAvailable;
 
   const lyricsOptions = useMemo(
     () =>
@@ -1278,6 +1297,11 @@ export function NrmMetadataEditModal({
           <Text style={[styles.preview, { color: bodyColor }]} numberOfLines={2}>
             파일명: {preview}
           </Text>
+          {showMelonLyricsUnavailableHint ? (
+            <Text style={[styles.melonLyricsMissingHint, { color: bodyColor }]}>
+              {melonAdultAuthRequired ? '멜론 성인인증을 하세요.' : '가사 정보가 없습니다.'}
+            </Text>
+          ) : null}
           {nameConflict ? (
             <Text
               style={[
@@ -1581,7 +1605,12 @@ const styles = StyleSheet.create({
   preview: {
     fontSize: nrmTokens.font.caption,
     marginTop: nrmTokens.space.sm,
-    marginBottom: nrmTokens.space.md,
+    marginBottom: nrmTokens.space.sm,
+  },
+  melonLyricsMissingHint: {
+    fontSize: nrmTokens.font.caption,
+    marginBottom: nrmTokens.space.sm,
+    opacity: 0.9,
   },
   conflictHint: {
     fontSize: nrmTokens.font.caption,

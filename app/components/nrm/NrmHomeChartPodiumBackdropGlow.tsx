@@ -3,8 +3,10 @@ import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import type { HomeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
 
+export type HomeChartBackdropGlowTier = HomeChartPodiumTier | 'blue';
+
 type Props = {
-  tier: HomeChartPodiumTier;
+  tier: HomeChartBackdropGlowTier;
   isDark: boolean;
   width: number;
   height: number;
@@ -13,17 +15,19 @@ type Props = {
   coverSize: number;
 };
 
-/** 금·은·동 빛 색상 (다크/라이트 분리 — 두 모드 모두 색이 또렷하게 구분되도록) */
-const GLOW_RGB: Record<'dark' | 'light', Record<HomeChartPodiumTier, string>> = {
+/** 금·은·동·앱 파란색 빛 (다크/라이트 분리) */
+const GLOW_RGB: Record<'dark' | 'light', Record<HomeChartBackdropGlowTier, string>> = {
   dark: {
     1: '255, 198, 64',
     2: '202, 222, 242',
     3: '230, 138, 66',
+    blue: '41, 151, 255',
   },
   light: {
     1: '201, 132, 8',
     2: '78, 112, 144',
     3: '156, 76, 24',
+    blue: '0, 102, 204',
   },
 };
 

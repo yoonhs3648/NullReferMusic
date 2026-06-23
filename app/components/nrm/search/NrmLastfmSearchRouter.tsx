@@ -316,7 +316,6 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       top.hits.length === 0 &&
       !top.error &&
       !top.errorCode;
-
     useImperativeHandle(
       ref,
       () => ({

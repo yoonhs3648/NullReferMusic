@@ -15,12 +15,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
-import { NrmHomeChartLaurelWreath, homeChartLaurelLayoutMetrics } from '@/components/nrm/NrmHomeChartLaurelWreath';
 import {
   HOME_CHART_NAV_BTN_SIZE,
   NrmHomeChartNavButton,
 } from '@/components/nrm/NrmHomeChartNavButton';
 import { NrmHomeChartPodiumBackdropGlow } from '@/components/nrm/NrmHomeChartPodiumBackdropGlow';
+import type { HomeChartBackdropGlowTier } from '@/components/nrm/NrmHomeChartPodiumBackdropGlow';
 import { NrmHomeChartRankSparkle } from '@/components/nrm/NrmHomeChartRankSparkle';
 import { NrmHomeChartRankHeroNumber } from '@/components/nrm/NrmHomeChartRankHeroNumber';
 import {
@@ -195,7 +195,6 @@ export function NrmHomeChartCarousel({
   onIndexChangeRef.current = onIndexChange;
 
   const { coverSize, stageWidth } = homeChartStageMetrics(width);
-  const laurelLayout = useMemo(() => homeChartLaurelLayoutMetrics(coverSize), [coverSize]);
   const trackInset = homeChartCrownClearanceInset(coverSize);
   const slideHeight = trackInset + coverSize;
   const [rootLayout, setRootLayout] = useState({ width: 0, height: 0 });
@@ -223,6 +222,8 @@ export function NrmHomeChartCarousel({
   const current = count > 0 ? items[clampIndex(index, count)] : null;
   const currentRank = current ? (current.rank > 0 ? current.rank : index + 1) : 0;
   const podiumTier = homeChartPodiumTier(currentRank);
+  const backdropGlowTier: HomeChartBackdropGlowTier | null =
+    currentRank > 0 ? (podiumTier ?? 'blue') : null;
   const rankTopLabelColor = homeChartRankTopLabelColor(currentRank, isDark);
 
   const syncIndex = useCallback((nextIndex: number, force = false) => {
@@ -551,19 +552,8 @@ export function NrmHomeChartCarousel({
       <Text style={[styles.artist, { color: muted }]} numberOfLines={2}>
         {current?.artists || '—'}
       </Text>
-      <View
-        style={[
-          styles.titleLaurelWrap,
-          podiumTier ? { minHeight: laurelLayout.wrapMinHeight } : null,
-        ]}>
-        {podiumTier ? (
-          <View
-            style={[styles.laurelBackdrop, { top: laurelLayout.laurelTop }]}
-            pointerEvents="none">
-            <NrmHomeChartLaurelWreath rank={currentRank} width={coverSize} />
-          </View>
-        ) : null}
-        <Text style={[styles.title, styles.titleOnLaurel, { color: ink }]} numberOfLines={2}>
+      <View style={styles.titleLaurelWrap}>
+        <Text style={[styles.title, { color: ink }]} numberOfLines={2}>
           {current?.title || '—'}
         </Text>
       </View>
@@ -589,7 +579,7 @@ export function NrmHomeChartCarousel({
         const { width: w, height: h } = e.nativeEvent.layout;
         setRootLayout((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
       }}>
-      {podiumTier ? (
+      {backdropGlowTier ? (
         <View
           style={[
             styles.backdropGlowSlot,
@@ -597,7 +587,7 @@ export function NrmHomeChartCarousel({
           ]}
           pointerEvents="none">
           <NrmHomeChartPodiumBackdropGlow
-            tier={podiumTier}
+            tier={backdropGlowTier}
             isDark={isDark}
             width={glowWidth}
             height={glowHeight}
@@ -806,28 +796,10 @@ const styles = StyleSheet.create({
     opacity: 0.88,
   },
   titleLaurelWrap: {
-    position: 'relative',
     width: '100%',
     alignItems: 'center',
     justifyContent: 'flex-start',
     marginTop: nrmTokens.space.xxs,
-    overflow: 'visible',
-  },
-  laurelBackdrop: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  titleOnLaurel: {
-    zIndex: 2,
-    paddingHorizontal: nrmTokens.space.sm,
-    paddingBottom: 4,
-    ...Platform.select({
-      android: { elevation: 3 },
-      default: {},
-    }),
   },
   artist: {
     fontSize: 18,

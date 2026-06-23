@@ -136,6 +136,58 @@ class NrmSiteCookieModule(reactContext: ReactApplicationContext) :
 
         )
 
+
+
+    private val MELON_URLS =
+
+        listOf(
+
+            "https://www.melon.com",
+
+            "https://melon.com",
+
+            "https://member.melon.com",
+
+            "https://accounts.melon.com",
+
+        )
+
+
+
+    private val MELON_ORIGINS =
+
+        listOf(
+
+            "https://www.melon.com",
+
+            "https://melon.com",
+
+            "https://member.melon.com",
+
+            "https://accounts.melon.com",
+
+        )
+
+
+
+    private val MELON_KNOWN_COOKIE_NAMES =
+
+        listOf(
+
+            "MLCP",
+
+            "MAC",
+
+            "keyCookie",
+
+            "JSESSIONID",
+
+            "PCID",
+
+            "PCID_FRV",
+
+        )
+
   }
 
 
@@ -445,6 +497,154 @@ class NrmSiteCookieModule(reactContext: ReactApplicationContext) :
       } catch (e: Exception) {
 
         promise.reject("deepl_cookie_clear_error", e.message, e)
+
+      }
+
+    }
+
+  }
+
+
+
+  private fun readMelonCookieHeaderSync(): String? {
+
+    val cookieManager = CookieManager.getInstance()
+
+    cookieManager.flush()
+
+    val merged = LinkedHashMap<String, String>()
+
+    for (url in MELON_URLS) {
+
+      val raw = cookieManager.getCookie(url) ?: continue
+
+      for (part in raw.split(";")) {
+
+        val trimmed = part.trim()
+
+        val eq = trimmed.indexOf('=')
+
+        if (eq <= 0) continue
+
+        val name = trimmed.substring(0, eq).trim()
+
+        val value = trimmed.substring(eq + 1).trim()
+
+        if (name.isNotEmpty() && value.isNotEmpty()) {
+
+          merged[name] = value
+
+        }
+
+      }
+
+    }
+
+    if (merged.isEmpty()) return null
+
+    return merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+  }
+
+
+
+  private fun melonCookieHeaderHasLogin(raw: String?): Boolean {
+
+    if (raw.isNullOrBlank()) return false
+
+    for (part in raw.split(";")) {
+
+      val trimmed = part.trim()
+
+      val eq = trimmed.indexOf('=')
+
+      if (eq <= 0) continue
+
+      if (trimmed.substring(0, eq).trim().equals("MLCP", ignoreCase = true)) {
+
+        val value = trimmed.substring(eq + 1).trim()
+
+        if (value.isNotEmpty()) return true
+
+      }
+
+    }
+
+    return false
+
+  }
+
+
+
+  @ReactMethod
+
+  fun getMelonLoginCookieHeader(promise: Promise) {
+
+    runOnMain {
+
+      try {
+
+        promise.resolve(readMelonCookieHeaderSync())
+
+      } catch (e: Exception) {
+
+        promise.reject("melon_cookie_read_error", e.message, e)
+
+      }
+
+    }
+
+  }
+
+
+
+  @ReactMethod
+
+  fun hasMelonLoginCookies(promise: Promise) {
+
+    runOnMain {
+
+      try {
+
+        promise.resolve(melonCookieHeaderHasLogin(readMelonCookieHeaderSync()))
+
+      } catch (e: Exception) {
+
+        promise.reject("melon_cookie_probe_error", e.message, e)
+
+      }
+
+    }
+
+  }
+
+
+
+  @ReactMethod
+
+  fun clearMelonLoginCookies(promise: Promise) {
+
+    runOnMain {
+
+      try {
+
+        clearCookiesForSite(
+
+            "melon-cookie",
+
+            MELON_URLS,
+
+            MELON_ORIGINS,
+
+            MELON_KNOWN_COOKIE_NAMES,
+
+        )
+
+        promise.resolve(true)
+
+      } catch (e: Exception) {
+
+        promise.reject("melon_cookie_clear_error", e.message, e)
 
       }
 

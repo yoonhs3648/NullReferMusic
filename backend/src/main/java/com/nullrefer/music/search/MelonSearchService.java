@@ -66,6 +66,7 @@ public class MelonSearchService {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
   private final ObjectMapper objectMapper;
+  private final ThreadLocal<String> melonCookieHeader = new ThreadLocal<>();
   private final RestClient restClient =
       RestClient.builder()
           .defaultHeader(HttpHeaders.USER_AGENT, USER_AGENT)
@@ -76,6 +77,18 @@ public class MelonSearchService {
 
   public MelonSearchService(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
+  }
+
+  public void setMelonCookieHeader(String cookieHeader) {
+    if (cookieHeader == null || cookieHeader.isBlank()) {
+      melonCookieHeader.remove();
+    } else {
+      melonCookieHeader.set(cookieHeader.trim());
+    }
+  }
+
+  public void clearMelonCookieHeader() {
+    melonCookieHeader.remove();
   }
 
   public MelonArtistSearchResult searchArtists(String query) {
@@ -184,12 +197,16 @@ public class MelonSearchService {
 
   private String fetchHtml(String url, String referer) {
     try {
-      return restClient
-          .get()
-          .uri(URI.create(url))
-          .header(HttpHeaders.REFERER, referer)
-          .retrieve()
-          .body(String.class);
+      var request =
+          restClient
+              .get()
+              .uri(URI.create(url))
+              .header(HttpHeaders.REFERER, referer);
+      String cookie = melonCookieHeader.get();
+      if (cookie != null && !cookie.isBlank()) {
+        request = request.header(HttpHeaders.COOKIE, cookie);
+      }
+      return request.retrieve().body(String.class);
     } catch (RestClientResponseException e) {
       log.warn("Melon search fetch failed {} status={}", url, e.getStatusCode().value());
       throw new IllegalStateException("melon_fetch_failed");
@@ -790,6 +807,8 @@ public class MelonSearchService {
                 "스타일이 유사한 인기곡[\\s\\S]*?class=\"service_list_song[^\"]*d_song_list\"[\\s\\S]*?<tbody>([\\s\\S]*?)</tbody>",
                 Pattern.CASE_INSENSITIVE));
     List<MelonTrackSummaryDto> similar = parseSimilarTracks(similarTbody);
+    String lyrics = parseSongLyrics(html);
+    boolean lyricsAdultAuthRequired = isMelonLyricsSectionAdultAuthRequired(html) && lyrics.isBlank();
     MelonTrackInfoDto info =
         new MelonTrackInfoDto(
             songId,
@@ -803,9 +822,38 @@ public class MelonSearchService {
             genre,
             likeCount,
             BASE + "/song/detail.htm?songId=" + songId,
-            parseSongLyrics(html),
+            lyrics,
+            lyricsAdultAuthRequired,
             parseSongCredits(html));
     return new MelonTrackDetailResult(info, similar, null);
+  }
+
+  private static boolean isMelonLyricsSectionAdultAuthRequired(String html) {
+    String block =
+        firstMatchGroup(
+            html,
+            Pattern.compile("<!--\\s*가사\\s*-->[\\s\\S]*?<!--\\s*//가사\\s*-->", Pattern.CASE_INSENSITIVE));
+    if (block.isBlank()) {
+      return false;
+    }
+    if (Pattern.compile("adultcheck|goAdult|btn_adult|needAdult|성인\\s*인증\\s*후", Pattern.CASE_INSENSITIVE)
+        .matcher(block)
+        .find()) {
+      return true;
+    }
+    String raw =
+        firstMatchGroup(
+            block,
+            Pattern.compile(
+                "class=\"lyric\"[^>]*id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>",
+                Pattern.CASE_INSENSITIVE));
+    if (raw.isBlank()) {
+      raw =
+          firstMatchGroup(
+              block,
+              Pattern.compile("id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE));
+    }
+    return isMelonAdultAuthBlockedLyrics(cleanMultilineText(raw));
   }
 
   private static String parseSongLyrics(String html) {
@@ -825,7 +873,22 @@ public class MelonSearchService {
               block,
               Pattern.compile("id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE));
     }
-    return cleanMultilineText(raw);
+    String text = cleanMultilineText(raw);
+    if (isMelonAdultAuthBlockedLyrics(text)) {
+      return "";
+    }
+    return text;
+  }
+
+  private static boolean isMelonAdultAuthBlockedLyrics(String text) {
+    String t = text == null ? "" : text.trim();
+    if (t.isBlank() || t.length() > 200) {
+      return false;
+    }
+    return t.contains("성인") && t.contains("인증")
+        || t.contains("19") && t.contains("세")
+        || t.contains("본인") && t.contains("인증")
+        || t.contains("청소년") && t.contains("유해");
   }
 
   private static MelonTrackCreditsDto parseSongCredits(String html) {

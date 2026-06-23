@@ -1,6 +1,8 @@
 import { nrmBackendFetch } from '@/lib/nrmBackendFetch';
 import { nrmDirectFetch } from '@/lib/nrmLoggedFetch';
-import { isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+import { Platform } from 'react-native';
+
+import { isExpoGo, isStandaloneApp, usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import {
   getDefaultApiBaseUrl,
   getResolvedApiBaseUrl,
@@ -58,6 +60,7 @@ import {
   enrichMelonTrackSearchHits,
 } from '@/lib/nrmMelonSearchEnrich';
 import { readMelonHtmlCache, writeMelonHtmlCache } from '@/lib/nrmMelonHtmlCache';
+import { getMelonAdultCookieHeader } from '@/lib/nrmMelonAdultSession';
 
 const MELON_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -74,26 +77,30 @@ function requireQuery(query: string): string | null {
 }
 
 async function melonFetchHtml(url: string, referer = `${MELON_BASE}/`): Promise<string | null> {
-  const cached = readMelonHtmlCache(url);
+  const cookieHeader = await getMelonAdultCookieHeader();
+  const cacheKey = cookieHeader ? `${url}\0${cookieHeader}` : url;
+  const cached = readMelonHtmlCache(cacheKey);
   if (cached !== null) {
     return cached;
   }
   try {
+    const headers: Record<string, string> = {
+      'User-Agent': MELON_UA,
+      Accept: 'text/html,application/xhtml+xml',
+      'Accept-Language': 'ko-KR,ko;q=0.9',
+      Referer: referer,
+    };
+    if (cookieHeader) {
+      headers.Cookie = cookieHeader;
+    }
     const res = await nrmDirectFetch(
       url,
-      {
-        headers: {
-          'User-Agent': MELON_UA,
-          Accept: 'text/html,application/xhtml+xml',
-          'Accept-Language': 'ko-KR,ko;q=0.9',
-          Referer: referer,
-        },
-      },
+      { headers },
       'melon-search',
     );
     if (!res.ok) return null;
     const html = await res.text();
-    writeMelonHtmlCache(url, html);
+    writeMelonHtmlCache(cacheKey, html);
     return html;
   } catch {
     return null;
@@ -102,15 +109,18 @@ async function melonFetchHtml(url: string, referer = `${MELON_BASE}/`): Promise<
 
 async function melonFetchText(url: string, referer: string): Promise<string | null> {
   try {
+    const cookieHeader = await getMelonAdultCookieHeader();
+    const headers: Record<string, string> = {
+      'User-Agent': MELON_UA,
+      Accept: 'application/json,text/plain,*/*',
+      Referer: referer,
+    };
+    if (cookieHeader) {
+      headers.Cookie = cookieHeader;
+    }
     const res = await nrmDirectFetch(
       url,
-      {
-        headers: {
-          'User-Agent': MELON_UA,
-          Accept: 'application/json,text/plain,*/*',
-          Referer: referer,
-        },
-      },
+      { headers },
       'melon-search',
     );
     if (!res.ok) return null;
@@ -293,8 +303,13 @@ async function fetchMelonSearchBackend<T>(path: string): Promise<MelonSearchOutc
     if (!primary) {
       return { ok: false, errorCode: 'network', message: messageForError('network') };
     }
+    const cookieHeader = await getMelonAdultCookieHeader();
+    const backendHeaders: Record<string, string> = {};
+    if (cookieHeader) {
+      backendHeaders['X-NRM-Melon-Cookie'] = cookieHeader;
+    }
     const tryBase = async (base: string): Promise<MelonSearchOutcome<T>> => {
-      const res = await nrmBackendFetch(`${base}${path}`);
+      const res = await nrmBackendFetch(`${base}${path}`, { headers: backendHeaders });
       const raw = await res.text();
       if (!res.ok) {
         let code: string | undefined;
@@ -323,8 +338,10 @@ async function fetchMelonSearchBackend<T>(path: string): Promise<MelonSearchOutc
   }
 }
 
+/** 웹은 CORS — APK·Expo Go는 멜론 HTML 직접 조회 */
 function useDirect(): boolean {
-  return isStandaloneApp();
+  if (Platform.OS === 'web') return false;
+  return isStandaloneApp() || isExpoGo();
 }
 
 function melonSearchPagePath(

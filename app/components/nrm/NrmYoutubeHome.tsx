@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -63,6 +63,7 @@ import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { chartTrackDisplayLabel } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
+import { isAdminSearchTrigger, runAdminAuthFlow } from '@/lib/nrmAdminAuth';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
 import {
@@ -185,6 +186,10 @@ type Props = {
   downloadMetadataAuth: DownloadMetadataAuthHandlers;
   /** browsing·오버레이: FlatList가 남은 높이를 채움 */
   fillHeight?: boolean;
+  /** 스크롤 헤더 상단 — 메뉴·로고·알림 (고정 FAB 대신) */
+  scrollTopChrome?: ReactNode;
+  /** 관리자 히든 인증 후 메인(Home) 복귀 */
+  onAdminGateComplete?: () => void;
 };
 
 export function NrmYoutubeHome({
@@ -196,6 +201,8 @@ export function NrmYoutubeHome({
   chartDownloadSource = null,
   downloadMetadataAuth,
   fillHeight = false,
+  scrollTopChrome,
+  onAdminGateComplete,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
   const [query, setQuery] = useState(initialQuery ?? '');
@@ -347,12 +354,19 @@ export function NrmYoutubeHome({
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
+    if (isAdminSearchTrigger(q)) {
+      setQuery('');
+      setCommittedQuery('');
+      await runAdminAuthFlow();
+      onAdminGateComplete?.();
+      return;
+    }
     onSearchCommitted?.();
     setCommittedQuery(q);
     await resolveChartMetadataOnSearch(q);
     const token = ++latestSearchTokenRef.current;
     await runSearchWithQuery(q, token);
-  }, [onSearchCommitted, query, resolveChartMetadataOnSearch, runSearchWithQuery]);
+  }, [onAdminGateComplete, onSearchCommitted, query, resolveChartMetadataOnSearch, runSearchWithQuery]);
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || !hasMore || !nextCursor || !committedQuery.trim()) {
@@ -880,8 +894,12 @@ export function NrmYoutubeHome({
   const resultListMaxHeight = Math.min(windowHeight * 0.55, 520);
 
   const searchHeader = (
-    <View style={styles.searchRowWrap}>
-      <View style={styles.searchRow}>
+    <View style={styles.searchHeaderCol}>
+      {scrollTopChrome ? (
+        <View style={styles.scrollTopChrome}>{scrollTopChrome}</View>
+      ) : null}
+      <View style={styles.searchRowWrap}>
+        <View style={styles.searchRow}>
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -908,6 +926,7 @@ export function NrmYoutubeHome({
             <Text style={styles.searchBtnLabel}>검색</Text>
           )}
         </Pressable>
+      </View>
       </View>
     </View>
   );
@@ -1059,6 +1078,9 @@ export function NrmYoutubeHome({
         initialArtist={effectiveChartTrack?.artists}
         initialTitle={effectiveChartTrack?.title}
         initialMetadataFields={downloadModalInitialFields}
+        melonSongId={
+          effectiveChartSource === 'melon' ? effectiveChartTrack?.trackId : undefined
+        }
         busy={!!(downloadModalItem && dlMetaBusy[downloadModalItem.videoId])}
         onClose={handleModalClose}
         onConfirm={(videoId, fileName, metadata) => {
@@ -1157,6 +1179,14 @@ const styles = StyleSheet.create({
     flex: 1,
     maxWidth: nrmTokens.layout.homeSearchClusterMaxWidth,
     minWidth: 0,
+  },
+  searchHeaderCol: {
+    width: '100%',
+    marginBottom: nrmTokens.space.md,
+  },
+  scrollTopChrome: {
+    width: '100%',
+    marginBottom: nrmTokens.space.sm,
   },
   searchRowWrap: {
     width: '100%',

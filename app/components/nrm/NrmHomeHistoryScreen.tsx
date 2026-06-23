@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  SectionList,
   StyleSheet,
   Text,
   View,
@@ -11,13 +11,16 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   formatActivityHistoryLabel,
+  formatActivityHistoryTime,
+  groupActivityHistoryByDate,
   invalidateActivityHistoryCache,
   peekActivityHistoryForDisplay,
   type NrmActivityHistoryEntry,
+  type NrmActivityHistorySection,
 } from '@/lib/nrmActivityHistory';
 import {
-  activityHistoryDisplaySubtitle,
   registerActivityHistoryDisplayListener,
+  DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS,
   type NrmActivityHistoryDisplayDays,
 } from '@/lib/nrmActivityHistorySettings';
 
@@ -25,23 +28,21 @@ type Props = {
   isDark: boolean;
 };
 
-function formatWhen(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** 설정된 기간의 다운로드·가사생성 기록 (읽기 전용) */
+/** 설정된 기간의 다운로드·가사 생성 기록 (읽기 전용) */
 export function NrmHomeHistoryScreen({ isDark }: Props) {
   const [items, setItems] = useState<NrmActivityHistoryEntry[]>([]);
-  const [displayDays, setDisplayDays] = useState<NrmActivityHistoryDisplayDays>('90');
+  const [displayDays, setDisplayDays] = useState<NrmActivityHistoryDisplayDays>(
+    DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS,
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
-  const subtitle = activityHistoryDisplaySubtitle(displayDays);
+  const sectionHeaderBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
+
+  const sections = useMemo(() => groupActivityHistoryByDate(items), [items]);
 
   const applySnapshot = useCallback(
     (days: NrmActivityHistoryDisplayDays, rows: NrmActivityHistoryEntry[]) => {
@@ -82,29 +83,48 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   const emptyMessage =
     displayDays === '0' ? 'History 표시가 꺼져 있습니다.' : '최근 기록이 없습니다.';
 
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: NrmActivityHistorySection }) => (
+      <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
+        <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>{section.title}</Text>
+      </View>
+    ),
+    [bodyColor, sectionHeaderBg],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: NrmActivityHistoryEntry }) => (
+      <View style={[styles.row, { borderBottomColor: hairline }]}>
+        <Text style={[styles.rowLabel, { color: titleColor }]} numberOfLines={2}>
+          {formatActivityHistoryLabel(item)}
+        </Text>
+        <Text style={[styles.rowWhen, { color: bodyColor }]}>
+          {formatActivityHistoryTime(item.createdAt)}
+        </Text>
+      </View>
+    ),
+    [bodyColor, hairline, titleColor],
+  );
+
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.title, { color: titleColor }]}>History</Text>
-      <Text style={[styles.subtitle, { color: bodyColor }]}>{subtitle}</Text>
       {loading ? (
         <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
       ) : (
-        <FlatList
-          data={items}
+        <SectionList
+          sections={sections}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
-          contentContainerStyle={items.length === 0 ? styles.emptyContent : styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />
+          }
+          contentContainerStyle={sections.length === 0 ? styles.emptyContent : styles.listContent}
           ListEmptyComponent={
             <Text style={[styles.empty, { color: bodyColor }]}>{emptyMessage}</Text>
           }
-          renderItem={({ item }) => (
-            <View style={[styles.row, { borderBottomColor: hairline }]}>
-              <Text style={[styles.rowLabel, { color: titleColor }]} numberOfLines={2}>
-                {formatActivityHistoryLabel(item)}
-              </Text>
-              <Text style={[styles.rowWhen, { color: bodyColor }]}>{formatWhen(item.createdAt)}</Text>
-            </View>
-          )}
+          renderSectionHeader={renderSectionHeader}
+          renderItem={renderItem}
+          stickySectionHeadersEnabled
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
@@ -119,29 +139,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: nrmTokens.space.md,
     paddingTop: nrmTokens.space.sm,
   },
-  title: {
-    fontSize: nrmTokens.font.leadAiry,
-    fontWeight: '700',
-    marginBottom: nrmTokens.space.xxs,
-  },
-  subtitle: {
-    fontSize: nrmTokens.font.caption,
-    marginBottom: nrmTokens.space.md,
-  },
   loader: {
     marginTop: nrmTokens.space.xl,
   },
   listContent: {
-    paddingBottom: nrmTokens.space.xl,
+    paddingBottom: nrmTokens.space.xxl,
   },
   emptyContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingBottom: nrmTokens.space.xl,
+    paddingBottom: nrmTokens.space.xxl,
   },
   empty: {
     textAlign: 'center',
     fontSize: nrmTokens.font.body,
+  },
+  sectionHeader: {
+    paddingHorizontal: nrmTokens.space.xs,
+    paddingVertical: nrmTokens.space.xxs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(128,128,128,0.25)',
+  },
+  sectionHeaderLabel: {
+    fontSize: nrmTokens.font.finePrint,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   row: {
     paddingVertical: nrmTokens.space.md,

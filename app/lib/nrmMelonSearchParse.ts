@@ -504,13 +504,44 @@ export function parseMelonAlbumTrackList(html: string): MelonAlbumTrack[] {
   return tracks;
 }
 
-function parseMelonSongLyrics(html: string): string {
-  const block = html.match(/<!--\s*가사\s*-->[\s\S]*?<!--\s*\/\/가사\s*-->/i)?.[0] ?? '';
+function extractMelonSongLyricsBlock(html: string): string {
+  return html.match(/<!--\s*가사\s*-->[\s\S]*?<!--\s*\/\/가사\s*-->/i)?.[0] ?? '';
+}
+
+function extractMelonSongLyricsRawText(html: string): string {
+  const block = extractMelonSongLyricsBlock(html);
   const raw =
     block.match(/class="lyric"[^>]*id="d_video_summary"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
     block.match(/id="d_video_summary"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
     '';
   return cleanMultilineText(raw);
+}
+
+function parseMelonSongLyrics(html: string): string {
+  const text = extractMelonSongLyricsRawText(html);
+  if (isMelonAdultAuthBlockedLyrics(text)) return '';
+  return text;
+}
+
+/** 가사 영역에 성인인증 안내만 있는 경우 */
+export function isMelonAdultAuthBlockedLyrics(text: string | undefined): boolean {
+  const t = (text ?? '').trim();
+  if (!t) return false;
+  if (t.length > 200) return false;
+  return /성인\s*인증|19\s*세\s*이상|본인\s*인증|청소년\s*유해/i.test(t);
+}
+
+/**
+ * 가사 섹션(<!-- 가사 -->) 안에서만 성인인증 필요 여부 판별.
+ * 실제 가사가 없어서 빈 경우와 구분할 수 있을 때만 true.
+ */
+export function isMelonLyricsSectionAdultAuthRequired(html: string): boolean {
+  const block = extractMelonSongLyricsBlock(html);
+  if (!block.trim()) return false;
+  if (/adultcheck|goAdult|btn_adult|needAdult|성인\s*인증\s*후/i.test(block)) {
+    return true;
+  }
+  return isMelonAdultAuthBlockedLyrics(extractMelonSongLyricsRawText(html));
 }
 
 function parseMelonSongCredits(html: string): MelonTrackCredits {
@@ -587,6 +618,8 @@ export function parseMelonSongDetailHtml(html: string, songId: string) {
       /스타일이 유사한 인기곡[\s\S]*?class="service_list_song[^"]*d_song_list"[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/i,
     )?.[1] ?? '';
 
+  const lyrics = parseMelonSongLyrics(html);
+
   return {
     info: {
       songId,
@@ -600,7 +633,8 @@ export function parseMelonSongDetailHtml(html: string, songId: string) {
       genre,
       likeCount,
       url: `${MELON_BASE}/song/detail.htm?songId=${songId}`,
-      lyrics: parseMelonSongLyrics(html),
+      lyrics,
+      lyricsAdultAuthRequired: isMelonLyricsSectionAdultAuthRequired(html) && !lyrics,
       credits: parseMelonSongCredits(html),
     },
     similarTracks: parseMelonSimilarTrackRows(similarBlock),

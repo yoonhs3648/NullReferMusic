@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
@@ -14,6 +14,7 @@ type Props = {
   onLogoPress?: () => void;
   podiumTier?: HomeChartPodiumTier | null;
   menuHidden?: boolean;
+  unreadAlarmCount?: number;
 };
 
 const ICON_HIT = 44;
@@ -26,6 +27,7 @@ export function NrmAppTopBar({
   onLogoPress,
   podiumTier = null,
   menuHidden = false,
+  unreadAlarmCount = 0,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -68,8 +70,23 @@ export function NrmAppTopBar({
         hitSlop={8}
         style={({ pressed }) => [styles.sideSlot, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel="알림">
-        <Ionicons name="notifications-outline" size={24} color={iconColor} />
+        accessibilityLabel={
+          unreadAlarmCount > 0 ? `알림, 읽지 않음 ${unreadAlarmCount}건` : '알림'
+        }>
+        <View style={styles.bellWrap}>
+          <Ionicons name="notifications-outline" size={24} color={iconColor} />
+          {unreadAlarmCount > 0 ? (
+            <View
+              style={[
+                styles.badge,
+                { borderColor: isDark ? nrmTokens.color.surfaceTile1 : '#ffffff' },
+              ]}>
+              <Text style={styles.badgeText}>
+                {unreadAlarmCount > 99 ? '99+' : String(unreadAlarmCount)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </Pressable>
     </View>
   );
@@ -97,5 +114,30 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.72,
+  },
+  bellWrap: {
+    width: ICON_HIT,
+    height: ICON_HIT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: 4,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: '#e53935',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  badgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12,
   },
 });

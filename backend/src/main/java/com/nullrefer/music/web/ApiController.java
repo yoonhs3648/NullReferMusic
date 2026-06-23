@@ -730,75 +730,75 @@ public class ApiController {
   @GetMapping("/api/search/melon/artist")
   public ResponseEntity<?> melonSearchArtist(
       @RequestParam("q") String query,
-      @RequestParam(value = "cursor", required = false) String cursor) {
-    try {
-      return ResponseEntity.ok(melonSearchService.searchArtistsPage(query, cursor));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader,
+        () -> melonSearchService.searchArtistsPage(query, cursor));
   }
 
   @GetMapping("/api/search/melon/artist/detail")
   public ResponseEntity<?> melonArtistDetail(
       @RequestParam("artistId") String artistId,
-      @RequestParam(value = "artist", defaultValue = "") String artist) {
-    try {
-      return ResponseEntity.ok(melonSearchService.fetchArtistDetail(artistId, artist));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+      @RequestParam(value = "artist", defaultValue = "") String artist,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader,
+        () -> melonSearchService.fetchArtistDetail(artistId, artist));
   }
 
   @GetMapping("/api/search/melon/album")
   public ResponseEntity<?> melonSearchAlbum(
       @RequestParam("q") String query,
-      @RequestParam(value = "cursor", required = false) String cursor) {
-    try {
-      return ResponseEntity.ok(melonSearchService.searchAlbumsPage(query, cursor));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader,
+        () -> melonSearchService.searchAlbumsPage(query, cursor));
   }
 
   @GetMapping("/api/search/melon/album/detail")
-  public ResponseEntity<?> melonAlbumDetail(@RequestParam("albumId") String albumId) {
-    try {
-      return ResponseEntity.ok(melonSearchService.fetchAlbumDetail(albumId));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+  public ResponseEntity<?> melonAlbumDetail(
+      @RequestParam("albumId") String albumId,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader, () -> melonSearchService.fetchAlbumDetail(albumId));
   }
 
   @GetMapping("/api/search/melon/track")
   public ResponseEntity<?> melonSearchTrack(
       @RequestParam("q") String query,
-      @RequestParam(value = "cursor", required = false) String cursor) {
-    try {
-      return ResponseEntity.ok(melonSearchService.searchTracksPage(query, cursor));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader,
+        () -> melonSearchService.searchTracksPage(query, cursor));
   }
 
   @GetMapping("/api/search/melon/track/detail")
-  public ResponseEntity<?> melonTrackDetail(@RequestParam("songId") String songId) {
-    try {
-      return ResponseEntity.ok(melonSearchService.fetchTrackDetail(songId));
-    } catch (IllegalArgumentException e) {
-      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-    } catch (IllegalStateException e) {
-      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
-    }
+  public ResponseEntity<?> melonTrackDetail(
+      @RequestParam("songId") String songId,
+      @org.springframework.web.bind.annotation.RequestHeader(
+              value = "X-NRM-Melon-Cookie",
+              required = false)
+          String melonCookieHeader) {
+    return melonSearchWithCookie(
+        melonCookieHeader, () -> melonSearchService.fetchTrackDetail(songId));
   }
 
   @GetMapping("/api/search/spotify/artist")
@@ -1035,6 +1035,24 @@ public class ApiController {
       return ResponseEntity.status(403).body(Map.of("error", code));
     }
     return ResponseEntity.status(502).body(Map.of("error", code));
+  }
+
+  @FunctionalInterface
+  private interface MelonSearchAction<T> {
+    T run();
+  }
+
+  private <T> ResponseEntity<?> melonSearchWithCookie(String melonCookieHeader, MelonSearchAction<T> action) {
+    try {
+      melonSearchService.setMelonCookieHeader(melonCookieHeader);
+      return ResponseEntity.ok(action.run());
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      return ResponseEntity.status(502).body(Map.of("error", e.getMessage()));
+    } finally {
+      melonSearchService.clearMelonCookieHeader();
+    }
   }
 
   @FunctionalInterface

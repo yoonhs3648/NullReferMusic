@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import {
   ActivityIndicator,
@@ -127,6 +128,7 @@ type Props = {
   onBackToHome: () => void;
   onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
   restoredState?: MelonSearchRouterState | null;
+  scrollTopChrome?: ReactNode;
 };
 
 let frameSeq = 0;
@@ -220,7 +222,7 @@ function artistMetaRows(info: MelonArtistInfo): { label: string; value: string }
 
 export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
   function NrmMelonSearchRouter(
-    { initialKind, isDark, paddingHorizontal, onBackToHome, onNavigateYoutube, restoredState },
+    { initialKind, isDark, paddingHorizontal, onBackToHome, onNavigateYoutube, restoredState, scrollTopChrome },
     ref,
   ) {
     const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -234,6 +236,7 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     const reqRef = useRef(0);
     const loadMoreLockRef = useRef(false);
     const listRef = useRef<FlatList<MelonArtistSearchHit | MelonAlbumSearchHit | MelonTrackSearchHit>>(null);
+    const detailScrollRef = useRef<ScrollView>(null);
     const [showScrollTop, setShowScrollTop] = useState(false);
 
     useEffect(() => {
@@ -243,6 +246,11 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     }, [restoredState]);
 
     const top = stack[stack.length - 1];
+
+    useEffect(() => {
+      detailScrollRef.current?.scrollTo({ y: 0, animated: false });
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, [stack.length, top.id]);
     const isTopList =
       top.type === 'artist-list' ||
       top.type === 'album-list' ||
@@ -253,7 +261,6 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       !top.loading &&
       top.hits.length === 0 &&
       !top.error;
-
     useImperativeHandle(
       ref,
       () => ({
@@ -1148,17 +1155,20 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
 
     return (
       <ScrollView
+        ref={detailScrollRef}
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollInner,
           { paddingHorizontal },
         ]}
         keyboardShouldPersistTaps="handled">
-        <NrmFeatureScreenLogoHeader
-          isDark={isDark}
-          onPressHome={onBackToHome}
-          compact
-        />
+        {scrollTopChrome ?? (
+          <NrmFeatureScreenLogoHeader
+            isDark={isDark}
+            onPressHome={onBackToHome}
+            compact
+          />
+        )}
         {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
         {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
         {top.type === 'track-detail' ? renderTrackDetail(top) : null}

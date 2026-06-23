@@ -369,4 +369,81 @@ object NrmFileLogger {
       legacyLogFile?.appendBytes(payload) ?: throw IOException("legacy log file missing")
     }
   }
+
+  data class FolderFileRow(val name: String, val uri: String, val sizeBytes: Long)
+
+  /** 문의 첨부 — Download/{brand}/logs 폴더 파일 목록 */
+  fun listLogFolderFiles(context: Context): List<FolderFileRow> {
+    init(context)
+    val out = mutableListOf<FolderFileRow>()
+    val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+      val projection =
+          arrayOf(
+              MediaStore.MediaColumns._ID,
+              MediaStore.MediaColumns.DISPLAY_NAME,
+              MediaStore.MediaColumns.SIZE,
+          )
+      val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+      val args = arrayOf("$relativePath%")
+      context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
+        val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+        val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+        val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+        while (cursor.moveToNext()) {
+          val id = cursor.getLong(idCol)
+          val name = cursor.getString(nameCol) ?: continue
+          val size = cursor.getLong(sizeCol).coerceAtLeast(0L)
+          val uri = ContentUris.withAppendedId(collection, id).toString()
+          out.add(FolderFileRow(name, uri, size))
+        }
+      }
+    } else {
+      @Suppress("DEPRECATION")
+      val dir =
+          File(
+              Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+              folderRelPath,
+          )
+      if (dir.isDirectory) {
+        dir.listFiles()?.forEach { f ->
+          if (f.isFile) {
+            out.add(FolderFileRow(f.name, Uri.fromFile(f).toString(), f.length()))
+          }
+        }
+      }
+    }
+    return out.sortedByDescending { it.name }
+  }
+
+  fun queryDisplayName(context: Context, uri: Uri): String? {
+    context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+          if (cursor.moveToFirst()) {
+            val col = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+            if (col >= 0) return cursor.getString(col)
+          }
+        }
+    return uri.lastPathSegment
+  }
+
+  fun querySizeBytes(context: Context, uri: Uri): Long {
+    context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)?.use {
+        cursor ->
+      if (cursor.moveToFirst()) {
+        val col = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+        if (col >= 0) return cursor.getLong(col).coerceAtLeast(0L)
+      }
+    }
+    return 0L
+  }
+
+  fun readUriAsBase64(context: Context, uriString: String): String {
+    val uri = Uri.parse(uriString)
+    val bytes =
+        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw IOException("cannot open attachment")
+    return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+  }
 }

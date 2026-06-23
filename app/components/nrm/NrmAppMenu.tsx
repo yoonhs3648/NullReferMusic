@@ -45,6 +45,7 @@ import { NrmMelonAdultAuthPanel } from '@/components/nrm/settings/NrmMelonAdultA
 import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAlarmRegisterPanel';
 import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
+import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
 import { NrmInquiryPanel } from '@/components/nrm/settings/NrmInquiryPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
@@ -178,6 +179,7 @@ type Panel =
   | 'adminAlarmRegister'
   | 'adminUserBanList'
   | 'adminUserBanRegister'
+  | 'adminInquiryList'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -1610,6 +1612,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminInquiryList')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    문의 내역
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -1647,6 +1664,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminUserBanRegisterPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminInquiryList' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminInquiryListPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

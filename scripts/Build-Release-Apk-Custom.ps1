@@ -69,21 +69,39 @@ $buildFailed = $false
 try {
     if ($Customize) {
         $namePath = Join-Path $WorkDir 'display-name.txt'
+        $serialPath = Join-Path $WorkDir 'serial-no.txt'
+        $userPath = Join-Path $WorkDir 'user-name.txt'
         if (-not (Test-Path -LiteralPath $namePath)) {
             throw "Custom display name file not found: $namePath"
         }
+        if (-not (Test-Path -LiteralPath $serialPath)) {
+            throw "Custom serial number file not found: $serialPath"
+        }
+        if (-not (Test-Path -LiteralPath $userPath)) {
+            throw "Custom user name file not found: $userPath"
+        }
         $name = [System.IO.File]::ReadAllText($namePath).Trim()
+        $serialNo = [System.IO.File]::ReadAllText($serialPath).Trim()
+        $userName = [System.IO.File]::ReadAllText($userPath).Trim()
         if (-not $name) {
             throw 'Custom display name is empty.'
         }
+        if (-not $serialNo) {
+            throw 'Custom serial number is empty.'
+        }
+        if (-not $userName) {
+            throw 'Custom user name is empty.'
+        }
         $cfg = $originalBrandJson | ConvertFrom-Json
         $cfg.displayName = $name
-        $cfg.versionInfoCustomizing = $name
+        $cfg.serialNo = $serialNo
+        $cfg.userName = $userName
         Write-Utf8NoBom -Path $BrandConfigPath -Content ($cfg | ConvertTo-Json -Depth 5)
         Write-Host ""
         Write-Host "[brand] Temporary display name for this build: $name"
-        Write-Host "[brand] Version info customizing line: customizing : $name"
-        Write-Host "[brand] Note: version label product name stays versionInfoProductName (default NullReference Music)."
+        Write-Host "[brand] SerialNo embedded in APK (NrmBrand.SERIAL_NO); not shown in version UI."
+        Write-Host "[brand] UserName embedded in APK (NrmBrand.USER_NAME); not shown in version UI."
+        Write-Host "[brand] Version info label stays versionInfoProductName (default NullReference Music)."
     }
     else {
         Write-Host ""
@@ -181,6 +199,26 @@ if ($apkFiles.Count -eq 0) {
 Write-Host "Generated APK file(s):"
 foreach ($apk in $apkFiles) {
     Write-Host "  $($apk.FullName)"
+}
+
+if ($Customize) {
+    $userPath = Join-Path $WorkDir 'user-name.txt'
+    $namePath = Join-Path $WorkDir 'display-name.txt'
+    $serialPath = Join-Path $WorkDir 'serial-no.txt'
+    if ((Test-Path -LiteralPath $userPath) -and (Test-Path -LiteralPath $namePath) -and (Test-Path -LiteralPath $serialPath)) {
+        $regAppName = [System.IO.File]::ReadAllText($namePath).Trim()
+        $regUserName = [System.IO.File]::ReadAllText($userPath).Trim()
+        $regSerialNo = [System.IO.File]::ReadAllText($serialPath).Trim()
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Register-NrmCustomApkUserList.ps1') `
+            -RepoRoot $RepoRoot `
+            -AppName $regAppName `
+            -UserName $regUserName `
+            -SerialNo $regSerialNo `
+            -Version $ver.VersionName
+    }
+    else {
+        Write-Host "[userList] WARNING: Custom metadata files missing; skipped userList registration." -ForegroundColor Yellow
+    }
 }
 
 exit 0

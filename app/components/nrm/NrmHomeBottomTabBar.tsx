@@ -13,14 +13,13 @@ type TabSpec = {
 };
 
 const TABS: TabSpec[] = [
-  { id: 'library', label: 'Library', icon: 'albums-outline' },
+  { id: 'library', label: 'Storage', icon: 'albums-outline' },
   { id: 'search', label: 'Search', icon: 'search-outline' },
   { id: 'home', label: 'Home', icon: 'home-outline' },
   { id: 'favorite', label: 'Favorite', icon: 'heart-outline' },
   { id: 'history', label: 'History', icon: 'time-outline' },
 ];
 
-const TAB_ACTIVE = '#C9A227';
 const TAB_INACTIVE_DARK = 'rgba(255,255,255,0.55)';
 const TAB_INACTIVE_LIGHT = 'rgba(29,29,31,0.45)';
 
@@ -32,10 +31,11 @@ type Props = {
   backgroundColor?: string;
 };
 
-/** 메인 홈 하단 탭 — Library · Search · Home · Favorite · History */
+/** 메인 홈 하단 탭 — Storage · Search · Home · Favorite · History */
 export function NrmHomeBottomTabBar({ isDark, active, onChange, backgroundColor }: Props) {
   const insets = useSafeAreaInsets();
   const inactive = isDark ? TAB_INACTIVE_DARK : TAB_INACTIVE_LIGHT;
+  const activeColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
 
   return (
     <View
@@ -50,7 +50,7 @@ export function NrmHomeBottomTabBar({ isDark, active, onChange, backgroundColor 
       ]}>
       {TABS.map((tab) => {
         const selected = tab.id === active;
-        const color = selected ? TAB_ACTIVE : inactive;
+        const color = selected ? activeColor : inactive;
         return (
           <Pressable
             key={tab.id}

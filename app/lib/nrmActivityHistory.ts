@@ -6,14 +6,21 @@ import {
   peekActivityHistoryDisplayDays,
   type NrmActivityHistoryDisplayDays,
 } from '@/lib/nrmActivityHistorySettings';
+import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 
 export type NrmActivityHistoryKind = 'download' | 'lyrics' | 'lyrics_translation';
 
 export type NrmActivityHistoryEntry = {
   id: string;
+  /** 저장 시점 파일명(확장자 포함 가능) — 표시 시 `가수 - 제목`으로 정규화 */
   fileName: string;
   kind: NrmActivityHistoryKind;
   createdAt: number;
+};
+
+export type NrmActivityHistorySection = {
+  title: string;
+  data: NrmActivityHistoryEntry[];
 };
 
 const STORAGE_KEY = 'nrm_activity_history_v1';
@@ -73,17 +80,50 @@ function filterForDisplayDays(
   return entries.filter((e) => e.createdAt >= cutoff);
 }
 
+function historyTrackLabel(rawFileName: string): string {
+  const v = rawFileName.trim();
+  if (!v || v.startsWith('저장했습니다')) return v;
+  return displayLabelFromAudioFileName(v);
+}
+
 export function formatActivityHistoryLabel(entry: NrmActivityHistoryEntry): string {
-  const base = entry.fileName.trim();
+  const base = historyTrackLabel(entry.fileName);
   switch (entry.kind) {
     case 'download':
-      return `${base} 다운로드`;
+      return `${base} 저장`;
     case 'lyrics_translation':
-      return `${base} 가사생성(번역지원)`;
+      return `${base} 가사 생성(번역지원)`;
     case 'lyrics':
     default:
-      return `${base} 가사생성`;
+      return `${base} 가사 생성`;
   }
+}
+
+export function activityHistoryDateKey(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export function formatActivityHistoryTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function groupActivityHistoryByDate(
+  items: NrmActivityHistoryEntry[],
+): NrmActivityHistorySection[] {
+  const map = new Map<string, NrmActivityHistoryEntry[]>();
+  for (const item of items) {
+    const key = activityHistoryDateKey(item.createdAt);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(item);
+    else map.set(key, [item]);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([title, data]) => ({ title, data }));
 }
 
 export async function appendActivityHistory(

@@ -127,6 +127,7 @@ public final class MelonSearchDtos {
       long likeCount,
       String url,
       String lyrics,
+      boolean lyricsAdultAuthRequired,
       MelonTrackCreditsDto credits) {}
 
   public record MelonTrackDetailResult(

@@ -7,6 +7,10 @@ package com.nullrefer.music
 object NrmBrand {
     const val DISPLAY_NAME: String = "NullReference Music"
     const val STORAGE_FOLDER_NAME: String = "NullReferenceMusic"
+    /** Custom APK only — embedded for future licensing logic; not shown in version UI */
+    const val SERIAL_NO: String = ""
+    /** Custom APK only — inquiry registration; not shown in version UI */
+    const val USER_NAME: String = ""
     val STORAGE_LOGS_PATH: String get() = "$STORAGE_FOLDER_NAME/logs"
     fun userAgent(version: String): String = "$STORAGE_FOLDER_NAME/$version"
 }

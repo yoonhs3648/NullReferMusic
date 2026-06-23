@@ -106,6 +106,12 @@ object NrmForegroundNotificationBinder {
           buildAudioProgressNotification(context, audioTitle, audioBody),
       )
     }
+    if (NrmBackgroundWorkCoordinator.hasModelInstallTokens()) {
+      return ForegroundTarget(
+          NOTIF_MODEL_ID,
+          buildModelNotification(context),
+      )
+    }
     if (NrmBackgroundWorkCoordinator.hasLyricsTokens()) {
       return ForegroundTarget(
           NOTIF_LYRICS_PROGRESS_ID,
