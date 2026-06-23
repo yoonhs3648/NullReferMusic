@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 129
-        versionName "2.3.1"
+        versionCode 130
+        versionName "2.3.2"
 
         def localProps = new Properties()
         def localPropsFile = rootProject.file('local.properties')
