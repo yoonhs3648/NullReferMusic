@@ -1,0 +1,34 @@
+{
+	"inquiry": [
+		{
+			"id": 1,
+			"userName": "김테스트",
+			"SerialNo": "01027523648",
+			"version": "2.1.4",
+			"content": "멜론 차트에서 특정 곡 유튜브 검색 시 결과가 비어 보입니다. 재현 단계: 홈 차트 → 5위 곡 → 유튜브 검색.",
+			"attachedFile": "",
+			"isAnswered": false,
+			"Createddate": "2026-06-22 10:15:42.080"
+		},
+		{
+			"id": 2,
+			"userName": "이샘플",
+			"SerialNo": "01098765432",
+			"version": "2.1.3",
+			"content": "다크 모드에서 하단 탭 색상이 잘 보이는지 확인 부탁드립니다.",
+			"attachedFile": "",
+			"isAnswered": true,
+			"Createddate": "2026-06-21 18:02:11.512"
+		},
+		{
+			"id": 3,
+			"userName": "박데모",
+			"SerialNo": "01011112222",
+			"version": "2.1.4",
+			"content": "wav2vec2 모델 다운로드 알림 문구가 가사 생성으로 표시되는 현상이 있었습니다. (임시 테스트 문의)",
+			"attachedFile": "",
+			"isAnswered": false,
+			"Createddate": "2026-06-23 09:30:00.000"
+		}
+	]
+}
