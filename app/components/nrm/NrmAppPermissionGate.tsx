@@ -133,25 +133,27 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
     })();
   }, [finishIfGranted]);
 
+  const topPad = Math.max(insets.top, 24) + 24;
+
   if (phase === 'checking') {
     return (
-      <View style={[styles.centered, { backgroundColor: bg, paddingTop: insets.top }]}>
+      <View style={[styles.centered, { backgroundColor: bg, paddingTop: topPad }]}>
         <ActivityIndicator size="large" color={nrmTokens.color.primary} />
       </View>
     );
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: bg, paddingTop: insets.top + 24 }]}>
+    <View style={[styles.root, { backgroundColor: bg, paddingTop: topPad }]}>
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          { paddingBottom: insets.bottom + 32 },
+          { paddingBottom: Math.max(insets.bottom, 16) + 32 },
         ]}
         showsVerticalScrollIndicator={false}>
         <Text style={[styles.title, { color: ink }]}>앱 사용에 필요한 권한</Text>
         <Text style={[styles.lead, { color: muted }]}>
-          아래 권한을 모두 허용해야 앱을 사용할 수 있습니다. 거부 시 앱이 종료됩니다.
+          아래 권한을 모두 허용해야 앱을 사용할 수 있습니다.{'\n'}거부 시 앱이 종료됩니다.
         </Text>
 
         <View style={styles.cardList}>

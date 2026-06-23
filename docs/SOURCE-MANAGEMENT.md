@@ -10,6 +10,7 @@
 - **커밋 메시지**: 무엇을 왜 바꿨는지 한 줄로 요약하고, 필요하면 본문에 맥락을 적는다. (예: `feat: yt-dlp 실행 API 추가`, `fix: 출력 경로 인코딩 처리`)
 - **리뷰 가능한 단위**: 한 PR/커밋에 UI·백엔드·리팩터가 섞이지 않게 쪼갠다.
 - **바이너리**: `yt-dlp.exe`, `ffmpeg` 등 용량이 크면 Git LFS 또는 문서로 “로컬 배치 경로”만 명시하는 방식을 검토한다. (팀 정책에 맞춤)
+- **GitHub 원격 JSON·필드 정의서**: `data/alarm.json` 등 `data/` JSON과 **`data/nrm-github-data-fields.xlsx`** 는 형상관리 대상이다. JSON 연동 로직·필드 구조 변경 규칙은 **`docs/NRM-GITHUB-DATA.md`** 를 따른다.
 
 ---
 

@@ -120,6 +120,7 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
 
   useEffect(() => {
     if (open) {
+      feed.collapseAllExpanded();
       setVisible(true);
       translateX.setValue(drawerW);
       Animated.timing(translateX, {
@@ -132,7 +133,7 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
       return;
     }
     if (visible) dismiss();
-  }, [dismiss, drawerW, feed.reload, open, translateX, visible]);
+  }, [dismiss, drawerW, feed.collapseAllExpanded, feed.reload, open, translateX, visible]);
 
   const onToggle = useCallback(
     (id: number) => {

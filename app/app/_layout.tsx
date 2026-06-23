@@ -3,11 +3,13 @@ import '@/lib/nrmMetroLogBootstrap';
 import '@/lib/nrmFileLogBootstrap';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Platform } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { NrmAppPermissionGate } from '@/components/nrm/NrmAppPermissionGate';
+import { NrmTermsConsentGate } from '@/components/nrm/NrmTermsConsentGate';
+import { NrmDeviceBindingGate } from '@/components/nrm/NrmDeviceBindingGate';
 import { NrmNotifyHost } from '@/components/nrm/NrmNotifyHost';
 import { NrmUserBanGate } from '@/components/nrm/NrmUserBanGate';
 import { NrmGoogleTranslateHost } from '@/components/nrm/NrmGoogleTranslateHost';
@@ -20,24 +22,78 @@ import {
 import { getNrmNavigationTheme } from '@/constants/nrmNavigationTheme';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
+import { isNrmTermsConsented, saveNrmTermsConsented } from '@/lib/nrmTermsConsent';
 
 export { ErrorBoundary } from 'expo-router';
+
+/**
+ * 앱 진입 시 단계:
+ *  checking      → AsyncStorage에서 약관 동의 여부 확인 중 (투명 화면)
+ *  terms         → 이용약관/개인정보처리방침 동의 화면
+ *  permissions   → 앱 사용 권한 요청 화면 (Android만)
+ *  device_check  → 커스텀 APK 디바이스 바인딩 검사 (SerialNo 있을 때만, Android만)
+ *  ready         → 메인 앱 진입
+ *
+ * 약관 동의는 권한 허가 완료 이후에만 저장됩니다.
+ * 권한 허가 전 앱이 종료되면 재실행 시 약관 화면부터 다시 시작합니다.
+ */
+type GatePhase = 'checking' | 'terms' | 'permissions' | 'device_check' | 'ready';
 
 function RootLayoutInner() {
   const { isDark } = useNrmUiAppearance();
   const navigationTheme = getNrmNavigationTheme(isDark ? 'dark' : 'light');
   const rootBackground = getNrmRootBackgroundColor(isDark);
-  const [permissionsReady, setPermissionsReady] = useState(Platform.OS !== 'android');
+  const [phase, setPhase] = useState<GatePhase>('checking');
 
-  const onPermissionsGranted = useCallback(() => {
-    setPermissionsReady(true);
-    if (Platform.OS !== 'web') {
-      void setupNrmMobileDownloadNotifications();
+  useEffect(() => {
+    void isNrmTermsConsented().then((consented) => {
+      if (!consented) {
+        setPhase('terms');
+      } else if (Platform.OS === 'android') {
+        setPhase('permissions');
+      } else {
+        setPhase('ready');
+      }
+    });
+  }, []);
+
+  const onTermsAgreed = useCallback(() => {
+    if (Platform.OS === 'android') {
+      setPhase('permissions');
+    } else {
+      void saveNrmTermsConsented();
+      if (Platform.OS !== 'web') {
+        void setupNrmMobileDownloadNotifications();
+      }
+      setPhase('ready');
     }
   }, []);
 
-  if (!permissionsReady) {
+  const onPermissionsGranted = useCallback(() => {
+    void saveNrmTermsConsented();
+    void setupNrmMobileDownloadNotifications();
+    // Android 커스텀 APK는 디바이스 바인딩 검사 추가
+    if (Platform.OS === 'android') {
+      setPhase('device_check');
+    } else {
+      setPhase('ready');
+    }
+  }, []);
+
+  if (phase === 'checking') {
+    return <View style={{ flex: 1, backgroundColor: rootBackground }} />;
+  }
+
+  if (phase === 'terms') {
+    return <NrmTermsConsentGate onAgreed={onTermsAgreed} />;
+  }
+
+  if (phase === 'permissions') {
     return <NrmAppPermissionGate onGranted={onPermissionsGranted} />;
+  }
+
+  if (phase === 'device_check') {
+    return <NrmDeviceBindingGate onVerified={() => setPhase('ready')} />;
   }
 
   return (

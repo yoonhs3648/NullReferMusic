@@ -15,7 +15,6 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { registerInquiryToGithub } from '@/lib/nrmGithubInquiryRegister';
 import {
-  listInquiryLogFolderFiles,
   pickInquiryAttachmentFile,
   type NrmInquiryAttachmentPick,
 } from '@/lib/nrmInquiryAttachment';
@@ -41,6 +40,10 @@ function formatMb(bytes: number): string {
   return (bytes / MB).toFixed(1);
 }
 
+function isTxtAttachmentName(name: string): boolean {
+  return name.trim().toLowerCase().endsWith('.txt');
+}
+
 function MenuBackRow({ onPress }: { onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={styles.backRow} accessibilityRole="button" accessibilityLabel="뒤로">
@@ -53,9 +56,7 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
 export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
   const [content, setContent] = useState('');
   const [attachment, setAttachment] = useState<NrmInquiryAttachmentPick | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [logFiles, setLogFiles] = useState<NrmInquiryAttachmentPick[]>([]);
-  const [pickerLoading, setPickerLoading] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -70,39 +71,29 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
     setContent(text);
   }, []);
 
-  const openAttachPicker = useCallback(async () => {
-    setPickerOpen(true);
-    setPickerLoading(true);
-    try {
-      setLogFiles(await listInquiryLogFolderFiles());
-    } catch {
-      setLogFiles([]);
-    } finally {
-      setPickerLoading(false);
-    }
-  }, []);
-
-  const selectAttachment = useCallback((file: NrmInquiryAttachmentPick) => {
-    if (file.sizeBytes > NRM_INQUIRY_MAX_ATTACHMENT_BYTES) {
-      void notifyUser('첨부파일은 20MB 까지 가능합니다.');
+  const onAttachPress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      void notifyUser('첨부 파일은 Android 앱에서만 선택할 수 있습니다.');
       return;
     }
-    setAttachment(file);
-    setPickerOpen(false);
-  }, []);
-
-  const onPickOtherFile = useCallback(async () => {
+    setPicking(true);
     try {
       const picked = await pickInquiryAttachmentFile();
       if (!picked) return;
+      if (!isTxtAttachmentName(picked.name)) {
+        void notifyUser('txt 파일만 첨부할 수 있습니다.');
+        return;
+      }
       if (picked.sizeBytes > NRM_INQUIRY_MAX_ATTACHMENT_BYTES) {
         void notifyUser('첨부파일은 20MB 까지 가능합니다.');
         return;
       }
       setAttachment(picked);
-      setPickerOpen(false);
-    } catch {
-      void notifyUser('파일을 선택하지 못했습니다.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '파일을 선택하지 못했습니다.';
+      void notifyUser(msg);
+    } finally {
+      setPicking(false);
     }
   }, []);
 
@@ -133,6 +124,7 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
     <View style={styles.root}>
       <NrmMenuDrawerScroll>
         <MenuBackRow onPress={onBack} />
+        <Text style={[styles.panelTitle, { color: titleColor }]}>문의하기</Text>
         <Text style={[styles.fieldLabel, { color: titleColor }]}>문의내용</Text>
         <TextInput
           value={content}
@@ -152,7 +144,7 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
         <View style={styles.attachHeadRow}>
           <Text style={[styles.fieldLabel, { color: titleColor, marginTop: 0 }]}>첨부파일</Text>
           <Text style={[styles.attachQuota, { color: bodyColor }]}>
-            ({attachMb}/{maxMb}MB)
+            ({attachMb}/{maxMb}MB, txt)
           </Text>
         </View>
         <View style={styles.attachRow}>
@@ -162,12 +154,20 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
             {attachment?.name ?? '선택된 파일 없음'}
           </Text>
           <Pressable
-            onPress={() => void openAttachPicker()}
-            disabled={submitting}
-            style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+            onPress={() => void onAttachPress()}
+            disabled={submitting || picking}
+            style={({ pressed }) => [
+              styles.attachBtn,
+              (pressed || picking) && styles.attachBtnPressed,
+              (submitting || picking) && styles.attachBtnDisabled,
+            ]}
             accessibilityRole="button"
             accessibilityLabel="파일 첨부">
-            <Ionicons name="folder-open-outline" size={20} color={nrmTokens.color.primary} />
+            {picking ? (
+              <ActivityIndicator color={nrmTokens.color.primary} size="small" />
+            ) : (
+              <Ionicons name="folder-open-outline" size={20} color={nrmTokens.color.primary} />
+            )}
             <Text style={styles.attachBtnLabel}>파일첨부</Text>
           </Pressable>
         </View>
@@ -184,46 +184,6 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
           <Text style={styles.submitBtnLabel}>문의하기</Text>
         </Pressable>
       </NrmMenuDrawerScroll>
-
-      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
-        <Pressable style={[styles.modalRoot, { backgroundColor: modalScrim }]} onPress={() => setPickerOpen(false)}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas, borderColor: hairline },
-            ]}>
-            <Text style={[styles.modalTitle, { color: titleColor }]}>첨부 파일</Text>
-            {pickerLoading ? (
-              <ActivityIndicator color={nrmTokens.color.primary} style={styles.pickerLoading} />
-            ) : (
-              <>
-                {logFiles.length === 0 ? (
-                  <Text style={[styles.modalEmpty, { color: bodyColor }]}>로그 폴더에 파일이 없습니다.</Text>
-                ) : (
-                  logFiles.map((file) => (
-                    <Pressable
-                      key={file.uri}
-                      onPress={() => selectAttachment(file)}
-                      style={({ pressed }) => [styles.modalRow, pressed && { opacity: 0.85 }]}>
-                      <Text style={[styles.modalRowText, { color: titleColor }]} numberOfLines={1}>
-                        {file.name}
-                      </Text>
-                      <Text style={[styles.modalRowSub, { color: bodyColor }]}>
-                        {formatMb(file.sizeBytes)}MB
-                      </Text>
-                    </Pressable>
-                  ))
-                )}
-                <Pressable
-                  onPress={() => void onPickOtherFile()}
-                  style={({ pressed }) => [styles.modalRow, styles.modalOtherRow, pressed && { opacity: 0.85 }]}>
-                  <Text style={[styles.modalRowText, { color: nrmTokens.color.primary }]}>다른 파일 선택…</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
-        </Pressable>
-      </Modal>
 
       {submitting ? (
         <Modal visible transparent animationType="fade">
@@ -251,6 +211,11 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.primary,
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
+  },
+  panelTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: nrmTokens.space.md,
   },
   fieldLabel: {
     fontSize: nrmTokens.font.bodyStrong,
@@ -308,6 +273,9 @@ const styles = StyleSheet.create({
   attachBtnPressed: {
     opacity: 0.88,
   },
+  attachBtnDisabled: {
+    opacity: 0.65,
+  },
   attachBtnLabel: {
     color: nrmTokens.color.primary,
     fontSize: nrmTokens.font.caption,
@@ -331,48 +299,6 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.onPrimary,
     fontSize: nrmTokens.font.bodyStrong,
     fontWeight: '600',
-  },
-  modalRoot: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: nrmTokens.space.lg,
-  },
-  modalCard: {
-    borderRadius: nrmTokens.radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    maxHeight: 400,
-    overflow: 'hidden',
-  },
-  modalTitle: {
-    fontSize: nrmTokens.font.bodyStrong,
-    fontWeight: '700',
-    paddingHorizontal: nrmTokens.space.lg,
-    paddingTop: nrmTokens.space.md,
-    paddingBottom: nrmTokens.space.sm,
-  },
-  modalEmpty: {
-    paddingHorizontal: nrmTokens.space.lg,
-    paddingBottom: nrmTokens.space.lg,
-    fontSize: nrmTokens.font.body,
-  },
-  modalRow: {
-    paddingHorizontal: nrmTokens.space.lg,
-    paddingVertical: nrmTokens.space.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(128,128,128,0.25)',
-  },
-  modalOtherRow: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  modalRowText: {
-    fontSize: nrmTokens.font.body,
-  },
-  modalRowSub: {
-    fontSize: nrmTokens.font.caption,
-    marginTop: 2,
-  },
-  pickerLoading: {
-    paddingVertical: nrmTokens.space.xl,
   },
   blocker: {
     flex: 1,

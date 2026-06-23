@@ -3,6 +3,7 @@ import { NativeModules, Platform } from 'react-native';
 type NrmAppBrandNative = {
   getSerialNo: () => Promise<string>;
   getUserName: () => Promise<string>;
+  getAndroidIdSha256: () => Promise<string>;
 };
 
 let cachedSerialNo: string | null = null;
@@ -44,4 +45,16 @@ export async function getNrmAppUserName(): Promise<string> {
     cachedUserName = '';
   }
   return cachedUserName;
+}
+
+/** 기기의 ANDROID_ID를 SHA-256 해싱한 hex 문자열 (비식별화) */
+export async function getNrmAndroidIdSha256(): Promise<string> {
+  if (Platform.OS !== 'android') return '';
+  const mod = NativeModules.NrmAppBrand as NrmAppBrandNative | undefined;
+  if (!mod?.getAndroidIdSha256) return '';
+  try {
+    return String(await mod.getAndroidIdSha256()).trim();
+  } catch {
+    return '';
+  }
 }

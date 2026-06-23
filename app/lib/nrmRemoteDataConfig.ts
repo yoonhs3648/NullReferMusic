@@ -3,6 +3,7 @@ export const NRM_GITHUB_BRANCH = 'main';
 
 export const NRM_ALARM_JSON_RAW_URL = `https://raw.githubusercontent.com/${NRM_GITHUB_REPO}/${NRM_GITHUB_BRANCH}/data/alarm.json`;
 export const NRM_USER_LIST_JSON_RAW_URL = `https://raw.githubusercontent.com/${NRM_GITHUB_REPO}/${NRM_GITHUB_BRANCH}/data/custom-apk/userList.json`;
+export const NRM_USER_LIST_JSON_API_PATH = `https://api.github.com/repos/${NRM_GITHUB_REPO}/contents/data/custom-apk/userList.json`;
 
 export const NRM_ALARM_JSON_API_PATH = `https://api.github.com/repos/${NRM_GITHUB_REPO}/contents/data/alarm.json`;
 

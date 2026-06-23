@@ -41,12 +41,14 @@ foreach ($entry in $doc.userList) {
 
 $newId = $maxId + 1
 $newEntry = [ordered]@{
-    id          = $newId
-    appName     = $AppName
-    userName    = $UserName
-    SerialNo    = $SerialNo
-    version     = $Version
-    Createddate = (Get-Date -Format 'yyyy-MM-dd')
+    id             = $newId
+    appName        = $AppName
+    userName       = $UserName
+    SerialNo       = $SerialNo
+    version        = $Version
+    Createddate    = (Get-Date -Format 'yyyy-MM-dd')
+    deviceId       = $null
+    lastAccessDate = $null
 }
 $doc.userList += $newEntry
 

@@ -1,4 +1,5 @@
 import { getNrmGithubDataPat } from '@/lib/nrmGithubDataPat';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -36,13 +37,34 @@ export async function fetchGithubJsonDocument<T>(
   pat: string,
   emptyDoc: T,
 ): Promise<{ doc: T; sha: string }> {
-  const res = await fetch(apiPath, { headers: githubHeaders(pat, false) });
-  if (res.status === 404) return { doc: emptyDoc, sha: '' };
-  if (!res.ok) throw new Error(`GitHub read failed (${res.status})`);
-  const body = (await res.json()) as GithubContentsResponse;
-  const sha = String(body.sha ?? '');
-  if (!body.content) return { doc: emptyDoc, sha };
-  return { doc: JSON.parse(base64ToUtf8(body.content)) as T, sha };
+  const tag = 'github-data';
+  logNrmDev(tag, { event: 'fetch-start', path: apiPath });
+  const t0 = Date.now();
+  try {
+    const res = await fetch(apiPath, { headers: githubHeaders(pat, false) });
+    const elapsedMs = Date.now() - t0;
+    if (res.status === 404) {
+      logNrmDev(tag, { event: 'fetch-not-found', path: apiPath, elapsedMs });
+      return { doc: emptyDoc, sha: '' };
+    }
+    if (!res.ok) {
+      const err = new Error(`GitHub read failed (${res.status})`);
+      logNrmRunError(tag, err, { path: apiPath, status: res.status, elapsedMs });
+      throw err;
+    }
+    const body = (await res.json()) as GithubContentsResponse;
+    const sha = String(body.sha ?? '');
+    if (!body.content) {
+      logNrmDev(tag, { event: 'fetch-empty', path: apiPath, sha, elapsedMs });
+      return { doc: emptyDoc, sha };
+    }
+    logNrmDev(tag, { event: 'fetch-ok', path: apiPath, sha, elapsedMs });
+    return { doc: JSON.parse(base64ToUtf8(body.content)) as T, sha };
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('GitHub read failed')) throw e;
+    logNrmRunError(tag, e, { event: 'fetch-error', path: apiPath, elapsedMs: Date.now() - t0 });
+    throw e;
+  }
 }
 
 export async function putGithubContents(
@@ -52,23 +74,41 @@ export async function putGithubContents(
   message: string,
   sha?: string,
 ): Promise<void> {
+  const tag = 'github-data';
+  logNrmDev(tag, { event: 'put-start', path: apiPath, message, hasSha: !!sha });
+  const t0 = Date.now();
   const body: Record<string, string> = {
     message,
     content: contentBase64,
     branch: 'main',
   };
   if (sha) body.sha = sha;
-  const res = await fetch(apiPath, {
-    method: 'PUT',
-    headers: githubHeaders(pat),
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`GitHub write failed (${res.status})`);
+  try {
+    const res = await fetch(apiPath, {
+      method: 'PUT',
+      headers: githubHeaders(pat),
+      body: JSON.stringify(body),
+    });
+    const elapsedMs = Date.now() - t0;
+    if (!res.ok) {
+      const err = new Error(`GitHub write failed (${res.status})`);
+      logNrmRunError(tag, err, { path: apiPath, status: res.status, elapsedMs });
+      throw err;
+    }
+    logNrmDev(tag, { event: 'put-ok', path: apiPath, status: res.status, elapsedMs });
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('GitHub write failed')) throw e;
+    logNrmRunError(tag, e, { event: 'put-error', path: apiPath, elapsedMs: Date.now() - t0 });
+    throw e;
+  }
 }
 
 export async function resolveGithubDataPat(): Promise<string> {
   const pat = await getNrmGithubDataPat();
-  if (!pat) throw new Error('GitHub 등록 토큰이 설정되지 않았습니다.');
+  if (!pat) {
+    logNrmRunError('github-data', new Error('GitHub PAT not configured'), { event: 'pat-missing' });
+    throw new Error('GitHub 등록 토큰이 설정되지 않았습니다.');
+  }
   return pat;
 }
 

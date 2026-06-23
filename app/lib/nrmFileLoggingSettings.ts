@@ -11,7 +11,7 @@ export type NrmFileLoggingMode = 'off' | 'on';
 
 export const NRM_FILE_LOG_FOLDER_DISPLAY_PATH = getNrmFileLogFolderDisplayPath();
 
-export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}nrm-debug-YYYY-MM-DD.log`;
+export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}nullReferenceMusicLog.log`;
 
 export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
   try {
@@ -34,7 +34,7 @@ export async function loadNrmFileLoggingMode(): Promise<NrmFileLoggingMode> {
   return (await loadNrmFileLoggingEnabled()) ? 'on' : 'off';
 }
 
-/** 로그 폴더 내 모든 nrm-debug*.log 삭제 (Android 네이티브) */
+/** 로그 폴더 내 nullReferenceMusicLog.log 및 레거시 nrm-debug*.log 삭제 (Android 네이티브) */
 export async function deleteAllNrmLogFiles(): Promise<number> {
   if (Platform.OS !== 'android') return 0;
   const mod = NativeModules.NrmFileLogger as

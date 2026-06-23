@@ -5,6 +5,10 @@ export type NrmUserListEntry = {
   appName: string;
   userName: string;
   SerialNo: string;
+  version: string;
+  Createddate: string;
+  deviceId: string | null;
+  lastAccessDate: string | null;
 };
 
 type UserListJson = {
@@ -13,6 +17,10 @@ type UserListJson = {
     appName?: string;
     userName?: string;
     SerialNo?: string;
+    version?: string;
+    Createddate?: string;
+    deviceId?: string | null;
+    lastAccessDate?: string | null;
   }>;
 };
 
@@ -51,6 +59,10 @@ export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]>
       appName: String(row.appName ?? '').trim(),
       userName,
       SerialNo,
+      version: String(row.version ?? '').trim(),
+      Createddate: String(row.Createddate ?? '').trim(),
+      deviceId: row.deviceId ?? null,
+      lastAccessDate: row.lastAccessDate ?? null,
     });
   }
   return dedupeUserListBySerialNo(normalized);

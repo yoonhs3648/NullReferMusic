@@ -190,7 +190,8 @@ export function NrmSpotifyChartsHome({
     const cached = tabCacheRef.current.get(activeTab);
     if (cached && !cached.loading) {
       applySnapshot(cached);
-      return;
+    } else if (!cached) {
+      applySnapshot({ ...EMPTY_SNAPSHOT, loading: true });
     }
 
     void loadChart(activeTab, generation);

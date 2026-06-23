@@ -16,6 +16,7 @@
     "postinstall": "patch-package",
     "generate:notification-icon": "node scripts/generate-android-notification-icon.mjs",
     "generate:music-quotes": "node scripts/build-music-quotes.mjs",
+    "generate:github-data-fields": "node scripts/generate-github-data-fields-xlsx.mjs",
     "generate:home-chart-assets": "node scripts/tint-home-chart-assets.mjs",
     "sync:brand": "node scripts/sync-nrm-brand.mjs",
     "preandroid:release": "npm run sync:brand && npm run generate:music-quotes"

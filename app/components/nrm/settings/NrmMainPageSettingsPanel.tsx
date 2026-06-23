@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text } from 'react-native';
 
 import { NrmMainPageChartSourcePicker } from '@/components/nrm/settings/NrmMainPageChartSourcePicker';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
@@ -53,14 +53,19 @@ export function NrmMainPageSettingsPanel({ titleColor, bodyColor, onBack }: Prop
   });
 
   useEffect(() => {
-    void (async () => {
+    const refresh = async () => {
       const [source, enabled] = await Promise.all([
         loadMainPageChartSource(),
         loadMainPageChartSourceEnabledMap(),
       ]);
-      setChartSource(source);
       setEnabledMap(enabled);
-    })();
+      setChartSource(source);
+    };
+    void refresh();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+    return () => sub.remove();
   }, []);
 
   const onSelect = useCallback((id: NrmMainPageChartSource) => {

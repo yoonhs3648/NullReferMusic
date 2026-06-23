@@ -11,6 +11,7 @@ import {
   NRM_INQUIRY_ATTACH_DIR_API,
   NRM_INQUIRY_JSON_API_PATH,
 } from '@/lib/nrmRemoteDataConfig';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
 export type NrmInquiryRegisterInput = {
   content: string;
@@ -50,52 +51,64 @@ function formatInquiryJson(doc: InquiryJson): string {
 }
 
 export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): Promise<void> {
-  const pat = await resolveGithubDataPat();
-  const [userName, serialNo, version] = await Promise.all([
-    getNrmAppUserName(),
-    getNrmAppSerialNo(),
-    Promise.resolve(getNrmAppVersion()),
-  ]);
+  const tag = 'github-inquiry';
+  logNrmDev(tag, { event: 'register-start', hasAttachment: !!input.attachment });
+  const t0 = Date.now();
 
-  let attachedFile = '';
-  if (input.attachment) {
-    const storedName = sanitizeFileStem(input.attachment.name);
-    const b64 = await readInquiryAttachmentBase64(input.attachment.uri);
-    const apiPath = `${NRM_INQUIRY_ATTACH_DIR_API}/${encodeURIComponent(storedName)}`;
-    await putGithubContents(
-      apiPath,
+  try {
+    const pat = await resolveGithubDataPat();
+    const [userName, serialNo, version] = await Promise.all([
+      getNrmAppUserName(),
+      getNrmAppSerialNo(),
+      Promise.resolve(getNrmAppVersion()),
+    ]);
+
+    let attachedFile = '';
+    if (input.attachment) {
+      const storedName = sanitizeFileStem(input.attachment.name);
+      logNrmDev(tag, { event: 'attach-start', storedName });
+      const b64 = await readInquiryAttachmentBase64(input.attachment.uri);
+      const apiPath = `${NRM_INQUIRY_ATTACH_DIR_API}/${encodeURIComponent(storedName)}`;
+      await putGithubContents(
+        apiPath,
+        pat,
+        b64,
+        `inquiry: attach ${storedName}`,
+      );
+      logNrmDev(tag, { event: 'attach-ok', storedName });
+      attachedFile = storedName;
+    }
+
+    const { doc, sha } = await fetchGithubJsonDocument<InquiryJson>(
+      NRM_INQUIRY_JSON_API_PATH,
       pat,
-      b64,
-      `inquiry: attach ${storedName}`,
+      { inquiry: [] },
     );
-    attachedFile = storedName;
+    let maxId = 0;
+    for (const row of doc.inquiry) {
+      if (typeof row.id === 'number' && row.id > maxId) maxId = row.id;
+    }
+    const entry = {
+      id: maxId + 1,
+      userName,
+      SerialNo: serialNo,
+      version,
+      content: input.content,
+      attachedFile,
+      isAnswered: false,
+      Createddate: formatInquiryCreatedDate(new Date()),
+    };
+    doc.inquiry.push(entry);
+    await putGithubContents(
+      NRM_INQUIRY_JSON_API_PATH,
+      pat,
+      utf8ToBase64(formatInquiryJson(doc)),
+      `inquiry: register id=${entry.id}`,
+      sha || undefined,
+    );
+    logNrmDev(tag, { event: 'register-ok', inquiryId: entry.id, version, elapsedMs: Date.now() - t0 });
+  } catch (e) {
+    logNrmRunError(tag, e, { event: 'register-error', elapsedMs: Date.now() - t0 });
+    throw e;
   }
-
-  const { doc, sha } = await fetchGithubJsonDocument<InquiryJson>(
-    NRM_INQUIRY_JSON_API_PATH,
-    pat,
-    { inquiry: [] },
-  );
-  let maxId = 0;
-  for (const row of doc.inquiry) {
-    if (typeof row.id === 'number' && row.id > maxId) maxId = row.id;
-  }
-  const entry = {
-    id: maxId + 1,
-    userName,
-    SerialNo: serialNo,
-    version,
-    content: input.content,
-    attachedFile,
-    isAnswered: false,
-    Createddate: formatInquiryCreatedDate(new Date()),
-  };
-  doc.inquiry.push(entry);
-  await putGithubContents(
-    NRM_INQUIRY_JSON_API_PATH,
-    pat,
-    utf8ToBase64(formatInquiryJson(doc)),
-    `inquiry: register id=${entry.id}`,
-    sha || undefined,
-  );
 }

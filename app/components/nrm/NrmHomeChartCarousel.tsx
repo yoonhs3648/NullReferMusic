@@ -92,12 +92,13 @@ function toLogicalIndex(physical: number, count: number): number {
   return wrapIndex(physical, count);
 }
 
-/** 마지막→첫·첫→마지막 래핑 시 FlatList가 중간 페이지를 모두 지나가는 것을 방지 */
-function isLoopWrap(from: number, to: number, count: number, direction: number): boolean {
-  if (count <= 1) return false;
-  if (direction > 0) return from === count - 1 && to === 0;
-  if (direction < 0) return from === 0 && to === count - 1;
-  return false;
+/** 마지막→첫·첫→마지막 래핑 시 인접 복제 슬라이드로 무한 루프 연출 */
+function isLoopWrapForward(from: number, to: number, count: number): boolean {
+  return count > 1 && from === count - 1 && to === 0;
+}
+
+function isLoopWrapBackward(from: number, to: number, count: number): boolean {
+  return count > 1 && from === 0 && to === count - 1;
 }
 
 /** 메뉴 좌측 엣지 스와이프와 겹치지 않도록 차트 팬 시작 X (px) */
@@ -237,7 +238,7 @@ export function NrmHomeChartCarousel({
   }, []);
 
   const scrollToOffset = useCallback(
-    (physical: number, animated: boolean) => {
+    (physical: number, animated: boolean, onComplete?: () => void) => {
       const offset = Math.round(physical * pageWidth);
       listRef.current?.scrollToOffset({ offset, animated });
       if (snapScrollRef.current) {
@@ -248,7 +249,10 @@ export function NrmHomeChartCarousel({
         snapScrollRef.current = setTimeout(() => {
           listRef.current?.scrollToOffset({ offset, animated: false });
           snapScrollRef.current = null;
+          onComplete?.();
         }, SCROLL_SNAP_MS);
+      } else {
+        onComplete?.();
       }
     },
     [pageWidth],
@@ -266,13 +270,38 @@ export function NrmHomeChartCarousel({
       if (c <= 0) return;
       const from = indexRef.current;
       const logical = wrapIndex(logicalIndex, c);
-      const direction = logicalIndex - from;
-      const wraps = isLoopWrap(from, logical, c, direction);
-      const useAnimated = animated && !wraps;
-      const physical = toPhysicalIndex(logical, c);
 
       syncIndex(logical, true);
-      scrollToOffset(physical, useAnimated);
+
+      if (!loopEnabledRef.current || c <= 1) {
+        scrollToOffset(clampIndex(logical, c), animated);
+        return;
+      }
+
+      const wrapForward = animated && isLoopWrapForward(from, logical, c);
+      const wrapBackward = animated && isLoopWrapBackward(from, logical, c);
+
+      if (wrapForward) {
+        repositioningRef.current = true;
+        scrollToOffset(2 * c, true, () => {
+          scrollToOffset(c, false, () => {
+            repositioningRef.current = false;
+          });
+        });
+        return;
+      }
+
+      if (wrapBackward) {
+        repositioningRef.current = true;
+        scrollToOffset(c - 1, true, () => {
+          scrollToOffset(c + c - 1, false, () => {
+            repositioningRef.current = false;
+          });
+        });
+        return;
+      }
+
+      scrollToOffset(toPhysicalIndex(logical, c), animated);
     },
     [scrollToOffset, syncIndex],
   );

@@ -1,0 +1,29 @@
+---
+description: Whenever data/*.json field specs change, regenerate the xlsx definition file.
+globs: "data/**/*.json,app/scripts/generate-github-data-fields-xlsx.mjs,app/lib/nrmUserListClient.ts,app/lib/nrmUserBanClient.ts,app/lib/nrmAlarmClient.ts,app/lib/nrmGithubInquiryRegister.ts,scripts/Register-NrmCustomApkUserList.ps1"
+alwaysApply: true
+---
+
+# GitHub Data JSON 필드 변경 시 엑셀 정의서 갱신 (필수)
+
+`data/` JSON의 **필드 추가·삭제·이름·타입·의미**가 바뀌거나, 연동 TypeScript 타입(`NrmUserBanItem`, `NrmUserListEntry`, `NrmAlarmItem` 등)이 바뀌면 **반드시 같은 작업 안에서** 아래를 수행한다.
+
+## 절차 (빠짐없이 수행)
+
+1. `app/scripts/generate-github-data-fields-xlsx.mjs` 안의 **`SCHEMAS`** 객체를 실제 구조에 맞게 수정한다.
+2. 아래 명령으로 xlsx를 재생성한다.
+
+   ```powershell
+   cd C:\NullReferMusic\app; npm run generate:github-data-fields
+   ```
+
+3. 생성된 `data/nrm-github-data-fields.xlsx`가 갱신됐는지 확인한다.
+
+## 금지
+
+- JSON 구조를 바꾸고 xlsx를 옛날 채로 두는 커밋은 **금지**한다.
+- SCHEMAS를 수정하지 않고 xlsx만 직접 편집하는 것도 **금지**한다.
+
+## 참조
+
+상세 규칙은 `docs/NRM-GITHUB-DATA.md §3` 을 따른다.

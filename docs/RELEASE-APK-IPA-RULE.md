@@ -171,6 +171,36 @@ npm run sync:brand
 
 상세: `docs/APP-BRAND.md`, `.cursor/rules/nrm-app-brand.mdc`
 
+### 6-1-d. GitHub data PAT (문의하기·알림·차단 등록)
+
+앱에서 `data/inquiry.json` 등 **GitHub 저장소에 쓰기**는 GitHub Contents API + **PAT**가 필요하다. PAT는 **릴리스 APK 빌드 시** `BuildConfig.NRM_GITHUB_DATA_PAT`로 APK에 내장된다 (런타임에 사용자가 입력하지 않음).
+
+| 경로 | 용도 |
+|------|------|
+| `.secrets/nrm-github-data.pat` | **로컬 PAT 원본** (한 줄 `ghp_...`, **Git 커밋 금지**) |
+| `.secrets/nrm-github-data.pat.example` | 형식 예시 (커밋 가능) |
+| `app/android/local.properties` | 빌드 직전 `nrm.github.pat=` 자동 동기화 (`sdk.dir` 등 기존 항목 유지) |
+| `scripts/Ensure-NrmGithubDataPat.ps1` | PAT 검증·`local.properties` 반영 |
+
+**PAT 소스 (우선순위):** 환경변수 `NRM_GITHUB_DATA_PAT` → `.secrets/nrm-github-data.pat`
+
+**릴리스 APK 빌드 시 자동 실행:**
+
+- `scripts/Invoke-NrmAndroidReleaseBuild.ps1` 시작 시 `Ensure-NrmGithubDataPat.ps1` 호출
+- 따라서 `NullReferMusic-Build-Release-Apk.bat`, `build-release-apk-custom.bat`, `npm run android:release` **모두** PAT 없으면 **빌드 실패** (문의 등록 빈 APK 방지)
+
+**최초 1회 (PC별):**
+
+```powershell
+# 저장소 루트
+copy .secrets\nrm-github-data.pat.example .secrets\nrm-github-data.pat
+# .secrets\nrm-github-data.pat 를 편집해 repo 쓰기 권한 PAT 한 줄 입력
+```
+
+PAT 권한: 대상 저장소 `data/` 및 문의 첨부 경로 **Contents write**.
+
+상세: `docs/NRM-GITHUB-DATA.md` §6
+
 ### 6-2. 앱 메타데이터 확인
 | 항목 | 기준값 | 위치 |
 |------|--------|------|

@@ -102,6 +102,8 @@ export const nrmTokens = {
      * safe area(insets.bottom)와 별도 — UI·패널 변경 시에도 이 값만 사용.
      */
     menuDrawerCloseBottomGap: 24,
+    /** Storage·History 하단 탭 본문 상단 여백 — 두 탭 동일 */
+    homeTabTopInset: 24,
   },
 } as const;
 

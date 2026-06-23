@@ -250,9 +250,9 @@ export default function HomeScreen() {
         items: cached.items,
         chartSource: cached.chartSource,
       });
-    } else {
-      setHomeChartState({ status: 'loading' });
+      return;
     }
+    setHomeChartState({ status: 'loading' });
     void fetchHomeChartTop20(chartSource, ac.signal, epoch).then((out) => {
       if (ac.signal.aborted) return;
       if (out.ok) {
@@ -261,7 +261,7 @@ export default function HomeScreen() {
           items: out.items,
           chartSource: out.chartSource,
         });
-      } else if (!cached?.ok) {
+      } else {
         setHomeChartState({ status: 'failed' });
       }
     });
@@ -384,6 +384,8 @@ export default function HomeScreen() {
     setLayoutPhase('welcome');
     setHomeTab('home');
     setHomeEpoch((v) => v + 1);
+    setSearchViewEpoch((v) => v + 1);
+    setHomeChartIndex(0);
     bumpQuoteRefresh();
   }, [dismissYoutubeOverlay, bumpQuoteRefresh]);
 
@@ -426,12 +428,7 @@ export default function HomeScreen() {
 
 
 
-  const onMainLogoPress = useCallback(() => {
-    if (mainPageMode === 'charts') {
-      setHomeChartIndex(0);
-    }
-    resetToYoutubeHome();
-  }, [mainPageMode, resetToYoutubeHome]);
+  const onMainLogoPress = resetToYoutubeHome;
 
 
 
@@ -981,10 +978,10 @@ export default function HomeScreen() {
         chartDownloadTrack={overlay?.downloadTrack ?? null}
         chartDownloadSource={overlay?.downloadSource ?? null}
         scrollTopChrome={
-          overlay ? (
+          overlay || homeTab === 'search' ? (
             <NrmFeatureScreenLogoHeader
               isDark={isDark}
-              onPressHome={dismissYoutubeOverlay}
+              onPressHome={resetToYoutubeHome}
               compact
             />
           ) : undefined
@@ -1161,6 +1158,7 @@ export default function HomeScreen() {
           isDark={isDark}
           paddingHorizontal={pad}
           hideMenuFab
+          onLogoPressHome={resetToYoutubeHome}
           leftEdgeSwipeReserve={showHomeWelcomeChart ? homeChartLeftNavRight : undefined}
 
           onNavigateAppleMusicCharts={openAppleMusicCharts}

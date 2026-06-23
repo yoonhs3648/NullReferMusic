@@ -14,6 +14,8 @@ if (-not $RepoRoot) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 }
 
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Ensure-NrmGithubDataPat.ps1') -RepoRoot $RepoRoot
+
 $androidDir = Join-Path $RepoRoot 'app\android'
 if (-not (Test-Path (Join-Path $androidDir 'gradlew.bat'))) {
     Write-Error "gradlew.bat not found under $androidDir"

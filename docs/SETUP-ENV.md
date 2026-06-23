@@ -25,7 +25,7 @@
    상세: `docs/RELEASE-APK-IPA-RULE.md` §6-1-a
 7. **개발 실행**: `StartServer.bat` (백엔드 + Expo Go LAN) — 3종 타깃은 `docs/DEV-THREE-TARGETS.md`
 8. **Expo Go(폰)**: PC와 **같은 Wi‑Fi**에서 `StartServer.bat` → Metro QR(`exp://`)로 연결 (`docs/DEV-THREE-TARGETS.md`)
-9. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트, §6-1-a assets·§6-1-b 명언 Excel 필수)
+9. **릴리스 APK**: `NullReferMusic-Build-Release-Apk.bat` (저장소 루트, §6-1-a assets·§6-1-b 명언 Excel·**§6-1-d GitHub PAT** 필수)
 10. **네이티브(온디바이스 yt-dlp)**: Expo Go 불가 → `cd app && npx expo run:android` 또는 `app\android\gradlew.bat assembleDebug`
 
 Cursor 규칙: `.cursor/rules/` · 빌드 검증: `docs/BUILD-VERIFY-RULE.md`

@@ -83,8 +83,11 @@ fs.writeFileSync(kotlinPath, nrmBrandKt, 'utf8');
 fs.writeFileSync(swiftPath, nrmBrandSwift, 'utf8');
 
 let gradle = fs.readFileSync(buildGradlePath, 'utf8');
-const apkLine = `            outputFileName = findProperty('nrmApkVariant') == 'custom'
+const apkLine = `            def apkVariant = findProperty('nrmApkVariant') ?: ''
+            outputFileName = apkVariant == 'custom'
                 ? "${storageFolderName}-custom-v\${variant.versionName}.apk"
+                : apkVariant == 'admin'
+                ? "${storageFolderName}-admin-v\${variant.versionName}.apk"
                 : "${storageFolderName}-v\${variant.versionName}.apk"`;
 if (!gradle.includes('nrmApkVariant') || !gradle.includes(`${storageFolderName}-custom-v`)) {
   const replaced = gradle.replace(

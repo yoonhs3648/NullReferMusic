@@ -11,7 +11,7 @@ import {
 
 export const NRM_HOME_CHART_TOP_N = 20;
 
-/** 홈 차트 메모리 캐시 TTL — 메인 재진입 시 불필요한 재조회 방지 */
+/** 홈 차트 메모리 캐시 TTL — 성공 응답만 보관 */
 const HOME_CHART_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 
 export type HomeChartLoadResult =
@@ -51,9 +51,15 @@ export function homeChartItemsFingerprint(items: ChartTrackItem[]): string {
     .join('|');
 }
 
-/** 로고 탭·홈 복귀 시 호출 — 다음 fetch는 네트워크 강제 */
+/** 차트 소스 변경 시에만 호출 */
 export function invalidateHomeChartCache(): void {
   memoryCache = null;
+}
+
+function clearMemoryCacheForSource(chartSource: NrmMainPageChartSource): void {
+  if (memoryCache?.chartSource === chartSource) {
+    memoryCache = null;
+  }
 }
 
 /** UI: 네트워크 없이 즉시 표시 가능한 유효 캐시 */
@@ -146,6 +152,7 @@ async function fetchHomeChartTop20Network(
 
 /**
  * 선택한 차트 소스에서 Top 20만 조회 (플랫폼 폴백 없음).
+ * 유효 캐시(3시간 TTL)가 있으면 네트워크 없이 반환한다.
  * @param refreshEpoch `homeChartEpoch` — 바뀌면 캐시 무시
  */
 export async function fetchHomeChartTop20(
@@ -153,9 +160,10 @@ export async function fetchHomeChartTop20(
   signal?: AbortSignal,
   refreshEpoch = 0,
 ): Promise<HomeChartLoadResult> {
-  const now = Date.now();
-  const cached = readMemoryCache(chartSource, refreshEpoch, now);
-  if (cached) return cached;
+  const cached = readMemoryCache(chartSource, refreshEpoch, Date.now());
+  if (cached) {
+    return cached;
+  }
 
   if (inflight && inflightChartSource === chartSource) {
     const shared = await inflight;
@@ -167,6 +175,8 @@ export async function fetchHomeChartTop20(
     const out = await fetchHomeChartTop20Network(chartSource, signal);
     if (out.ok) {
       writeMemoryCache(out.items, out.chartSource, out.fetchedAt, refreshEpoch);
+    } else {
+      clearMemoryCacheForSource(chartSource);
     }
     return out;
   })();

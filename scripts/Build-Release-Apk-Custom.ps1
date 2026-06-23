@@ -105,7 +105,10 @@ try {
     }
     else {
         Write-Host ""
-        Write-Host "[brand] Using default branding from nrm-brand.config.json"
+        Write-Host "[brand] Using default branding from nrm-brand.config.json (admin APK)"
+        $cfg = $originalBrandJson | ConvertFrom-Json
+        $cfg.versionInfoAdminBuild = $true
+        Write-Utf8NoBom -Path $BrandConfigPath -Content ($cfg | ConvertTo-Json -Depth 5)
     }
 
     Write-Host ""
@@ -145,8 +148,8 @@ try {
         & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'custom' -ForceRebundle
     }
     else {
-        Write-Host "[4/5] Gradle assembleRelease..."
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot
+        Write-Host "[4/5] Gradle assembleRelease (admin APK)..."
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'admin'
     }
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'

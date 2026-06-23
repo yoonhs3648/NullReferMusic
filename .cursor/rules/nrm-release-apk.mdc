@@ -44,6 +44,11 @@ alwaysApply: false
 
 없으면 `scripts/Build-Whisper-AndroidCli.ps1`, `scripts/Setup-AndroidShine.ps1` 실행 후 `scripts/Verify-AndroidReleaseAssets.ps1` 통과.
 
+## 2-b. GitHub data PAT (릴리스 APK 필수)
+
+문의하기·알림 등록은 APK에 PAT가 내장되어야 한다. **최초 1회** `.secrets/nrm-github-data.pat`에 repo 쓰기 PAT 한 줄을 둔다 (`.secrets/nrm-github-data.pat.example` 참고).  
+`NullReferMusic-Build-Release-Apk.bat`·`build-release-apk-custom.bat`·`npm run android:release`는 빌드 전 `scripts/Ensure-NrmGithubDataPat.ps1`로 PAT를 `local.properties`에 반영한다. PAT 없으면 빌드 실패. 상세: `docs/RELEASE-APK-IPA-RULE.md` §6-1-d.
+
 ## 3. 빌드 실행
 
 1. `docs/BUILD-VERIFY-RULE.md`에 따라 `cd app && npx tsc --noEmit` 실행 (실패 시 수정 후 재시도).

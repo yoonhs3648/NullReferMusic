@@ -6,7 +6,9 @@
 			"userName": "김테스트",
 			"SerialNo": "01027523648",
 			"version": "2.1.4",
-			"Createddate": "2026-06-18"
+			"Createddate": "2026-06-18",
+			"deviceId": null,
+			"lastAccessDate": null
 		},
 		{
 			"id": 2,
@@ -14,7 +16,9 @@
 			"userName": "이샘플",
 			"SerialNo": "01098765432",
 			"version": "2.1.3",
-			"Createddate": "2026-06-20"
+			"Createddate": "2026-06-20",
+			"deviceId": null,
+			"lastAccessDate": null
 		},
 		{
 			"id": 3,
@@ -22,7 +26,9 @@
 			"userName": "박데모",
 			"SerialNo": "01011112222",
 			"version": "2.1.4",
-			"Createddate": "2026-06-23"
+			"Createddate": "2026-06-23",
+			"deviceId": null,
+			"lastAccessDate": null
 		}
 	]
 }

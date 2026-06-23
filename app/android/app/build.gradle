@@ -213,11 +213,14 @@ android {
         }
     }
     tasks.named("preBuild").configure { dependsOn(verifyReleaseNativeAssets) }
-    // APK 파일명: {storageFolderName}-v{version}.apk | {storageFolderName}-custom-v{version}.apk (-PnrmApkVariant=custom)
+    // APK 파일명: {storageFolderName}-v{version}.apk | -admin- | -custom- (-PnrmApkVariant)
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            outputFileName = findProperty('nrmApkVariant') == 'custom'
+            def apkVariant = findProperty('nrmApkVariant') ?: ''
+            outputFileName = apkVariant == 'custom'
                 ? "NullReferenceMusic-custom-v${variant.versionName}.apk"
+                : apkVariant == 'admin'
+                ? "NullReferenceMusic-admin-v${variant.versionName}.apk"
                 : "NullReferenceMusic-v${variant.versionName}.apk"
         }
     }

@@ -14,8 +14,10 @@ import {
   type TrackListIndexLabel,
 } from '@/lib/nrmTrackListIndex';
 
-/** 리스트 열과 나란히 배치할 인덱스 바 너비 */
-export const TRACK_LIST_INDEX_BAR_WIDTH = 26;
+/** 리스트 열 옆 시각적 인덱스 바 너비 */
+export const TRACK_LIST_INDEX_BAR_WIDTH = 22;
+/** 드래그 터치 영역 — 시각 바보다 넓게 */
+const TRACK_LIST_INDEX_TOUCH_WIDTH = 38;
 
 type Props = {
   onSelect: (label: TrackListIndexLabel, animated?: boolean) => void;
@@ -25,10 +27,11 @@ type Props = {
 
 export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }: Props) {
   const labels = TRACK_LIST_INDEX_LABELS;
-  const heightRef = useRef(1);
+  const barWindowRef = useRef({ pageY: 0, height: 1 });
   const lastLabelRef = useRef<TrackListIndexLabel | null>(null);
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hintLabel, setHintLabel] = useState<TrackListIndexLabel | null>(null);
+  const [itemHeight, setItemHeight] = useState(10);
 
   const clearHintTimer = useCallback(() => {
     if (hintTimerRef.current) {
@@ -50,15 +53,29 @@ export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }
     hintTimerRef.current = setTimeout(() => setHintLabel(null), 320);
   }, [clearHintTimer]);
 
-  const pickLabel = useCallback(
-    (locationY: number): TrackListIndexLabel => {
-      const h = heightRef.current;
-      const ratio = Math.min(1, Math.max(0, locationY / h));
+  const pickLabelFromPageY = useCallback(
+    (pageY: number): TrackListIndexLabel => {
+      const { pageY: top, height } = barWindowRef.current;
+      const innerPad = 6;
+      const usable = Math.max(1, height - innerPad * 2);
+      const localY = pageY - top - innerPad;
+      const ratio = Math.min(1, Math.max(0, localY / usable));
       const idx = Math.min(labels.length - 1, Math.floor(ratio * labels.length));
       return labels[idx]!;
     },
     [labels],
   );
+
+  const barRef = useRef<View>(null);
+
+  const syncBarMeasure = useCallback(() => {
+    barRef.current?.measureInWindow((_x, y, _w, h) => {
+      barWindowRef.current = { pageY: y, height: Math.max(1, h) };
+      const innerPad = 6;
+      const usable = Math.max(1, h - innerPad * 2);
+      setItemHeight(Math.max(7, Math.floor(usable / labels.length)));
+    });
+  }, [labels.length]);
 
   const emitSelect = useCallback(
     (label: TrackListIndexLabel, animated: boolean) => {
@@ -77,10 +94,10 @@ export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (evt) => {
-          emitSelect(pickLabel(evt.nativeEvent.locationY), false);
+          emitSelect(pickLabelFromPageY(evt.nativeEvent.pageY), false);
         },
         onPanResponderMove: (evt) => {
-          emitSelect(pickLabel(evt.nativeEvent.locationY), false);
+          emitSelect(pickLabelFromPageY(evt.nativeEvent.pageY), false);
         },
         onPanResponderRelease: () => {
           lastLabelRef.current = null;
@@ -91,7 +108,7 @@ export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }
           hideHintSoon();
         },
       }),
-    [emitSelect, hideHintSoon, pickLabel],
+    [emitSelect, hideHintSoon, pickLabelFromPageY],
   );
 
   const onTapLabel = useCallback(
@@ -121,23 +138,28 @@ export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }
       </Modal>
 
       <View
-        style={styles.wrap}
-        onLayout={(e) => {
-          heightRef.current = Math.max(1, e.nativeEvent.layout.height);
-        }}
+        ref={barRef}
+        style={styles.touchWrap}
+        onLayout={syncBarMeasure}
         accessibilityRole="adjustable"
         accessibilityLabel="목록 인덱스"
         {...panResponder.panHandlers}>
-        <View style={[styles.inner, isDark ? styles.innerDark : styles.innerLight]}>
+        <View style={[styles.bar, isDark ? styles.barDark : styles.barLight]}>
           {labels.map((label) => (
             <Pressable
               key={label}
               onPress={() => onTapLabel(label)}
-              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-              hitSlop={1}
+              style={({ pressed }) => [
+                styles.item,
+                { height: itemHeight },
+                pressed && styles.itemPressed,
+              ]}
+              hitSlop={2}
               accessibilityRole="button"
               accessibilityLabel={`${label} 섹션`}>
-              <Text style={[styles.label, { color: mutedColor }]}>{label}</Text>
+              <Text style={[styles.label, { color: mutedColor }]} numberOfLines={1}>
+                {label}
+              </Text>
             </Pressable>
           ))}
         </View>
@@ -147,40 +169,40 @@ export function NrmTrackListSectionIndex({ onSelect, mutedColor, isDark = true }
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    width: TRACK_LIST_INDEX_BAR_WIDTH,
+  touchWrap: {
+    width: TRACK_LIST_INDEX_TOUCH_WIDTH,
     alignSelf: 'stretch',
     justifyContent: 'center',
     paddingVertical: nrmTokens.space.xs,
-    marginLeft: nrmTokens.space.xxs,
+    marginLeft: 0,
   },
-  inner: {
+  bar: {
+    alignSelf: 'flex-end',
+    width: TRACK_LIST_INDEX_BAR_WIDTH,
     flex: 1,
-    justifyContent: 'space-between',
-    alignItems: 'center',
     borderRadius: nrmTokens.radius.pill,
     paddingVertical: 3,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
   },
-  innerDark: {
+  barDark: {
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  innerLight: {
+  barLight: {
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
   item: {
-    flex: 1,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 9,
   },
   itemPressed: {
     opacity: 0.65,
   },
   label: {
-    fontSize: nrmTokens.font.microLegal,
+    fontSize: 9,
     fontWeight: '600',
-    lineHeight: 11,
+    lineHeight: 10,
     textAlign: 'center',
   },
   hintScrim: {

@@ -20,7 +20,6 @@ export async function verifyAdminPassword(input: string): Promise<boolean> {
 /** 비밀번호 입력 → 성공/실패 알림. 취소 시 `cancelled`. */
 export async function runAdminAuthFlow(): Promise<'success' | 'fail' | 'cancelled'> {
   const password = await promptUser('관리자 비밀번호를 입력하세요.', {
-    secure: true,
     confirmLabel: '확인',
     cancelLabel: '취소',
   });

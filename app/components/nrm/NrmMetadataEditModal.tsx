@@ -1,5 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NrmMelonAdultAuthLoginModal } from '@/components/nrm/settings/NrmMelonAdultAuthLoginModal';
+import {
+  melonCookieHeaderHasLogin,
+  saveMelonAdultSession,
+} from '@/lib/nrmMelonAdultSession';
+import { hasNrmMelonCookieNativeModule } from '@/lib/nrmMelonCookie';
 import {
   ActivityIndicator,
   Image,
@@ -363,6 +369,9 @@ export function NrmMetadataEditModal({
   const [melonLyricsAvailable, setMelonLyricsAvailable] = useState(false);
   const [melonAdultAuthRequired, setMelonAdultAuthRequired] = useState(false);
   const [melonProbeLoading, setMelonProbeLoading] = useState(false);
+  const [melonAuthModalOpen, setMelonAuthModalOpen] = useState(false);
+  const [melonAuthWebViewKey, setMelonAuthWebViewKey] = useState(0);
+  const [melonProbeBump, setMelonProbeBump] = useState(0);
   const [storedLyricsMode, setStoredLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const [whisperXAlignMissing, setWhisperXAlignMissing] = useState(false);
   const [translationOptionEnabled, setTranslationOptionEnabled] = useState(true);
@@ -515,7 +524,7 @@ export function NrmMetadataEditModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, purpose, website, metadataSource, melonSongId]);
+  }, [visible, purpose, website, metadataSource, melonSongId, melonProbeBump]);
 
   useEffect(() => {
     if (!item || !visible) return;
@@ -880,6 +889,27 @@ export function NrmMetadataEditModal({
       }
     };
   }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
+
+  const canUseMelonWebView = Platform.OS === 'android' && hasNrmMelonCookieNativeModule();
+
+  /** 성인인증이 필요하면 WebView 자동 오픈 (Android APK 한정) */
+  useEffect(() => {
+    if (melonAdultAuthRequired && canUseMelonWebView) {
+      setMelonAuthWebViewKey((k) => k + 1);
+      setMelonAuthModalOpen(true);
+    }
+  }, [melonAdultAuthRequired, canUseMelonWebView]);
+
+  const handleMelonAdultCookieCaptured = useCallback(
+    async (cookieHeader: string) => {
+      if (!melonCookieHeaderHasLogin(cookieHeader)) return;
+      await saveMelonAdultSession(cookieHeader);
+      setMelonAuthModalOpen(false);
+      setMelonAdultAuthRequired(false);
+      setMelonProbeBump((b) => b + 1);
+    },
+    [],
+  );
 
   const showMelonLyricsUnavailableHint =
     purpose === 'download' &&
@@ -1298,9 +1328,25 @@ export function NrmMetadataEditModal({
             파일명: {preview}
           </Text>
           {showMelonLyricsUnavailableHint ? (
-            <Text style={[styles.melonLyricsMissingHint, { color: bodyColor }]}>
-              {melonAdultAuthRequired ? '멜론 성인인증을 하세요.' : '가사 정보가 없습니다.'}
-            </Text>
+            melonAdultAuthRequired && canUseMelonWebView ? (
+              <Pressable
+                onPress={() => {
+                  setMelonAuthWebViewKey((k) => k + 1);
+                  setMelonAuthModalOpen(true);
+                }}
+                style={({ pressed }) => [
+                  styles.melonAdultAuthBtn,
+                  pressed && styles.pressed,
+                ]}>
+                <Text style={[styles.melonAdultAuthBtnLabel, { color: nrmTokens.color.primary }]}>
+                  멜론 성인인증 필요 — 탭하여 로그인
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.melonLyricsMissingHint, { color: bodyColor }]}>
+                {melonAdultAuthRequired ? '멜론 성인인증을 하세요.' : '가사 정보가 없습니다.'}
+              </Text>
+            )
           ) : null}
           {nameConflict ? (
             <Text
@@ -1410,6 +1456,14 @@ export function NrmMetadataEditModal({
           </View>
         ) : null}
       </View>
+
+      <NrmMelonAdultAuthLoginModal
+        visible={melonAuthModalOpen}
+        titleColor={isDark ? '#fff' : '#000'}
+        webViewSessionKey={melonAuthWebViewKey}
+        onClose={() => setMelonAuthModalOpen(false)}
+        onCookieCaptured={(cookie) => void handleMelonAdultCookieCaptured(cookie)}
+      />
     </Modal>
   );
 }
@@ -1611,6 +1665,15 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.caption,
     marginBottom: nrmTokens.space.sm,
     opacity: 0.9,
+  },
+  melonAdultAuthBtn: {
+    marginBottom: nrmTokens.space.sm,
+    paddingVertical: nrmTokens.space.xs,
+  },
+  melonAdultAuthBtnLabel: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   conflictHint: {
     fontSize: nrmTokens.font.caption,

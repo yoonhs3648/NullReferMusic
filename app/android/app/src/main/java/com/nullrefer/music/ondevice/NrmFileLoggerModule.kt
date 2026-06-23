@@ -3,19 +3,24 @@ package com.nullrefer.music.ondevice
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.DocumentsContract
 import com.facebook.react.bridge.ActivityEventListener
+import com.nullrefer.music.NrmBrand
+import java.util.Locale
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
-/** JS → Download/NullReferenceMusic/logs/nrm-debug-YYYY-MM-DD.log */
+/** JS → Download/NullReferenceMusic/logs/nullReferenceMusicLog.log */
 class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext), ActivityEventListener {
 
   companion object {
     private const val REQ_PICK_ATTACHMENT = 8821
+    private const val MAX_ATTACHMENT_BYTES = 20L * 1024L * 1024L
   }
 
   private var pickPromise: Promise? = null
@@ -103,10 +108,21 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     }
     pickPromise = promise
     try {
+      val logsRel = NrmBrand.STORAGE_LOGS_PATH
+      val initialUri =
+          Uri.parse(
+              "content://com.android.externalstorage.documents/document/primary:" +
+                  Uri.encode(logsRel))
       val intent =
           Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
+            type = "text/plain"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+              putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+            }
           }
       activity.startActivityForResult(intent, REQ_PICK_ATTACHMENT)
     } catch (e: Exception) {
@@ -146,7 +162,23 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     try {
       val ctx = reactApplicationContext.applicationContext
       val name = NrmFileLogger.queryDisplayName(ctx, uri) ?: "attachment"
+      if (!name.lowercase(Locale.US).endsWith(".txt")) {
+        promise.reject("E_PICK_TYPE", "txt 파일만 첨부할 수 있습니다.")
+        return
+      }
       val size = NrmFileLogger.querySizeBytes(ctx, uri)
+      if (size > MAX_ATTACHMENT_BYTES) {
+        promise.reject("E_PICK_SIZE", "첨부파일은 20MB 까지 가능합니다.")
+        return
+      }
+      try {
+        ctx.contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+      } catch (_: Exception) {
+        /* 일부 URI는 persist 불가 — 같은 세션 읽기는 가능 */
+      }
       val map = Arguments.createMap()
       map.putString("name", name)
       map.putString("uri", uri.toString())

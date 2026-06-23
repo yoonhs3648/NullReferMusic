@@ -27,7 +27,7 @@ export function NrmMainPageChartSourcePicker({
     <View style={styles.col}>
       {options.map((opt) => {
         const enabled = enabledMap[opt.id] ?? false;
-        const active = value === opt.id && enabled;
+        const selected = value === opt.id;
         return (
           <Pressable
             key={opt.id}
@@ -38,8 +38,8 @@ export function NrmMainPageChartSourcePicker({
             style={({ pressed }) => [
               styles.card,
               {
-                borderColor: active ? nrmTokens.color.primary : 'rgba(128,128,128,0.28)',
-                backgroundColor: active
+                borderColor: selected ? nrmTokens.color.primary : 'rgba(128,128,128,0.28)',
+                backgroundColor: selected
                   ? 'rgba(0,102,204,0.1)'
                   : Platform.OS === 'web'
                     ? 'rgba(255,255,255,0.02)'
@@ -49,13 +49,13 @@ export function NrmMainPageChartSourcePicker({
               pressed && enabled && styles.pressed,
             ]}
             accessibilityRole="radio"
-            accessibilityState={{ checked: active, disabled: !enabled }}>
+            accessibilityState={{ checked: selected, disabled: !enabled }}>
             <View style={styles.cardHeader}>
               <View
                 style={[
                   styles.iconWrap,
                   {
-                    backgroundColor: active
+                    backgroundColor: selected
                       ? 'rgba(0,102,204,0.16)'
                       : 'rgba(128,128,128,0.12)',
                   },
@@ -67,7 +67,7 @@ export function NrmMainPageChartSourcePicker({
                   style={[
                     styles.label,
                     {
-                      color: active
+                      color: selected
                         ? nrmTokens.color.primary
                         : enabled
                           ? titleColor
@@ -77,11 +77,12 @@ export function NrmMainPageChartSourcePicker({
                   {opt.label}
                 </Text>
               </View>
-              {active ? (
+              {selected ? (
                 <Ionicons
                   name="checkmark-circle"
                   size={22}
-                  color={nrmTokens.color.primary}
+                  color={enabled ? nrmTokens.color.primary : bodyColor}
+                  style={styles.checkIcon}
                 />
               ) : (
                 <View style={styles.checkSpacer} />
@@ -102,10 +103,12 @@ const styles = StyleSheet.create({
     borderWidth: Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1,
     paddingVertical: 12,
     paddingHorizontal: nrmTokens.space.md,
+    minHeight: 56,
+    justifyContent: 'center',
   },
   cardHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: nrmTokens.space.sm,
   },
   iconWrap: {
@@ -114,13 +117,24 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
+    flexShrink: 0,
   },
-  titleBlock: { flex: 1, gap: 4 },
+  titleBlock: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
   label: {
     fontSize: nrmTokens.font.bodyStrong,
     fontWeight: '700',
     letterSpacing: -0.2,
+    lineHeight: 22,
   },
-  checkSpacer: { width: 22 },
+  checkIcon: {
+    flexShrink: 0,
+  },
+  checkSpacer: {
+    width: 22,
+    flexShrink: 0,
+  },
 });

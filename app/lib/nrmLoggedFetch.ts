@@ -1,6 +1,7 @@
 import { appendNrmFileLog } from '@/lib/nrmFileLog';
 import { logNrmRunError } from '@/lib/nrmDevLog';
 import { isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
+import { maskUrl, maskBody, maskHeaderRecord } from '@/lib/nrmLogMask';
 
 const MAX_BODY_LOG = 8_000;
 const FAILURE_PAD = '\n\n\n';
@@ -14,16 +15,7 @@ function clip(text: string, max = MAX_BODY_LOG): string {
 function headerSnapshot(init?: RequestInit): string {
   try {
     const h = new Headers(init?.headers ?? undefined);
-    const out: Record<string, string> = {};
-    h.forEach((v, k) => {
-      const key = k.toLowerCase();
-      if (key === 'authorization') {
-        out[k] = v.trim().length > 12 ? `${v.slice(0, 8)}…` : '(set)';
-      } else {
-        out[k] = v;
-      }
-    });
-    return JSON.stringify(out);
+    return maskHeaderRecord(h);
   } catch {
     return '{}';
   }
@@ -73,16 +65,19 @@ export async function nrmLoggedFetch(
   const method = (init?.method ?? 'GET').toUpperCase();
   const t0 = Date.now();
 
+  const safeUrl = maskUrl(url);
+
   if (isNrmFileLoggingActive()) {
+    const rawBody = typeof init?.body === 'string' ? clip(init.body, 2000) : undefined;
     appendNrmFileLog(
       tag,
       'info',
       JSON.stringify({
         event: 'request',
         method,
-        url,
+        url: safeUrl,
         headers: headerSnapshot(init),
-        body: typeof init?.body === 'string' ? clip(init.body, 2000) : undefined,
+        body: rawBody !== undefined ? maskBody(rawBody) : undefined,
       }),
     );
   }
@@ -92,14 +87,15 @@ export async function nrmLoggedFetch(
     const elapsedMs = Date.now() - t0;
 
     if (isNrmFileLoggingActive()) {
-      const bodySnippet = await readResponseSnippet(res);
+      const rawSnippet = await readResponseSnippet(res);
+      const bodySnippet = maskBody(rawSnippet);
       appendNrmFileLog(
         tag,
         res.ok ? 'info' : 'error',
         JSON.stringify({
           event: 'response',
           method,
-          url,
+          url: safeUrl,
           status: res.status,
           ok: res.ok,
           elapsedMs,
@@ -109,7 +105,7 @@ export async function nrmLoggedFetch(
       if (!res.ok) {
         logNrmFailureBanner(
           tag,
-          `HTTP ${res.status} ${method} ${url}`,
+          `HTTP ${res.status} ${method} ${safeUrl}`,
           `elapsedMs=${elapsedMs}\nbody=${bodySnippet}`,
         );
       }
@@ -122,7 +118,7 @@ export async function nrmLoggedFetch(
     if (isNrmFileLoggingActive()) {
       logNrmFailureBanner(
         tag,
-        `NETWORK ${method} ${url}`,
+        `NETWORK ${method} ${safeUrl}`,
         `elapsedMs=${elapsedMs}\nerror=${msg}`,
       );
     }

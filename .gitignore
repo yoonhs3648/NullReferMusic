@@ -27,6 +27,12 @@ Thumbs.db
 /*.json
 /*.html
 
+# GitHub data PAT (APK 빌드용 — 절대 커밋 금지)
+.secrets/nrm-github-data.pat
+
+# Excel 임시 잠금 파일 (Office)
+~$*.xlsx
+
 # Whisper 로컬 바이너리/모델 (대용량 산출물)
 library/whisper/*.bin
 library/whisper/*.dll

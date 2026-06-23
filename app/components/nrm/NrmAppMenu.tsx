@@ -46,6 +46,7 @@ import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAl
 import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
+import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryPanel } from '@/components/nrm/settings/NrmInquiryPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
@@ -79,6 +80,7 @@ import {
 import {
   getNrmAppCopyrightNotice,
   getNrmAppVersionLabel,
+  getNrmVersionInfoAdminLine,
   getNrmVersionInfoCustomizingLine,
   NRM_APP_AUTHOR_DISPLAY,
 } from '@/lib/nrmAppInfo';
@@ -129,6 +131,8 @@ type Props = {
   leftEdgeSwipeReserve?: number;
   /** 상단 바에서 메뉴 버튼을 렌더할 때 내장 FAB 숨김 */
   hideMenuFab?: boolean;
+  /** 메뉴 상단 로고 탭 — 메인 홈 복귀 */
+  onLogoPressHome?: () => void;
 };
 
 export type NrmAppMenuHandle = {
@@ -180,6 +184,7 @@ type Panel =
   | 'adminUserBanList'
   | 'adminUserBanRegister'
   | 'adminInquiryList'
+  | 'adminUserList'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -209,6 +214,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onShowLastfmAuthInvalid,
     leftEdgeSwipeReserve,
     hideMenuFab = false,
+    onLogoPressHome,
   },
   ref,
 ) {
@@ -296,6 +302,13 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   useEffect(() => {
     if (!open) setVersionOverlayOpen(false);
   }, [open]);
+
+  const closeMenuAndGoHome = useCallback(() => {
+    onLogoPressHome?.();
+    setOpen(false);
+    resetMenuPanels('root');
+    translateX.setValue(-drawerW);
+  }, [drawerW, onLogoPressHome, resetMenuPanels, translateX]);
 
   const closeMenuAndNavigateAppleMusicCharts = useCallback(() => {
     onNavigateAppleMusicCharts?.();
@@ -767,7 +780,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <View style={styles.menuLogoGap}>
-                  <NrmLogo layout="stacked" compact tone={isDark ? 'dark' : 'light'} />
+                  <NrmLogo
+                    layout="stacked"
+                    compact
+                    tone={isDark ? 'dark' : 'light'}
+                    onPress={onLogoPressHome ? closeMenuAndGoHome : undefined}
+                  />
                 </View>
                 <Pressable
                   onPress={() => pushPanel('charts')}
@@ -1568,6 +1586,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   관리자페이지
                 </Text>
                 <Pressable
+                  onPress={() => pushPanel('adminUserList')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    사용자 조회
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => pushPanel('adminAlarmRegister')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1678,6 +1711,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminInquiryListPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminUserList' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminUserListPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}
@@ -2122,6 +2169,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
             <Text style={[styles.versionLine, { color: bodyColor }]}>
               {getNrmAppVersionLabel()}
             </Text>
+            {getNrmVersionInfoAdminLine() ? (
+              <Text style={[styles.versionLine, { color: bodyColor }]}>
+                {getNrmVersionInfoAdminLine()}
+              </Text>
+            ) : null}
             {getNrmVersionInfoCustomizingLine() ? (
               <Text style={[styles.versionLine, { color: bodyColor }]}>
                 {getNrmVersionInfoCustomizingLine()}

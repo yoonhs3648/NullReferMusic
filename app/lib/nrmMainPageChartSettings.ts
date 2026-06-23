@@ -7,49 +7,49 @@ import { hasSpotifyChartsSessionAccess } from '@/lib/nrmSpotifyChartsSession';
 export const NRM_MAIN_PAGE_CHART_SOURCE_OPTIONS = [
   {
     id: 'melon-top100',
-    label: 'Melon Top 100',
+    label: 'Melon Top 20',
     iconKey: 'melon' as const,
     tokenPlatform: null,
   },
   {
     id: 'melon-hot100',
-    label: 'Melon Hot 100',
+    label: 'Melon Hot 20',
     iconKey: 'melon' as const,
     tokenPlatform: null,
   },
   {
     id: 'spotify-top100-kr',
-    label: 'Spotify Top 100 Korea',
+    label: 'Spotify Top 20 Korea',
     iconKey: 'spotify' as const,
     tokenPlatform: 'spotify' as const,
   },
   {
     id: 'spotify-top100-global',
-    label: 'Spotify Top 100 Global',
+    label: 'Spotify Top 20 Global',
     iconKey: 'spotify' as const,
     tokenPlatform: 'spotify' as const,
   },
   {
     id: 'apple-top100-kr',
-    label: 'Apple Music Top 100 Korea',
+    label: 'Apple Music Top 20 Korea',
     iconKey: 'appleMusic' as const,
     tokenPlatform: null,
   },
   {
     id: 'apple-top100-global',
-    label: 'Apple Music Top 100 Global',
+    label: 'Apple Music Top 20 Global',
     iconKey: 'appleMusic' as const,
     tokenPlatform: null,
   },
   {
     id: 'lastfm-top100-kr',
-    label: 'Last.fm Top 100 Korea',
+    label: 'Last.fm Top 20 Korea',
     iconKey: 'lastfm' as const,
     tokenPlatform: 'lastfm' as const,
   },
   {
     id: 'lastfm-top100-global',
-    label: 'Last.fm Top 100 Global',
+    label: 'Last.fm Top 20 Global',
     iconKey: 'lastfm' as const,
     tokenPlatform: 'lastfm' as const,
   },
@@ -109,14 +109,11 @@ export async function loadMainPageChartSourceEnabledMap(): Promise<
   return map;
 }
 
-async function resolveStoredChartSource(raw: string | null): Promise<NrmMainPageChartSource> {
+function resolveStoredChartSource(raw: string | null): NrmMainPageChartSource {
   if (!raw || !isNrmMainPageChartSource(raw)) {
     return DEFAULT_MAIN_PAGE_CHART_SOURCE;
   }
-  if (await isMainPageChartSourceTokenReady(raw)) {
-    return raw;
-  }
-  return DEFAULT_MAIN_PAGE_CHART_SOURCE;
+  return raw;
 }
 
 export async function loadMainPageChartSource(): Promise<NrmMainPageChartSource> {

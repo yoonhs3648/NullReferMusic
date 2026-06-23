@@ -8,12 +8,22 @@ import {
 } from '@/lib/nrmActivityHistorySettings';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 
-export type NrmActivityHistoryKind = 'download' | 'lyrics' | 'lyrics_translation';
+export type NrmActivityHistoryKind =
+  | 'download'
+  | 'lyrics'
+  | 'lyrics_translation'
+  | 'metadata_edit'
+  | 'lyrics_remove'
+  | 'lyrics_add_translation'
+  | 'lyrics_remove_translation'
+  | 'track_remove';
 
 export type NrmActivityHistoryEntry = {
   id: string;
   /** 저장 시점 파일명(확장자 포함 가능) — 표시 시 `가수 - 제목`으로 정규화 */
   fileName: string;
+  /** Storage·History에서 트랙 재오픈용 (리네임 후에도 추적) */
+  audioUri?: string;
   kind: NrmActivityHistoryKind;
   createdAt: number;
 };
@@ -93,6 +103,16 @@ export function formatActivityHistoryLabel(entry: NrmActivityHistoryEntry): stri
       return `${base} 저장`;
     case 'lyrics_translation':
       return `${base} 가사 생성(번역지원)`;
+    case 'metadata_edit':
+      return `${base} 메타데이터 수정`;
+    case 'lyrics_remove':
+      return `${base} 가사 제거`;
+    case 'lyrics_add_translation':
+      return `${base} 가사 번역지원`;
+    case 'lyrics_remove_translation':
+      return `${base} 가사 번역제거`;
+    case 'track_remove':
+      return `${base} 제거`;
     case 'lyrics':
     default:
       return `${base} 가사 생성`;
@@ -127,7 +147,9 @@ export function groupActivityHistoryByDate(
 }
 
 export async function appendActivityHistory(
-  entry: Pick<NrmActivityHistoryEntry, 'fileName' | 'kind'> & { createdAt?: number },
+  entry: Pick<NrmActivityHistoryEntry, 'fileName' | 'kind' | 'audioUri'> & {
+    createdAt?: number;
+  },
 ): Promise<void> {
   try {
     const prev = await loadAllEntries(true);
@@ -135,6 +157,7 @@ export async function appendActivityHistory(
       {
         id: newId(),
         fileName: entry.fileName,
+        audioUri: entry.audioUri,
         kind: entry.kind,
         createdAt: entry.createdAt ?? Date.now(),
       },
@@ -143,6 +166,7 @@ export async function appendActivityHistory(
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     cachedEntries = next;
     cacheLoadedAt = Date.now();
+    notifyActivityHistoryRevision();
   } catch {
     invalidateEntryCache();
   }
@@ -172,6 +196,20 @@ export async function peekActivityHistoryForDisplay(): Promise<{
 
 export function invalidateActivityHistoryCache(): void {
   invalidateEntryCache();
+}
+
+type ActivityHistoryRevisionListener = () => void;
+
+let revisionListener: ActivityHistoryRevisionListener | null = null;
+
+export function registerActivityHistoryRevisionListener(
+  listener: ActivityHistoryRevisionListener | null,
+): void {
+  revisionListener = listener;
+}
+
+function notifyActivityHistoryRevision(): void {
+  revisionListener?.();
 }
 
 /** @deprecated listActivityHistoryForDisplay 사용 */

@@ -20,6 +20,7 @@ export type NrmAlarmFeed = {
   reload: (force?: boolean) => Promise<void>;
   pullToRefresh: () => Promise<void>;
   toggleExpanded: (id: number) => void;
+  collapseAllExpanded: () => void;
 };
 
 async function applyItems(
@@ -72,6 +73,10 @@ export function useNrmAlarmFeed(): NrmAlarmFeed {
     });
   }, []);
 
+  const collapseAllExpanded = useCallback(() => {
+    setExpandedIds(new Set());
+  }, []);
+
   useEffect(() => {
     void (async () => {
       setLoading(true);
@@ -111,5 +116,6 @@ export function useNrmAlarmFeed(): NrmAlarmFeed {
     reload,
     pullToRefresh,
     toggleExpanded,
+    collapseAllExpanded,
   };
 }

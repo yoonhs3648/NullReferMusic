@@ -20,7 +20,7 @@ import java.util.TimeZone
 /**
  * 사용자가 파일 관리자에서 바로 열 수 있는 경로에 디버그 로그를 기록합니다.
  *
- * 경로: Download/{@link NrmBrand#STORAGE_FOLDER_NAME}/logs/nrm-debug-YYYY-MM-DD.log
+ * 경로: Download/{@link NrmBrand#STORAGE_FOLDER_NAME}/logs/nullReferenceMusicLog.log
  * (Android/data 아래가 아님)
  *
  * on/off — SharedPreferences `nrm_file_logging` / JS AsyncStorage 와 동기화. 기본 off.
@@ -30,7 +30,9 @@ object NrmFileLogger {
   private const val KEY_ENABLED = "enabled"
 
   private const val LOG_TAG = "NrmFileLogger"
-  private const val LOG_FILE_PREFIX = "nrm-debug-"
+  private const val LOG_FILE_NAME = "nullReferenceMusicLog.log"
+  /** 레거시 일별 로그 — 삭제·정리 시에만 참조 */
+  private const val LEGACY_LOG_FILE_PREFIX = "nrm-debug-"
   private const val LOG_FILE_SUFFIX = ".log"
   private val folderRelPath = "${NrmBrand.STORAGE_FOLDER_NAME}/logs"
   private const val FAILURE_PAD = "\n\n\n"
@@ -40,9 +42,8 @@ object NrmFileLogger {
   private val lock = Any()
   private var mediaStoreUri: Uri? = null
   private var legacyLogFile: File? = null
-  private var activeLogDateKey: String? = null
   private var displayPath: String =
-    "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath/${LOG_FILE_PREFIX}YYYY-MM-DD$LOG_FILE_SUFFIX"
+      "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath/$LOG_FILE_NAME"
 
   fun init(context: Context) {
     if (appContext != null) return
@@ -51,7 +52,6 @@ object NrmFileLogger {
       appContext = context.applicationContext
       // on/off는 JS AsyncStorage가 단일 소스 — bridge 동기화 전까지는 항상 off
       userLoggingEnabled = false
-      updateDisplayPath()
     }
   }
 
@@ -68,7 +68,6 @@ object NrmFileLogger {
       if (!enabled) {
         mediaStoreUri = null
         legacyLogFile = null
-        activeLogDateKey = null
         return
       }
       ensureLogSink(createIfMissing = true)
@@ -153,21 +152,20 @@ object NrmFileLogger {
     )
   }
 
-  /** logs 폴더의 nrm-debug*.log 전부 삭제 */
+  /** logs 폴더의 nullReferenceMusicLog.log 및 레거시 nrm-debug*.log 전부 삭제 */
   fun deleteAllLogFiles(): Int {
     val ctx = appContext ?: return 0
     var removed = 0
     synchronized(lock) {
       mediaStoreUri = null
       legacyLogFile = null
-      activeLogDateKey = null
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
         val selection =
-            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-        val args = arrayOf("$relativePath%", "${LOG_FILE_PREFIX}%")
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND (${MediaStore.MediaColumns.DISPLAY_NAME} = ? OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?)"
+        val args = arrayOf("$relativePath%", LOG_FILE_NAME, "${LEGACY_LOG_FILE_PREFIX}%")
         ctx.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
           val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
           while (cursor.moveToNext()) {
@@ -185,7 +183,12 @@ object NrmFileLogger {
             )
         if (dir.isDirectory) {
           dir.listFiles()?.forEach { f ->
-            if (f.isFile && f.name.startsWith(LOG_FILE_PREFIX) && f.name.endsWith(LOG_FILE_SUFFIX)) {
+            if (
+                f.isFile &&
+                    (f.name == LOG_FILE_NAME ||
+                        (f.name.startsWith(LEGACY_LOG_FILE_PREFIX) &&
+                            f.name.endsWith(LOG_FILE_SUFFIX)))
+            ) {
               if (f.delete()) removed++
             }
           }
@@ -224,20 +227,6 @@ object NrmFileLogger {
           append(" logPath=$displayPath")
         },
     )
-  }
-
-  private fun todayKey(): String {
-    val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    fmt.timeZone = TimeZone.getDefault()
-    return fmt.format(Date())
-  }
-
-  private fun logFileNameForDate(dateKey: String): String =
-      "$LOG_FILE_PREFIX$dateKey$LOG_FILE_SUFFIX"
-
-  private fun updateDisplayPath() {
-    displayPath =
-        "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath/${logFileNameForDate(todayKey())}"
   }
 
   private fun write(level: String, tag: String, message: String, throwable: Throwable?) {
@@ -295,55 +284,75 @@ object NrmFileLogger {
   }
 
   private fun ensureLogSink(createIfMissing: Boolean): Boolean {
-    val dateKey = todayKey()
-    if (activeLogDateKey != dateKey) {
-      mediaStoreUri = null
-      legacyLogFile = null
-      activeLogDateKey = dateKey
-      updateDisplayPath()
+    if (mediaStoreUri != null) return true
+    if (legacyLogFile?.isFile == true) return true
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val existing = resolveExistingMediaStoreUri(LOG_FILE_NAME)
+      if (existing != null) {
+        mediaStoreUri = existing
+        return true
+      }
+      if (!createIfMissing) return false
+      mediaStoreUri = createMediaStoreUri(LOG_FILE_NAME)
+      return mediaStoreUri != null
     }
-    if (mediaStoreUri != null || legacyLogFile?.parentFile?.exists() == true) {
+
+    @Suppress("DEPRECATION")
+    val dir =
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            folderRelPath,
+        )
+    val file = File(dir, LOG_FILE_NAME)
+    if (file.isFile) {
+      legacyLogFile = file
+      displayPath = file.absolutePath
       return true
     }
     if (!createIfMissing) return false
-
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      mediaStoreUri = resolveOrCreateMediaStoreUri(logFileNameForDate(dateKey))
-      mediaStoreUri != null
-    } else {
-      @Suppress("DEPRECATION")
-      val dir =
-          File(
-              Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-              folderRelPath,
-          )
-      if (!dir.exists() && !dir.mkdirs()) {
-        Log.w(LOG_TAG, "legacy log dir create failed: ${dir.absolutePath}")
-        return false
-      }
-      legacyLogFile = File(dir, logFileNameForDate(dateKey))
-      displayPath = "${dir.absolutePath}/${logFileNameForDate(dateKey)}"
-      true
+    if (!dir.exists() && !dir.mkdirs()) {
+      Log.w(LOG_TAG, "legacy log dir create failed: ${dir.absolutePath}")
+      return false
     }
+    legacyLogFile = file
+    displayPath = file.absolutePath
+    return true
   }
 
-  private fun resolveOrCreateMediaStoreUri(fileName: String): Uri? {
+  /** 동일 파일명이 여러 개면 가장 큰 SIZE 항목 하나만 사용 (중복 생성 방지) */
+  private fun resolveExistingMediaStoreUri(fileName: String): Uri? {
     val ctx = appContext ?: return null
     val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
     val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    val projection = arrayOf(MediaStore.MediaColumns._ID)
+    val projection =
+        arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE)
     val selection =
         "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
     val args = arrayOf(fileName, "$relativePath%")
 
+    var bestId: Long? = null
+    var bestSize = -1L
     ctx.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-      if (cursor.moveToFirst()) {
-        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-        displayPath = "$relativePath/$fileName"
-        return ContentUris.withAppendedId(collection, id)
+      val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+      val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+      while (cursor.moveToNext()) {
+        val size = cursor.getLong(sizeCol).coerceAtLeast(0L)
+        if (size >= bestSize) {
+          bestSize = size
+          bestId = cursor.getLong(idCol)
+        }
       }
     }
+    if (bestId == null) return null
+    displayPath = "$relativePath/$fileName"
+    return ContentUris.withAppendedId(collection, bestId!!)
+  }
 
+  private fun createMediaStoreUri(fileName: String): Uri? {
+    val ctx = appContext ?: return null
+    val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$folderRelPath"
+    val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val values =
         ContentValues().apply {
           put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)

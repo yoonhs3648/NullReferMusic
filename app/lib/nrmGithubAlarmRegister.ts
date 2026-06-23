@@ -5,6 +5,7 @@ import {
   NRM_ALARM_JSON_RAW_URL,
 } from '@/lib/nrmRemoteDataConfig';
 import { invalidateAlarmCache } from '@/lib/nrmAlarmClient';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
 export type NrmAlarmRegisterInput = {
   isNoti: boolean;
@@ -128,38 +129,53 @@ async function registerViaBackend(input: NrmAlarmRegisterInput): Promise<boolean
 }
 
 export async function registerAlarmToGithub(input: NrmAlarmRegisterInput): Promise<void> {
-  const viaBackend = await registerViaBackend(input);
-  if (viaBackend) {
+  const tag = 'github-alarm';
+  logNrmDev(tag, { event: 'register-start', isNoti: input.isNoti });
+  const t0 = Date.now();
+
+  try {
+    const viaBackend = await registerViaBackend(input);
+    if (viaBackend) {
+      logNrmDev(tag, { event: 'register-ok-backend', elapsedMs: Date.now() - t0 });
+      invalidateAlarmCache();
+      return;
+    }
+
+    logNrmDev(tag, { event: 'backend-unavailable-fallback-github' });
+
+    const pat = await getNrmGithubDataPat();
+    if (!pat) {
+      const err = new Error('GitHub 등록 토큰이 설정되지 않았습니다.');
+      logNrmRunError(tag, err, { event: 'pat-missing' });
+      throw err;
+    }
+
+    const { doc, sha } = await fetchAlarmDocumentFromGithub(pat);
+    let maxId = 0;
+    for (const row of doc.alarm) {
+      if (typeof row.id === 'number' && row.id > maxId) maxId = row.id;
+    }
+    const entry = {
+      id: maxId + 1,
+      isNoti: input.isNoti,
+      title: input.title.trim(),
+      content: input.content,
+      SerialNo: input.serialNo.trim(),
+      date: todayYmd(),
+    };
+    doc.alarm.push(entry);
+    await putAlarmDocumentToGithub(
+      pat,
+      doc,
+      sha,
+      `admin: register alarm id=${entry.id}`,
+    );
+    logNrmDev(tag, { event: 'register-ok-github', alarmId: entry.id, elapsedMs: Date.now() - t0 });
     invalidateAlarmCache();
-    return;
+  } catch (e) {
+    logNrmRunError(tag, e, { event: 'register-error', elapsedMs: Date.now() - t0 });
+    throw e;
   }
-
-  const pat = await getNrmGithubDataPat();
-  if (!pat) {
-    throw new Error('GitHub 등록 토큰이 설정되지 않았습니다.');
-  }
-
-  const { doc, sha } = await fetchAlarmDocumentFromGithub(pat);
-  let maxId = 0;
-  for (const row of doc.alarm) {
-    if (typeof row.id === 'number' && row.id > maxId) maxId = row.id;
-  }
-  const entry = {
-    id: maxId + 1,
-    isNoti: input.isNoti,
-    title: input.title.trim(),
-    content: input.content,
-    SerialNo: input.serialNo.trim(),
-    date: todayYmd(),
-  };
-  doc.alarm.push(entry);
-  await putAlarmDocumentToGithub(
-    pat,
-    doc,
-    sha,
-    `admin: register alarm id=${entry.id}`,
-  );
-  invalidateAlarmCache();
 }
 
 /** raw URL로 현재 문서 읽기 (등록 전 id 계산용 폴백) */

@@ -19,21 +19,9 @@ import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { NrmTrackListSectionIndex } from '@/components/nrm/NrmTrackListSectionIndex';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
-import {
-  isEmbeddedSyncLyricsText,
-  lyricsUiModeToMetadataField,
-  resolveStoredLyricsModeFromFlags,
-} from '@/lib/nrmLrcUiMode';
-import {
-  fetchMelonPlainLyricsFromWebsite,
-  isMelonTrackWebsite,
-  normalizeMelonTrackWebsite,
-  type NrmLyricsUiMode,
-} from '@/lib/nrmMelonLyrics';
+import type { NrmLyricsUiMode } from '@/lib/nrmMelonLyrics';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
-import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
-import { resolveEditableArtistTitle } from '@/lib/nrmAudioMetadataTitle';
 import {
   buildTrackListSections,
   filterTracksByQuery,
@@ -57,8 +45,14 @@ import { hasAnyWhisperModelOnDevice } from '@/lib/nrmWhisperModelNative';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { isStandaloneAndroid } from '@/lib/nrmStandalonePlatform';
 import type { YoutubeSearchItem } from '@/lib/youtubeSearchTypes';
-import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
-import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
+import {
+  logStorageMetadataHistory,
+  logStorageTrackRemoveHistory,
+} from '@/lib/nrmStorageActivityHistory';
+import {
+  bootstrapTrackEditorState,
+  EMPTY_METADATA_FIELDS,
+} from '@/lib/nrmTrackEditorBootstrap';
 
 type Props = {
   isDark: boolean;
@@ -82,12 +76,7 @@ function fakeYoutubeItem(track: NrmDownloadTrackItem): YoutubeSearchItem {
   };
 }
 
-const EMPTY_METADATA_FIELDS: Omit<NrmAudioFileMetadata, 'artist' | 'title'> = {
-  album: '',
-  genre: '',
-  releaseDate: '',
-  coverUrl: '',
-};
+const EMPTY_METADATA_FIELDS_LOCAL = EMPTY_METADATA_FIELDS;
 
 function isDownloadTrackItem(item: unknown): item is NrmDownloadTrackItem {
   return (
@@ -146,7 +135,7 @@ export function NrmTrackMetadataSettingsHome({
   const [initialTitle, setInitialTitle] = useState('');
   const [initialFields, setInitialFields] = useState<
     Omit<NrmAudioFileMetadata, 'artist' | 'title'>
-  >(EMPTY_METADATA_FIELDS);
+  >(EMPTY_METADATA_FIELDS_LOCAL);
   const [initialLyricsMode, setInitialLyricsMode] = useState<NrmLyricsUiMode>('unset');
   const [initialMelonLyricsAvailable, setInitialMelonLyricsAvailable] = useState(false);
   const [initialHasEmbeddedSyncLyrics, setInitialHasEmbeddedSyncLyrics] = useState(false);
@@ -273,56 +262,18 @@ export function NrmTrackMetadataSettingsHome({
     setModalBusy(true);
     setInitialArtist('');
     setInitialTitle('');
-    setInitialFields(EMPTY_METADATA_FIELDS);
+    setInitialFields(EMPTY_METADATA_FIELDS_LOCAL);
     setInitialLyricsMode('unset');
     setInitialMelonLyricsAvailable(false);
     setInitialHasEmbeddedSyncLyrics(false);
     try {
-      const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
-      const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
-      let lrcText = '';
-      if (track.lrcUri) {
-        try {
-          lrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
-            encoding: EncodingType.UTF8,
-          });
-        } catch {
-          /* 사이드카 읽기 실패 시 내장 가사로 복원 */
-        }
-      }
-
-      const embeddedSync = isEmbeddedSyncLyricsText(meta.lyrics) ? (meta.lyrics ?? '').trim() : '';
-
-      let melonLyricsAvailable = false;
-      if (isMelonTrackWebsite(normalizedWebsite)) {
-        const plain = await fetchMelonPlainLyricsFromWebsite(normalizedWebsite);
-        melonLyricsAvailable = plain.trim().length > 0;
-      }
-
-      const lyricsMode = resolveStoredLyricsModeFromFlags({
-        hasSidecarLrc: !!track.lrcUri && lrcText.trim().length > 0,
-        sidecarLrcText: lrcText,
-        embeddedSyncLyrics: embeddedSync,
-        embeddedLyricsMode: meta.nrmLyricsMode,
-        melonTrackUrl: isMelonTrackWebsite(normalizedWebsite) ? normalizedWebsite : undefined,
-      });
-
-      setInitialLyricsMode(lyricsMode);
-      setInitialMelonLyricsAvailable(melonLyricsAvailable);
-      setInitialHasEmbeddedSyncLyrics(embeddedSync.length > 0);
-      const { artist, title } = resolveEditableArtistTitle(
-        meta.artist,
-        meta.title,
-        track.displayLabel,
-      );
-      setInitialArtist(artist);
-      setInitialTitle(title);
-      const { artist: _a, title: _t, ...rest } = meta;
-      setInitialFields({
-        ...rest,
-        website: normalizedWebsite || rest.website,
-        lyrics: lyricsUiModeToMetadataField(lyricsMode),
-      });
+      const state = await bootstrapTrackEditorState(track);
+      setInitialLyricsMode(state.initialLyricsMode);
+      setInitialMelonLyricsAvailable(state.initialMelonLyricsAvailable);
+      setInitialHasEmbeddedSyncLyrics(state.initialHasEmbeddedSyncLyrics);
+      setInitialArtist(state.initialArtist);
+      setInitialTitle(state.initialTitle);
+      setInitialFields(state.initialFields);
     } finally {
       setModalBusy(false);
     }
@@ -337,6 +288,9 @@ export function NrmTrackMetadataSettingsHome({
       const track = editTrack;
       const lyricsModeAtOpen = initialLyricsMode;
       const hasEmbeddedSyncAtOpen = initialHasEmbeddedSyncLyrics;
+      const artistAtOpen = initialArtist;
+      const titleAtOpen = initialTitle;
+      const fieldsAtOpen = initialFields;
       setEditTrack(null);
 
       void (async () => {
@@ -390,6 +344,17 @@ export function NrmTrackMetadataSettingsHome({
             newLyricsMode: effectiveNewLyricsMode,
             hasEmbeddedSyncLyrics: hasEmbeddedSyncAtOpen,
           });
+          await logStorageMetadataHistory({
+            track,
+            fileNameAfter: fileName,
+            audioUriAfter: track.audioUri,
+            metadataAfter: metadata,
+            beforeArtist: artistAtOpen,
+            beforeTitle: titleAtOpen,
+            beforeFields: fieldsAtOpen,
+            lyricsModeBefore: lyricsModeAtOpen,
+            lyricsModeAfter: effectiveNewLyricsMode,
+          });
           await reload();
         } catch (e) {
           setError(e instanceof Error ? e.message : '저장에 실패했습니다.');
@@ -398,13 +363,14 @@ export function NrmTrackMetadataSettingsHome({
         }
       })();
     },
-    [editTrack, initialHasEmbeddedSyncLyrics, initialLyricsMode, reload],
+    [editTrack, initialArtist, initialFields, initialHasEmbeddedSyncLyrics, initialLyricsMode, initialTitle, reload],
   );
 
   const onDeleteTrack = useCallback(async () => {
     if (!editTrack) return;
     const track = editTrack;
     try {
+      await logStorageTrackRemoveHistory(track);
       await deleteDownloadTrack(track);
       await invalidateListCoverDiskCache(trackListCoverKey(track));
       setEditTrack(null);
@@ -578,7 +544,11 @@ export function NrmTrackMetadataSettingsHome({
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1 },
+  wrap: {
+    flex: 1,
+    paddingTop: nrmTokens.layout.homeTabTopInset,
+    marginRight: -nrmTokens.space.sm,
+  },
   backRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -644,7 +614,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: nrmTokens.space.xxl,
     flexGrow: 1,
-    paddingRight: nrmTokens.space.xxs,
   },
   rowChevron: {
     marginRight: nrmTokens.space.sm,

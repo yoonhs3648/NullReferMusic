@@ -102,6 +102,7 @@
 | 웹·앱 동일 화면 | §6 준수 — 시각 스펙·토큰 통일 + 메인 로고 대비 검증 |
 | 오류·알림 | §7 준수 — 인라인 금지·`notifyUser` + `NrmNotifyHost` 모달·브랜드 MZ 톤 |
 | **APK·IPA·릴리스 빌드** | **`docs/RELEASE-APK-IPA-RULE.md` 필수** — Expo Go만으로 충분하다고 가정하지 않음 |
+| **GitHub `data/` JSON** (알림·문의·차단·userList) | **`docs/NRM-GITHUB-DATA.md` 필수** — `data/nrm-github-data-fields.xlsx` 참조, 구조 변경 시 xlsx 동기 갱신 |
 
 ---
 

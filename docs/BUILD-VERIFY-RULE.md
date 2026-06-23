@@ -10,6 +10,7 @@
 |-----------|------------------|
 | `app/` TypeScript·TSX | `cd app && npx tsc --noEmit` |
 | `backend/` Java | `cd backend && mvn -DskipTests compile` (또는 동등한 Maven 컴파일) |
+| `data/` GitHub JSON 필드·연동 로직 (`docs/NRM-GITHUB-DATA.md`) | 구조 변경 시 `cd app && npm run generate:github-data-fields` 로 `data/nrm-github-data-fields.xlsx` 재생성 후 함께 커밋 |
 | 네이티브·번들까지 필요 시 | 프로젝트에 정의된 스크립트·CI와 동일한 빌드 |
 
 프로젝트에 `npm run build`, `expo export` 등 **표준 빌드 스크립트**가 있으면, 변경 범위에 맞게 그것도 실행한다.

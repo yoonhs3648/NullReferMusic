@@ -22,8 +22,8 @@ import {
 import {
   clearMelonWebLoginCookies,
   hasNrmMelonCookieNativeModule,
-  readMelonLoginCookieHeader,
 } from '@/lib/nrmMelonCookie';
+import { copyToClipboard } from '@/lib/nrmCopyText';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -49,6 +49,44 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
+function FieldLabelRow({
+  label,
+  bodyColor: color,
+  hasValue,
+  onCopy,
+}: {
+  label: string;
+  bodyColor: string;
+  hasValue: boolean;
+  onCopy?: () => void;
+}) {
+  return (
+    <View style={styles.fieldLabelRow}>
+      <Text style={[styles.fieldLabel, { color }]}>{label}</Text>
+      {onCopy ? (
+        <Pressable
+          onPress={onCopy}
+          disabled={!hasValue}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`${label} 복사`}
+          accessibilityState={{ disabled: !hasValue }}
+          style={({ pressed }) => [
+            styles.copyIconBtn,
+            !hasValue && styles.copyIconBtnDisabled,
+            pressed && hasValue && styles.copyIconBtnPressed,
+          ]}>
+          <Ionicons
+            name="copy-outline"
+            size={18}
+            color={hasValue ? nrmTokens.color.primary : 'rgba(128,128,128,0.45)'}
+          />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function formatSavedAt(ms: number): string {
   try {
     return new Date(ms).toLocaleString('ko-KR');
@@ -61,7 +99,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [manualCookie, setManualCookie] = useState('');
+  const [cookieField, setCookieField] = useState('');
   const [loginVisible, setLoginVisible] = useState(false);
   const [webViewSessionKey, setWebViewSessionKey] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -74,6 +112,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
       const session = await getMelonAdultSession();
       setSaved(session != null);
       setSavedAt(session?.savedAt ?? null);
+      setCookieField(session?.cookieHeader ?? '');
     } finally {
       setLoading(false);
     }
@@ -84,8 +123,8 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
   }, [refreshStatus]);
 
   const persistCookieHeader = useCallback(
-    async (cookieHeader: string, source: 'webview' | 'manual') => {
-      const trimmed = cookieHeader.trim();
+    async (rawCookie: string, source: 'webview' | 'manual'): Promise<boolean> => {
+      const trimmed = rawCookie.trim();
       if (!trimmed) {
         notifyUser('저장할 쿠키가 없습니다. 멜론 로그인 후 다시 시도해 주세요.');
         return false;
@@ -101,6 +140,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
         await saveMelonAdultSession(trimmed);
         setSaved(true);
         setSavedAt(Date.now());
+        setCookieField(trimmed);
         notifyUser(
           source === 'webview'
             ? '멜론 성인인증 세션이 저장되었습니다.'
@@ -114,16 +154,18 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
     [],
   );
 
-  const handleSaveFromWebView = useCallback(async () => {
-    const cookieHeader = await readMelonLoginCookieHeader();
-    const ok = await persistCookieHeader(cookieHeader ?? '', 'webview');
-    if (ok) setLoginVisible(false);
-  }, [persistCookieHeader]);
+  /** WebView 에서 MLCP 쿠키를 감지하면 자동 저장 후 모달 닫기 */
+  const handleWebViewCookieCaptured = useCallback(
+    async (cookieHeader: string) => {
+      const ok = await persistCookieHeader(cookieHeader, 'webview');
+      if (ok) setLoginVisible(false);
+    },
+    [persistCookieHeader],
+  );
 
   const handleSaveManual = useCallback(async () => {
-    const ok = await persistCookieHeader(manualCookie, 'manual');
-    if (ok) setManualCookie('');
-  }, [manualCookie, persistCookieHeader]);
+    await persistCookieHeader(cookieField, 'manual');
+  }, [cookieField, persistCookieHeader]);
 
   const handleClear = useCallback(async () => {
     setSaving(true);
@@ -132,7 +174,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
       await clearMelonWebLoginCookies();
       setSaved(false);
       setSavedAt(null);
-      setManualCookie('');
+      setCookieField('');
       setWebViewSessionKey((k) => k + 1);
       notifyUser('멜론 성인인증 세션이 삭제되었습니다.');
     } finally {
@@ -149,98 +191,97 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
     <>
       <MenuBackRow onPress={onBack} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>멜론 성인인증</Text>
-      <Text style={[styles.lead, { color: bodyColor }]}>
-        일부 19금 곡은 멜론 로그인·성인인증 후에만 가사를 볼 수 있습니다. 인증 세션을 저장하면
-        가사 조회·다운로드 시 자동으로 사용됩니다.
-      </Text>
-
-      {loading ? (
-        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
-      ) : (
-        <View style={[styles.statusBox, { borderColor: FIELD_BORDER_COLOR }]}>
-          <Text style={[styles.statusLabel, { color: titleColor }]}>저장 상태</Text>
-          <Text style={[styles.statusValue, { color: saved ? '#6ecf8a' : bodyColor }]}>
-            {saved ? '인증 세션 저장됨' : '미저장'}
-          </Text>
-          {saved && savedAt ? (
-            <Text style={[styles.statusMeta, { color: bodyColor }]}>
-              저장 시각: {formatSavedAt(savedAt)}
-            </Text>
-          ) : null}
-        </View>
-      )}
 
       {canUseWebView ? (
         <Pressable
           onPress={handleOpenLogin}
           disabled={saving}
           style={({ pressed }) => [
-            styles.actionRow,
-            pressed && { backgroundColor: rowHover },
+            styles.primaryBtn,
+            pressed && styles.primaryBtnPressed,
             saving && styles.disabled,
           ]}>
-          <Text style={[styles.actionLabel, { color: titleColor }]}>멜론 로그인 · 성인인증</Text>
-          <Ionicons name="open-outline" size={20} color={bodyColor} />
+          <Text style={[styles.primaryBtnLabel, { color: titleColor }]}>
+            멜론 로그인 · 성인인증
+          </Text>
         </Pressable>
       ) : (
-        <Text style={[styles.note, { color: bodyColor }]}>
+        <Text style={[styles.webUnavailableNote, { color: bodyColor }]}>
           {Platform.OS === 'web'
             ? '웹에서는 브라우저 개발자 도구(F12) → Network → melon.com 요청의 Cookie 헤더를 아래에 붙여넣어 저장하세요.'
             : 'Expo Go에서는 WebView 쿠키를 읽을 수 없습니다. APK 빌드에서 WebView 로그인을 사용하거나, 쿠키를 직접 입력하세요.'}
         </Text>
       )}
 
-      <Text style={[styles.fieldLabel, { color: titleColor }]}>Cookie 헤더 (수동)</Text>
-      <TextInput
-        value={manualCookie}
-        onChangeText={setManualCookie}
-        placeholder="MLCP=...; keyCookie=...; JSESSIONID=..."
-        placeholderTextColor="rgba(128,128,128,0.7)"
-        multiline
-        textAlignVertical="top"
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={[
-          styles.cookieInput,
-          {
-            color: titleColor,
-            borderColor: FIELD_BORDER_COLOR,
-            borderWidth: PANEL_INPUT_BORDER,
-          },
-        ]}
-      />
-      <Pressable
-        onPress={() => void handleSaveManual()}
-        disabled={saving || !manualCookie.trim()}
-        style={({ pressed }) => [
-          styles.primaryBtn,
-          (saving || !manualCookie.trim()) && styles.disabled,
-          pressed && !saving && manualCookie.trim() && styles.primaryBtnPressed,
-        ]}>
-        <Text style={styles.primaryBtnText}>쿠키 저장</Text>
-      </Pressable>
-
-      {saved ? (
-        <Pressable
-          onPress={() => void handleClear()}
-          disabled={saving}
-          style={({ pressed }) => [
-            styles.dangerRow,
-            pressed && { backgroundColor: rowHover },
-            saving && styles.disabled,
-          ]}>
-          <Text style={styles.dangerLabel}>세션 삭제</Text>
-        </Pressable>
-      ) : null}
-
       <NrmMelonAdultAuthLoginModal
         visible={loginVisible}
         titleColor={titleColor}
-        bodyColor={bodyColor}
         webViewSessionKey={webViewSessionKey}
         onClose={() => setLoginVisible(false)}
-        onRequestSave={() => void handleSaveFromWebView()}
+        onCookieCaptured={(cookie) => void handleWebViewCookieCaptured(cookie)}
       />
+
+      <FieldLabelRow
+        label="쿠키 헤더"
+        bodyColor={bodyColor}
+        hasValue={cookieField.trim().length > 0}
+        onCopy={
+          cookieField.trim()
+            ? () => void copyToClipboard(cookieField.trim()).then(() => notifyUser('쿠키가 복사되었습니다.'))
+            : undefined
+        }
+      />
+      <View style={[styles.fieldShell, { borderColor: FIELD_BORDER_COLOR, borderWidth: PANEL_INPUT_BORDER }]}>
+        <TextInput
+          value={cookieField}
+          onChangeText={setCookieField}
+          placeholder="MLCP=...; keyCookie=...; JSESSIONID=..."
+          placeholderTextColor="rgba(128,128,128,0.7)"
+          multiline
+          textAlignVertical="top"
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[styles.fieldInner, { color: titleColor }]}
+        />
+      </View>
+
+      <Pressable
+        onPress={() => void handleSaveManual()}
+        disabled={saving || !cookieField.trim()}
+        style={({ pressed }) => [
+          styles.primaryBtn,
+          styles.manualSaveBtn,
+          (saving || !cookieField.trim()) && styles.disabled,
+          pressed && !saving && cookieField.trim() ? styles.primaryBtnPressed : undefined,
+        ]}>
+        <Text style={[styles.primaryBtnLabel, { color: titleColor }]}>저장</Text>
+      </Pressable>
+
+      {loading ? (
+        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
+      ) : saved ? (
+        <>
+          <View style={[styles.statusBox, { borderColor: FIELD_BORDER_COLOR }]}>
+            <Text style={[styles.statusLabel, { color: bodyColor }]}>저장 상태</Text>
+            <Text style={[styles.statusValue, { color: '#6ecf8a' }]}>인증 세션 저장됨</Text>
+            {savedAt ? (
+              <Text style={[styles.statusMeta, { color: bodyColor }]}>
+                저장 시각: {formatSavedAt(savedAt)}
+              </Text>
+            ) : null}
+          </View>
+          <Pressable
+            onPress={() => void handleClear()}
+            disabled={saving}
+            style={({ pressed }) => [
+              styles.dangerRow,
+              pressed && { backgroundColor: rowHover },
+              saving && styles.disabled,
+            ]}>
+            <Text style={styles.dangerLabel}>세션 삭제</Text>
+          </Pressable>
+        </>
+      ) : null}
     </>
   );
 }
@@ -264,10 +305,61 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: nrmTokens.space.sm,
   },
-  lead: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 20,
+  primaryBtn: {
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: PANEL_INPUT_BORDER,
+    borderColor: FIELD_BORDER_COLOR,
+    paddingVertical: nrmTokens.space.md,
+    paddingHorizontal: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  primaryBtnPressed: {
+    opacity: 0.75,
+  },
+  primaryBtnLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '500',
+    flex: 1,
+  },
+  manualSaveBtn: {
+    justifyContent: 'center',
+  },
+  webUnavailableNote: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 18,
+    marginBottom: nrmTokens.space.md,
+  },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: nrmTokens.space.xs,
+  },
+  fieldLabel: {
+    fontSize: nrmTokens.font.caption,
+    flex: 1,
+  },
+  copyIconBtn: {
+    padding: 4,
+  },
+  copyIconBtnDisabled: {
+    opacity: 0.4,
+  },
+  copyIconBtnPressed: {
+    opacity: 0.6,
+  },
+  fieldShell: {
+    borderRadius: nrmTokens.radius.md,
+    overflow: 'hidden',
+    marginBottom: nrmTokens.space.sm,
+  },
+  fieldInner: {
+    minHeight: 88,
+    paddingHorizontal: nrmTokens.space.sm,
+    paddingVertical: nrmTokens.space.sm,
+    fontSize: nrmTokens.font.caption,
+    textAlignVertical: 'top',
   },
   loader: {
     marginVertical: nrmTokens.space.lg,
@@ -276,6 +368,7 @@ const styles = StyleSheet.create({
     borderWidth: PANEL_INPUT_BORDER,
     borderRadius: nrmTokens.radius.md,
     padding: nrmTokens.space.md,
+    marginTop: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
   },
   statusLabel: {
@@ -289,50 +382,6 @@ const styles = StyleSheet.create({
   statusMeta: {
     fontSize: nrmTokens.font.caption,
     marginTop: 4,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 52,
-    paddingHorizontal: nrmTokens.space.sm,
-    marginBottom: nrmTokens.space.md,
-  },
-  actionLabel: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-  },
-  note: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 18,
-    marginBottom: nrmTokens.space.md,
-  },
-  fieldLabel: {
-    fontSize: nrmTokens.font.caption,
-    marginBottom: nrmTokens.space.xs,
-  },
-  cookieInput: {
-    minHeight: 88,
-    borderRadius: nrmTokens.radius.md,
-    paddingHorizontal: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.sm,
-    fontSize: nrmTokens.font.caption,
-    marginBottom: nrmTokens.space.sm,
-  },
-  primaryBtn: {
-    backgroundColor: nrmTokens.color.primary,
-    borderRadius: nrmTokens.radius.md,
-    paddingVertical: nrmTokens.space.md,
-    alignItems: 'center',
-    marginBottom: nrmTokens.space.md,
-  },
-  primaryBtnPressed: {
-    opacity: 0.85,
-  },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: nrmTokens.font.body,
-    fontWeight: '600',
   },
   dangerRow: {
     minHeight: 48,
