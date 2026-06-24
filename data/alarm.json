@@ -23,6 +23,14 @@
 			"content": "유저 공지알림\n입\n니다\nㅎㅎ",
 			"SerialNo": "testadminserialno",
 			"date": "2026-06-25"
+		},
+		{
+			"id": 4,
+			"isNoti": false,
+			"title": "testadmin 님의 문의",
+			"content": "2026-06-25 00:59:52.329",
+			"SerialNo": "admin",
+			"date": "2026-06-25"
 		}
 	]
 }
