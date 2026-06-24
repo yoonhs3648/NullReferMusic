@@ -30,8 +30,9 @@ export function NrmMenuDrawerScroll({
       {...rest}
       style={[styles.scroll, style]}
       contentContainerStyle={[styles.content, contentContainerStyle]}
-      keyboardShouldPersistTaps="handled"
+      keyboardShouldPersistTaps="always"
       showsVerticalScrollIndicator={false}
+      overScrollMode="never"
       {...(Platform.OS === 'web'
         ? { className: WEB_SCROLL_CLASS }
         : {})}>

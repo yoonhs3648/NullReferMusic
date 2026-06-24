@@ -23,6 +23,7 @@ import { getNrmNavigationTheme } from '@/constants/nrmNavigationTheme';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
 import { isNrmTermsConsented, saveNrmTermsConsented } from '@/lib/nrmTermsConsent';
+import brandConfig from '../nrm-brand.config.json';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -72,8 +73,8 @@ function RootLayoutInner() {
   const onPermissionsGranted = useCallback(() => {
     void saveNrmTermsConsented();
     void setupNrmMobileDownloadNotifications();
-    // Android 커스텀 APK는 디바이스 바인딩 검사 추가
-    if (Platform.OS === 'android') {
+    // Android 커스텀 APK는 디바이스 바인딩 검사 추가 (admin APK 제외)
+    if (Platform.OS === 'android' && brandConfig.versionInfoAdminBuild !== true) {
       setPhase('device_check');
     } else {
       setPhase('ready');

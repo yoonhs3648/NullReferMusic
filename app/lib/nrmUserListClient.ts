@@ -1,3 +1,4 @@
+import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import { NRM_USER_LIST_JSON_RAW_URL } from '@/lib/nrmRemoteDataConfig';
 
 export type NrmUserListEntry = {
@@ -9,7 +10,6 @@ export type NrmUserListEntry = {
   Createddate: string;
   deviceId: string | null;
   lastAccessDate: string | null;
-  isAdmin?: boolean;
 };
 
 type UserListJson = {
@@ -22,7 +22,6 @@ type UserListJson = {
     Createddate?: string;
     deviceId?: string | null;
     lastAccessDate?: string | null;
-    isAdmin?: boolean;
   }>;
 };
 
@@ -41,13 +40,7 @@ export function dedupeUserListBySerialNo(rows: NrmUserListEntry[]): NrmUserListE
 }
 
 export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]> {
-  const res = await fetch(NRM_USER_LIST_JSON_RAW_URL, {
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-  });
-  if (!res.ok) {
-    throw new Error(`userList.json HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as UserListJson;
+  const json = await fetchGithubRawJson<UserListJson>(NRM_USER_LIST_JSON_RAW_URL);
   const rows = Array.isArray(json.userList) ? json.userList : [];
   const normalized: NrmUserListEntry[] = [];
   for (const row of rows) {
@@ -65,7 +58,6 @@ export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]>
       Createddate: String(row.Createddate ?? '').trim(),
       deviceId: row.deviceId ?? null,
       lastAccessDate: row.lastAccessDate ?? null,
-      isAdmin: row.isAdmin === true,
     });
   }
   return dedupeUserListBySerialNo(normalized);

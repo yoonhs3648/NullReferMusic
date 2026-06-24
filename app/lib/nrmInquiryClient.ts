@@ -1,4 +1,5 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
+import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import {
   NRM_INQUIRY_HISTORY_DAYS,
   NRM_INQUIRY_JSON_RAW_URL,
@@ -90,14 +91,7 @@ export function sortInquiriesByCreatedDesc(items: NrmInquiryItem[]): NrmInquiryI
 }
 
 async function fetchInquiryRows(signal?: AbortSignal): Promise<NrmInquiryItem[]> {
-  const res = await fetch(NRM_INQUIRY_JSON_RAW_URL, {
-    signal,
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-  });
-  if (!res.ok) {
-    throw new Error(`inquiry.json HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as InquiryJson;
+  const json = await fetchGithubRawJson<InquiryJson>(NRM_INQUIRY_JSON_RAW_URL, { signal });
   const rows = Array.isArray(json.inquiry) ? json.inquiry : [];
   const items: NrmInquiryItem[] = [];
   for (const row of rows) {

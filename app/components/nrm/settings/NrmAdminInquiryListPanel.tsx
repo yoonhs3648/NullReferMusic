@@ -25,6 +25,7 @@ import {
 import { validateInquiryReplyContent } from '@/lib/nrmJsonFieldValidation';
 import { NRM_INQUIRY_MAX_REPLY_CHARS } from '@/lib/nrmRemoteDataConfig';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
 const PAGE_SIZE = 15;
@@ -280,7 +281,8 @@ const InquiryRow = memo(function InquiryRow({
 
 type SectionHeaderProps = {
   title: string;
-  count: number;
+  count?: number;
+  showCount?: boolean;
   open: boolean;
   onToggle: () => void;
   titleColor: string;
@@ -291,6 +293,7 @@ type SectionHeaderProps = {
 function SectionHeader({
   title,
   count,
+  showCount = true,
   open,
   onToggle,
   titleColor,
@@ -310,7 +313,9 @@ function SectionHeader({
       accessibilityState={{ expanded: open }}>
       <Text style={[styles.sectionHeadTitle, { color: titleColor }]}>
         {title}
-        <Text style={[styles.sectionHeadCount, { color: bodyColor }]}> ({count})</Text>
+        {showCount && count !== undefined ? (
+          <Text style={[styles.sectionHeadCount, { color: bodyColor }]}> ({count})</Text>
+        ) : null}
       </Text>
       <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={20} color={bodyColor} />
     </Pressable>
@@ -408,7 +413,7 @@ function InquirySectionList({
 export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
   const [allItems, setAllItems] = useState<NrmInquiryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pendingOpen, setPendingOpen] = useState(true);
+  const [pendingOpen, setPendingOpen] = useState(false);
   const [answeredOpen, setAnsweredOpen] = useState(false);
   const [pendingDisplayCount, setPendingDisplayCount] = useState(PAGE_SIZE);
   const [answeredDisplayCount, setAnsweredDisplayCount] = useState(PAGE_SIZE);
@@ -430,19 +435,26 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
     return { pendingItems: pending, answeredItems: answered };
   }, [allItems]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setPendingDisplayCount(PAGE_SIZE);
-    setAnsweredDisplayCount(PAGE_SIZE);
-    setExpandedIds(new Set());
-    setReplyDrafts({});
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setPendingDisplayCount(PAGE_SIZE);
+      setAnsweredDisplayCount(PAGE_SIZE);
+      setExpandedIds(new Set());
+      setReplyDrafts({});
+    }
     try {
       setAllItems(await fetchAllInquiriesForAdmin());
     } catch {
-      setAllItems([]);
+      if (!silent) {
+        setAllItems([]);
+      }
       void notifyUser('문의 목록을 불러오지 못했습니다.');
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -468,7 +480,7 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
     try {
       await downloadInquiryAttachmentFile(fileName);
     } catch (e) {
-      void notifyUser(e instanceof Error ? e.message : '첨부 파일 다운로드에 실패했습니다.');
+      notifyUserError('inquiry.attachDownload', e, '첨부 파일 다운로드에 실패했습니다.');
     } finally {
       setDownloadingAttach(false);
     }
@@ -484,12 +496,30 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
       }
       setSubmittingId(item.id);
       setGlobalBusy(true);
+      const replyText = draft.trim();
       try {
-        await submitInquiryReplyToGithub(item.id, draft.trim());
+        await submitInquiryReplyToGithub(item.id, replyText);
+        setAllItems((prev) =>
+          prev.map((row) =>
+            row.id === item.id
+              ? { ...row, isAnswered: true, replyContent: replyText }
+              : row,
+          ),
+        );
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        setReplyDrafts((prev) => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
         void notifyUser('답변이 등록되었습니다.');
-        await reload();
+        void reload({ silent: true });
       } catch (e) {
-        void notifyUser(e instanceof Error ? e.message : '답변 등록에 실패했습니다.');
+        notifyUserError('inquiry.replySubmit', e, '답변 등록에 실패했습니다.');
       } finally {
         setSubmittingId(null);
         setGlobalBusy(false);
@@ -537,12 +567,12 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
 
           <SectionHeader
             title="답변완료"
-            count={answeredItems.length}
             open={answeredOpen}
             onToggle={() => setAnsweredOpen((v) => !v)}
             titleColor={titleColor}
             bodyColor={bodyColor}
             isDark={isDark}
+            showCount={false}
           />
           <InquirySectionList
             items={answeredItems}
@@ -562,10 +592,6 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
             downloadingAttach={downloadingAttach}
             onDownloadAttach={onDownloadAttach}
           />
-
-          <Pressable onPress={() => void reload()} style={styles.refreshLink}>
-            <Text style={styles.refreshLabel}>새로고침</Text>
-          </Pressable>
         </>
       )}
 
@@ -763,15 +789,6 @@ const styles = StyleSheet.create({
   replyBody: {
     fontSize: nrmTokens.font.body,
     lineHeight: 22,
-  },
-  refreshLink: {
-    alignSelf: 'center',
-    paddingVertical: nrmTokens.space.md,
-  },
-  refreshLabel: {
-    color: nrmTokens.color.primary,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
   },
   blocker: {
     flex: 1,

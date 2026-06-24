@@ -1,0 +1,197 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { nrmTokens } from '@/constants/nrmTokens';
+
+export type NrmAdminUserSearchField = 'userName' | 'SerialNo';
+
+type Props = {
+  titleColor: string;
+  bodyColor: string;
+  isDark: boolean;
+  searchActive: boolean;
+  onSearchActiveChange: (active: boolean) => void;
+  searchField: NrmAdminUserSearchField;
+  onSearchFieldChange: (field: NrmAdminUserSearchField) => void;
+  searchText: string;
+  onSearchTextChange: (text: string) => void;
+};
+
+export function NrmAdminUserSearchBar({
+  titleColor,
+  bodyColor,
+  isDark,
+  searchActive,
+  onSearchActiveChange,
+  searchField,
+  onSearchFieldChange,
+  searchText,
+  onSearchTextChange,
+}: Props) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const dropdownBg = isDark ? '#2a2a2e' : '#ffffff';
+
+  const closeSearch = () => {
+    onSearchActiveChange(false);
+    onSearchTextChange('');
+    setDropdownOpen(false);
+  };
+
+  if (!searchActive) {
+    return (
+      <View style={styles.searchBtnRow}>
+        <Pressable
+          onPress={() => onSearchActiveChange(true)}
+          style={({ pressed }) => [
+            styles.searchToggleBtn,
+            { borderColor: hairline },
+            pressed && { opacity: 0.7 },
+          ]}
+          accessibilityRole="button">
+          <Ionicons name="search-outline" size={16} color={nrmTokens.color.primary} />
+          <Text style={styles.searchToggleBtnText}>검색</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.searchPanel, { borderColor: hairline }]}>
+      <View style={styles.searchFieldRow}>
+        <Pressable
+          onPress={() => setDropdownOpen((v) => !v)}
+          style={[styles.fieldDropdownBtn, { borderColor: hairline }]}>
+          <Text style={[styles.fieldDropdownText, { color: titleColor }]}>
+            {searchField === 'userName' ? '사용자 이름' : '시리얼번호'}
+          </Text>
+          <Ionicons
+            name={dropdownOpen ? 'chevron-up' : 'chevron-down'}
+            size={13}
+            color={bodyColor}
+          />
+        </Pressable>
+        <Pressable onPress={closeSearch} style={styles.searchCloseBtn} accessibilityRole="button">
+          <Ionicons name="close" size={20} color={bodyColor} />
+        </Pressable>
+      </View>
+
+      {dropdownOpen ? (
+        <View style={[styles.dropdownMenu, { backgroundColor: dropdownBg, borderColor: hairline }]}>
+          {(['userName', 'SerialNo'] as NrmAdminUserSearchField[]).map((f) => (
+            <Pressable
+              key={f}
+              onPress={() => {
+                onSearchFieldChange(f);
+                setDropdownOpen(false);
+              }}
+              style={({ pressed }) => [styles.dropdownItem, pressed && { opacity: 0.7 }]}>
+              <Text
+                style={[
+                  styles.dropdownItemText,
+                  { color: titleColor },
+                  searchField === f && styles.dropdownItemTextActive,
+                ]}>
+                {f === 'userName' ? '사용자 이름' : '시리얼번호'}
+              </Text>
+              {searchField === f ? (
+                <Ionicons name="checkmark" size={15} color={nrmTokens.color.primary} />
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <TextInput
+        value={searchText}
+        onChangeText={onSearchTextChange}
+        placeholder="검색어 입력"
+        placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'}
+        style={[styles.searchInput, { color: titleColor, borderColor: hairline }]}
+        autoFocus
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  searchBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: nrmTokens.space.sm,
+  },
+  searchToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  searchToggleBtnText: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '500',
+    color: nrmTokens.color.primary,
+  },
+  searchPanel: {
+    marginBottom: nrmTokens.space.sm,
+    paddingBottom: nrmTokens.space.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: nrmTokens.space.sm,
+  },
+  searchFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: nrmTokens.space.sm,
+  },
+  fieldDropdownBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: nrmTokens.radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  fieldDropdownText: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '500',
+  },
+  searchInput: {
+    width: '100%',
+    fontSize: nrmTokens.font.body,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: nrmTokens.radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 40,
+  },
+  searchCloseBtn: {
+    padding: 4,
+  },
+  dropdownMenu: {
+    borderRadius: nrmTokens.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  dropdownItemText: {
+    fontSize: nrmTokens.font.body,
+    flex: 1,
+  },
+  dropdownItemTextActive: {
+    color: nrmTokens.color.primary,
+    fontWeight: '600',
+  },
+});

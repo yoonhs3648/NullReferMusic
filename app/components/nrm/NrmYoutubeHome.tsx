@@ -6,7 +6,6 @@ import {
   Alert,
   FlatList,
   Image,
-  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -23,6 +22,7 @@ import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { nrmDeferUiWork } from '@/lib/nrmDeferUiWork';
 import {
   nrmYoutubeDownloadYtDlpFailedMessage,
   nrmYoutubeSearchBackendConnectionMessage,
@@ -682,29 +682,29 @@ export function NrmYoutubeHome({
               : undefined,
         });
         if (out.lyricsWarning === 'not_embedded') {
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             setLyricsEmbedUnavailableOpen(true);
           });
         } else if (out.lyricsWarning === 'translation_exhausted') {
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             setLyricsTranslationExhausted(true);
             setLyricsTranslationFailedOpen(true);
           });
         } else if (out.lyricsWarning === 'translation_failed') {
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             setLyricsTranslationExhausted(false);
             setLyricsTranslationFailedOpen(true);
           });
         } else if (out.lyricsWarning === 'memory_insufficient') {
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
           });
         } else if (out.lyricsWarning === 'melon_align_failed') {
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             notifyUser('멜론가사 생성에 실패했습니다.');
           });
@@ -737,7 +737,7 @@ export function NrmYoutubeHome({
       setDownloadModalItem(null);
       setDownloadModalInitialFields(undefined);
 
-      InteractionManager.runAfterInteractions(() => {
+      void nrmDeferUiWork().then(() => {
         if (!mountedRef.current) return;
         const session: DownloadSession = {
           extractionPromise: beginParallelExtraction(videoId),
@@ -839,7 +839,7 @@ export function NrmYoutubeHome({
             ),
             resolveDownloadFileName(item, metadataContext),
           ]);
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             void (async () => {
               try {
@@ -857,7 +857,7 @@ export function NrmYoutubeHome({
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
           beginParallelExtraction(videoId);
-          InteractionManager.runAfterInteractions(() => {
+          void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             void (async () => {
               try {

@@ -11,11 +11,13 @@ import {
   View,
 } from 'react-native';
 
+import { NrmAdminUserPickerModal } from '@/components/nrm/settings/NrmAdminUserPickerModal';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { validateAlarmJsonField } from '@/lib/nrmJsonFieldValidation';
 import { registerAlarmToGithub } from '@/lib/nrmGithubAlarmRegister';
-import { fetchDedupedUserListEntries, type NrmUserListEntry } from '@/lib/nrmUserListClient';
+import type { NrmUserListEntry } from '@/lib/nrmUserListClient';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
@@ -52,25 +54,20 @@ export function NrmAdminAlarmRegisterPanel({ titleColor, bodyColor, isDark, onBa
   const [personalLabel, setPersonalLabel] = useState('설정안함');
   const [personalSerial, setPersonalSerial] = useState('');
   const [userPickerOpen, setUserPickerOpen] = useState(false);
-  const [userRows, setUserRows] = useState<NrmUserListEntry[]>([]);
-  const [userLoading, setUserLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const inputBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
   const modalScrim = getNrmModalScrimColor(isDark);
 
-  const openUserPicker = useCallback(async () => {
-    setUserPickerOpen(true);
-    setUserLoading(true);
-    try {
-      setUserRows(await fetchDedupedUserListEntries());
-    } catch {
-      setUserRows([]);
-      void notifyUser('사용자 목록을 불러오지 못했습니다.');
-    } finally {
-      setUserLoading(false);
-    }
+  const onUserSelect = useCallback((entry: NrmUserListEntry) => {
+    setPersonalLabel(entry.userName);
+    setPersonalSerial(entry.SerialNo);
+  }, []);
+
+  const onPersonalClear = useCallback(() => {
+    setPersonalLabel('설정안함');
+    setPersonalSerial('');
   }, []);
 
   const onSave = useCallback(async () => {
@@ -99,7 +96,7 @@ export function NrmAdminAlarmRegisterPanel({ titleColor, bodyColor, isDark, onBa
       setPersonalSerial('');
       void notifyUser('알림이 등록되었습니다.');
     } catch (e) {
-      void notifyUser(e instanceof Error ? e.message : '알림 등록에 실패했습니다.');
+      notifyUserError('admin.alarmRegister', e, '알림 등록에 실패했습니다.');
     } finally {
       setSaving(false);
     }
@@ -148,7 +145,7 @@ export function NrmAdminAlarmRegisterPanel({ titleColor, bodyColor, isDark, onBa
           ]}
         />
         <Pressable
-          onPress={() => void openUserPicker()}
+          onPress={() => setUserPickerOpen(true)}
           style={({ pressed }) => [styles.searchBtn, pressed && styles.searchBtnPressed]}
           accessibilityRole="button"
           accessibilityLabel="사용자 검색">
@@ -190,37 +187,15 @@ export function NrmAdminAlarmRegisterPanel({ titleColor, bodyColor, isDark, onBa
         </Pressable>
       </Modal>
 
-      <Modal visible={userPickerOpen} transparent animationType="fade" onRequestClose={() => setUserPickerOpen(false)}>
-        <Pressable style={[styles.modalRoot, { backgroundColor: modalScrim }]} onPress={() => setUserPickerOpen(false)}>
-          <View style={[styles.modalCard, styles.userModalCard, { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas, borderColor: hairline }]}>
-            <Pressable
-              onPress={() => {
-                setPersonalLabel('설정안함');
-                setPersonalSerial('');
-                setUserPickerOpen(false);
-              }}
-              style={({ pressed }) => [styles.modalRow, pressed && { opacity: 0.85 }]}>
-              <Text style={[styles.modalRowText, { color: titleColor }]}>설정안함</Text>
-            </Pressable>
-            {userLoading ? (
-              <ActivityIndicator style={styles.userLoading} color={nrmTokens.color.primary} />
-            ) : (
-              userRows.map((row) => (
-                <Pressable
-                  key={`${row.id}-${row.SerialNo}`}
-                  onPress={() => {
-                    setPersonalLabel(row.userName);
-                    setPersonalSerial(row.SerialNo);
-                    setUserPickerOpen(false);
-                  }}
-                  style={({ pressed }) => [styles.modalRow, pressed && { opacity: 0.85 }]}>
-                  <Text style={[styles.modalRowText, { color: titleColor }]}>{row.userName}</Text>
-                </Pressable>
-              ))
-            )}
-          </View>
-        </Pressable>
-      </Modal>
+      <NrmAdminUserPickerModal
+        visible={userPickerOpen}
+        onClose={() => setUserPickerOpen(false)}
+        onSelect={onUserSelect}
+        onClear={onPersonalClear}
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        isDark={isDark}
+      />
     </NrmMenuDrawerScroll>
   );
 }
@@ -326,15 +301,14 @@ const styles = StyleSheet.create({
   modalRoot: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: nrmTokens.space.lg,
   },
   modalCard: {
+    width: '100%',
     borderRadius: nrmTokens.radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-  },
-  userModalCard: {
-    maxHeight: 360,
   },
   modalRow: {
     paddingHorizontal: nrmTokens.space.lg,
@@ -344,8 +318,5 @@ const styles = StyleSheet.create({
   },
   modalRowText: {
     fontSize: nrmTokens.font.body,
-  },
-  userLoading: {
-    paddingVertical: nrmTokens.space.lg,
   },
 });

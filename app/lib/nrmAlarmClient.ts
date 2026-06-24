@@ -1,9 +1,6 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
-import {
-  NRM_ALARM_ADMIN_SERIAL,
-  resolvesAdminTargetedAlarms,
-} from '@/lib/nrmAdminAlarmReceiver';
 import { countUnreadAlarmIds, pruneAlarmReadIds } from '@/lib/nrmAlarmReadState';
+import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 
 import { NRM_ALARM_JSON_RAW_URL, NRM_ALARM_DISPLAY_DAYS } from '@/lib/nrmRemoteDataConfig';
 
@@ -58,16 +55,11 @@ function isWithinDisplayWindow(dateStr: string, nowMs: number): boolean {
   return itemMs >= cutoff;
 }
 
-function isSerialVisible(
-  alarmSerial: string,
-  appSerial: string,
-  receiveAdminAlarms: boolean,
-): boolean {
-  const target = alarmSerial.trim();
-  if (!target) return true;
-  if (receiveAdminAlarms && target === NRM_ALARM_ADMIN_SERIAL) return true;
+function isSerialVisible(alarmSerial: string, appSerial: string): boolean {
   const app = appSerial.trim();
   if (!app) return false;
+  const target = alarmSerial.trim();
+  if (!target) return true;
   return target === app;
 }
 
@@ -102,27 +94,19 @@ function sortAlarms(items: NrmAlarmItem[]): NrmAlarmItem[] {
 function filterAlarms(
   rows: NrmAlarmItem[],
   appSerialNo: string,
-  receiveAdminAlarms: boolean,
   nowMs: number,
 ): NrmAlarmItem[] {
   return sortAlarms(
     rows.filter(
       (row) =>
         isWithinDisplayWindow(row.date, nowMs) &&
-        isSerialVisible(row.SerialNo, appSerialNo, receiveAdminAlarms),
+        isSerialVisible(row.SerialNo, appSerialNo),
     ),
   );
 }
 
 async function fetchAlarmPayload(signal?: AbortSignal): Promise<NrmAlarmItem[]> {
-  const res = await fetch(NRM_ALARM_JSON_RAW_URL, {
-    signal,
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-  });
-  if (!res.ok) {
-    throw new Error(`alarm.json HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as AlarmJson;
+  const json = await fetchGithubRawJson<AlarmJson>(NRM_ALARM_JSON_RAW_URL, { signal });
   const rows = Array.isArray(json.alarm) ? json.alarm : [];
   const normalized: NrmAlarmItem[] = [];
   for (const row of rows) {
@@ -152,10 +136,13 @@ export async function fetchAlarmsForApp(options?: {
 
   inflight = (async () => {
     const appSerialNo = await getNrmAppSerialNo();
-    const receiveAdminAlarms = await resolvesAdminTargetedAlarms();
     const nowMs = Date.now();
+    if (!appSerialNo.trim()) {
+      memoryCache = { items: [], fetchedAt: nowMs, appSerialNo: '' };
+      return [];
+    }
     const raw = await fetchAlarmPayload(options?.signal);
-    const items = filterAlarms(raw, appSerialNo, receiveAdminAlarms, nowMs);
+    const items = filterAlarms(raw, appSerialNo, nowMs);
     memoryCache = { items, fetchedAt: nowMs, appSerialNo };
     await pruneAlarmReadIds(items.map((row) => row.id));
     return items;

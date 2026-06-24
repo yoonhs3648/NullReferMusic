@@ -105,10 +105,15 @@ try {
     }
     else {
         Write-Host ""
-        Write-Host "[brand] Using default branding from nrm-brand.config.json (admin APK)"
+        Write-Host "[brand] Admin APK — NullReference Music / user=관리자 / SerialNo=Admin"
         $cfg = $originalBrandJson | ConvertFrom-Json
+        $cfg.displayName = 'NullReference Music'
+        $cfg.serialNo = 'Admin'
+        $cfg.userName = '관리자'
         $cfg.versionInfoAdminBuild = $true
         Write-Utf8NoBom -Path $BrandConfigPath -Content ($cfg | ConvertTo-Json -Depth 5)
+        Write-Host "[brand] SerialNo embedded in APK (NrmBrand.SERIAL_NO); license check skipped at runtime."
+        Write-Host "[brand] UserName embedded in APK (NrmBrand.USER_NAME)."
     }
 
     Write-Host ""
@@ -148,8 +153,8 @@ try {
         & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'custom' -ForceRebundle
     }
     else {
-        Write-Host "[4/5] Gradle assembleRelease (admin APK)..."
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'admin'
+        Write-Host "[4/5] Gradle assembleRelease (force rebundle for admin branding)..."
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'admin' -ForceRebundle
     }
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'

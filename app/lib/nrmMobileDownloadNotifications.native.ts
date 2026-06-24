@@ -63,9 +63,15 @@ const CH_LYRICS_PROGRESS = 'nrm_lyrics_progress';
 
 const CH_LYRICS_COMPLETE = 'nrm_lyrics_complete';
 
+const CH_ATTACHMENT_PROGRESS = 'nrm_attachment_progress';
+
+const CH_ATTACHMENT_COMPLETE = 'nrm_attachment_complete';
+
 const NOTIF_AUDIO_PROGRESS_ID = 'nrm-audio-busy';
 
 const NOTIF_LYRICS_PROGRESS_ID = 'nrm-lyrics-busy';
+
+const NOTIF_ATTACHMENT_PROGRESS_ID = 'nrm-attach-busy';
 
 
 
@@ -200,6 +206,34 @@ export async function setupNrmMobileDownloadNotifications(): Promise<void> {
       await setNotificationChannelAsync(CH_LYRICS_COMPLETE, {
 
         name: '가사 생성 완료',
+
+        importance: AndroidImportance.DEFAULT,
+
+        enableLights: false,
+
+        enableVibrate: false,
+
+        showBadge: true,
+
+      });
+
+      await setNotificationChannelAsync(CH_ATTACHMENT_PROGRESS, {
+
+        name: '첨부 파일 다운로드 진행',
+
+        importance: AndroidImportance.LOW,
+
+        enableLights: false,
+
+        enableVibrate: false,
+
+        showBadge: false,
+
+      });
+
+      await setNotificationChannelAsync(CH_ATTACHMENT_COMPLETE, {
+
+        name: '첨부 파일 다운로드 완료',
 
         importance: AndroidImportance.DEFAULT,
 
@@ -518,6 +552,112 @@ export function nrmNotifyDownloadFinished(
 export function nrmNotifyDownloadWorkEnded(videoId: string): void {
 
   nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
+
+}
+
+
+
+export async function nrmNotifyAttachmentDownloadStarted(fileName: string): Promise<void> {
+
+  if (!setupDone) await setupNrmMobileDownloadNotifications();
+
+  if (!setupDone) return;
+
+
+
+  const label = fileName.trim() || '첨부 파일';
+
+  const native = nativeProgressModule();
+
+  if (native?.showAudioProgress) {
+
+    native.showAudioProgress('다운로드 중', label);
+
+    return;
+
+  }
+
+
+
+  await scheduleNotificationAsync({
+
+    identifier: NOTIF_ATTACHMENT_PROGRESS_ID,
+
+    content: {
+
+      title: '다운로드 중',
+
+      body: label,
+
+      data: {},
+
+      ...(Platform.OS === 'android'
+
+        ? ({ android: { channelId: CH_ATTACHMENT_PROGRESS } } as object)
+
+        : {}),
+
+    },
+
+    trigger: null,
+
+  });
+
+}
+
+
+
+export async function nrmNotifyAttachmentDownloadFinished(
+
+  fileName: string,
+
+  success: boolean,
+
+): Promise<void> {
+
+  const label = fileName.trim() || '첨부 파일';
+
+  const native = nativeProgressModule();
+
+  if (native?.dismissAudioProgress) {
+
+    native.dismissAudioProgress();
+
+  } else {
+
+    await dismissNotificationAsync(NOTIF_ATTACHMENT_PROGRESS_ID).catch(() => {});
+
+  }
+
+
+
+  if (!setupDone || !success) return;
+
+
+
+  await scheduleNotificationAsync({
+
+    identifier: `nrm-attach-done-${Date.now()}`,
+
+    content: {
+
+      title: '다운로드 완료',
+
+      body: label,
+
+      data: {},
+
+      ...(Platform.OS === 'android'
+
+        ? ({ android: { channelId: CH_ATTACHMENT_COMPLETE } } as object)
+
+        : {}),
+
+    },
+
+    trigger: null,
+
+  });
 
 }
 

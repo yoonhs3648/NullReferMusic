@@ -29,6 +29,11 @@ type NativeOnDevice = {
     mimeType: string,
   ) => Promise<{ uri: string }>;
   copyFileToExistingSaf?: (sourcePath: string, destUri: string) => Promise<null>;
+  saveFileToAppDownloads?: (
+    sourcePath: string,
+    displayName: string,
+    mimeType: string,
+  ) => Promise<{ displayPath: string }>;
 };
 
 export function isOnDeviceDownloadAvailable(): boolean {
@@ -99,6 +104,27 @@ export async function copyLocalFileToExistingSaf(
     throw new Error(`SAF 대상 URI 오류: ${dest.slice(0, 96)}`);
   }
   await mod.copyFileToExistingSaf(src, dest);
+}
+
+/** Android: Download/{brand}/downloads/ 에 로컬 파일 저장 */
+export async function saveLocalFileToAppDownloads(
+  sourcePath: string,
+  displayName: string,
+  mimeType: string,
+): Promise<string> {
+  const mod = NativeModules.NrmOnDeviceDownload as NativeOnDevice | undefined;
+  if (!mod?.saveFileToAppDownloads) {
+    throw new Error('NrmOnDeviceDownload.saveFileToAppDownloads unavailable');
+  }
+  const trimmed = sourcePath.trim();
+  if (trimmed.startsWith('content://')) {
+    throw new Error(`로컬 파일 경로가 필요합니다: ${trimmed.slice(0, 96)}`);
+  }
+  const src = trimmed.startsWith('file://') ? trimmed.slice(7) : trimmed;
+  const out = await mod.saveFileToAppDownloads(src, displayName.trim(), mimeType);
+  const path = out?.displayPath?.trim();
+  if (!path) throw new Error('저장 경로를 받지 못했습니다.');
+  return path;
 }
 
 /** Android: 캐시 파일을 사용자 설정 확장자로 ffmpeg 변환 */

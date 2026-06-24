@@ -12,10 +12,10 @@ import {
 
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
-import { getNrmLogFilePath } from '@/lib/nrmFileLog';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import {
   deleteAllNrmLogFiles,
-  NRM_FILE_LOG_DISPLAY_PATH,
+  NRM_FILE_LOG_FOLDER_DISPLAY_PATH,
 } from '@/lib/nrmFileLoggingSettings';
 import {
   refreshNrmFileLoggingFromStorage,
@@ -48,7 +48,6 @@ export function NrmFileLoggingSettingsPanel({
   onBack,
 }: Props) {
   const [enabled, setEnabled] = useState(false);
-  const [logPath, setLogPath] = useState(NRM_FILE_LOG_DISPLAY_PATH);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -56,15 +55,9 @@ export function NrmFileLoggingSettingsPanel({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [stored, resolvedPath] = await Promise.all([
-        refreshNrmFileLoggingFromStorage(),
-        getNrmLogFilePath(),
-      ]);
+      const stored = await refreshNrmFileLoggingFromStorage();
       if (cancelled) return;
       setEnabled(stored);
-      if (resolvedPath?.trim()) {
-        setLogPath(resolvedPath.trim());
-      }
       setLoading(false);
     })();
     return () => {
@@ -98,6 +91,8 @@ export function NrmFileLoggingSettingsPanel({
           ? `${count}개의 로그 파일을 삭제했습니다.`
           : '삭제할 로그 파일이 없습니다.',
       );
+    } catch (e) {
+      notifyUserError('fileLog.deleteAll', e, '로그 파일 삭제에 실패했습니다.');
     } finally {
       setDeleting(false);
     }
@@ -108,7 +103,7 @@ export function NrmFileLoggingSettingsPanel({
       <MenuBackRow onPress={onBack} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>로깅</Text>
       <Text style={[styles.pathLabel, { color: bodyColor }]}>
-        로그위치 : {logPath}
+        로그위치 : {NRM_FILE_LOG_FOLDER_DISPLAY_PATH}
       </Text>
       {Platform.OS !== 'android' ? (
         <Text style={[styles.note, { color: bodyColor }]}>

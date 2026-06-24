@@ -15,6 +15,7 @@ import {
   truncateInquiryPreview,
   type NrmInquiryItem,
 } from '@/lib/nrmInquiryClient';
+import { logNrmRunError } from '@/lib/nrmDevLog';
 
 type Props = {
   titleColor: string;
@@ -106,23 +107,21 @@ function InquiryHistoryRow({
 export function NrmInquiryHistoryPanel({ titleColor, bodyColor, isDark }: Props) {
   const [items, setItems] = useState<NrmInquiryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
 
-  const load = useCallback(async (pull = false) => {
-    if (pull) setRefreshing(true);
-    else setLoading(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
       const rows = await fetchInquiriesForApp();
       setItems(rows);
       setExpandedIds(new Set());
     } catch (e) {
+      logNrmRunError('inquiry.historyLoad', e);
       setError(e instanceof Error ? e.message : '문의 내역을 불러오지 못했습니다.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
@@ -139,43 +138,28 @@ export function NrmInquiryHistoryPanel({ titleColor, bodyColor, isDark }: Props)
     });
   }, []);
 
-  const footerNote = (
-    <Text style={[styles.footerNote, { color: bodyColor }]}>
-      90일 이내의 문의내역을 조회합니다.
-    </Text>
-  );
-
   if (loading && items.length === 0) {
     return (
-      <View>
-        <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
-        {footerNote}
-      </View>
+      <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
     );
   }
 
   if (error && items.length === 0) {
     return (
-      <View>
-        <View style={styles.emptyWrap}>
-          <Text style={[styles.emptyText, { color: bodyColor }]}>{error}</Text>
-          <Pressable onPress={() => void load()} style={styles.retryBtn}>
-            <Text style={styles.retryLabel}>다시 시도</Text>
-          </Pressable>
-        </View>
-        {footerNote}
+      <View style={styles.emptyWrap}>
+        <Text style={[styles.emptyText, { color: bodyColor }]}>{error}</Text>
+        <Pressable onPress={() => void load()} style={styles.retryBtn}>
+          <Text style={styles.retryLabel}>다시 시도</Text>
+        </Pressable>
       </View>
     );
   }
 
   if (items.length === 0) {
     return (
-      <View>
-        <Text style={[styles.emptyText, { color: bodyColor, paddingVertical: nrmTokens.space.lg }]}>
-          최근 90일 이내 등록한 문의가 없습니다.
-        </Text>
-        {footerNote}
-      </View>
+      <Text style={[styles.emptyText, { color: bodyColor, paddingVertical: nrmTokens.space.lg }]}>
+        최근 90일 이내 등록한 문의가 없습니다.
+      </Text>
     );
   }
 
@@ -192,13 +176,6 @@ export function NrmInquiryHistoryPanel({ titleColor, bodyColor, isDark }: Props)
           isDark={isDark}
         />
       ))}
-      {refreshing ? (
-        <ActivityIndicator style={styles.footerLoader} color={nrmTokens.color.primary} />
-      ) : null}
-      <Pressable onPress={() => void load(true)} style={styles.refreshLink}>
-        <Text style={styles.refreshLabel}>새로고침</Text>
-      </Pressable>
-      {footerNote}
     </View>
   );
 }
@@ -289,24 +266,5 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginTop: nrmTokens.space.md,
     marginBottom: nrmTokens.space.sm,
-  },
-  footerLoader: {
-    marginTop: nrmTokens.space.sm,
-  },
-  refreshLink: {
-    alignSelf: 'center',
-    paddingVertical: nrmTokens.space.sm,
-  },
-  refreshLabel: {
-    color: nrmTokens.color.primary,
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-  },
-  footerNote: {
-    marginTop: nrmTokens.space.md,
-    marginBottom: nrmTokens.space.sm,
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 18,
-    textAlign: 'center',
   },
 });

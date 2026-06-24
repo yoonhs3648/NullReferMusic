@@ -21,4 +21,24 @@ if (Platform.OS !== 'web') {
       prev?.(error, isFatal);
     });
   }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const rejectionTracking = require('promise/setimmediate/rejection-tracking') as {
+      enable?: (opts: {
+        allRejections: boolean;
+        onUnhandled: (id: number, error: unknown) => void;
+        onHandled: (id: number) => void;
+      }) => void;
+    };
+    rejectionTracking.enable?.({
+      allRejections: true,
+      onUnhandled: (_id, error) => {
+        logNrmRunError('unhandledRejection', error);
+      },
+      onHandled: () => {},
+    });
+  } catch {
+    /* optional — Expo Go 등 일부 환경 */
+  }
 }

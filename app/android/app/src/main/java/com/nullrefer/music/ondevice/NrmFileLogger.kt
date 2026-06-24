@@ -152,44 +152,47 @@ object NrmFileLogger {
     )
   }
 
-  /** logs 폴더 내 모든 로그 파일 삭제 (일별·레거시 포함) */
+  /** logs 폴더 내 모든 로그 파일 삭제 (일별·레거시·중복 포함) */
   fun deleteAllLogFiles(): Int {
     val ctx = appContext ?: return 0
     var removed = 0
     synchronized(lock) {
       resetLogSink()
-      val relativePath = mediaStoreRelativePath()
+      val rows = listLogFolderFiles(ctx)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val projection = arrayOf(MediaStore.MediaColumns._ID)
-        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-        val args = arrayOf("$relativePath%")
-        ctx.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
-          val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-          while (cursor.moveToNext()) {
-            val id = cursor.getLong(idCol)
-            val uri = ContentUris.withAppendedId(collection, id)
-            if (ctx.contentResolver.delete(uri, null, null) > 0) removed++
-          }
-        }
-      } else {
-        @Suppress("DEPRECATION")
-        val dir =
-            File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                folderRelPath,
-            )
-        if (dir.isDirectory) {
-          dir.listFiles()?.forEach { f ->
-            if (f.isFile && f.delete()) removed++
+        for (row in rows) {
+          try {
+            val uri = Uri.parse(row.uri)
+            if (ctx.contentResolver.delete(uri, null, null) > 0) {
+              removed++
+            }
+          } catch (e: Exception) {
+            Log.w(LOG_TAG, "MediaStore delete failed: ${row.name} ${e.message}")
           }
         }
       }
-    }
-    if (userLoggingEnabled) {
-      log("file-log", "Deleted $removed log file(s)")
+      @Suppress("DEPRECATION")
+      val dir =
+          File(
+              Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+              folderRelPath,
+          )
+      if (dir.isDirectory) {
+        dir.listFiles()?.forEach { f ->
+          if (f.isFile && isLogFileName(f.name) && f.delete()) {
+            removed++
+          }
+        }
+      }
+      resetLogSink()
     }
     return removed
+  }
+
+  private fun isLogFileName(name: String): Boolean {
+    val n = name.trim()
+    if (n.isEmpty()) return false
+    return n.contains("NullReferenceMusicLog") || n.startsWith(LEGACY_LOG_FILE_PREFIX)
   }
 
   private fun logSessionHeader() {

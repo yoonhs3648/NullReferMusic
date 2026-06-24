@@ -19,11 +19,11 @@ import {
   type NrmInquiryAttachmentPick,
 } from '@/lib/nrmInquiryAttachment';
 import { validateInquiryContent } from '@/lib/nrmJsonFieldValidation';
-import { inquiryAttachmentExtensionLabel } from '@/lib/nrmInquiryAttachmentPolicy';
 import {
   NRM_INQUIRY_MAX_ATTACHMENT_BYTES,
   NRM_INQUIRY_MAX_CONTENT_CHARS,
 } from '@/lib/nrmRemoteDataConfig';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
@@ -86,8 +86,7 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack, embedde
       }
       setAttachment(picked);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '파일을 선택하지 못했습니다.';
-      void notifyUser(msg);
+      notifyUserError('inquiry.attachPick', e);
     } finally {
       setPicking(false);
     }
@@ -110,7 +109,7 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack, embedde
       setAttachment(null);
       void notifyUser('완료되었습니다.');
     } catch (e) {
-      void notifyUser(e instanceof Error ? e.message : '문의 등록에 실패했습니다.');
+      notifyUserError('inquiry.register', e, '문의 등록에 실패했습니다.');
     } finally {
       setSubmitting(false);
     }
@@ -134,12 +133,9 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack, embedde
         [{content.length}/{NRM_INQUIRY_MAX_CONTENT_CHARS}]
       </Text>
 
-      <View style={styles.attachHeadRow}>
-        <Text style={[styles.fieldLabel, { color: titleColor, marginTop: 0 }]}>첨부파일</Text>
-        <Text style={[styles.attachQuota, { color: bodyColor }]}>
-          ({attachMb}/{maxMb}MB, {inquiryAttachmentExtensionLabel()})
-        </Text>
-      </View>
+      <Text style={[styles.fieldLabel, { color: titleColor }]}>
+        첨부파일 ({attachMb}/{maxMb}MB)
+      </Text>
       <View style={styles.attachRow}>
         <Text
           style={[styles.attachName, { color: titleColor, borderColor: hairline, backgroundColor: inputBg }]}
@@ -242,15 +238,6 @@ const styles = StyleSheet.create({
     marginTop: nrmTokens.space.xs,
     fontSize: nrmTokens.font.caption,
     textAlign: 'right',
-  },
-  attachHeadRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginTop: nrmTokens.space.md,
-  },
-  attachQuota: {
-    fontSize: nrmTokens.font.caption,
   },
   attachRow: {
     flexDirection: 'row',

@@ -3,14 +3,12 @@ import {
   putGithubContents,
   utf8ToBase64,
 } from '@/lib/nrmGithubContentsApi';
-import {
-  setCachedUserListIsAdmin,
-} from '@/lib/nrmAdminAlarmReceiver';
 import { getNrmGithubDataPat } from '@/lib/nrmGithubDataPat';
 import { getNrmAppSerialNo, getNrmAndroidIdSha256 } from '@/lib/nrmAppSerialNo';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
 import { NRM_USER_LIST_JSON_API_PATH } from '@/lib/nrmRemoteDataConfig';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import brandConfig from '../nrm-brand.config.json';
 
 type UserListRawEntry = {
   id?: number;
@@ -21,7 +19,6 @@ type UserListRawEntry = {
   Createddate?: string;
   deviceId?: string | null;
   lastAccessDate?: string | null;
-  isAdmin?: boolean;
 };
 
 type UserListJson = {
@@ -98,6 +95,11 @@ export type DeviceBindingResult =
 export async function runDeviceBindingCheck(): Promise<DeviceBindingResult> {
   const tag = 'device-binding';
 
+  if (brandConfig.versionInfoAdminBuild === true) {
+    logNrmDev(tag, { event: 'skip-admin-build' });
+    return { status: 'skip' };
+  }
+
   const serialNo = await getNrmAppSerialNo();
   if (!serialNo) {
     logNrmDev(tag, { event: 'skip-no-serial' });
@@ -124,8 +126,6 @@ export async function runDeviceBindingCheck(): Promise<DeviceBindingResult> {
     logNrmRunError(tag, new Error('SerialNo not registered in userList'), { event: 'serial-not-found' });
     return { status: 'unregistered' };
   }
-
-  setCachedUserListIsAdmin(entry.isAdmin === true);
 
   const androidIdHash = await getNrmAndroidIdSha256();
   if (!androidIdHash) {

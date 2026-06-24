@@ -277,13 +277,6 @@ function ConsentSection({
             }}>
             <Text style={[styles.contentText, { color: muted }]}>{content}</Text>
           </ScrollView>
-          {!scrolledToBottom && (
-            <View style={styles.scrollHintRow}>
-              <Text style={[styles.scrollHintText, { color: nrmTokens.color.primary }]}>
-                끝까지 스크롤하면 동의할 수 있습니다
-              </Text>
-            </View>
-          )}
           <View style={[styles.hairline, { backgroundColor: divider }]} />
         </>
       )}
@@ -483,15 +476,6 @@ const styles = StyleSheet.create({
   contentText: {
     fontSize: 13,
     lineHeight: 20,
-  },
-  scrollHintRow: {
-    paddingHorizontal: nrmTokens.space.md,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  scrollHintText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
 
   // checkbox row

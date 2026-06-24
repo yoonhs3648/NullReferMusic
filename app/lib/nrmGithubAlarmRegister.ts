@@ -5,6 +5,7 @@ import {
   NRM_ALARM_JSON_RAW_URL,
 } from '@/lib/nrmRemoteDataConfig';
 import { invalidateAlarmCache } from '@/lib/nrmAlarmClient';
+import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
 export type NrmAlarmRegisterInput = {
@@ -180,10 +181,10 @@ export async function registerAlarmToGithub(input: NrmAlarmRegisterInput): Promi
 
 /** raw URL로 현재 문서 읽기 (등록 전 id 계산용 폴백) */
 export async function peekAlarmJsonFromRaw(): Promise<AlarmJson> {
-  const res = await fetch(NRM_ALARM_JSON_RAW_URL, {
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-  });
-  if (!res.ok) return { alarm: [] };
-  const parsed = (await res.json()) as AlarmJson;
-  return { alarm: Array.isArray(parsed.alarm) ? parsed.alarm : [] };
+  try {
+    const parsed = await fetchGithubRawJson<AlarmJson>(NRM_ALARM_JSON_RAW_URL);
+    return { alarm: Array.isArray(parsed.alarm) ? parsed.alarm : [] };
+  } catch {
+    return { alarm: [] };
+  }
 }

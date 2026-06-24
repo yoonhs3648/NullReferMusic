@@ -1,3 +1,4 @@
+import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import {
   NRM_USER_BAN_LIST_JSON_RAW_URL,
   NRM_USER_BAN_POLL_INTERVAL_MS,
@@ -45,14 +46,9 @@ function normalizeRows(json: UserBanListJson): NrmUserBanItem[] {
 
 /** 캐시 없이 원격 userBanList.json 조회 */
 export async function fetchUserBanList(signal?: AbortSignal): Promise<NrmUserBanItem[]> {
-  const res = await fetch(NRM_USER_BAN_LIST_JSON_RAW_URL, {
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+  const json = await fetchGithubRawJson<UserBanListJson>(NRM_USER_BAN_LIST_JSON_RAW_URL, {
     signal,
   });
-  if (!res.ok) {
-    throw new Error(`userBanList.json HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as UserBanListJson;
   return normalizeRows(json);
 }
 

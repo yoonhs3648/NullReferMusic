@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -30,7 +30,7 @@ type Props = {
   feed: NrmAlarmFeed;
 };
 
-function AlarmListRow({
+function AlarmListRowInner({
   item,
   isDark,
   expanded,
@@ -41,17 +41,29 @@ function AlarmListRow({
   isDark: boolean;
   expanded: boolean;
   isRead: boolean;
-  onToggle: () => void;
+  onToggle: (id: number) => void;
 }) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
+  const readTitleColor = isDark ? 'rgba(255,255,255,0.58)' : nrmTokens.color.inkMuted80;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
+  const accentColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+  const unreadRowBg = isDark ? 'rgba(41, 151, 255, 0.09)' : nrmTokens.color.accentSoft;
   const contentLines = item.content.split('\n');
 
   return (
-    <View style={[styles.row, { borderBottomColor: hairline }]}>
+    <View
+      style={[
+        styles.row,
+        { borderBottomColor: hairline },
+        !isRead && {
+          backgroundColor: unreadRowBg,
+          borderLeftWidth: 3,
+          borderLeftColor: accentColor,
+        },
+      ]}>
       <Pressable
-        onPress={onToggle}
+        onPress={() => onToggle(item.id)}
         style={({ pressed }) => [styles.rowHead, pressed && styles.rowPressed]}
         accessibilityRole="button"
         accessibilityState={{ expanded }}>
@@ -61,20 +73,22 @@ function AlarmListRow({
               <Text style={styles.noticeBadgeText}>공지</Text>
             </View>
           ) : null}
-          <Text
-            style={[
-              styles.rowTitle,
-              { color: titleColor },
-              !isRead && styles.rowTitleUnread,
-            ]}
-            numberOfLines={expanded ? undefined : 2}>
-            {item.title}
-          </Text>
-          {!isRead ? (
-            <View style={styles.newBadge}>
-              <Text style={styles.newBadgeText}>N</Text>
-            </View>
-          ) : null}
+          <View style={styles.titleWithBadge}>
+            <Text
+              style={[
+                styles.rowTitle,
+                { color: isRead ? readTitleColor : titleColor },
+                !isRead && styles.rowTitleUnread,
+              ]}
+              numberOfLines={expanded ? undefined : 2}>
+              {item.title}
+            </Text>
+            {!isRead ? (
+              <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>N</Text>
+              </View>
+            ) : null}
+          </View>
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={16}
@@ -99,18 +113,28 @@ function AlarmListRow({
   );
 }
 
+const AlarmListRow = memo(AlarmListRowInner);
+
 /** 우측 알림 레이어 — GitHub alarm.json 기반 인앱 알림 */
 export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: Props) {
   const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const drawerW = Math.min(380, Math.round(windowWidth * 0.88));
+  const drawerW = Math.max(280, Math.min(380, Math.round(windowWidth * 0.88) || 320));
+  const drawerWRef = useRef(drawerW);
+  drawerWRef.current = drawerW;
   const translateX = useRef(new Animated.Value(drawerW)).current;
   const [visible, setVisible] = useState(open);
   const [readIds, setReadIds] = useState<Set<number>>(() => new Set());
+  const feedRef = useRef(feed);
+  feedRef.current = feed;
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
   const modalScrim = getNrmModalScrimColor(isDark);
+
+  /** feed/readIds의 최신 값을 ref로 유지 — onToggle 참조 안정화용 */
+  const readIdsRef = useRef(readIds);
+  readIdsRef.current = readIds;
 
   const dismiss = useCallback(() => {
     Animated.timing(translateX, {
@@ -126,31 +150,37 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
   }, [drawerW, onOpenChange, translateX]);
 
   useEffect(() => {
-    if (open) {
-      feed.collapseAllExpanded();
-      setVisible(true);
-      translateX.setValue(drawerW);
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 260,
-        useNativeDriver: true,
-      }).start();
-      void feed.reload(true);
-      void peekReadAlarmIds().then(setReadIds);
-      return;
-    }
-    if (visible) dismiss();
-  }, [dismiss, drawerW, feed.collapseAllExpanded, feed.reload, open, translateX, visible]);
+    if (!open) return;
+    feedRef.current.collapseAllExpanded();
+    setVisible(true);
+    const w = drawerWRef.current;
+    translateX.setValue(w);
+    Animated.timing(translateX, {
+      toValue: 0,
+      duration: 260,
+      useNativeDriver: true,
+    }).start();
+    void feedRef.current.reload(true);
+    void peekReadAlarmIds().then(setReadIds);
+  }, [open, translateX]);
 
-  const onToggle = useCallback(
-    (id: number) => {
-      feed.toggleExpanded(id);
-      if (!readIds.has(id)) {
-        setReadIds((prev) => new Set(prev).add(id));
-      }
-    },
-    [feed, readIds],
-  );
+  useEffect(() => {
+    if (!open) return;
+    translateX.setValue(0);
+  }, [drawerW, open, translateX]);
+
+  useEffect(() => {
+    if (open || !visible) return;
+    dismiss();
+  }, [dismiss, open, visible]);
+
+  /** 참조가 안정적 — feed/readIds를 ref로 읽으므로 deps 불필요 */
+  const onToggle = useCallback((id: number) => {
+    feedRef.current.toggleExpanded(id);
+    if (!readIdsRef.current.has(id)) {
+      setReadIds((prev) => new Set(prev).add(id));
+    }
+  }, []);
 
   const onRefreshPull = useCallback(() => {
     void feed.pullToRefresh();
@@ -163,7 +193,7 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
         isDark={isDark}
         expanded={feed.expandedIds.has(item.id)}
         isRead={readIds.has(item.id)}
-        onToggle={() => onToggle(item.id)}
+        onToggle={onToggle}
       />
     ),
     [feed.expandedIds, isDark, onToggle, readIds],
@@ -172,7 +202,7 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={dismiss}>
+    <Modal visible transparent animationType="none" onRequestClose={dismiss} hardwareAccelerated>
       <View style={styles.modalRoot}>
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
@@ -215,6 +245,8 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
                   }
                   contentContainerStyle={styles.listContent}
                   showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="always"
+                  overScrollMode="never"
                   initialNumToRender={15}
                   maxToRenderPerBatch={10}
                   windowSize={8}
@@ -284,6 +316,8 @@ const styles = StyleSheet.create({
   row: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingVertical: nrmTokens.space.sm,
+    paddingHorizontal: nrmTokens.space.xs,
+    borderRadius: nrmTokens.radius.sm,
   },
   rowHead: {
     gap: nrmTokens.space.xs,
@@ -295,6 +329,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: nrmTokens.space.xs,
+  },
+  titleWithBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    minWidth: 0,
   },
   noticeBadge: {
     backgroundColor: nrmTokens.color.primary,
@@ -325,13 +366,14 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
   rowTitle: {
-    flex: 1,
+    flexShrink: 1,
     fontSize: nrmTokens.font.body,
     lineHeight: 22,
     fontWeight: '400',
   },
   rowTitleUnread: {
-    fontWeight: '700',
+    fontWeight: '600',
+    letterSpacing: -0.15,
   },
   rowChevron: {
     marginTop: 3,

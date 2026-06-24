@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
+import { logNrmRunError } from '@/lib/nrmDevLog';
 import { runDeviceBindingCheck, type DeviceBindingResult } from '@/lib/nrmDeviceBinding';
 
 type Phase =
@@ -39,6 +40,7 @@ export function NrmDeviceBindingGate({ onVerified }: Props) {
       try {
         result = await runDeviceBindingCheck();
       } catch (e) {
+        logNrmRunError('device-binding.gate', e);
         const msg = e instanceof Error ? e.message : String(e);
         setPhase({ kind: 'error', message: msg });
         return;

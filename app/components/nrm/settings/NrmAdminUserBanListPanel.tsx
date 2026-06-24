@@ -6,10 +6,13 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import {
+  NrmAdminUserSearchBar,
+  type NrmAdminUserSearchField,
+} from '@/components/nrm/settings/NrmAdminUserSearchBar';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { unbanUserOnGithub } from '@/lib/nrmGithubUserBanRegister';
@@ -18,9 +21,10 @@ import {
   listCurrentlyBannedUsers,
   type NrmUserBanItem,
 } from '@/lib/nrmUserBanClient';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
-type SearchField = 'userName' | 'SerialNo';
+type SearchField = NrmAdminUserSearchField;
 
 type Props = {
   titleColor: string;
@@ -54,13 +58,11 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
   const [searchActive, setSearchActive] = useState(false);
   const [searchField, setSearchField] = useState<SearchField>('userName');
   const [searchText, setSearchText] = useState('');
-  const [fieldDropdownOpen, setFieldDropdownOpen] = useState(false);
 
   const [detailEntry, setDetailEntry] = useState<NrmUserBanItem | null>(null);
 
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const surfaceBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
-  const dropdownBg = isDark ? '#2a2a2e' : '#ffffff';
 
   const filteredRows = useMemo(() => {
     if (!searchActive || !searchText.trim()) return rows;
@@ -96,7 +98,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
         void notifyUser('차단이 해제되었습니다.');
         await reload();
       } catch (e) {
-        void notifyUser(e instanceof Error ? e.message : '차단 해제에 실패했습니다.');
+        notifyUserError('admin.userBanUnban', e, '차단 해제에 실패했습니다.');
       } finally {
         setBusyId(null);
       }
@@ -104,86 +106,22 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
     [reload],
   );
 
-  const closeSearch = () => {
-    setSearchActive(false);
-    setSearchText('');
-    setFieldDropdownOpen(false);
-  };
-
   return (
     <NrmMenuDrawerScroll>
       <MenuBackRow onPress={onBack} />
       <Text style={[styles.title, { color: titleColor }]}>사용자 블랙리스트</Text>
 
-      {/* 검색 영역 */}
-      {!searchActive ? (
-        <View style={styles.searchBtnRow}>
-          <Pressable
-            onPress={() => setSearchActive(true)}
-            style={({ pressed }) => [styles.searchToggleBtn, { borderColor: hairline }, pressed && { opacity: 0.7 }]}
-            accessibilityRole="button"
-            accessibilityLabel="검색">
-            <Ionicons name="search-outline" size={16} color={nrmTokens.color.primary} />
-            <Text style={styles.searchToggleBtnText}>검색</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
-          <View style={[styles.searchActiveRow, { borderColor: hairline }]}>
-            <Pressable
-              onPress={() => setFieldDropdownOpen((v) => !v)}
-              style={[styles.fieldDropdownBtn, { borderColor: hairline }]}
-              accessibilityRole="button">
-              <Text style={[styles.fieldDropdownBtnText, { color: titleColor }]}>
-                {searchField === 'userName' ? '사용자 이름' : '시리얼번호'}
-              </Text>
-              <Ionicons
-                name={fieldDropdownOpen ? 'chevron-up' : 'chevron-down'}
-                size={13}
-                color={bodyColor}
-              />
-            </Pressable>
-            <TextInput
-              value={searchText}
-              onChangeText={setSearchText}
-              placeholder="검색어 입력"
-              placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'}
-              style={[styles.searchInput, { color: titleColor, borderColor: hairline }]}
-              autoFocus
-            />
-            <Pressable onPress={closeSearch} style={styles.searchCloseBtn} accessibilityRole="button" accessibilityLabel="검색 닫기">
-              <Ionicons name="close" size={20} color={bodyColor} />
-            </Pressable>
-          </View>
-
-          {fieldDropdownOpen && (
-            <View style={[styles.fieldDropdownMenu, { backgroundColor: dropdownBg, borderColor: hairline }]}>
-              {(['userName', 'SerialNo'] as SearchField[]).map((f) => (
-                <Pressable
-                  key={f}
-                  onPress={() => {
-                    setSearchField(f);
-                    setFieldDropdownOpen(false);
-                  }}
-                  style={({ pressed }) => [styles.fieldDropdownItem, pressed && { opacity: 0.7 }]}
-                  accessibilityRole="menuitem">
-                  <Text
-                    style={[
-                      styles.fieldDropdownItemText,
-                      { color: titleColor },
-                      searchField === f && styles.fieldDropdownItemTextActive,
-                    ]}>
-                    {f === 'userName' ? '사용자 이름' : '시리얼번호'}
-                  </Text>
-                  {searchField === f && (
-                    <Ionicons name="checkmark" size={15} color={nrmTokens.color.primary} />
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </>
-      )}
+      <NrmAdminUserSearchBar
+        titleColor={titleColor}
+        bodyColor={bodyColor}
+        isDark={isDark}
+        searchActive={searchActive}
+        onSearchActiveChange={setSearchActive}
+        searchField={searchField}
+        onSearchFieldChange={setSearchField}
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+      />
 
       {/* 리스트 */}
       {loading ? (
@@ -278,86 +216,6 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     lineHeight: 22,
     marginTop: nrmTokens.space.sm,
-  },
-
-  /* 검색 버튼 (비활성 상태) */
-  searchBtnRow: {
-    flexDirection: 'row',
-    marginBottom: nrmTokens.space.sm,
-  },
-  searchToggleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  searchToggleBtnText: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-    color: nrmTokens.color.primary,
-  },
-
-  /* 검색 바 (활성 상태) */
-  searchActiveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: nrmTokens.space.xs,
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  fieldDropdownBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: nrmTokens.radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    minWidth: 90,
-  },
-  fieldDropdownBtnText: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '500',
-    flex: 1,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: nrmTokens.font.body,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: nrmTokens.radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 34,
-  },
-  searchCloseBtn: {
-    padding: 4,
-  },
-
-  /* 드롭다운 메뉴 */
-  fieldDropdownMenu: {
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: nrmTokens.space.sm,
-    overflow: 'hidden',
-  },
-  fieldDropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-  },
-  fieldDropdownItemText: {
-    fontSize: nrmTokens.font.body,
-    flex: 1,
-  },
-  fieldDropdownItemTextActive: {
-    color: nrmTokens.color.primary,
-    fontWeight: '600',
   },
 
   /* 리스트 */

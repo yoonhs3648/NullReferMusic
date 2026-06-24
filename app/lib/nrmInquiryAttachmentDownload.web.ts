@@ -2,7 +2,7 @@ import {
   buildInquiryAttachmentRawUrl,
   inquiryAttachmentRepoPath,
   openInquiryAttachmentOnWeb,
-} from '@/lib/nrmInquiryAttachmentDownload';
+} from '@/lib/nrmInquiryAttachmentDownload.shared';
 
 export { buildInquiryAttachmentRawUrl, inquiryAttachmentRepoPath, openInquiryAttachmentOnWeb };
 

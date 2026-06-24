@@ -21,7 +21,9 @@ if not exist "%ANDROID%\gradlew.bat" (
 echo ======================================================
 echo NullReferMusic RELEASE APK ^(custom branding optional^)
 echo - Standalone APK ^(no Metro / PC dev server^)
-echo - Custom: GitHub PAT, two-word app name, user name, serial number
+echo - GitHub PAT (saved in .secrets after first valid entry; reused on later builds)
+echo - Y: custom app name, user name, serial number
+echo - N: admin APK (NullReference Music / 관리자 / SerialNo Admin)
 echo ======================================================
 echo.
 
@@ -41,7 +43,7 @@ if exist "%WORK%\customize.flag" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "$n=[IO.File]::ReadAllText('%WORK%\display-name.txt').Trim(); Write-Host ('Building release APK with temporary display name: ' + $n)"
   powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%" -Customize
 ) else (
-  echo Building release APK with default branding ^(NullReference Music^)...
+  echo Building admin APK (NullReference Music / SerialNo Admin)...
   powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%"
 )
 

@@ -15,3 +15,10 @@ export function nrmNotifyDownloadFinished(
 ): void {}
 
 export function nrmNotifyDownloadWorkEnded(_videoId: string): void {}
+
+export async function nrmNotifyAttachmentDownloadStarted(_fileName: string): Promise<void> {}
+
+export async function nrmNotifyAttachmentDownloadFinished(
+  _fileName: string,
+  _success: boolean,
+): Promise<void> {}

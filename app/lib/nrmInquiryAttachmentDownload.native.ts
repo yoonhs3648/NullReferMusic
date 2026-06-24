@@ -1,16 +1,19 @@
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
-import { StorageAccessFramework } from 'expo-file-system/src/legacy/FileSystem';
-import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
-import { Linking, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
+import { saveLocalFileToAppDownloads } from '@/lib/onDeviceDownload';
+import { logNrmDev } from '@/lib/nrmDevLog';
+import { buildInquiryAttachmentRawUrl } from '@/lib/nrmInquiryAttachmentDownload.shared';
 import {
+  nrmNotifyAttachmentDownloadFinished,
+  nrmNotifyAttachmentDownloadStarted,
+} from '@/lib/nrmMobileDownloadNotifications';
+
+export {
   buildInquiryAttachmentRawUrl,
   inquiryAttachmentRepoPath,
   openInquiryAttachmentOnWeb,
-} from '@/lib/nrmInquiryAttachmentDownload';
-import { notifyUser } from '@/lib/nrmUserNotify';
-
-export { buildInquiryAttachmentRawUrl, inquiryAttachmentRepoPath, openInquiryAttachmentOnWeb };
+} from '@/lib/nrmInquiryAttachmentDownload.shared';
 
 function guessMimeType(fileName: string): string {
   const lower = fileName.toLowerCase();
@@ -30,48 +33,34 @@ export async function downloadInquiryAttachmentFile(fileName: string): Promise<v
   if (!name) {
     throw new Error('첨부 파일명이 없습니다.');
   }
-  const url = buildInquiryAttachmentRawUrl(name);
+  if (Platform.OS !== 'android') {
+    throw new Error('첨부 파일 다운로드는 Android 앱에서만 지원합니다.');
+  }
+
+  await nrmNotifyAttachmentDownloadStarted(name);
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
+    await nrmNotifyAttachmentDownloadFinished(name, false);
     throw new Error('캐시 경로를 사용할 수 없습니다.');
   }
-  const tempUri = `${cacheRoot}nrm-inquiry-attach-${Date.now()}-${name.replace(/[/\\?%*:|"<>]/g, '_')}`;
-  const dl = await FileSystem.downloadAsync(url, tempUri);
-  if (dl.status !== 200) {
-    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    throw new Error(`첨부 파일을 받지 못했습니다. (HTTP ${dl.status})`);
-  }
 
-  if (Platform.OS === 'android') {
-    const perm = await StorageAccessFramework.requestDirectoryPermissionsAsync();
-    if (!perm.granted) {
-      await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-      throw new Error('저장할 폴더를 선택하지 않았습니다.');
+  const safeLocalName = name.replace(/[/\\?%*:|"<>]/g, '_');
+  const tempUri = `${cacheRoot}nrm-inquiry-attach-${Date.now()}-${safeLocalName}`;
+
+  try {
+    const url = buildInquiryAttachmentRawUrl(name);
+    const dl = await FileSystem.downloadAsync(url, tempUri);
+    if (dl.status !== 200) {
+      throw new Error(`첨부 파일을 받지 못했습니다. (HTTP ${dl.status})`);
     }
-    const destUri = await StorageAccessFramework.createFileAsync(
-      perm.directoryUri,
-      name,
-      guessMimeType(name),
-    );
-    const b64 = await FileSystem.readAsStringAsync(tempUri, { encoding: EncodingType.Base64 });
-    await FileSystem.writeAsStringAsync(destUri, b64, { encoding: EncodingType.Base64 });
-    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    void notifyUser('첨부 파일을 저장했습니다.');
-    return;
-  }
 
-  if (Platform.OS === 'ios') {
-    const docRoot = FileSystem.documentDirectory;
-    if (!docRoot) {
-      await Linking.openURL(url);
-      return;
-    }
-    const destUri = `${docRoot}${name.replace(/[/\\?%*:|"<>]/g, '_')}`;
-    await FileSystem.copyAsync({ from: tempUri, to: destUri });
+    const displayPath = await saveLocalFileToAppDownloads(tempUri, name, guessMimeType(name));
+    logNrmDev('inquiry.attachDownload', { path: displayPath });
+    await nrmNotifyAttachmentDownloadFinished(name, true);
+  } catch (e) {
+    await nrmNotifyAttachmentDownloadFinished(name, false);
+    throw e;
+  } finally {
     await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-    void notifyUser('첨부 파일을 앱 문서 폴더에 저장했습니다.');
-    return;
   }
-
-  await Linking.openURL(url);
 }

@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { appendNrmFileLog } from '@/lib/nrmFileLog';
 import { isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
+import { notifyUser } from '@/lib/nrmUserNotify';
 
 function toFilePayload(payload: Record<string, unknown>): string {
   try {
@@ -51,4 +52,16 @@ export function logNrmRunError(
     const ctx = extra ? ` ${toFilePayload(extra)}` : '';
     appendNrmFileLog(tag, 'error', `${String(err)}${ctx}`);
   }
+}
+
+/** 파일 로그 기록 후 사용자 알림 (catch 블록 공통) */
+export function notifyUserError(
+  tag: string,
+  err: unknown,
+  userMessage?: string,
+): void {
+  logNrmRunError(tag, err);
+  const fallback =
+    err instanceof Error ? err.message.trim() : String(err ?? '').trim();
+  void notifyUser(userMessage?.trim() || fallback || '오류가 발생했습니다.');
 }

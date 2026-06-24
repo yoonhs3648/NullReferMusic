@@ -444,4 +444,35 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
       }
     }.start()
   }
+
+  /** Download/{brand}/downloads/ 에 로컬 파일 저장 (문의 첨부 등) */
+  @ReactMethod
+  fun saveFileToAppDownloads(
+      sourcePath: String,
+      displayName: String,
+      mimeType: String,
+      promise: Promise,
+  ) {
+    Thread {
+      try {
+        val displayPath =
+            NrmPublicDownloads.saveLocalFile(
+                reactApplicationContext,
+                sourcePath,
+                displayName,
+                mimeType,
+            )
+        val map = Arguments.createMap()
+        map.putString("displayPath", displayPath)
+        promise.resolve(map)
+      } catch (t: Throwable) {
+        NrmFileLogger.error(
+            "download",
+            "saveFileToAppDownloads 실패 name=$displayName",
+            t,
+        )
+        promise.reject("E_SAVE_DOWNLOAD", t.message ?: t.toString(), t as? Exception)
+      }
+    }.start()
+  }
 }

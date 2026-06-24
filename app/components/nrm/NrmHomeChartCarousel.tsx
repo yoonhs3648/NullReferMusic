@@ -12,8 +12,7 @@ import {
   View,
   useWindowDimensions,
   type ViewToken,
-} from 'react-native';
-import { coverArtUrlForDisplaySize } from '@/lib/nrmCoverArtUrl';
+} from 'react-native';import { coverArtUrlForDisplaySize } from '@/lib/nrmCoverArtUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
@@ -239,6 +238,7 @@ export function NrmHomeChartCarousel({
     const logical = wrapIndex(nextIndex, c);
     if (!force && logical === indexRef.current) return;
     indexRef.current = logical;
+    navIndexRef.current = logical;
     setIndex(logical);
     onIndexChangeRef.current?.(logical);
   }, []);
@@ -275,47 +275,43 @@ export function NrmHomeChartCarousel({
     (logicalIndex: number, animated = true) => {
       const c = countRef.current;
       if (c <= 0) return;
+      if (snapScrollRef.current) {
+        clearTimeout(snapScrollRef.current);
+        snapScrollRef.current = null;
+      }
       const from = navIndexRef.current;
       const logical = wrapIndex(logicalIndex, c);
 
-      // 탐색 ref는 즉시 갱신 (다음 자동재생·버튼 계산에 사용)
       navIndexRef.current = logical;
+      syncIndex(logical, true);
 
-      if (!loopEnabledRef.current || c <= 1 || !animated) {
-        // 루프 없음 또는 즉시 이동: UI도 즉시 갱신
-        syncIndex(logical, true);
-        scrollToOffset(
-          loopEnabledRef.current ? toPhysicalIndex(logical, c) : clampIndex(logical, c),
-          animated,
-        );
+      if (!loopEnabledRef.current || c <= 1) {
+        scrollToOffset(clampIndex(logical, c), animated);
         return;
       }
 
-      // 애니메이션 루프 탐색:
-      // UI(순위·제목)는 onViewableItemsChanged가 슬라이드가 보이는 시점에 자연스럽게 갱신한다.
-      // silentJumpRef는 무음 위치 교정 구간에만 true — 애니메이션 중에는 false 유지.
-      const wrapForward = isLoopWrapForward(from, logical, c);
-      const wrapBackward = isLoopWrapBackward(from, logical, c);
+      const wrapForward = animated && isLoopWrapForward(from, logical, c);
+      const wrapBackward = animated && isLoopWrapBackward(from, logical, c);
 
       if (wrapForward) {
-        // copy2 TOP20(물리 2c-1) → copy3 TOP1(물리 2c) 1칸 전진 애니메이션
-        // 완료 후 copy2 TOP1(물리 c)으로 무음 교정
+        repositioningRef.current = true;
         scrollToOffset(2 * c, true, () => {
           silentJumpRef.current = true;
           scrollToOffset(c, false, () => {
             silentJumpRef.current = false;
+            repositioningRef.current = false;
           });
         });
         return;
       }
 
       if (wrapBackward) {
-        // copy2 TOP1(물리 c) → copy1 TOP20(물리 c-1) 1칸 후진 애니메이션
-        // 완료 후 copy2 TOP20(물리 2c-1)으로 무음 교정
+        repositioningRef.current = true;
         scrollToOffset(c - 1, true, () => {
           silentJumpRef.current = true;
           scrollToOffset(c + c - 1, false, () => {
             silentJumpRef.current = false;
+            repositioningRef.current = false;
           });
         });
         return;
@@ -349,8 +345,14 @@ export function NrmHomeChartCarousel({
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      // silentJump(무음 위치 교정) 중에만 차단 — 애니메이션 구간에는 허용하여 자연스럽게 UI 갱신
-      if (silentJumpRef.current || userDraggingRef.current || viewableItems.length === 0) return;
+      if (
+        repositioningRef.current ||
+        silentJumpRef.current ||
+        userDraggingRef.current ||
+        viewableItems.length === 0
+      ) {
+        return;
+      }
       const token = viewableItems.find((v) => v.isViewable) ?? viewableItems[0];
       if (token?.index == null) return;
       const c = countRef.current;
@@ -391,16 +393,18 @@ export function NrmHomeChartCarousel({
     });
   }, [count, itemsFingerprint, scrollToOffset, syncIndex]);
 
-  /** 차트 데이터가 바뀌면 이미지 20장을 미리 캐시에 넣는다.
-   *  복제본(copy1·copy3)을 전환할 때 빈 이미지 순간을 방지한다. */
+  /** 차트 데이터가 바뀌면 커버 이미지를 백그라운드에서 prefetch */
   useEffect(() => {
     if (items.length === 0 || coverPixelSize <= 0) return;
-    for (const it of items) {
-      const url = it.imageUrl?.trim();
-      if (!url) continue;
-      const displayUrl = coverArtUrlForDisplaySize(url, coverPixelSize);
-      Image.prefetch(displayUrl).catch(() => {});
-    }
+    const timer = setTimeout(() => {
+      for (const it of items) {
+        const url = it.imageUrl?.trim();
+        if (!url) continue;
+        const displayUrl = coverArtUrlForDisplaySize(url, coverPixelSize);
+        Image.prefetch(displayUrl).catch(() => {});
+      }
+    }, 400);
+    return () => clearTimeout(timer);
   }, [items, coverPixelSize]);
 
   useEffect(() => {
@@ -449,14 +453,14 @@ export function NrmHomeChartCarousel({
   );
 
   const goPrev = useCallback(() => {
-    if (!loopEnabled || silentJumpRef.current) return;
+    if (!loopEnabled || silentJumpRef.current || repositioningRef.current || snapScrollRef.current) return;
     clearAutoAdvance();
     scrollToLogicalIndex(navIndexRef.current - 1, true);
     scheduleAutoAdvance();
   }, [clearAutoAdvance, loopEnabled, scheduleAutoAdvance, scrollToLogicalIndex]);
 
   const goNext = useCallback(() => {
-    if (!loopEnabled || silentJumpRef.current) return;
+    if (!loopEnabled || silentJumpRef.current || repositioningRef.current || snapScrollRef.current) return;
     clearAutoAdvance();
     scrollToLogicalIndex(navIndexRef.current + 1, true);
     scheduleAutoAdvance();

@@ -24,6 +24,7 @@ import {
   saveLyricsModeOrder,
   type NrmLyricsModeOrderId,
 } from '@/lib/nrmLyricsOrderSettings';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -108,7 +109,7 @@ export function NrmLyricsOrderSettingsPanel({
       setSavedOrder([...order]);
       void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
     } catch (e) {
-      void notifyUser(e instanceof Error ? e.message : '저장하지 못했습니다.');
+      notifyUserError('settings.lyricsOrderSave', e, '저장하지 못했습니다.');
     } finally {
       setSaving(false);
     }
@@ -132,7 +133,7 @@ export function NrmLyricsOrderSettingsPanel({
           setSavedOrder([...order]);
           void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
         } catch (e) {
-          void notifyUser(e instanceof Error ? e.message : '저장하지 못했습니다.');
+          notifyUserError('settings.lyricsOrderSave', e, '저장하지 못했습니다.');
           return;
         } finally {
           setSaving(false);

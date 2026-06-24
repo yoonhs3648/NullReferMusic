@@ -84,6 +84,7 @@ import {
   getNrmVersionInfoCustomizingLine,
   NRM_APP_AUTHOR_DISPLAY,
 } from '@/lib/nrmAppInfo';
+import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
 import {
   openMenuPanelStack,
   peekMenuPanel,
@@ -221,8 +222,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const { setAppearanceMode } = useNrmUiAppearance();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const drawerW = Math.min(380, windowWidth * 0.88);
-  const translateX = useRef(new Animated.Value(0)).current;
+  const drawerW = Math.max(280, Math.min(380, Math.round(windowWidth * 0.88) || 320));
+  const drawerWRef = useRef(drawerW);
+  drawerWRef.current = drawerW;
+  const translateX = useRef(new Animated.Value(-320)).current;
   const spotifyBackHandlerRef = useRef<(() => boolean) | null>(null);
   const spotifyDrawerDismissRef = useRef<(() => void) | null>(null);
   const [spotifyFocusChartsSession, setSpotifyFocusChartsSession] = useState(false);
@@ -254,6 +257,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const panel = peekMenuPanel(panelStack);
   const [versionOverlayOpen, setVersionOverlayOpen] = useState(false);
   const [adminSessionActive, setAdminSessionActive] = useState(false);
+  const [appSerialNo, setAppSerialNo] = useState('');
+  const hasAppSerialNo = appSerialNo.trim().length > 0;
 
   const resetMenuPanels = useCallback((next: Panel = 'root') => {
     setPanelStack(resetMenuPanelStack(next));
@@ -283,6 +288,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   }, []);
 
   useEffect(() => {
+    void getNrmAppSerialNo().then(setAppSerialNo);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void getNrmAppSerialNo().then(setAppSerialNo);
+  }, [open]);
+
+  useEffect(() => {
+    if (!versionOverlayOpen) return;
+    void getNrmAppSerialNo().then(setAppSerialNo);
+  }, [versionOverlayOpen]);
+
+  useEffect(() => {
     if (panel !== 'searchSettings') return;
     let cancelled = false;
     void getYoutubeSearchSuffixMode().then((m) => {
@@ -294,10 +313,12 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   }, [panel]);
 
   const openMenu = useCallback(() => {
+    // setOpen 전에 미리 위치 설정 → 첫 렌더에서 빈 화면 방지
+    translateX.setValue(-drawerWRef.current);
     resetMenuPanels('root');
     setVersionOverlayOpen(false);
     setOpen(true);
-  }, [resetMenuPanels]);
+  }, [resetMenuPanels, translateX]);
 
   const dismissDrawer = useCallback(() => {
     setVersionOverlayOpen(false);
@@ -333,26 +354,26 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
 
   const openSpotifyTokenSettings = useCallback(() => {
     setSpotifyFocusChartsSession(false);
+    translateX.setValue(0);  // 첫 렌더부터 올바른 위치 (애니메이션 없이 즉시)
     setOpen(true);
     setPanelStack(openMenuPanelStack<Panel>([], 'spotifyApiManage'));
-    translateX.setValue(0);
   }, [translateX]);
 
   const openSpotifyChartsSessionSettings = useCallback(() => {
     setSpotifyFocusChartsSession(true);
+    translateX.setValue(0);
     setOpen(true);
     setPanelStack(openMenuPanelStack<Panel>([], 'spotifyApiManage'));
-    translateX.setValue(0);
   }, [translateX]);
 
   const openLastfmApiManage = useCallback(async () => {
     const registered = await hasLastfmCredentials();
     setLastfmEntryScreen(registered ? 'manage' : 'issue');
+    translateX.setValue(0);
     setOpen(true);
     setPanelStack((stack) =>
       openMenuPanelStack(stack, 'lastfmApiManage'),
     );
-    translateX.setValue(0);
   }, [translateX]);
 
   const openLastfmTokenSettings = openLastfmApiManage;
@@ -379,15 +400,15 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   );
 
   const openDownloadSettingsFromGlobal = useCallback(() => {
+    translateX.setValue(0);
     setOpen(true);
     setPanelStack(['root', 'downloadPathSettings']);
-    translateX.setValue(0);
   }, [translateX]);
 
   const openLyricsEmbedSettingsFromGlobal = useCallback(() => {
+    translateX.setValue(0);
     setOpen(true);
     setPanelStack(['root', 'downloadLyricsEmbedSettings']);
-    translateX.setValue(0);
   }, [translateX]);
 
   useEffect(() => {
@@ -623,23 +644,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     dismissDrawer();
   }, [dismissDrawer, panel]);
 
+  // open이 false→true 전환 시 슬라이드인 (openMenu에서 이미 -drawerW 설정됨)
   useEffect(() => {
     if (!open) return;
-    translateX.setValue(-drawerW);
     Animated.timing(translateX, {
       toValue: 0,
-      duration: 260,
+      duration: 240,
       useNativeDriver: true,
     }).start();
-    // open이 true로 바뀔 때만 슬라이드 애니메이션 실행
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, translateX]);
 
+  // 메뉴가 열린 상태에서 화면 폭 변경 시에만 위치 재조정
+  // open은 ref로 읽어 이 effect가 open 전환 시엔 실행되지 않도록 함
   useEffect(() => {
-    // 이미 열린 상태에서 드로어 너비만 변경되면 즉시 위치 동기화 (재애니메이션 없음)
     if (!open) return;
     translateX.setValue(0);
-  }, [drawerW, open, translateX]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerW]);
 
   const rootBg = getNrmRootBackgroundColor(isDark);
   const modalScrim = getNrmModalScrimColor(isDark);
@@ -787,7 +808,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         transparent
         animationType="none"
         onRequestClose={goBackInMenu}
-        statusBarTranslucent>
+        statusBarTranslucent
+        hardwareAccelerated>
         <View style={[styles.modalWrap, { backgroundColor: rootBg }]}>
           <Pressable
             style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
@@ -927,18 +949,25 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 </Pressable>
                 {adminSessionActive ? (
                   <Pressable
-                    onPress={() => pushPanel('adminPage')}
+                    onPress={hasAppSerialNo ? () => pushPanel('adminPage') : undefined}
+                    disabled={!hasAppSerialNo}
                     style={({ pressed }) => [
                       styles.row,
-                      pressed && { backgroundColor: rowHover },
+                      !hasAppSerialNo && styles.rowDisabled,
+                      hasAppSerialNo && pressed && { backgroundColor: rowHover },
                     ]}>
-                    <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    <Text
+                      style={[
+                        styles.rowLabel,
+                        { color: titleColor },
+                        !hasAppSerialNo && styles.rowLabelDisabled,
+                      ]}>
                       관리자페이지
                     </Text>
                     <Ionicons
                       name="chevron-forward"
                       size={20}
-                      color={bodyColor}
+                      color={!hasAppSerialNo ? rowHover : bodyColor}
                     />
                   </Pressable>
                 ) : null}
@@ -1101,18 +1130,25 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => pushPanel('inquirySettings')}
+                  onPress={hasAppSerialNo ? () => pushPanel('inquirySettings') : undefined}
+                  disabled={!hasAppSerialNo}
                   style={({ pressed }) => [
                     styles.row,
-                    pressed && { backgroundColor: rowHover },
+                    !hasAppSerialNo && styles.rowDisabled,
+                    hasAppSerialNo && pressed && { backgroundColor: rowHover },
                   ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                  <Text
+                    style={[
+                      styles.rowLabel,
+                      { color: titleColor },
+                      !hasAppSerialNo && styles.rowLabelDisabled,
+                    ]}>
                     Q&A
                   </Text>
                   <Ionicons
                     name="chevron-forward"
                     size={20}
-                    color={bodyColor}
+                    color={!hasAppSerialNo ? rowHover : bodyColor}
                   />
                 </Pressable>
               </DrawerShell>
@@ -2199,6 +2235,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 {getNrmVersionInfoCustomizingLine()}
               </Text>
             ) : null}
+            {appSerialNo.trim() ? (
+              <Text style={[styles.versionLine, { color: bodyColor }]}>
+                {`Serial Number : ${appSerialNo.trim()}`}
+              </Text>
+            ) : null}
 
             <View style={styles.versionMetaBlock}>
               <Text style={[styles.versionMetaText, { color: bodyColor }]}>
@@ -2393,6 +2434,12 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
+  },
+  rowDisabled: {
+    opacity: 0.42,
+  },
+  rowLabelDisabled: {
+    opacity: 0.72,
   },
   backRow: {
     flexDirection: 'row',

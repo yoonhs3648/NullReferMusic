@@ -22,6 +22,7 @@ import {
   validateGenreTagCatalog,
   type NrmGenreCategory,
 } from '@/lib/nrmGenreTagSettings';
+import { notifyUserError } from '@/lib/nrmDevLog';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -156,7 +157,7 @@ export function NrmGenreTagSettingsPanel({
       await saveNrmGenreTagCatalog({ version: 4, categories });
       notifyUser('장르·태그 설정을 저장했습니다.');
     } catch (e) {
-      notifyUser(e instanceof Error ? e.message : '저장하지 못했습니다.');
+      notifyUserError('settings.genreTagSave', e, '저장하지 못했습니다.');
     } finally {
       setSaving(false);
     }

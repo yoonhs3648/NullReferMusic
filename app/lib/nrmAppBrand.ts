@@ -37,6 +37,10 @@ export function getNrmFileLogFolderDisplayPath(): string {
   return `Download/${NRM_BRAND_STORAGE_FOLDER_NAME}/logs/`;
 }
 
+export function getNrmDownloadsFolderDisplayPath(): string {
+  return `Download/${NRM_BRAND_STORAGE_FOLDER_NAME}/downloads/`;
+}
+
 export function getNrmAppExitConfirmMessage(): string {
   return `${NRM_BRAND_DISPLAY_NAME}을 종료할까요?`;
 }
