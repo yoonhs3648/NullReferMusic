@@ -196,6 +196,13 @@ export function NrmAdminAlarmRegisterPanel({ titleColor, bodyColor, isDark, onBa
         bodyColor={bodyColor}
         isDark={isDark}
       />
+
+      {/* 저장 중 — 전체 화면 블로킹 스피너 */}
+      <Modal visible={saving} transparent animationType="none" statusBarTranslucent>
+        <View style={styles.savingOverlay}>
+          <ActivityIndicator size="large" color={nrmTokens.color.primary} />
+        </View>
+      </Modal>
     </NrmMenuDrawerScroll>
   );
 }
@@ -297,6 +304,12 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.onPrimary,
     fontSize: nrmTokens.font.bodyStrong,
     fontWeight: '600',
+  },
+  savingOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   modalRoot: {
     flex: 1,

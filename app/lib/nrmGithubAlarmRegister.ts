@@ -1,4 +1,5 @@
 import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
+import { isStandaloneApp } from '@/lib/nrmDevRuntime';
 import { getNrmGithubDataPat } from '@/lib/nrmGithubDataPat';
 import {
   NRM_ALARM_JSON_API_PATH,
@@ -109,13 +110,24 @@ async function putAlarmDocumentToGithub(
   }
 }
 
+function isLocalhostBase(url: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url);
+}
+
 async function registerViaBackend(input: NrmAlarmRegisterInput): Promise<boolean> {
+  // 릴리스 APK(스탠드얼론)에서는 백엔드 서버가 없으므로 즉시 스킵 — 31초 hanging 방지
+  if (isStandaloneApp()) return false;
+
   const base = await getResolvedApiBaseUrl();
-  if (!base) return false;
+  if (!base || isLocalhostBase(base)) return false;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const res = await fetch(`${base}/api/nrm-data/alarm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         isNoti: input.isNoti,
         title: input.title.trim(),
@@ -126,6 +138,8 @@ async function registerViaBackend(input: NrmAlarmRegisterInput): Promise<boolean
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

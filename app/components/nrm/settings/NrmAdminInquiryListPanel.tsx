@@ -17,7 +17,7 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import { submitInquiryReplyToGithub } from '@/lib/nrmGithubInquiryReply';
 import { downloadInquiryAttachmentFile } from '@/lib/nrmInquiryAttachmentDownload';
 import {
-  fetchAllInquiriesForAdmin,
+  fetchAllInquiriesForAdminViaApi,
   formatInquiryCreatedYmd,
   inquiryListTitle,
   type NrmInquiryItem,
@@ -46,10 +46,8 @@ const DETAIL_FIELDS: { key: keyof NrmInquiryItem; label: string }[] = [
   { key: 'SerialNo', label: 'SerialNo' },
   { key: 'version', label: 'version' },
   { key: 'content', label: 'content' },
-  { key: 'attachedFile', label: 'attachedFile' },
-  { key: 'isAnswered', label: 'isAnswered' },
-  { key: 'replyContent', label: 'replyContent' },
   { key: 'Createddate', label: 'Createddate' },
+  { key: 'attachedFile', label: 'attachedFile' },
 ];
 
 const keyExtractorInquiry = (item: NrmInquiryItem) => String(item.id);
@@ -445,7 +443,7 @@ export function NrmAdminInquiryListPanel({ titleColor, bodyColor, isDark, onBack
       setReplyDrafts({});
     }
     try {
-      setAllItems(await fetchAllInquiriesForAdmin());
+      setAllItems(await fetchAllInquiriesForAdminViaApi());
     } catch {
       if (!silent) {
         setAllItems([]);

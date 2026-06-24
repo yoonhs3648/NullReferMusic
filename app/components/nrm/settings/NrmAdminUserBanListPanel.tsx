@@ -17,10 +17,11 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { unbanUserOnGithub } from '@/lib/nrmGithubUserBanRegister';
 import {
-  fetchUserBanList,
+  fetchUserBanListViaApi,
   listCurrentlyBannedUsers,
   type NrmUserBanItem,
 } from '@/lib/nrmUserBanClient';
+import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
@@ -53,7 +54,7 @@ const DETAIL_FIELDS: { key: keyof Omit<NrmUserBanItem, 'isBanned'>; label: strin
 export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
   const [rows, setRows] = useState<NrmUserBanItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [globalBusy, setGlobalBusy] = useState(false);
 
   const [searchActive, setSearchActive] = useState(false);
   const [searchField, setSearchField] = useState<SearchField>('userName');
@@ -63,6 +64,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
 
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const surfaceBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
+  const modalScrim = getNrmModalScrimColor(isDark);
 
   const filteredRows = useMemo(() => {
     if (!searchActive || !searchText.trim()) return rows;
@@ -76,7 +78,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await fetchUserBanList();
+      const all = await fetchUserBanListViaApi();
       setRows(listCurrentlyBannedUsers(all));
     } catch {
       setRows([]);
@@ -92,7 +94,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
 
   const onUnban = useCallback(
     async (entry: NrmUserBanItem) => {
-      setBusyId(entry.id);
+      setGlobalBusy(true);
       try {
         await unbanUserOnGithub(entry);
         void notifyUser('차단이 해제되었습니다.');
@@ -100,7 +102,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
       } catch (e) {
         notifyUserError('admin.userBanUnban', e, '차단 해제에 실패했습니다.');
       } finally {
-        setBusyId(null);
+        setGlobalBusy(false);
       }
     },
     [reload],
@@ -142,21 +144,24 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
             </Pressable>
             <Pressable
               onPress={() => void onUnban(row)}
-              disabled={busyId === row.id}
+              disabled={globalBusy}
               style={({ pressed }) => [
                 styles.unbanBtn,
-                (pressed || busyId === row.id) && styles.unbanBtnPressed,
+                (pressed || globalBusy) && styles.unbanBtnPressed,
               ]}
               accessibilityRole="button">
-              {busyId === row.id ? (
-                <ActivityIndicator color={nrmTokens.color.primary} size="small" />
-              ) : (
-                <Text style={styles.unbanLabel}>해제</Text>
-              )}
+              <Text style={styles.unbanLabel}>해제</Text>
             </Pressable>
           </View>
         ))
       )}
+
+      {/* 해제 작업 중 — 전체 화면 블로킹 스피너 */}
+      <Modal visible={globalBusy} transparent animationType="none" statusBarTranslucent>
+        <View style={styles.busyOverlay}>
+          <ActivityIndicator size="large" color={nrmTokens.color.primary} />
+        </View>
+      </Modal>
 
       {/* 상세 팝업 */}
       <Modal
@@ -252,6 +257,14 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.primary,
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
+  },
+
+  /* 블로킹 스피너 */
+  busyOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
 
   /* 상세 모달 */

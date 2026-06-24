@@ -8,4 +8,5 @@ export {
   markGoogleTranslateWebViewReady,
   routeGoogleTranslateWebViewMessage,
   translateTextsViaGoogleTranslateWeb,
+  registerGoogleTranslateWebViewCallbacks,
 } from './nrmGoogleTranslateBridge.web';

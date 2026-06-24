@@ -5,7 +5,7 @@ import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import { NRM_ALARM_JSON_RAW_URL, NRM_ALARM_DISPLAY_DAYS } from '@/lib/nrmRemoteDataConfig';
 
 /** 원격 알림 주기적 갱신 간격 */
-export const NRM_ALARM_POLL_INTERVAL_MS = 30 * 60 * 1000;
+export const NRM_ALARM_POLL_INTERVAL_MS = 1 * 60 * 1000;
 
 export { NRM_ALARM_DISPLAY_DAYS };
 
@@ -84,6 +84,8 @@ function normalizeAlarmRow(
 
 function sortAlarms(items: NrmAlarmItem[]): NrmAlarmItem[] {
   return [...items].sort((a, b) => {
+    // 공지(isNoti=true)를 먼저, 그룹 안에서는 최신순(date 내림차순 → id 내림차순)
+    if (a.isNoti !== b.isNoti) return a.isNoti ? -1 : 1;
     const da = parseAlarmDateMs(a.date) ?? 0;
     const db = parseAlarmDateMs(b.date) ?? 0;
     if (db !== da) return db - da;

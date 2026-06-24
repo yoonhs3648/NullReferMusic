@@ -26,6 +26,39 @@ let webReady = false;
 let translateBusy = false;
 let currentJob: TranslateJob | null = null;
 
+// ── 레이지 마운트 ──────────────────────────────────────────────────────────────
+let requestGtMountFn: (() => void) | null = null;
+let releaseGtMountFn: (() => void) | null = null;
+let gtIdleTimer: ReturnType<typeof setTimeout> | null = null;
+/** 번역 완료 후 이 시간만큼 idle이면 WebView를 언마운트 */
+const GT_IDLE_UNMOUNT_MS = 3 * 60 * 1000; // 3분
+
+export function registerGoogleTranslateWebViewCallbacks(
+  requestMount: (() => void) | null,
+  releaseMount: (() => void) | null,
+): void {
+  requestGtMountFn = requestMount;
+  releaseGtMountFn = releaseMount;
+}
+
+function requestGtMount(): void {
+  if (gtIdleTimer !== null) {
+    clearTimeout(gtIdleTimer);
+    gtIdleTimer = null;
+  }
+  requestGtMountFn?.();
+}
+
+function scheduleGtIdleUnmount(): void {
+  if (gtIdleTimer !== null) clearTimeout(gtIdleTimer);
+  gtIdleTimer = setTimeout(() => {
+    gtIdleTimer = null;
+    if (!translateBusy && translateQueue.length === 0 && currentJob === null) {
+      releaseGtMountFn?.();
+    }
+  }, GT_IDLE_UNMOUNT_MS);
+}
+
 export function attachGoogleTranslateWebView(ref: InjectedWebView | null): void {
   webView = ref;
   if (!ref) {
@@ -121,9 +154,18 @@ true;
 }
 
 function drainTranslateQueue(): void {
-  if (translateBusy || !webReady || !webView) return;
+  if (translateBusy || !webReady || !webView) {
+    // 대기 중인 작업이 없고 idle → WebView 유지 불필요, 언마운트 예약
+    if (!translateBusy && translateQueue.length === 0 && currentJob === null) {
+      scheduleGtIdleUnmount();
+    }
+    return;
+  }
   const job = translateQueue.shift();
-  if (!job) return;
+  if (!job) {
+    scheduleGtIdleUnmount();
+    return;
+  }
   translateBusy = true;
   currentJob = job;
   webView.injectJavaScript(buildTranslateInject(job.jobId, job.texts));
@@ -181,6 +223,8 @@ async function waitForWebViewReady(timeoutMs: number): Promise<void> {
 async function translateViaWebView(
   texts: string[],
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {
+  // WebView가 마운트되지 않은 경우 마운트 요청 후 준비될 때까지 대기
+  requestGtMount();
   await waitForWebViewReady(20_000);
   if (!webView) {
     throw new Error('Google Translate WebView가 없습니다.');

@@ -1,5 +1,6 @@
+import { fetchGithubJsonDocument, resolveGithubDataPat } from '@/lib/nrmGithubContentsApi';
 import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
-import { NRM_USER_LIST_JSON_RAW_URL } from '@/lib/nrmRemoteDataConfig';
+import { NRM_USER_LIST_JSON_API_PATH, NRM_USER_LIST_JSON_RAW_URL } from '@/lib/nrmRemoteDataConfig';
 
 export type NrmUserListEntry = {
   id: number;
@@ -39,8 +40,7 @@ export function dedupeUserListBySerialNo(rows: NrmUserListEntry[]): NrmUserListE
   return [...bySerial.values()].sort((a, b) => b.id - a.id);
 }
 
-export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]> {
-  const json = await fetchGithubRawJson<UserListJson>(NRM_USER_LIST_JSON_RAW_URL);
+function normalizeUserListRows(json: UserListJson): NrmUserListEntry[] {
   const rows = Array.isArray(json.userList) ? json.userList : [];
   const normalized: NrmUserListEntry[] = [];
   for (const row of rows) {
@@ -60,5 +60,21 @@ export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]>
       lastAccessDate: row.lastAccessDate ?? null,
     });
   }
-  return dedupeUserListBySerialNo(normalized);
+  return normalized;
+}
+
+export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]> {
+  const json = await fetchGithubRawJson<UserListJson>(NRM_USER_LIST_JSON_RAW_URL);
+  return dedupeUserListBySerialNo(normalizeUserListRows(json));
+}
+
+/** GitHub Contents API로 최신 userList.json 조회 (관리자 패널 — CDN 캐시 우회) */
+export async function fetchDedupedUserListEntriesViaApi(): Promise<NrmUserListEntry[]> {
+  const pat = await resolveGithubDataPat();
+  const { doc } = await fetchGithubJsonDocument<UserListJson>(
+    NRM_USER_LIST_JSON_API_PATH,
+    pat,
+    { userList: [] },
+  );
+  return dedupeUserListBySerialNo(normalizeUserListRows(doc));
 }

@@ -47,21 +47,12 @@ function AlarmListRowInner({
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
   const readTitleColor = isDark ? 'rgba(255,255,255,0.58)' : nrmTokens.color.inkMuted80;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
-  const accentColor = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
-  const unreadRowBg = isDark ? 'rgba(41, 151, 255, 0.09)' : nrmTokens.color.accentSoft;
+  const cardBg = isDark ? 'rgba(255,255,255,0.05)' : '#fff';
+  const expandedBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)';
   const contentLines = item.content.split('\n');
 
   return (
-    <View
-      style={[
-        styles.row,
-        { borderBottomColor: hairline },
-        !isRead && {
-          backgroundColor: unreadRowBg,
-          borderLeftWidth: 3,
-          borderLeftColor: accentColor,
-        },
-      ]}>
+    <View style={[styles.row, { borderColor: hairline, backgroundColor: cardBg }]}>
       <Pressable
         onPress={() => onToggle(item.id)}
         style={({ pressed }) => [styles.rowHead, pressed && styles.rowPressed]}
@@ -99,7 +90,7 @@ function AlarmListRowInner({
         <Text style={[styles.rowDate, { color: bodyColor }]}>{item.date}</Text>
       </Pressable>
       {expanded ? (
-        <View style={styles.rowBody}>
+        <View style={[styles.rowBody, { borderTopColor: hairline, backgroundColor: expandedBg }]}>
           {contentLines.map((line, i) => (
             <Text
               key={`${item.id}-line-${i}`}
@@ -202,7 +193,13 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={dismiss} hardwareAccelerated>
+    <Modal
+      visible
+      transparent
+      animationType="none"
+      onRequestClose={dismiss}
+      statusBarTranslucent
+      hardwareAccelerated>
       <View style={styles.modalRoot}>
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: modalScrim }]}
@@ -219,7 +216,8 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
               backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas,
               transform: [{ translateX }],
             },
-          ]}>
+          ]}
+          accessibilityViewIsModal>
           <View style={styles.drawerColumn}>
             <View style={styles.body}>
               <Text style={[styles.title, { color: titleColor }]}>알림</Text>
@@ -270,14 +268,18 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
 const styles = StyleSheet.create({
   modalRoot: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
   },
   drawer: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
     height: '100%',
+    maxHeight: '100%',
+    flexDirection: 'column',
     borderTopLeftRadius: nrmTokens.radius.lg,
     borderBottomLeftRadius: nrmTokens.radius.lg,
-    overflow: 'hidden',
+    zIndex: 1,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -314,13 +316,16 @@ const styles = StyleSheet.create({
     paddingBottom: nrmTokens.space.md,
   },
   row: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: nrmTokens.space.sm,
-    paddingHorizontal: nrmTokens.space.xs,
-    borderRadius: nrmTokens.radius.sm,
+    borderWidth: 1,
+    borderRadius: nrmTokens.radius.md,
+    marginBottom: nrmTokens.space.sm,
+    overflow: 'hidden',
   },
   rowHead: {
     gap: nrmTokens.space.xs,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingVertical: nrmTokens.space.sm + 2,
+    minHeight: 44,
   },
   rowPressed: {
     opacity: 0.88,
@@ -372,20 +377,22 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   rowTitleUnread: {
-    fontWeight: '600',
-    letterSpacing: -0.15,
+    fontWeight: '800',
   },
   rowChevron: {
     marginTop: 3,
   },
   rowDate: {
-    fontSize: nrmTokens.font.caption,
+    fontSize: 11,
     marginTop: 2,
+    opacity: 0.55,
   },
   rowBody: {
-    marginTop: nrmTokens.space.sm,
-    paddingLeft: nrmTokens.space.xs,
-    gap: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingTop: nrmTokens.space.sm,
+    paddingBottom: nrmTokens.space.md,
+    gap: 4,
   },
   rowContent: {
     fontSize: nrmTokens.font.body,

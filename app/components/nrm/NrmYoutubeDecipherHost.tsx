@@ -1,7 +1,10 @@
 /**
  * youtubei `Player.decipher`용 — 네이티브에서만 보이지 않는 WebView를 띄웁니다.
+ *
+ * 레이지 마운트: YouTube 다운로드/복호화 요청이 들어올 때만 WebView를 실제로 마운트하고,
+ * 3분 idle 후 언마운트해 상시 메모리를 절약합니다.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
 
@@ -9,6 +12,7 @@ import {
   attachDecipherWebView,
   markDecipherWebViewLoading,
   markDecipherWebViewReady,
+  registerDecipherWebViewCallbacks,
   routeYoutubeWebViewMessage,
 } from '@/lib/nrmYoutubeDecipherBridge';
 
@@ -21,25 +25,32 @@ const IOS_YT_UA =
   'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5 like Mac OS X)';
 
 export function NrmYoutubeDecipherHost() {
+  const [webViewMounted, setWebViewMounted] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    registerDecipherWebViewCallbacks(
+      () => setWebViewMounted(true),
+      () => setWebViewMounted(false),
+    );
+    return () => {
+      registerDecipherWebViewCallbacks(null, null);
+    };
+  }, []);
+
   const onLoadStart = useCallback(() => {
-    if (Platform.OS !== 'web') {
-      markDecipherWebViewLoading();
-    }
+    markDecipherWebViewLoading();
   }, []);
 
   const onLoadEnd = useCallback(() => {
-    if (Platform.OS !== 'web') {
-      markDecipherWebViewReady();
-    }
+    markDecipherWebViewReady();
   }, []);
 
   const onMessage = useCallback((e: { nativeEvent: { data: string } }) => {
-    if (Platform.OS !== 'web') {
-      routeYoutubeWebViewMessage(e.nativeEvent.data);
-    }
+    routeYoutubeWebViewMessage(e.nativeEvent.data);
   }, []);
 
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' || !webViewMounted) {
     return null;
   }
 

@@ -12,15 +12,21 @@ export const NRM_VERSION_INFO_PRODUCT_NAME = (
   brandConfig.versionInfoProductName ?? 'NullReference Music'
 ).trim() || 'NullReference Music';
 
-/** 친구용 APK 빌드 시에만 설정 (build-release-apk-custom.bat -Customize) */
+/** 친구용 APK 빌드 시에만 설정 (build-release-apk-custom.bat Y) */
 export function getNrmVersionInfoCustomizingLine(): string | null {
-  const label = (brandConfig.versionInfoCustomizing ?? '').trim();
-  return label ? `customizing : ${label}` : null;
+  if (brandConfig.versionInfoAdminBuild === true) return null;
+  const userName = String(brandConfig.userName ?? '').trim();
+  return userName ? `Custom : ${userName}` : null;
 }
 
-/** 기본 admin APK 빌드 시에만 설정 (build-release-apk-custom.bat, -Customize 없음) */
+/** admin APK 빌드 시에만 설정 (build-release-apk-custom.bat N) */
 export function getNrmVersionInfoAdminLine(): string | null {
-  return brandConfig.versionInfoAdminBuild === true ? 'admin version' : null;
+  return brandConfig.versionInfoAdminBuild === true ? 'Admin Version' : null;
+}
+
+/** 버전 정보에 Serial Number 줄을 표시할지 (admin APK는 숨김) */
+export function shouldShowVersionInfoSerialNumber(): boolean {
+  return brandConfig.versionInfoAdminBuild !== true;
 }
 
 /** 로고 워드마크 — 마지막 단어를 accent 색으로 분리 */

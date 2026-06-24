@@ -12,6 +12,12 @@ export function routeDecipherWebViewMessage(_raw: string): void {}
 /** 네이티브 WebView 스트림 수신 — 웹에서는 미사용 */
 export function routeYoutubeWebViewMessage(_raw: string): void {}
 
+/** 웹/tsc 스텁 — 네이티브에서만 동작 */
+export function registerDecipherWebViewCallbacks(
+  _requestMount: (() => void) | null,
+  _releaseMount: (() => void) | null,
+): void {}
+
 export async function downloadMediaUrlViaWebView(
   _fullUrl: string,
   _destUri: string,

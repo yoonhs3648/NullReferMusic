@@ -393,19 +393,25 @@ export function NrmHomeChartCarousel({
     });
   }, [count, itemsFingerprint, scrollToOffset, syncIndex]);
 
-  /** 차트 데이터가 바뀌면 커버 이미지를 백그라운드에서 prefetch */
+  /**
+   * 차트 데이터가 바뀌면 현재 인덱스 기준 앞쪽 커버 이미지를 백그라운드에서 prefetch.
+   * 전량(20장) 선로딩 대신 현재 위치 ±윈도우만 로드해 이미지 캐시 메모리를 절약한다.
+   */
   useEffect(() => {
     if (items.length === 0 || coverPixelSize <= 0) return;
     const timer = setTimeout(() => {
-      for (const it of items) {
-        const url = it.imageUrl?.trim();
+      const windowStart = Math.max(0, index - 1);
+      const windowEnd = Math.min(items.length, index + 5);
+      for (let i = windowStart; i < windowEnd; i++) {
+        const url = items[i]?.imageUrl?.trim();
         if (!url) continue;
         const displayUrl = coverArtUrlForDisplaySize(url, coverPixelSize);
         Image.prefetch(displayUrl).catch(() => {});
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [items, coverPixelSize]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, coverPixelSize, index]);
 
   useEffect(() => {
     if (count <= 0) return;

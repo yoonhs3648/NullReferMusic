@@ -10,6 +10,12 @@ export function markGoogleTranslateWebViewReady(): void {}
 
 export function routeGoogleTranslateWebViewMessage(_raw: string): void {}
 
+/** 웹/tsc 스텁 — 네이티브에서만 동작 */
+export function registerGoogleTranslateWebViewCallbacks(
+  _requestMount: (() => void) | null,
+  _releaseMount: (() => void) | null,
+): void {}
+
 export async function translateTextsViaGoogleTranslateWeb(
   texts: string[],
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {

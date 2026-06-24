@@ -46,6 +46,7 @@ import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAl
 import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
+import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDeviceResetPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
@@ -82,6 +83,7 @@ import {
   getNrmAppVersionLabel,
   getNrmVersionInfoAdminLine,
   getNrmVersionInfoCustomizingLine,
+  shouldShowVersionInfoSerialNumber,
   NRM_APP_AUTHOR_DISPLAY,
 } from '@/lib/nrmAppInfo';
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
@@ -186,6 +188,7 @@ type Panel =
   | 'adminUserBanRegister'
   | 'adminInquiryList'
   | 'adminUserList'
+  | 'adminDeviceReset'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -1716,6 +1719,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminDeviceReset')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    앱등록 초기화
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </DrawerShell>
             ) : null}
 
@@ -1781,6 +1799,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminUserListPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </DrawerShell>
+            ) : null}
+
+            {panel === 'adminDeviceReset' ? (
+              <DrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminDeviceResetPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}
@@ -2235,7 +2267,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 {getNrmVersionInfoCustomizingLine()}
               </Text>
             ) : null}
-            {appSerialNo.trim() ? (
+            {shouldShowVersionInfoSerialNumber() && appSerialNo.trim() ? (
               <Text style={[styles.versionLine, { color: bodyColor }]}>
                 {`Serial Number : ${appSerialNo.trim()}`}
               </Text>

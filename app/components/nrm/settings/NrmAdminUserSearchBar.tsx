@@ -16,6 +16,8 @@ type Props = {
   onSearchFieldChange: (field: NrmAdminUserSearchField) => void;
   searchText: string;
   onSearchTextChange: (text: string) => void;
+  /** true이면 비활성 상태일 때 검색 토글 버튼을 렌더링하지 않음 (외부에서 버튼을 직접 제어할 때 사용) */
+  hideToggle?: boolean;
 };
 
 export function NrmAdminUserSearchBar({
@@ -28,6 +30,7 @@ export function NrmAdminUserSearchBar({
   onSearchFieldChange,
   searchText,
   onSearchTextChange,
+  hideToggle = false,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -41,6 +44,7 @@ export function NrmAdminUserSearchBar({
   };
 
   if (!searchActive) {
+    if (hideToggle) return null;
     return (
       <View style={styles.searchBtnRow}>
         <Pressable

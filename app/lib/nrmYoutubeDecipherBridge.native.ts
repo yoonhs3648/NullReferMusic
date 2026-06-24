@@ -41,6 +41,39 @@ let streamDownloadActive = false;
 let streamJob: StreamJob | null = null;
 let streamWriteChain: Promise<void> = Promise.resolve();
 
+// ── 레이지 마운트 ──────────────────────────────────────────────────────────────
+let requestDecipherMountFn: (() => void) | null = null;
+let releaseDecipherMountFn: (() => void) | null = null;
+let decipherIdleTimer: ReturnType<typeof setTimeout> | null = null;
+/** 다운로드·복호화 완료 후 이 시간만큼 idle이면 WebView를 언마운트 */
+const DECIPHER_IDLE_UNMOUNT_MS = 3 * 60 * 1000; // 3분
+
+export function registerDecipherWebViewCallbacks(
+  requestMount: (() => void) | null,
+  releaseMount: (() => void) | null,
+): void {
+  requestDecipherMountFn = requestMount;
+  releaseDecipherMountFn = releaseMount;
+}
+
+function requestDecipherMount(): void {
+  if (decipherIdleTimer !== null) {
+    clearTimeout(decipherIdleTimer);
+    decipherIdleTimer = null;
+  }
+  requestDecipherMountFn?.();
+}
+
+function scheduleDecipherIdleUnmount(): void {
+  if (decipherIdleTimer !== null) clearTimeout(decipherIdleTimer);
+  decipherIdleTimer = setTimeout(() => {
+    decipherIdleTimer = null;
+    if (!decipherBusy && !streamDownloadActive && decipherQueue.length === 0) {
+      releaseDecipherMountFn?.();
+    }
+  }, DECIPHER_IDLE_UNMOUNT_MS);
+}
+
 function uint8ToBase64(u8: Uint8Array): string {
   const CHUNK = 0x1000;
   let binary = '';
@@ -318,7 +351,13 @@ true;
 
 function drainDecipherQueue(): void {
   if (streamDownloadActive || decipherBusy) return;
-  if (decipherQueue.length === 0 || webView == null || !webReady) return;
+  if (decipherQueue.length === 0 || webView == null || !webReady) {
+    // 대기 중인 작업이 없고 idle → WebView 유지 불필요, 언마운트 예약
+    if (!streamDownloadActive && !decipherBusy && decipherQueue.length === 0) {
+      scheduleDecipherIdleUnmount();
+    }
+    return;
+  }
   decipherBusy = true;
   const job = decipherQueue.shift()!;
   currentDecipherJob = job;
@@ -357,6 +396,7 @@ export async function waitForDecipherIdle(timeoutMs: number): Promise<void> {
 export async function evalYoutubePlayerInWebView(
   code: string,
 ): Promise<NrmDecipherResult> {
+  requestDecipherMount();
   await waitForWebViewReady(12_000);
   return new Promise((resolve, reject) => {
     decipherQueue.push({ code, resolve, reject });
@@ -371,6 +411,7 @@ export async function downloadMediaUrlViaWebView(
   fullUrl: string,
   destUri: string,
 ): Promise<void> {
+  requestDecipherMount();
   await waitForWebViewReady(15_000);
   await waitForDecipherIdle(15_000);
   if (webView == null) {

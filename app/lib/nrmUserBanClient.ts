@@ -1,5 +1,7 @@
+import { fetchGithubJsonDocument, resolveGithubDataPat } from '@/lib/nrmGithubContentsApi';
 import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import {
+  NRM_USER_BAN_LIST_JSON_API_PATH,
   NRM_USER_BAN_LIST_JSON_RAW_URL,
   NRM_USER_BAN_POLL_INTERVAL_MS,
 } from '@/lib/nrmRemoteDataConfig';
@@ -44,12 +46,23 @@ function normalizeRows(json: UserBanListJson): NrmUserBanItem[] {
   return out;
 }
 
-/** 캐시 없이 원격 userBanList.json 조회 */
+/** raw URL로 원격 userBanList.json 조회 (앱 클라이언트용) */
 export async function fetchUserBanList(signal?: AbortSignal): Promise<NrmUserBanItem[]> {
   const json = await fetchGithubRawJson<UserBanListJson>(NRM_USER_BAN_LIST_JSON_RAW_URL, {
     signal,
   });
   return normalizeRows(json);
+}
+
+/** GitHub Contents API로 최신 userBanList.json 조회 (관리자 패널 — CDN 캐시 우회) */
+export async function fetchUserBanListViaApi(): Promise<NrmUserBanItem[]> {
+  const pat = await resolveGithubDataPat();
+  const { doc } = await fetchGithubJsonDocument<UserBanListJson>(
+    NRM_USER_BAN_LIST_JSON_API_PATH,
+    pat,
+    { userBanList: [] },
+  );
+  return normalizeRows(doc);
 }
 
 /** SerialNo별 최신(id 최대) 기록 기준 차단 여부 */

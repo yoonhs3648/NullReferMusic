@@ -27,6 +27,8 @@ function githubHeaders(pat: string, json = true): Record<string, string> {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${pat}`,
     'X-GitHub-Api-Version': '2022-11-28',
+    'Cache-Control': 'no-cache, no-store',
+    Pragma: 'no-cache',
   };
   if (json) h['Content-Type'] = 'application/json';
   return h;

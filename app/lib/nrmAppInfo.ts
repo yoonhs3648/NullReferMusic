@@ -1,8 +1,8 @@
 import packageJson from '../package.json';
 
-import { NRM_VERSION_INFO_PRODUCT_NAME, getNrmVersionInfoAdminLine, getNrmVersionInfoCustomizingLine } from '@/lib/nrmAppBrand';
+import { NRM_VERSION_INFO_PRODUCT_NAME, getNrmVersionInfoAdminLine, getNrmVersionInfoCustomizingLine, shouldShowVersionInfoSerialNumber } from '@/lib/nrmAppBrand';
 
-export { getNrmVersionInfoAdminLine, getNrmVersionInfoCustomizingLine };
+export { getNrmVersionInfoAdminLine, getNrmVersionInfoCustomizingLine, shouldShowVersionInfoSerialNumber };
 
 /**
  * `package.json`의 `version` — Expo Go는 `expo-constants`의 `version`을 1.0.0 등으로 둘 수 있어

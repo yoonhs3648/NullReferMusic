@@ -1,7 +1,9 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
+import { fetchGithubJsonDocument, resolveGithubDataPat } from '@/lib/nrmGithubContentsApi';
 import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
 import {
   NRM_INQUIRY_HISTORY_DAYS,
+  NRM_INQUIRY_JSON_API_PATH,
   NRM_INQUIRY_JSON_RAW_URL,
 } from '@/lib/nrmRemoteDataConfig';
 export type NrmInquiryItem = {
@@ -103,6 +105,23 @@ async function fetchInquiryRows(signal?: AbortSignal): Promise<NrmInquiryItem[]>
 
 export async function fetchAllInquiriesForAdmin(signal?: AbortSignal): Promise<NrmInquiryItem[]> {
   const items = await fetchInquiryRows(signal);
+  return sortInquiriesByCreatedDesc(items);
+}
+
+/** GitHub Contents API로 최신 inquiry.json 조회 (관리자 패널 — CDN 캐시 우회) */
+export async function fetchAllInquiriesForAdminViaApi(): Promise<NrmInquiryItem[]> {
+  const pat = await resolveGithubDataPat();
+  const { doc } = await fetchGithubJsonDocument<InquiryJson>(
+    NRM_INQUIRY_JSON_API_PATH,
+    pat,
+    { inquiry: [] },
+  );
+  const rows = Array.isArray(doc.inquiry) ? doc.inquiry : [];
+  const items: NrmInquiryItem[] = [];
+  for (const row of rows) {
+    const item = normalizeInquiryRow(row);
+    if (item) items.push(item);
+  }
   return sortInquiriesByCreatedDesc(items);
 }
 

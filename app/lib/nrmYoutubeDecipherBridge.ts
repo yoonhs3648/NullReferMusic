@@ -11,4 +11,5 @@ export {
   routeYoutubeWebViewMessage,
   downloadMediaUrlViaWebView,
   evalYoutubePlayerInWebView,
+  registerDecipherWebViewCallbacks,
 } from './nrmYoutubeDecipherBridge.web';

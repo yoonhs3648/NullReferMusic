@@ -36,6 +36,9 @@ type Props = {
   scrollEnabled?: boolean;
   rowPressable?: boolean;
   onRowPress?: (entry: NrmUserListEntry) => void;
+  /** 외부에서 검색 활성 상태를 직접 제어할 때 사용. 제공 시 내부 state 대신 이 값을 사용하고 토글 버튼을 숨김 */
+  externalSearchActive?: boolean;
+  onExternalSearchActiveChange?: (active: boolean) => void;
 };
 
 export function NrmAdminUserLookupContent({
@@ -47,8 +50,15 @@ export function NrmAdminUserLookupContent({
   scrollEnabled = false,
   rowPressable = true,
   onRowPress,
+  externalSearchActive,
+  onExternalSearchActiveChange,
 }: Props) {
-  const [searchActive, setSearchActive] = useState(false);
+  const [internalSearchActive, setInternalSearchActive] = useState(false);
+  const isExternallyControlled = externalSearchActive !== undefined;
+  const searchActive = isExternallyControlled ? externalSearchActive : internalSearchActive;
+  const setSearchActive = isExternallyControlled
+    ? (onExternalSearchActiveChange ?? setInternalSearchActive)
+    : setInternalSearchActive;
   const [searchField, setSearchField] = useState<NrmAdminUserSearchField>('userName');
   const [searchText, setSearchText] = useState('');
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
@@ -133,6 +143,7 @@ export function NrmAdminUserLookupContent({
         onSearchFieldChange={setSearchField}
         searchText={searchText}
         onSearchTextChange={setSearchText}
+        hideToggle={isExternallyControlled}
       />
 
       {loading ? (
