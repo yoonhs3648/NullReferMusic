@@ -31,6 +31,14 @@
 			"content": "2026-06-25 00:59:52.329",
 			"SerialNo": "admin",
 			"date": "2026-06-25"
+		},
+		{
+			"id": 5,
+			"isNoti": false,
+			"title": "일반알람등록테스트",
+			"content": "test※★☆♥\nq\ns♥\n♣?\n1\n\n",
+			"SerialNo": "testadminserialno",
+			"date": "2026-06-25"
 		}
 	]
 }
