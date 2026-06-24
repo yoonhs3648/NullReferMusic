@@ -3,24 +3,13 @@
 		{
 			"id": 1,
 			"userName": "test",
-			"SerialNo": "01027523648",
+			"SerialNo": "testserialno",
 			"version": "2.1.4",
 			"content": "테스트",
 			"attachedFile": "",
 			"isAnswered": true,
 			"Createddate": "2026-06-18 10:15:42.080",
 			"replyContent": "테스트 완료"
-		},
-		{
-			"id": 2,
-			"userName": "testadmin",
-			"SerialNo": "testadminserialno",
-			"version": "2.3.7",
-			"content": "이건 \n문\ne.@#♡☆\n이\n\n다",
-			"attachedFile": "2026-06-25-NullReferenceMusicLog_1782316790480_3tji8a1o.txt",
-			"isAnswered": true,
-			"replyContent": "이\n\n건\n\n답ekfn☆♩\n\n입\n\n이다",
-			"Createddate": "2026-06-25 00:59:52.329"
 		}
 	]
 }
