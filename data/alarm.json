@@ -7,6 +7,14 @@
 			"content": "NullReference Music v.2.1.1 배포되었습니다.",
 			"SerialNo": "",
 			"date": "2026-06-13"
+		},
+		{
+			"id": 2,
+			"isNoti": false,
+			"title": "문의",
+			"content": "2026-06-24 14:59:00.970",
+			"SerialNo": "Admin",
+			"date": "2026-06-24"
 		}
 	]
 }
