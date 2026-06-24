@@ -13,7 +13,7 @@
 			"userName": "테스트계정2",
 			"SerialNo": "tester2",
 			"content": "test",
-			"isBanned": true,
+			"isBanned": false,
 			"date": "2026-06-25"
 		}
 	]
