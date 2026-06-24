@@ -39,6 +39,14 @@
 			"content": "test※★☆♥\nq\ns♥\n♣?\n1\n\n",
 			"SerialNo": "testadminserialno",
 			"date": "2026-06-25"
+		},
+		{
+			"id": 6,
+			"isNoti": false,
+			"title": "문의답변이 도착했습니다.",
+			"content": "문의답변이 도착했습니다.",
+			"SerialNo": "testadminserialno",
+			"date": "2026-06-25"
 		}
 	]
 }
