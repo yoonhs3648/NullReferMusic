@@ -15,6 +15,14 @@
 			"content": "테스트 알림입니다",
 			"SerialNo": "testadminserialno",
 			"date": "2026-06-25"
+		},
+		{
+			"id": 3,
+			"isNoti": true,
+			"title": "유저 공지알림",
+			"content": "유저 공지알림\n입\n니다\nㅎㅎ",
+			"SerialNo": "testadminserialno",
+			"date": "2026-06-25"
 		}
 	]
 }
