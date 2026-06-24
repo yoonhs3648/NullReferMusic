@@ -217,12 +217,20 @@ if ($Customize) {
         $regAppName = [System.IO.File]::ReadAllText($namePath).Trim()
         $regUserName = [System.IO.File]::ReadAllText($userPath).Trim()
         $regSerialNo = [System.IO.File]::ReadAllText($serialPath).Trim()
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Register-NrmCustomApkUserList.ps1') `
-            -RepoRoot $RepoRoot `
-            -AppName $regAppName `
-            -UserName $regUserName `
-            -SerialNo $regSerialNo `
-            -Version $ver.VersionName
+        try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Register-NrmCustomApkUserList.ps1') `
+                -RepoRoot $RepoRoot `
+                -AppName $regAppName `
+                -UserName $regUserName `
+                -SerialNo $regSerialNo `
+                -Version $ver.VersionName
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[userList] WARNING: userList registration script exited with code $LASTEXITCODE." -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "[userList] WARNING: userList registration failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
     else {
         Write-Host "[userList] WARNING: Custom metadata files missing; skipped userList registration." -ForegroundColor Yellow

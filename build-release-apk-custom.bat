@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 title NRM Build Release APK (Custom)
 
 if defined NRM_REPO_ROOT (
@@ -10,52 +10,60 @@ if defined NRM_REPO_ROOT (
 set "ROOT=%CD%"
 set "ANDROID=%ROOT%\app\android"
 set "WORK=%ROOT%\.build-release-apk-custom"
+set "BUILD_EXIT=1"
 
 if not exist "%ANDROID%\gradlew.bat" (
   echo ERROR: android\gradlew.bat not found.
   echo Expected: %ANDROID%\gradlew.bat
-  pause
-  exit /b 1
+  goto :finish
 )
 
 echo ======================================================
 echo NullReferMusic RELEASE APK ^(custom branding optional^)
 echo - Standalone APK ^(no Metro / PC dev server^)
-echo - GitHub PAT (saved in .secrets after first valid entry; reused on later builds)
+echo - GitHub PAT required after Y/N ^(validated each build; saved to .secrets on success^)
 echo - Y: custom app name, user name, serial number
-echo - N: admin APK (NullReference Music / 관리자 / SerialNo Admin)
+echo - N: admin APK ^(NullReference Music / 관리자 / SerialNo Admin^)
 echo ======================================================
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Show-NrmReleaseApkVersion.ps1" -RepoRoot "%ROOT%"
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Show-NrmReleaseApkVersion.ps1" -RepoRoot "%ROOT%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Prompt-NrmCustomApkBuild.ps1" -RepoRoot "%ROOT%"
-set "PROMPT_EXIT=%ERRORLEVEL%"
-if not "%PROMPT_EXIT%"=="0" (
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Prompt-NrmCustomApkBuild.ps1" -RepoRoot "%ROOT%"
+set "PROMPT_EXIT=!ERRORLEVEL!"
+if not "!PROMPT_EXIT!"=="0" (
   echo.
   echo Input cancelled or invalid.
-  pause
-  exit /b 1
+  set "BUILD_EXIT=!PROMPT_EXIT!"
+  goto :finish
 )
 
 echo.
 if exist "%WORK%\customize.flag" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$n=[IO.File]::ReadAllText('%WORK%\display-name.txt').Trim(); Write-Host ('Building release APK with temporary display name: ' + $n)"
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%" -Customize
+  if exist "%WORK%\display-name.txt" (
+    set /p NRM_DISPLAY_NAME=<"%WORK%\display-name.txt"
+    echo Building release APK with temporary display name: !NRM_DISPLAY_NAME!
+  ) else (
+    echo Building custom release APK...
+  )
+  call powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%" -Customize
 ) else (
-  echo Building admin APK (NullReference Music / SerialNo Admin)...
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%"
+  echo Building admin APK ^(NullReference Music / SerialNo Admin^)...
+  call powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\Build-Release-Apk-Custom.ps1" -RepoRoot "%ROOT%"
 )
 
-set "BUILD_EXIT=%ERRORLEVEL%"
+set "BUILD_EXIT=!ERRORLEVEL!"
 
+:finish
 echo.
-if not "%BUILD_EXIT%"=="0" (
-  echo Build failed. See messages above.
-  pause
-  exit /b 1
+echo ======================================================
+if "!BUILD_EXIT!"=="0" (
+  echo [OK] Release APK build script finished successfully.
+) else (
+  echo [FAIL] Release APK build script failed. Exit code: !BUILD_EXIT!
+  echo       Scroll up for error details.
 )
-
-pause
-endlocal
-exit /b 0
+echo ======================================================
+echo.
+echo This window stays open. Close it manually when you are done reviewing the log.
+cmd /k
