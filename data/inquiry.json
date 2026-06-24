@@ -9,18 +9,7 @@
 			"attachedFile": "",
 			"isAnswered": true,
 			"Createddate": "2026-06-18 10:15:42.080",
-			"replyContent": "256"
-		},
-		{
-			"id": 2,
-			"userName": "",
-			"SerialNo": "",
-			"version": "2.3.5",
-			"content": "문의 첨부테스트",
-			"attachedFile": "2026-06-24-NullReferenceMusicLog_1782280739601_5da4vnyj.txt",
-			"isAnswered": true,
-			"replyContent": "ㅇㅇㅇ",
-			"Createddate": "2026-06-24 14:59:00.970"
+			"replyContent": "테스트 완료"
 		}
 	]
 }
