@@ -37,7 +37,11 @@ function normalizeAccount(
   return { bearerToken };
 }
 
+let _migrationDone = false;
+
 async function migrateLegacyAccount(): Promise<void> {
+  if (_migrationDone) return;
+  _migrationDone = true;
   const legacy = await AsyncStorage.getItem(LEGACY_ACCOUNT_KEY);
   if (!legacy) return;
   try {

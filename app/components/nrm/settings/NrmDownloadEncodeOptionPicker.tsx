@@ -8,7 +8,7 @@ export type EncodeOptionItem = {
   label: string;
   description: string;
   hint?: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon?: keyof typeof Ionicons.glyphMap;
 };
 
 type Props = {
@@ -49,21 +49,23 @@ export function NrmDownloadEncodeOptionPicker({
             accessibilityRole="radio"
             accessibilityState={{ checked: active }}>
             <View style={styles.cardHeader}>
-              <View
-                style={[
-                  styles.iconWrap,
-                  {
-                    backgroundColor: active
-                      ? 'rgba(0,102,204,0.16)'
-                      : 'rgba(128,128,128,0.12)',
-                  },
-                ]}>
-                <Ionicons
-                  name={opt.icon}
-                  size={18}
-                  color={active ? nrmTokens.color.primary : bodyColor}
-                />
-              </View>
+              {opt.icon ? (
+                <View
+                  style={[
+                    styles.iconWrap,
+                    {
+                      backgroundColor: active
+                        ? 'rgba(0,102,204,0.16)'
+                        : 'rgba(128,128,128,0.12)',
+                    },
+                  ]}>
+                  <Ionicons
+                    name={opt.icon}
+                    size={18}
+                    color={active ? nrmTokens.color.primary : bodyColor}
+                  />
+                </View>
+              ) : null}
               <View style={styles.titleBlock}>
                 <View style={styles.titleRow}>
                   <Text

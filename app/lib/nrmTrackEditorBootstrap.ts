@@ -36,19 +36,17 @@ export type TrackEditorBootstrapState = {
 export async function bootstrapTrackEditorState(
   track: NrmDownloadTrackItem,
 ): Promise<TrackEditorBootstrapState> {
-  const meta = await readAudioFileMetadata(track.audioUri, track.fileName);
-  const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
-  let lrcText = '';
-  if (track.lrcUri) {
-    try {
-      lrcText = await FileSystem.readAsStringAsync(track.lrcUri, {
-        encoding: EncodingType.UTF8,
-      });
-    } catch {
-      /* 사이드카 읽기 실패 시 내장 가사로 복원 */
-    }
-  }
+  // 오디오 메타데이터 읽기와 LRC 사이드카 읽기는 독립적이므로 병렬 실행
+  const lrcReadPromise = track.lrcUri
+    ? FileSystem.readAsStringAsync(track.lrcUri, { encoding: EncodingType.UTF8 }).catch(() => '')
+    : Promise.resolve('');
 
+  const [meta, lrcText] = await Promise.all([
+    readAudioFileMetadata(track.audioUri, track.fileName),
+    lrcReadPromise,
+  ]);
+
+  const normalizedWebsite = normalizeMelonTrackWebsite(meta.website);
   const embeddedSync = isEmbeddedSyncLyricsText(meta.lyrics) ? (meta.lyrics ?? '').trim() : '';
 
   let melonLyricsAvailable = false;

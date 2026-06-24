@@ -38,6 +38,8 @@ type Props = {
   onBackToHome: () => void;
 };
 
+const keyExtractorSpotifyAlbum = (item: { id: string }) => item.id;
+
 function mergeSpotifyAlbumHits(
   prev: SpotifyAlbumSearchHit[],
   next: SpotifyAlbumSearchHit[],
@@ -232,7 +234,7 @@ export function NrmSpotifyAlbumSearchHome({
       <FlatList
         ref={listRef}
         data={!heroError ? hits : []}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractorSpotifyAlbum}
         renderItem={({ item: hit }) => (
           <Pressable
             onPress={() => void openDetail(hit)}
@@ -257,7 +259,7 @@ export function NrmSpotifyAlbumSearchHome({
           const y = e.nativeEvent.contentOffset.y;
           setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={200}
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
         contentContainerStyle={[
@@ -265,6 +267,9 @@ export function NrmSpotifyAlbumSearchHome({
           { paddingHorizontal },
           initialCentered && styles.scrollInnerInitialCentered,
         ]}
+        initialNumToRender={10}
+        maxToRenderPerBatch={8}
+        windowSize={10}
       />
       <NrmScrollToTopFab
         visible={showScrollTop}

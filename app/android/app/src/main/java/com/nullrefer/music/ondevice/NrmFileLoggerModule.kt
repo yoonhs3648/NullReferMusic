@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import com.facebook.react.bridge.ActivityEventListener
-import com.nullrefer.music.NrmBrand
 import java.util.Locale
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -14,13 +13,39 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
-/** JS → Download/NullReferenceMusic/logs/nullReferenceMusicLog.log */
+/** JS → Download/NullReferenceMusic/logs/yyyy-MM-dd-NullReferenceMusicLog.txt */
 class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext), ActivityEventListener {
 
   companion object {
     private const val REQ_PICK_ATTACHMENT = 8821
     private const val MAX_ATTACHMENT_BYTES = 20L * 1024L * 1024L
+    private val INQUIRY_ATTACHMENT_EXTENSIONS =
+        listOf(
+            ".txt",
+            ".md",
+            ".json",
+            ".log",
+            ".csv",
+            ".xml",
+            ".yaml",
+            ".yml",
+            ".html",
+            ".htm",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".zip",
+        )
+
+    private fun isAllowedInquiryAttachmentName(name: String): Boolean {
+      val lower = name.trim().lowercase(Locale.US)
+      if (lower.isEmpty()) return false
+      return INQUIRY_ATTACHMENT_EXTENSIONS.any { lower.endsWith(it) }
+    }
   }
 
   private var pickPromise: Promise? = null
@@ -108,16 +133,12 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     }
     pickPromise = promise
     try {
-      val logsRel = NrmBrand.STORAGE_LOGS_PATH
-      val initialUri =
-          Uri.parse(
-              "content://com.android.externalstorage.documents/document/primary:" +
-                  Uri.encode(logsRel))
+      val initialUri = NrmFileLogger.buildLogFolderDocumentUri()
       val intent =
           Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/plain"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain"))
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("*/*", "application/octet-stream"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -162,8 +183,11 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
     try {
       val ctx = reactApplicationContext.applicationContext
       val name = NrmFileLogger.queryDisplayName(ctx, uri) ?: "attachment"
-      if (!name.lowercase(Locale.US).endsWith(".txt")) {
-        promise.reject("E_PICK_TYPE", "txt 파일만 첨부할 수 있습니다.")
+      if (!isAllowedInquiryAttachmentName(name)) {
+        promise.reject(
+            "E_PICK_TYPE",
+            "GitHub에 올릴 수 있는 확장자만 첨부할 수 있습니다. (txt, md, json, pdf, png, jpg, gif, webp, zip 등)",
+        )
         return
       }
       val size = NrmFileLogger.querySizeBytes(ctx, uri)

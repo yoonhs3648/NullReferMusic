@@ -150,6 +150,8 @@ class NrmSiteCookieModule(reactContext: ReactApplicationContext) :
 
             "https://accounts.melon.com",
 
+            "https://m2.melon.com",
+
         )
 
 
@@ -165,6 +167,8 @@ class NrmSiteCookieModule(reactContext: ReactApplicationContext) :
             "https://member.melon.com",
 
             "https://accounts.melon.com",
+
+            "https://m2.melon.com",
 
         )
 

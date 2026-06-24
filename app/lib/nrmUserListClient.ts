@@ -9,6 +9,7 @@ export type NrmUserListEntry = {
   Createddate: string;
   deviceId: string | null;
   lastAccessDate: string | null;
+  isAdmin?: boolean;
 };
 
 type UserListJson = {
@@ -21,6 +22,7 @@ type UserListJson = {
     Createddate?: string;
     deviceId?: string | null;
     lastAccessDate?: string | null;
+    isAdmin?: boolean;
   }>;
 };
 
@@ -63,6 +65,7 @@ export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]>
       Createddate: String(row.Createddate ?? '').trim(),
       deviceId: row.deviceId ?? null,
       lastAccessDate: row.lastAccessDate ?? null,
+      isAdmin: row.isAdmin === true,
     });
   }
   return dedupeUserListBySerialNo(normalized);

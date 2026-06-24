@@ -15,6 +15,8 @@ import {
   updateWebTrackMetadata,
 } from '@/lib/nrmWebDownloadTrackCatalog';
 
+import type { ApplyTrackMetadataUpdateResult } from '@/lib/nrmTrackMetadataUpdate.native';
+
 export type ApplyTrackMetadataUpdateInput = {
   track: NrmDownloadTrackItem;
   newFileName: string;
@@ -34,7 +36,7 @@ async function readExistingSyncLrcText(track: NrmDownloadTrackItem): Promise<str
 
 export async function applyTrackMetadataUpdate(
   input: ApplyTrackMetadataUpdateInput,
-): Promise<void> {
+): Promise<ApplyTrackMetadataUpdateResult> {
   const { track, newFileName, metadata, initialLyricsMode, newLyricsMode, hasEmbeddedSyncLyrics } =
     input;
   if (track.location.kind !== 'web') {
@@ -60,7 +62,7 @@ export async function applyTrackMetadataUpdate(
       metadata: ffmpegMetadata,
       lrcText: lyricsAction.kind === 'delete' ? '' : undefined,
     });
-    return;
+    return {};
   }
 
   if (lyricsAction.kind === 'translate-lrc') {
@@ -76,9 +78,10 @@ export async function applyTrackMetadataUpdate(
       lrcText,
     });
     if (!translated.ok) {
-      throw new Error(translated.message ?? '번역에 실패했습니다.');
+      notifyUser(translated.message ?? '번역에 실패했습니다. 원본 가사로 저장되었습니다.');
+      return { lyricsSaved: true, lyricsTranslationFailed: true };
     }
-    return;
+    return { lyricsSaved: true };
   }
 
   if (lyricsAction.kind === 'strip-translation') {
@@ -93,7 +96,7 @@ export async function applyTrackMetadataUpdate(
         lrcText: stripped || existingLrcText,
       });
     }
-    return;
+    return { lyricsSaved: true };
   }
 
   if (lyricsAction.kind === 'generate-melon') {
@@ -102,11 +105,11 @@ export async function applyTrackMetadataUpdate(
     ).trim();
     if (!plain) {
       notifyUser('멜론 가사를 가져올 수 없습니다.');
-      return;
+      return { lyricsSaved: false };
     }
     const { resolveMelonAlignLanguageForPlain } = await import('@/lib/nrmPickMelonAlignLanguage');
     const alignLang = await resolveMelonAlignLanguageForPlain(plain);
-    if (!alignLang) return;
+    if (!alignLang) return { lyricsSaved: false };
     const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
     const melon = await transcribeMelonLyricsLrc(
       track.audioUri,
@@ -122,14 +125,17 @@ export async function applyTrackMetadataUpdate(
         metadata: ffmpegMetadata,
         lrcText: melon.lrcFull,
       });
-      return;
+      return {
+        lyricsSaved: true,
+        lyricsTranslationFailed: melon.lyricsTranslationFailed ?? false,
+      };
     }
     notifyUser(
       melon.lyricsMelonMemoryInsufficient
         ? '메모리가 부족합니다. 가사생성을 중지합니다.'
         : '멜론가사 생성에 실패했습니다.',
     );
-    return;
+    return { lyricsSaved: false };
   }
 
   const whisper = await transcribeWhisperLrc(track.audioUri, lyricsAction.mode, ext);
@@ -140,7 +146,10 @@ export async function applyTrackMetadataUpdate(
       metadata: ffmpegMetadata,
       lrcText: whisper.lrcFull,
     });
-    return;
+    return {
+      lyricsSaved: true,
+      lyricsTranslationFailed: whisper.lyricsTranslationFailed ?? false,
+    };
   }
   notifyUser('가사 생성에 실패했습니다. 메타데이터만 저장되었습니다.');
   await updateWebTrackMetadata(track.location.trackId, {
@@ -148,4 +157,5 @@ export async function applyTrackMetadataUpdate(
     displayLabel,
     metadata: ffmpegMetadata,
   });
+  return { lyricsSaved: false };
 }

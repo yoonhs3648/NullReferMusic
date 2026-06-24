@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const NRM_ACTIVITY_HISTORY_DISPLAY_OPTIONS = [
-  { id: '0', label: '사용안함', description: '', icon: 'eye-off-outline' as const },
-  { id: '7', label: '7일', description: '', icon: 'time-outline' as const },
-  { id: '30', label: '30일', description: '', icon: 'calendar-outline' as const },
-  { id: '90', label: '90일', description: '', icon: 'calendar-outline' as const },
-  { id: '180', label: '180일', description: '', icon: 'calendar-outline' as const },
+  { id: '0', label: '사용안함', description: '' },
+  { id: '7', label: '7일', description: '' },
+  { id: '30', label: '30일', description: '' },
+  { id: '90', label: '90일', description: '' },
+  { id: '180', label: '180일', description: '' },
 ] as const;
 
 export type NrmActivityHistoryDisplayDays =

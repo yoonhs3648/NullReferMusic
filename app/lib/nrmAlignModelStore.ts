@@ -27,7 +27,9 @@ export function useAlignModelStatuses(active: boolean) {
   useEffect(() => {
     if (!active) return;
     void refresh();
-    const poll = setInterval(() => void refresh(), 5000);
+    // 이벤트 구독(subscribeAlignModelDownloadEvents)이 실시간 변경을 처리하므로
+    // 폴백 폴링은 30초로 늘려 중복 요청을 최소화한다.
+    const poll = setInterval(() => void refresh(), 30_000);
     return () => clearInterval(poll);
   }, [active, refresh]);
 

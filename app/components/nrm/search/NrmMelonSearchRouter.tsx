@@ -1135,7 +1135,7 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
               const y = e.nativeEvent.contentOffset.y;
               setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
             }}
-            scrollEventThrottle={16}
+            scrollEventThrottle={200}
             keyboardShouldPersistTaps="handled"
             style={styles.scroll}
             contentContainerStyle={[
@@ -1143,6 +1143,9 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
               { paddingHorizontal },
               initialListCentered && styles.scrollInnerInitialCentered,
             ]}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={10}
           />
           <NrmScrollToTopFab
             visible={showScrollTop}

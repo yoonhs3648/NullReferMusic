@@ -40,6 +40,9 @@ async function listFromFolder(
   dirUri?: string,
 ): Promise<NrmDownloadTrackItem[]> {
   const names = await FileSystem.readDirectoryAsync(folderUri).catch(() => []);
+  // readDirectoryAsync가 이미 폴더 내 모든 파일 이름을 반환하므로,
+  // LRC 파일 존재 여부는 Set으로 O(1) 조회 — 파일당 FileSystem.getInfoAsync 제거
+  const nameSet = new Set(names.map((n) => n.toLowerCase()));
   const items: NrmDownloadTrackItem[] = [];
   for (const name of names.sort((a, b) => a.localeCompare(b, 'ko'))) {
     if (!isAudioFileName(name)) continue;
@@ -48,8 +51,9 @@ async function listFromFolder(
         ? await resolveSafChildUri(dirUri, name)
         : joinFolderFile(folderUri, name);
     const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
-    const lrcUri = siblingLrcUri(audioUri);
-    const lrcExists = await FileSystem.getInfoAsync(lrcUri).then((x) => x.exists).catch(() => false);
+    const lrcName = name.replace(/\.[^.]+$/, '.lrc');
+    const lrcExists = nameSet.has(lrcName.toLowerCase());
+    const lrcUri = lrcExists ? siblingLrcUri(audioUri) : undefined;
     const location: PersistedAudioLocation =
       kind === 'saf' && dirUri
         ? { kind: 'saf', audioUri, dirUri, fileName: name }
@@ -60,7 +64,7 @@ async function listFromFolder(
       audioUri,
       extension: ext,
       location,
-      lrcUri: lrcExists ? lrcUri : undefined,
+      lrcUri,
       displayLabel: stem,
     });
   }

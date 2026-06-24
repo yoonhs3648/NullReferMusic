@@ -2,6 +2,7 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import {
   appendActivityHistory,
+  appendActivityHistoryBatch,
   type NrmActivityHistoryKind,
 } from '@/lib/nrmActivityHistory';
 import type { NrmLyricsUiMode } from '@/lib/nrmMelonLyrics';
@@ -17,23 +18,27 @@ function hasTranslation(mode: NrmLyricsUiMode): boolean {
 export function classifyLyricsHistoryKind(
   before: NrmLyricsUiMode,
   after: NrmLyricsUiMode,
+  options?: { translationFailed?: boolean },
 ): NrmActivityHistoryKind | null {
   if (before === after) return null;
 
   const hadLyrics = hasLyrics(before);
   const hasLyricsNow = hasLyrics(after);
   const hadTrans = hasTranslation(before);
-  const hasTransNow = hasTranslation(after);
+  const wantTranslation = hasTranslation(after);
+  const translationOk = wantTranslation && !options?.translationFailed;
 
   if (!hadLyrics && hasLyricsNow) {
-    return hasTransNow ? 'lyrics_translation' : 'lyrics';
+    return translationOk ? 'lyrics_translation' : 'lyrics';
   }
   if (hadLyrics && !hasLyricsNow) {
     return 'lyrics_remove';
   }
   if (hadLyrics && hasLyricsNow) {
-    if (!hadTrans && hasTransNow) return 'lyrics_add_translation';
-    if (hadTrans && !hasTransNow) return 'lyrics_remove_translation';
+    if (!hadTrans && wantTranslation) {
+      return translationOk ? 'lyrics_add_translation' : 'lyrics';
+    }
+    if (hadTrans && !wantTranslation) return 'lyrics_remove_translation';
   }
   return null;
 }
@@ -82,32 +87,38 @@ export async function logStorageMetadataHistory(params: {
   beforeFields: Omit<NrmAudioFileMetadata, 'artist' | 'title'>;
   lyricsModeBefore: NrmLyricsUiMode;
   lyricsModeAfter: NrmLyricsUiMode;
+  lyricsSaved?: boolean;
+  lyricsTranslationFailed?: boolean;
 }): Promise<void> {
   const base = {
     fileName: params.fileNameAfter,
     audioUri: params.audioUriAfter,
   };
 
-  const lyricsKind = classifyLyricsHistoryKind(
-    params.lyricsModeBefore,
-    params.lyricsModeAfter,
-  );
-  if (lyricsKind) {
-    await appendActivityHistory({ ...base, kind: lyricsKind });
-  }
+  const lyricsKind =
+    params.lyricsSaved === false
+      ? null
+      : classifyLyricsHistoryKind(
+          params.lyricsModeBefore,
+          params.lyricsModeAfter,
+          { translationFailed: params.lyricsTranslationFailed },
+        );
 
-  if (
-    nonLyricsMetadataChanged(
-      params.beforeArtist,
-      params.beforeTitle,
-      params.beforeFields,
-      params.metadataAfter,
-      params.track.fileName,
-      params.fileNameAfter,
-    )
-  ) {
-    await appendActivityHistory({ ...base, kind: 'metadata_edit' });
-  }
+  const metaChanged = nonLyricsMetadataChanged(
+    params.beforeArtist,
+    params.beforeTitle,
+    params.beforeFields,
+    params.metadataAfter,
+    params.track.fileName,
+    params.fileNameAfter,
+  );
+
+  // 항목이 2개 이상이면 한 번의 I/O로 일괄 기록 (read 1회 + write 1회)
+  type EntryInput = Parameters<typeof appendActivityHistoryBatch>[0][number];
+  const toWrite: EntryInput[] = [];
+  if (lyricsKind) toWrite.push({ ...base, kind: lyricsKind });
+  if (metaChanged) toWrite.push({ ...base, kind: 'metadata_edit' });
+  await appendActivityHistoryBatch(toWrite);
 }
 
 export async function logStorageTrackRemoveHistory(track: NrmDownloadTrackItem): Promise<void> {

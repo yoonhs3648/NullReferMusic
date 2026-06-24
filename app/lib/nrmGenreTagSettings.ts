@@ -780,7 +780,15 @@ function normalizeLoadedCatalog(categories: NrmGenreCategory[]): NrmGenreTagCata
 
 
 
+let _genreTagCatalogCache: NrmGenreTagCatalog | null = null;
+
+export function invalidateNrmGenreTagCatalogCache(): void {
+  _genreTagCatalogCache = null;
+}
+
 export async function loadNrmGenreTagCatalog(): Promise<NrmGenreTagCatalog> {
+
+  if (_genreTagCatalogCache !== null) return _genreTagCatalogCache;
 
   try {
 
@@ -806,7 +814,10 @@ export async function loadNrmGenreTagCatalog(): Promise<NrmGenreTagCatalog> {
 
     }
 
-    if (!raw) return getDefaultNrmGenreTagCatalog();
+    if (!raw) {
+      _genreTagCatalogCache = getDefaultNrmGenreTagCatalog();
+      return _genreTagCatalogCache;
+    }
 
     const parsed = JSON.parse(raw) as NrmGenreTagCatalog;
 
@@ -826,7 +837,8 @@ export async function loadNrmGenreTagCatalog(): Promise<NrmGenreTagCatalog> {
 
     ) {
 
-      return getDefaultNrmGenreTagCatalog();
+      _genreTagCatalogCache = getDefaultNrmGenreTagCatalog();
+      return _genreTagCatalogCache;
 
     }
 
@@ -846,7 +858,10 @@ export async function loadNrmGenreTagCatalog(): Promise<NrmGenreTagCatalog> {
 
       .map((c) => sanitizeCategory(c));
 
-    if (categories.length === 0) return getDefaultNrmGenreTagCatalog();
+    if (categories.length === 0) {
+      _genreTagCatalogCache = getDefaultNrmGenreTagCatalog();
+      return _genreTagCatalogCache;
+    }
 
 
 
@@ -874,11 +889,13 @@ export async function loadNrmGenreTagCatalog(): Promise<NrmGenreTagCatalog> {
 
     }
 
+    _genreTagCatalogCache = catalog;
     return catalog;
 
   } catch {
 
-    return getDefaultNrmGenreTagCatalog();
+    _genreTagCatalogCache = getDefaultNrmGenreTagCatalog();
+    return _genreTagCatalogCache;
 
   }
 
@@ -921,6 +938,7 @@ export async function saveNrmGenreTagCatalog(
   };
 
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  _genreTagCatalogCache = payload;
 
 }
 
@@ -931,6 +949,7 @@ export async function resetNrmGenreTagCatalogToDefault(): Promise<NrmGenreTagCat
   const defaults = cloneCatalog(getDefaultNrmGenreTagCatalog());
 
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
+  _genreTagCatalogCache = defaults;
 
   return defaults;
 

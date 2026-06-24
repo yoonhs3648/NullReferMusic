@@ -251,7 +251,7 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
             effectiveNewLyricsMode = lyricsModeAtOpen;
           }
 
-          await applyTrackMetadataUpdate({
+          const updateResult = await applyTrackMetadataUpdate({
             track,
             newFileName: fileName,
             metadata,
@@ -269,6 +269,8 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
             beforeFields: fieldsAtOpen,
             lyricsModeBefore: lyricsModeAtOpen,
             lyricsModeAfter: effectiveNewLyricsMode,
+            lyricsSaved: updateResult.lyricsSaved,
+            lyricsTranslationFailed: updateResult.lyricsTranslationFailed,
           });
           await reloadHistory();
         } catch (e) {
@@ -342,7 +344,7 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
           sections={sections}
           keyExtractor={(item) => item.id}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           contentContainerStyle={sections.length === 0 ? styles.emptyContent : styles.listContent}
           ListEmptyComponent={
@@ -352,6 +354,9 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
           renderItem={renderItem}
           stickySectionHeadersEnabled
           showsVerticalScrollIndicator={false}
+          initialNumToRender={20}
+          maxToRenderPerBatch={15}
+          windowSize={10}
         />
       )}
 

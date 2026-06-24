@@ -21,6 +21,8 @@ import type { NrmAlarmItem } from '@/lib/nrmAlarmClient';
 import { peekReadAlarmIds } from '@/lib/nrmAlarmReadState';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
+const keyExtractorAlarm = (row: NrmAlarmItem) => String(row.id);
+
 type Props = {
   isDark: boolean;
   open: boolean;
@@ -68,6 +70,11 @@ function AlarmListRow({
             numberOfLines={expanded ? undefined : 2}>
             {item.title}
           </Text>
+          {!isRead ? (
+            <View style={styles.newBadge}>
+              <Text style={styles.newBadgeText}>N</Text>
+            </View>
+          ) : null}
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
             size={16}
@@ -145,6 +152,10 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
     [feed, readIds],
   );
 
+  const onRefreshPull = useCallback(() => {
+    void feed.pullToRefresh();
+  }, [feed]);
+
   const renderItem = useCallback(
     ({ item }: { item: NrmAlarmItem }) => (
       <AlarmListRow
@@ -193,17 +204,20 @@ export function NrmAppNotificationDrawer({ isDark, open, onOpenChange, feed }: P
               ) : (
                 <FlatList
                   data={feed.items}
-                  keyExtractor={(row) => String(row.id)}
+                  keyExtractor={keyExtractorAlarm}
                   renderItem={renderItem}
                   refreshControl={
                     <RefreshControl
                       refreshing={feed.refreshing}
-                      onRefresh={() => void feed.pullToRefresh()}
+                      onRefresh={onRefreshPull}
                       tintColor={nrmTokens.color.primary}
                     />
                   }
                   contentContainerStyle={styles.listContent}
                   showsVerticalScrollIndicator={false}
+                  initialNumToRender={15}
+                  maxToRenderPerBatch={10}
+                  windowSize={8}
                 />
               )}
             </View>
@@ -293,6 +307,22 @@ const styles = StyleSheet.create({
     color: nrmTokens.color.onPrimary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  newBadge: {
+    backgroundColor: nrmTokens.color.primary,
+    borderRadius: 999,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  newBadgeText: {
+    color: nrmTokens.color.onPrimary,
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 12,
   },
   rowTitle: {
     flex: 1,

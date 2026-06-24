@@ -100,6 +100,26 @@ export function NrmLastfmChartsHome({
     enabled: !loading && !errorCode,
   });
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem) => `${activeTab}-${item.trackId}-${item.rank}`,
+    [activeTab],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          coverUrl={coverLoader.resolveItemCoverUrl(item)}
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, coverLoader, onTrackPress],
+  );
+
   const listHeader = (
     <View style={{ paddingHorizontal: paddingHorizontal }} collapsable={false}>
       <View style={styles.headerRow}>
@@ -172,31 +192,20 @@ export function NrmLastfmChartsHome({
       style={styles.list}
       nestedScrollEnabled
       data={loading || errorCode ? [] : items}
-      keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
+      keyExtractor={keyExtractor}
       onViewableItemsChanged={coverLoader.onViewableItemsChanged}
       viewabilityConfig={coverLoader.viewabilityConfig}
-      renderItem={({ item }) => (
-        <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <NrmChartTrackRow
-            item={item}
-            titleColor={titleColor}
-            bodyColor={bodyColor}
-            coverUrl={coverLoader.resolveItemCoverUrl(item)}
-            onPress={
-              onTrackPress
-                ? () => onTrackPress(item)
-                : undefined
-            }
-          />
-        </View>
-      )}
+      renderItem={renderItem}
       ListHeaderComponent={listHeader}
-      ListEmptyComponent={() => listEmpty}
+      ListEmptyComponent={listEmpty}
       contentContainerStyle={[
         styles.listContent,
         (loading || errorCode) && styles.listContentEmpty,
       ]}
       keyboardShouldPersistTaps="handled"
+      initialNumToRender={20}
+      maxToRenderPerBatch={15}
+      windowSize={8}
     />
   );
 }

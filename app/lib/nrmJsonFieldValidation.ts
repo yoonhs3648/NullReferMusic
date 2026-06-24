@@ -1,3 +1,5 @@
+import { NRM_INQUIRY_MAX_REPLY_CHARS } from '@/lib/nrmRemoteDataConfig';
+
 const JSON_FORBIDDEN = /["\[\]{}\\]/;
 
 export function hasJsonForbiddenChars(value: string): boolean {
@@ -44,6 +46,19 @@ export function validateInquiryContent(value: string): string | null {
   }
   if (hasJsonForbiddenChars(value)) {
     return '문의내용에 포함할 수 없는 문자가 있습니다.';
+  }
+  return null;
+}
+
+export function validateInquiryReplyContent(value: string): string | null {
+  if (!isNonEmptyTrimmed(value)) {
+    return '답변 내용을 입력하세요.';
+  }
+  if (value.length > NRM_INQUIRY_MAX_REPLY_CHARS) {
+    return `답변은 ${NRM_INQUIRY_MAX_REPLY_CHARS}자까지 입력할 수 있습니다.`;
+  }
+  if (hasJsonForbiddenChars(value)) {
+    return '답변에 포함할 수 없는 문자가 있습니다.';
   }
   return null;
 }

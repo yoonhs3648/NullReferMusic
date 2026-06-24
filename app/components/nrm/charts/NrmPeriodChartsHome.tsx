@@ -355,6 +355,44 @@ export function NrmPeriodChartsHome({
     );
   }, [loading, items.length, errorCode, isDark, platform, paddingHorizontal, bodyColor]);
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem, index: number) =>
+      `${queryKey}-${item.trackId}-${item.rank}-${index}`,
+    [queryKey],
+  );
+
+  const coverLoader = useNrmLastfmChartCoverLoader({
+    items,
+    generation: chartGeneration,
+    enabled: platform === 'lastfm' && !loading && !errorCode,
+  });
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }} collapsable={false}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          coverUrl={
+            platform === 'lastfm'
+              ? coverLoader.resolveItemCoverUrl(item)
+              : undefined
+          }
+          countLabel={
+            platform === 'spotify'
+              ? spotifyKind === 'monthly'
+                ? '평균 순위'
+                : '스트림'
+              : undefined
+          }
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, platform, coverLoader, spotifyKind, onTrackPress],
+  );
+
   const listFooter =
     loadingMore && !errorCode ? (
       <ActivityIndicator
@@ -403,12 +441,6 @@ export function NrmPeriodChartsHome({
       />
     );
 
-  const coverLoader = useNrmLastfmChartCoverLoader({
-    items,
-    generation: chartGeneration,
-    enabled: platform === 'lastfm' && !loading && !errorCode,
-  });
-
   const listHeader = (
     <View>
       {platform !== 'spotify' && playlistTitle && !errorCode ? (
@@ -440,42 +472,19 @@ export function NrmPeriodChartsHome({
         style={styles.list}
         nestedScrollEnabled
         data={loading || errorCode ? [] : items}
-        keyExtractor={(item, index) =>
-          `${queryKey}-${item.trackId}-${item.rank}-${index}`
-        }
+        keyExtractor={keyExtractor}
         onViewableItemsChanged={
           platform === 'lastfm' ? coverLoader.onViewableItemsChanged : undefined
         }
         viewabilityConfig={
           platform === 'lastfm' ? coverLoader.viewabilityConfig : undefined
         }
-        renderItem={({ item }) => (
-          <View style={{ paddingHorizontal }} collapsable={false}>
-            <NrmChartTrackRow
-              item={item}
-              titleColor={titleColor}
-              bodyColor={bodyColor}
-              coverUrl={
-                platform === 'lastfm'
-                  ? coverLoader.resolveItemCoverUrl(item)
-                  : undefined
-              }
-              countLabel={
-                platform === 'spotify'
-                  ? spotifyKind === 'monthly'
-                    ? '평균 순위'
-                    : '스트림'
-                  : undefined
-              }
-              onPress={onTrackPress ? () => onTrackPress(item) : undefined}
-            />
-          </View>
-        )}
+        renderItem={renderItem}
         ListHeaderComponent={listHeader}
         ListHeaderComponentStyle={styles.listHeaderInset}
         ListEmptyComponent={renderListEmpty}
         ListFooterComponent={listFooter}
-        onEndReached={() => loadMore()}
+        onEndReached={loadMore}
         onEndReachedThreshold={0.35}
         contentContainerStyle={[
           styles.listContent,
@@ -484,6 +493,9 @@ export function NrmPeriodChartsHome({
         ]}
         keyboardShouldPersistTaps="always"
         removeClippedSubviews={Platform.OS === 'android' ? false : undefined}
+        initialNumToRender={20}
+        maxToRenderPerBatch={15}
+        windowSize={8}
       />
 
       <NrmPeriodChartSharedPickerModal

@@ -97,19 +97,22 @@ async function finalizeServerJobParallel(
     } = await import('@/lib/nrmApplyAudioMetadata.web');
 
     const needsTranslation = whisperMode === 'translation';
-    const [{ getDeepLApiKey }, { loadTranslationProvider }] = await Promise.all([
+    const [
+      { getDeepLApiKey },
+      { loadTranslationProvider },
+      { loadWhisperModelPreference, loadAlignModelPreference },
+    ] = await Promise.all([
       import('@/lib/nrmDeepLApiSettings'),
       import('@/lib/nrmTranslationSettings'),
+      import('@/lib/nrmDownloadSettings'),
     ]);
-    const provider = await loadTranslationProvider();
+    const [provider, whisperModelPreference, alignModelPreference] = await Promise.all([
+      loadTranslationProvider(),
+      whisperMode ? loadWhisperModelPreference() : Promise.resolve(undefined),
+      melonMode ? loadAlignModelPreference() : Promise.resolve(undefined),
+    ]);
     const deeplApiKey =
       needsTranslation && provider === 'deepl' ? await getDeepLApiKey() : '';
-    const whisperModelPreference = whisperMode
-      ? await (await import('@/lib/nrmDownloadSettings')).loadWhisperModelPreference()
-      : undefined;
-    const alignModelPreference = melonMode
-      ? await (await import('@/lib/nrmDownloadSettings')).loadAlignModelPreference()
-      : undefined;
 
     const applyLyricsWarnings = (applied: {
       lyricsRequested: boolean;
@@ -275,10 +278,13 @@ async function finalizeNativeParallel(
   const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
   const audioSaved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
   options?.onAudioPersisted?.(audioSaved.savedLabel);
-  void appendActivityHistory({
-    fileName: displayLabelFromAudioFileName(safeName),
-    kind: 'download',
-  });
+  if (!lyricsModeActive) {
+    void appendActivityHistory({
+      fileName: displayLabelFromAudioFileName(safeName),
+      audioUri: audioSaved.location.audioUri,
+      kind: 'download',
+    });
+  }
 
   // ── 3단계: 가사 생성 (오디오가 저장된 뒤) ───────────────────────────────────
   let lyricsStageStarted = false;
@@ -343,6 +349,7 @@ async function finalizeNativeParallel(
   const { prepareSidecarLrcTextForPersist } = await import('@/lib/nrmLrcUiMode');
   const lrcForSidecar = prepareSidecarLrcTextForPersist(lrcToPersist, persistedLyricsMode);
   const canPersistLrc = lrcToPersist.length > 0;
+  let lyricsPersistedOk = false;
 
   if (canPersistLrc && whisperDone) {
     const lyricsOutputMode = await loadLyricsOutputMode();
@@ -367,6 +374,7 @@ async function finalizeNativeParallel(
           persistedLyricsMode ?? undefined,
         );
         whisperRef.result = { ...whisperDone, lyricsEmbedded: true };
+        lyricsPersistedOk = true;
         logNrmDev('download.lrc', {
           event: 'embed_lyrics_ok',
           audioFileName: audioSaved.location.fileName,
@@ -404,6 +412,7 @@ async function finalizeNativeParallel(
           lrcUri: lrcUri ?? '',
         });
         if (lrcUri) {
+          lyricsPersistedOk = true;
           options?.onLyricsPersisted?.(lrcUri);
         }
         if (!lrcUri) {
@@ -436,12 +445,15 @@ async function finalizeNativeParallel(
   }
 
   if (lyricsStageStarted) {
-    if (canPersistLrc && whisperRef.result) {
-      const isTranslation =
+    if (lyricsPersistedOk && whisperRef.result) {
+      const translationRequested =
         persistedLyricsMode === 'translation' || persistedLyricsMode === 'melon_translation';
+      const translationSucceeded =
+        translationRequested && !(whisperRef.result.lyricsTranslationFailed ?? false);
       void appendActivityHistory({
         fileName: displayLabelFromAudioFileName(safeName),
-        kind: isTranslation ? 'lyrics_translation' : 'lyrics',
+        audioUri: audioSaved.location.audioUri,
+        kind: translationSucceeded ? 'lyrics_translation' : 'lyrics',
       });
     }
     options?.onLyricsStageEnded?.();

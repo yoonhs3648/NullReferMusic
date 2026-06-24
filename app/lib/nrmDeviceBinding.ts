@@ -3,6 +3,9 @@ import {
   putGithubContents,
   utf8ToBase64,
 } from '@/lib/nrmGithubContentsApi';
+import {
+  setCachedUserListIsAdmin,
+} from '@/lib/nrmAdminAlarmReceiver';
 import { getNrmGithubDataPat } from '@/lib/nrmGithubDataPat';
 import { getNrmAppSerialNo, getNrmAndroidIdSha256 } from '@/lib/nrmAppSerialNo';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
@@ -18,6 +21,7 @@ type UserListRawEntry = {
   Createddate?: string;
   deviceId?: string | null;
   lastAccessDate?: string | null;
+  isAdmin?: boolean;
 };
 
 type UserListJson = {
@@ -120,6 +124,8 @@ export async function runDeviceBindingCheck(): Promise<DeviceBindingResult> {
     logNrmRunError(tag, new Error('SerialNo not registered in userList'), { event: 'serial-not-found' });
     return { status: 'unregistered' };
   }
+
+  setCachedUserListIsAdmin(entry.isAdmin === true);
 
   const androidIdHash = await getNrmAndroidIdSha256();
   if (!androidIdHash) {

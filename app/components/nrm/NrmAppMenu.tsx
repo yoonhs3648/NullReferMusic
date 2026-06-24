@@ -47,7 +47,7 @@ import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUser
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
-import { NrmInquiryPanel } from '@/components/nrm/settings/NrmInquiryPanel';
+import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
@@ -232,6 +232,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const deeplDrawerDismissRef = useRef<(() => void) | null>(null);
   const lyricsOrderBackHandlerRef = useRef<(() => boolean) | null>(null);
   const lyricsOrderDrawerDismissRef = useRef<(() => void) | null>(null);
+  const melonAdultBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const melonAdultDrawerDismissRef = useRef<(() => void) | null>(null);
+
+  // register* 콜백 — useCallback으로 참조 안정화 (자식 panel useEffect 재실행 방지)
+  const registerSpotifyBackHandler = useCallback((h: (() => boolean) | null) => { spotifyBackHandlerRef.current = h; }, []);
+  const registerSpotifyDrawerDismiss = useCallback((h: (() => void) | null) => { spotifyDrawerDismissRef.current = h; }, []);
+  const registerLastfmBackHandler = useCallback((h: (() => boolean) | null) => { lastfmBackHandlerRef.current = h; }, []);
+  const registerLastfmDrawerDismiss = useCallback((h: (() => void) | null) => { lastfmDrawerDismissRef.current = h; }, []);
+  const registerDeepLBackHandler = useCallback((h: (() => boolean) | null) => { deeplBackHandlerRef.current = h; }, []);
+  const registerDeepLDrawerDismiss = useCallback((h: (() => void) | null) => { deeplDrawerDismissRef.current = h; }, []);
+  const registerLyricsOrderBackHandler = useCallback((h: (() => boolean) | null) => { lyricsOrderBackHandlerRef.current = h; }, []);
+  const registerLyricsOrderDrawerDismiss = useCallback((h: (() => void) | null) => { lyricsOrderDrawerDismissRef.current = h; }, []);
+  const registerMelonAdultBackHandler = useCallback((h: (() => boolean) | null) => { melonAdultBackHandlerRef.current = h; }, []);
+  const registerMelonAdultDrawerDismiss = useCallback((h: (() => void) | null) => { melonAdultDrawerDismissRef.current = h; }, []);
 
   const [open, setOpen] = useState(false);
   const [panelStack, setPanelStack] = useState<Panel[]>(() =>
@@ -551,6 +565,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     if (panel === 'lyricsOrderSettings' && lyricsOrderBackHandlerRef.current?.()) {
       return;
     }
+    if (panel === 'melonAdultAuth' && melonAdultBackHandlerRef.current?.()) {
+      return;
+    }
 
     if (panel === 'root' || panelStack.length <= 1) {
       dismissDrawer();
@@ -576,6 +593,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       lyricsOrderBackHandlerRef.current = null;
       lyricsOrderDrawerDismissRef.current = null;
     }
+    if (panel !== 'melonAdultAuth') {
+      melonAdultBackHandlerRef.current = null;
+      melonAdultDrawerDismissRef.current = null;
+    }
   }, [panel]);
 
   const requestDrawerDismiss = useCallback(() => {
@@ -595,6 +616,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       lyricsOrderDrawerDismissRef.current();
       return;
     }
+    if (panel === 'melonAdultAuth' && melonAdultDrawerDismissRef.current) {
+      melonAdultDrawerDismissRef.current();
+      return;
+    }
     dismissDrawer();
   }, [dismissDrawer, panel]);
 
@@ -606,7 +631,15 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       duration: 260,
       useNativeDriver: true,
     }).start();
-  }, [open, drawerW, translateX]);
+    // open이 true로 바뀔 때만 슬라이드 애니메이션 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, translateX]);
+
+  useEffect(() => {
+    // 이미 열린 상태에서 드로어 너비만 변경되면 즉시 위치 동기화 (재애니메이션 없음)
+    if (!open) return;
+    translateX.setValue(0);
+  }, [drawerW, open, translateX]);
 
   const rootBg = getNrmRootBackgroundColor(isDark);
   const modalScrim = getNrmModalScrimColor(isDark);
@@ -1074,7 +1107,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    문의하기
+                    Q&A
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1164,12 +1197,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   rowHover={rowHover}
                   onBack={popPanel}
                   onCloseDrawer={dismissDrawer}
-                  registerBackHandler={(handler) => {
-                    lyricsOrderBackHandlerRef.current = handler;
-                  }}
-                  registerDrawerDismiss={(handler) => {
-                    lyricsOrderDrawerDismissRef.current = handler;
-                  }}
+                  registerBackHandler={registerLyricsOrderBackHandler}
+                  registerDrawerDismiss={registerLyricsOrderDrawerDismiss}
                 />
               </DrawerShell>
             ) : null}
@@ -1244,12 +1273,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   }
                   onBack={popPanel}
                   onCloseDrawer={dismissDrawer}
-                  registerBackHandler={(handler) => {
-                    spotifyBackHandlerRef.current = handler;
-                  }}
-                  registerDrawerDismiss={(handler) => {
-                    spotifyDrawerDismissRef.current = handler;
-                  }}
+                  registerBackHandler={registerSpotifyBackHandler}
+                  registerDrawerDismiss={registerSpotifyDrawerDismiss}
                 />
               </DrawerShell>
             ) : null}
@@ -1266,12 +1291,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   initialScreen={lastfmEntryScreen}
                   onBack={popPanel}
                   onCloseDrawer={dismissDrawer}
-                  registerBackHandler={(handler) => {
-                    lastfmBackHandlerRef.current = handler;
-                  }}
-                  registerDrawerDismiss={(handler) => {
-                    lastfmDrawerDismissRef.current = handler;
-                  }}
+                  registerBackHandler={registerLastfmBackHandler}
+                  registerDrawerDismiss={registerLastfmDrawerDismiss}
                 />
               </DrawerShell>
             ) : null}
@@ -1287,12 +1308,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   rowHover={rowHover}
                   onBack={popPanel}
                   onCloseDrawer={dismissDrawer}
-                  registerBackHandler={(handler) => {
-                    deeplBackHandlerRef.current = handler;
-                  }}
-                  registerDrawerDismiss={(handler) => {
-                    deeplDrawerDismissRef.current = handler;
-                  }}
+                  registerBackHandler={registerDeepLBackHandler}
+                  registerDrawerDismiss={registerDeepLDrawerDismiss}
                 />
               </DrawerShell>
             ) : null}
@@ -1541,13 +1558,16 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
             {panel === 'melonAdultAuth' ? (
               <DrawerShell
                 titleColor={titleColor}
-                onDismiss={dismissDrawer}
+                onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmMelonAdultAuthPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   rowHover={rowHover}
                   onBack={popPanel}
+                  onCloseDrawer={dismissDrawer}
+                  registerBackHandler={registerMelonAdultBackHandler}
+                  registerDrawerDismiss={registerMelonAdultDrawerDismiss}
                 />
               </DrawerShell>
             ) : null}
@@ -1652,7 +1672,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    문의 내역
+                    문의 답변하기
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -1764,7 +1784,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
-                <NrmInquiryPanel
+                <NrmInquiryQaPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

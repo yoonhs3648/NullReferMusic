@@ -205,6 +205,11 @@ export function NrmYoutubeHome({
   onAdminGateComplete,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [query, setQuery] = useState(initialQuery ?? '');
   const [committedQuery, setCommittedQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -407,6 +412,8 @@ export function NrmYoutubeHome({
     loadingMore,
     nextCursor,
   ]);
+
+  const onEndReached = useCallback(() => void loadMore(), [loadMore]);
 
   const showScrollTopRef = useRef(false);
   const onResultsScroll = useCallback(
@@ -676,24 +683,29 @@ export function NrmYoutubeHome({
         });
         if (out.lyricsWarning === 'not_embedded') {
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             setLyricsEmbedUnavailableOpen(true);
           });
         } else if (out.lyricsWarning === 'translation_exhausted') {
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             setLyricsTranslationExhausted(true);
             setLyricsTranslationFailedOpen(true);
           });
         } else if (out.lyricsWarning === 'translation_failed') {
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             setLyricsTranslationExhausted(false);
             setLyricsTranslationFailedOpen(true);
           });
         } else if (out.lyricsWarning === 'memory_insufficient') {
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
           });
         } else if (out.lyricsWarning === 'melon_align_failed') {
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             notifyUser('멜론가사 생성에 실패했습니다.');
           });
         }
@@ -726,6 +738,7 @@ export function NrmYoutubeHome({
       setDownloadModalInitialFields(undefined);
 
       InteractionManager.runAfterInteractions(() => {
+        if (!mountedRef.current) return;
         const session: DownloadSession = {
           extractionPromise: beginParallelExtraction(videoId),
           aborted: false,
@@ -827,6 +840,7 @@ export function NrmYoutubeHome({
             resolveDownloadFileName(item, metadataContext),
           ]);
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             void (async () => {
               try {
                 await completeDownloadAfterExtraction(videoId, fileName, metadata);
@@ -844,6 +858,7 @@ export function NrmYoutubeHome({
           const fileName = await resolveDownloadFileName(item, metadataContext);
           beginParallelExtraction(videoId);
           InteractionManager.runAfterInteractions(() => {
+            if (!mountedRef.current) return;
             void (async () => {
               try {
                 await completeDownloadAfterExtraction(videoId, fileName, undefined);
@@ -931,7 +946,7 @@ export function NrmYoutubeHome({
     </View>
   );
 
-  const renderResultItem = ({ item }: ListRenderItemInfo<YoutubeSearchItem>) => {
+  const renderResultItem = useCallback(({ item }: ListRenderItemInfo<YoutubeSearchItem>) => {
     const active = item.videoId === playingId;
     const busy = !!dlBusy[item.videoId] || !!dlMetaBusy[item.videoId];
     return (
@@ -1038,7 +1053,8 @@ export function NrmYoutubeHome({
         ) : null}
       </Fragment>
     );
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingId, dlBusy, dlMetaBusy, isDark, startDownloadForItem]);
 
   return (
     <View
@@ -1105,7 +1121,7 @@ export function NrmYoutubeHome({
             ]}
             contentContainerStyle={styles.resultListContent}
             data={results}
-            keyExtractor={(item) => item.videoId}
+            keyExtractor={keyExtractorYoutube}
             renderItem={renderResultItem}
             ListHeaderComponent={searchHeader}
             ListFooterComponent={
@@ -1116,13 +1132,16 @@ export function NrmYoutubeHome({
                 />
               ) : null
             }
-            onEndReached={() => void loadMore()}
+            onEndReached={onEndReached}
             onEndReachedThreshold={0.35}
             onScroll={onResultsScroll}
             scrollEventThrottle={200}
             keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             nestedScrollEnabled
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={10}
           />
           <NrmScrollToTopFab
             visible={showScrollTop && results.length > 0}
@@ -1139,6 +1158,7 @@ export function NrmYoutubeHome({
 }
 
 const ROW_H = nrmTokens.layout.touchMin;
+const keyExtractorYoutube = (item: YoutubeSearchItem) => item.videoId;
 
 const styles = StyleSheet.create({
   root: {

@@ -89,6 +89,13 @@ function Test-SafeCustomField {
     return $true
 }
 
+function Test-SerialNotReserved {
+    param([string]$Raw)
+    $t = $Raw.Trim()
+    if ($t -ieq 'Admin') { return $false }
+    return $true
+}
+
 function Read-ValidatedLine {
     param(
         [string]$Prompt,
@@ -139,9 +146,12 @@ if ($doCustom -match '^(?i)Y$') {
 
     $serialNo = Read-ValidatedLine `
         -Prompt 'product serial number' `
-        -Hint 'Stored in APK as SerialNo (not shown in version UI). Same character rules as user name.' `
-        -Validator ${function:Test-SafeCustomField} `
-        -InvalidMessage 'Invalid: max 30 chars, no ", [, ], {, } or control characters.'
+        -Hint 'Stored in APK as SerialNo (not shown in version UI). Same character rules as user name. "Admin" is reserved.' `
+        -Validator {
+            param($line)
+            (Test-SafeCustomField $line) -and (Test-SerialNotReserved $line)
+        } `
+        -InvalidMessage 'Invalid: max 30 chars, no quotes/brackets, and "Admin" is reserved for system use.'
 
     Write-Utf8NoBom -Path $flagPath -Content '1'
     Write-Utf8NoBom -Path $namePath -Content $appName

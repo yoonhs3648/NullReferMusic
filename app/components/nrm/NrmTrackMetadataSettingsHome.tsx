@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   SectionList,
@@ -98,17 +99,54 @@ function tracksFromViewTokens(
   }
   return out;
 }
-function TrackRowCoverArt({
+
+/** FlatList/SectionList keyExtractor — 모듈 레벨 상수로 매 렌더 함수 재생성 방지 */
+const keyExtractorTrack = (item: NrmDownloadTrackItem) => item.audioUri;
+
+/** 아이콘 마진 — 모듈 레벨로 매 렌더 객체 재생성 방지 */
+const CHEVRON_STYLE = { marginRight: 8 } as const;
+
+/**
+ * 트랙 행 아이템 — React.memo 적용으로 커버 로드 시 해당 아이템만 리렌더.
+ * 다른 커버가 로드되어 coverByKey 참조가 바뀌어도 나머지 아이템은 리렌더 스킵.
+ */
+const TrackListItem = memo(function TrackListItem({
+  item,
   coverKey,
   coverUrl,
+  bodyColor,
+  titleColor,
+  row,
+  onPress,
 }: {
+  item: NrmDownloadTrackItem;
   coverKey: string;
   coverUrl: string;
+  bodyColor: string;
+  titleColor: string;
+  row: typeof nrmChartTrackListStyles;
+  onPress: (item: NrmDownloadTrackItem) => void;
 }) {
   return (
-    <NrmChartTrackArt imageUrl={coverUrl} cacheKey={coverKey} />
+    <Pressable
+      onPress={() => onPress(item)}
+      style={({ pressed }) => [row.trackRow, pressed && row.trackRowPressed]}
+      accessibilityRole="button">
+      <NrmChartTrackArt imageUrl={coverUrl} cacheKey={coverKey} />
+      <View style={row.trackMeta}>
+        <Text style={[row.trackTitle, { color: titleColor }]} numberOfLines={2}>
+          {item.displayLabel}
+        </Text>
+      </View>
+      <Ionicons
+        name="chevron-forward"
+        size={18}
+        color={bodyColor}
+        style={CHEVRON_STYLE}
+      />
+    </Pressable>
   );
-}
+});
 
 export function NrmTrackMetadataSettingsHome({
   isDark,
@@ -119,6 +157,7 @@ export function NrmTrackMetadataSettingsHome({
 }: Props) {
   const row = nrmChartTrackListStyles;
   const sectionListRef = useRef<SectionList<NrmDownloadTrackItem, TrackListSection>>(null);
+  const listViewportHeightRef = useRef(0);
   const searchInputRef = useRef<TextInput>(null);
 
   const [loading, setLoading] = useState(true);
@@ -248,11 +287,37 @@ export function NrmTrackMetadataSettingsHome({
     (label: TrackListIndexLabel, animated = true) => {
       const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
       if (sectionIndex < 0) return;
-      sectionListRef.current?.scrollToLocation({
-        sectionIndex,
-        itemIndex: 0,
-        animated,
-      });
+
+      // 해당 섹션 이하 남은 행 수(헤더 1 + 아이템 n) 합산
+      const remainingRows = sections
+        .slice(sectionIndex)
+        .reduce((sum, s) => sum + 1 + s.data.length, 0);
+
+      // 트랙 행 평균 높이(dp)로 남은 콘텐츠 높이 추산
+      const APPROX_ROW_H = 58;
+      const estimatedH = remainingRows * APPROX_ROW_H;
+      const viewportH = listViewportHeightRef.current;
+
+      if (viewportH > 0 && estimatedH < viewportH) {
+        // 남은 콘텐츠가 뷰포트를 채우기 부족 → 빈 공간 방지를 위해 리스트 맨 끝으로 이동
+        const lastSectionIndex = sections.length - 1;
+        const lastSection = sections[lastSectionIndex];
+        if (!lastSection) return;
+        sectionListRef.current?.scrollToLocation({
+          sectionIndex: lastSectionIndex,
+          itemIndex: Math.max(0, lastSection.data.length - 1),
+          animated,
+          viewPosition: 1,
+        });
+      } else {
+        // 충분한 콘텐츠 → 선택 섹션 헤더를 뷰포트 최상단에 고정
+        sectionListRef.current?.scrollToLocation({
+          sectionIndex,
+          itemIndex: 0,
+          animated,
+          viewPosition: 0,
+        });
+      }
     },
     [sections],
   );
@@ -336,7 +401,7 @@ export function NrmTrackMetadataSettingsHome({
             effectiveNewLyricsMode = lyricsModeAtOpen;
           }
 
-          await applyTrackMetadataUpdate({
+          const updateResult = await applyTrackMetadataUpdate({
             track,
             newFileName: fileName,
             metadata,
@@ -354,6 +419,8 @@ export function NrmTrackMetadataSettingsHome({
             beforeFields: fieldsAtOpen,
             lyricsModeBefore: lyricsModeAtOpen,
             lyricsModeAfter: effectiveNewLyricsMode,
+            lyricsSaved: updateResult.lyricsSaved,
+            lyricsTranslationFailed: updateResult.lyricsTranslationFailed,
           });
           await reload();
         } catch (e) {
@@ -380,31 +447,49 @@ export function NrmTrackMetadataSettingsHome({
     }
   }, [editTrack, reload]);
 
+  /** renderItem 시그니처로 직접 사용 — 래퍼 화살표 함수 없이 FlatList에 전달 */
   const renderTrackRow = useCallback(
-    (item: NrmDownloadTrackItem) => {
+    ({ item }: { item: NrmDownloadTrackItem }) => {
       const coverKey = trackListCoverKey(item);
       return (
-      <Pressable
-        onPress={() => void openEditor(item)}
-        style={({ pressed }) => [row.trackRow, pressed && row.trackRowPressed]}
-        accessibilityRole="button">
-        <TrackRowCoverArt coverKey={coverKey} coverUrl={coverByKey[coverKey] ?? ''} />
-        <View style={row.trackMeta}>
-          <Text style={[row.trackTitle, { color: titleColor }]} numberOfLines={2}>
-            {item.displayLabel}
-          </Text>
-        </View>
-        <Ionicons
-          name="chevron-forward"
-          size={18}
-          color={bodyColor}
-          style={styles.rowChevron}
+        <TrackListItem
+          item={item}
+          coverKey={coverKey}
+          coverUrl={coverByKey[coverKey] ?? ''}
+          bodyColor={bodyColor}
+          titleColor={titleColor}
+          row={row}
+          onPress={openEditor}
         />
-      </Pressable>
       );
     },
     [bodyColor, coverByKey, openEditor, row, titleColor],
   );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: TrackListSection }) => (
+      <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
+        <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
+          {section.title}
+        </Text>
+      </View>
+    ),
+    [bodyColor, sectionHeaderBg],
+  );
+
+  const onListLayout = useCallback((e: LayoutChangeEvent) => {
+    listViewportHeightRef.current = e.nativeEvent.layout.height;
+  }, []);
+
+  const onScrollToIndexFailed = useCallback(() => {
+    setTimeout(() => {
+      sectionListRef.current?.scrollToLocation({
+        sectionIndex: 0,
+        itemIndex: 0,
+        animated: false,
+      });
+    }, 100);
+  }, []);
 
   const listEmpty = loading ? (
     <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
@@ -471,42 +556,38 @@ export function NrmTrackMetadataSettingsHome({
             <FlatList
               style={styles.listFlex}
               data={searchFlatData}
-              keyExtractor={(item) => item.audioUri}
-              renderItem={({ item }) => renderTrackRow(item)}
-              ListEmptyComponent={() => listEmpty}
+              keyExtractor={keyExtractorTrack}
+              renderItem={renderTrackRow}
+              ListEmptyComponent={listEmpty}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               viewabilityConfig={viewabilityConfig}
               onViewableItemsChanged={onSearchViewableItemsChanged}
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              removeClippedSubviews={Platform.OS === 'android'}
             />
           ) : (
             <SectionList
               ref={sectionListRef}
               style={styles.listFlex}
               sections={sections}
-              keyExtractor={(item) => item.audioUri}
-              renderItem={({ item }) => renderTrackRow(item)}
-              renderSectionHeader={({ section }) => (
-                <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
-                  <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
-                    {section.title}
-                  </Text>
-                </View>
-              )}
-              ListEmptyComponent={() => listEmpty}
+              keyExtractor={keyExtractorTrack}
+              renderItem={renderTrackRow}
+              renderSectionHeader={renderSectionHeader}
+              ListEmptyComponent={listEmpty}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               stickySectionHeadersEnabled
               viewabilityConfig={viewabilityConfig}
               onViewableItemsChanged={onSectionViewableItemsChanged}
-              onScrollToIndexFailed={() => {
-                sectionListRef.current?.scrollToLocation({
-                  sectionIndex: 0,
-                  itemIndex: 0,
-                  animated: true,
-                });
-              }}
+              onLayout={onListLayout}
+              onScrollToIndexFailed={onScrollToIndexFailed}
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              windowSize={10}
             />
           )}
         </View>
@@ -614,9 +695,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: nrmTokens.space.xxl,
     flexGrow: 1,
-  },
-  rowChevron: {
-    marginRight: nrmTokens.space.sm,
   },
   sectionHeader: {
     paddingHorizontal: nrmTokens.space.xs,

@@ -56,12 +56,15 @@ function sha256(data: number[]): number[] {
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
   ];
   const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-  const words: number[] = [];
-  for (let i = 0; i < data.length; i++) words[i >> 2] = (words[i >> 2] ?? 0) | (data[i] << (24 - (i % 4) * 8));
   const bitLen = data.length * 8;
-  words[bitLen >> 5] = (words[bitLen >> 5] ?? 0) | (0x80 << (24 - (bitLen % 32)));
-  words[(((bitLen + 64 >> 9) << 4) + 15)] = bitLen;
-  for (let i = 0; i < words.length; i += 16) {
+  const wordCount = (((bitLen + 64) >>> 9) << 4) + 16;
+  const words = new Array<number>(wordCount).fill(0);
+  for (let i = 0; i < data.length; i++) {
+    words[i >> 2] |= data[i] << (24 - (i % 4) * 8);
+  }
+  words[bitLen >> 5] |= 0x80 << (24 - (bitLen % 32));
+  words[wordCount - 1] = bitLen;
+  for (let i = 0; i < wordCount; i += 16) {
     const w = words.slice(i, i + 16);
     for (let j = 16; j < 64; j++) {
       const s0 = rrot(w[j - 15], 7) ^ rrot(w[j - 15], 18) ^ (w[j - 15] >>> 3);

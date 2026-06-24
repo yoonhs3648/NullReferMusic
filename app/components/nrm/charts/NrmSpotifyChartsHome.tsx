@@ -197,6 +197,25 @@ export function NrmSpotifyChartsHome({
     void loadChart(activeTab, generation);
   }, [activeTab, chartSource, applySnapshot, loadChart]);
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem) => `${chartSource}-${activeTab}-${item.trackId}-${item.rank}`,
+    [chartSource, activeTab],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, onTrackPress],
+  );
+
   const listHeader = (
     <View style={{ paddingHorizontal: paddingHorizontal }}>
       <View style={styles.headerRow}>
@@ -279,30 +298,18 @@ export function NrmSpotifyChartsHome({
       style={styles.list}
       nestedScrollEnabled
       data={tabLoading && !items.length ? [] : items}
-      keyExtractor={(item) =>
-        `${chartSource}-${activeTab}-${item.trackId}-${item.rank}`
-      }
-      renderItem={({ item }) => (
-        <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <NrmChartTrackRow
-            item={item}
-            titleColor={titleColor}
-            bodyColor={bodyColor}
-            onPress={
-              onTrackPress
-                ? () => onTrackPress(item)
-                : undefined
-            }
-          />
-        </View>
-      )}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
       ListHeaderComponent={listHeader}
-      ListEmptyComponent={() => listEmpty}
+      ListEmptyComponent={listEmpty}
       contentContainerStyle={[
         styles.listContent,
         (tabLoading || errorCode) && !items.length && styles.listContentEmpty,
       ]}
       keyboardShouldPersistTaps="handled"
+      initialNumToRender={20}
+      maxToRenderPerBatch={15}
+      windowSize={8}
     />
   );
 }

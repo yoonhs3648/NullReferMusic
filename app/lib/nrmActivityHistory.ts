@@ -172,6 +172,41 @@ export async function appendActivityHistory(
   }
 }
 
+/**
+ * 여러 히스토리 항목을 한 번의 read + 한 번의 write로 기록한다.
+ * 순차 `appendActivityHistory` 호출 대비 AsyncStorage I/O를 절반으로 줄인다.
+ * entries 배열 순서 = 오래된 것 먼저 (앞 항목이 더 오래됨), 히스토리 목록에서는 뒤쪽이 최신으로 표시됨.
+ */
+export async function appendActivityHistoryBatch(
+  entries: Array<
+    Pick<NrmActivityHistoryEntry, 'fileName' | 'kind' | 'audioUri'> & { createdAt?: number }
+  >,
+): Promise<void> {
+  if (entries.length === 0) return;
+  if (entries.length === 1) {
+    return appendActivityHistory(entries[0]!);
+  }
+  try {
+    const prev = await loadAllEntries(true);
+    const now = Date.now();
+    // 뒤쪽 항목(index 큰 것)이 가장 최신 타임스탬프 → 히스토리 최상단에 표시
+    const newEntries: NrmActivityHistoryEntry[] = entries.map((e, i) => ({
+      id: newId(),
+      fileName: e.fileName,
+      audioUri: e.audioUri,
+      kind: e.kind,
+      createdAt: e.createdAt ?? now + i,
+    }));
+    const next = pruneInternal([...newEntries.reverse(), ...prev]);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    cachedEntries = next;
+    cacheLoadedAt = Date.now();
+    notifyActivityHistoryRevision();
+  } catch {
+    invalidateEntryCache();
+  }
+}
+
 /** History 탭 — 설정된 표시 기간만큼만 반환 (내부 저장은 항상 최대 180일) */
 export async function listActivityHistoryForDisplay(
   displayDays?: NrmActivityHistoryDisplayDays,

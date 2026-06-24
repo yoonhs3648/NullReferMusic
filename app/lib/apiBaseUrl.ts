@@ -127,6 +127,8 @@ export function getDefaultApiBaseUrl(): string {
   return mapLocalhostApiToAndroidEmulator('http://localhost:8787');
 }
 
+let _resolvedCache: string | null = null;
+
 export async function getResolvedApiBaseUrl(): Promise<string> {
   /**
    * 릴리스 APK/IPA: PC API 주소 저장·조회 없음 (기기 단독).
@@ -136,6 +138,8 @@ export async function getResolvedApiBaseUrl(): Promise<string> {
     return getDefaultApiBaseUrl();
   }
 
+  if (_resolvedCache !== null) return _resolvedCache;
+
   try {
     const stored = await AsyncStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -144,15 +148,18 @@ export async function getResolvedApiBaseUrl(): Promise<string> {
         if (shouldIgnoreStoredBaseOnDevice(n)) {
           await AsyncStorage.removeItem(STORAGE_KEY);
         } else {
-          return mapLocalhostApiToAndroidEmulator(n);
+          _resolvedCache = mapLocalhostApiToAndroidEmulator(n);
+          return _resolvedCache;
         }
       }
     }
   } catch {}
-  return getDefaultApiBaseUrl();
+  _resolvedCache = getDefaultApiBaseUrl();
+  return _resolvedCache;
 }
 
 export async function setApiBaseUrlOverride(url: string | null): Promise<void> {
+  _resolvedCache = null;
   if (!url || !normalizeApiBaseUrl(url)) {
     await AsyncStorage.removeItem(STORAGE_KEY);
     return;
@@ -161,5 +168,6 @@ export async function setApiBaseUrlOverride(url: string | null): Promise<void> {
 }
 
 export async function clearApiBaseUrlOverride(): Promise<void> {
+  _resolvedCache = null;
   await AsyncStorage.removeItem(STORAGE_KEY);
 }

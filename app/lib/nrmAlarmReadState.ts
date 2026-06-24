@@ -32,6 +32,7 @@ async function persistReadIdSet(ids: Set<number>): Promise<void> {
 }
 
 export async function isAlarmRead(id: number): Promise<boolean> {
+  if (cachedReadIds !== null) return cachedReadIds.has(id);
   const ids = await loadReadIdSet();
   return ids.has(id);
 }
@@ -64,7 +65,7 @@ export async function pruneAlarmReadIds(activeIds: Iterable<number>): Promise<vo
 }
 
 export async function countUnreadAlarmIds(ids: Iterable<number>): Promise<number> {
-  const read = await loadReadIdSet();
+  const read = cachedReadIds ?? await loadReadIdSet();
   let n = 0;
   for (const id of ids) {
     if (!read.has(id)) n += 1;

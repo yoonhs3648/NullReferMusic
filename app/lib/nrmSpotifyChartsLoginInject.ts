@@ -188,6 +188,12 @@ export const NRM_SPOTIFY_CHARTS_HARVEST_JS = `
   if (window.__nrmTokenPokeInterval) clearInterval(window.__nrmTokenPokeInterval);
   if (!isLoginHost()) {
     window.__nrmTokenPokeInterval = setInterval(pokeTokenEndpoint, 1500);
+    window.addEventListener('beforeunload', function() {
+      if (window.__nrmTokenPokeInterval) {
+        clearInterval(window.__nrmTokenPokeInterval);
+        window.__nrmTokenPokeInterval = undefined;
+      }
+    }, { once: true });
   }
 })();
 true;

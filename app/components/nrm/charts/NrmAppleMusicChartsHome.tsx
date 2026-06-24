@@ -80,6 +80,26 @@ export function NrmAppleMusicChartsHome({
     setActiveTab(tab);
   }, []);
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem) => `${activeTab}-${item.trackId}-${item.rank}`,
+    [activeTab],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          countLabel="stream 수"
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, onTrackPress],
+  );
+
   useEffect(() => {
     const generation = ++loadGenRef.current;
     void loadChart(activeTab, generation);
@@ -157,29 +177,18 @@ export function NrmAppleMusicChartsHome({
       style={styles.list}
       nestedScrollEnabled
       data={loading || errorCode ? [] : items}
-      keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
-      renderItem={({ item }) => (
-        <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <NrmChartTrackRow
-            item={item}
-            titleColor={titleColor}
-            bodyColor={bodyColor}
-            countLabel="stream 수"
-            onPress={
-              onTrackPress
-                ? () => onTrackPress(item)
-                : undefined
-            }
-          />
-        </View>
-      )}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
       ListHeaderComponent={listHeader}
-      ListEmptyComponent={() => listEmpty}
+      ListEmptyComponent={listEmpty}
       contentContainerStyle={[
         styles.listContent,
         (loading || errorCode) && styles.listContentEmpty,
       ]}
       keyboardShouldPersistTaps="handled"
+      initialNumToRender={20}
+      maxToRenderPerBatch={15}
+      windowSize={8}
     />
   );
 }

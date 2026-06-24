@@ -12,7 +12,7 @@ export type LrcTranslationSlot = {
   localTranslation: string | null;
 };
 
-const LRC_LINE_RE = /^\[(\d{2}:\d{2}\.\d{2})\](.*)$/;
+const LRC_LINE_RE = /^\[(\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\]\s*(.*)$/;
 
 /** Whisper·LRC 관례의 비가사·음악 구간 — DeepL 토큰 낭비 방지 */
 const MUSIC_LYRIC_RE =
@@ -201,6 +201,20 @@ export function extractDeepLTextsFromSlots(slots: LrcTranslationSlot[]): {
     slotIndices.push(si);
   }
   return { texts, slotIndices };
+}
+
+/** 번역지원 LRC — 동일 타임스탬프에 원문·(번역) 2줄이 하나라도 있는지 */
+export function lrcHasTranslationPairs(lrcText: string): boolean {
+  const lines = normalizeLrcLines(lrcText);
+  for (let i = 1; i < lines.length; i++) {
+    const cur = splitLrcLine(lines[i]!);
+    const prev = splitLrcLine(lines[i - 1]!);
+    if (!cur?.text || !prev?.text) continue;
+    if (cur.ts === prev.ts && cur.text.startsWith('(') && cur.text.endsWith(')')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function mergeDeepLResponsesIntoLrc(

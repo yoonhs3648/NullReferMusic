@@ -316,13 +316,18 @@ async function saveToExternalDirect(
 
   const fileName = storageFileName(safeName);
   const destUri = `${dirUri}/${fileName}`;
-  await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
-  await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-  if (sidecarLrcUri) {
-    const lrcDest = `${dirUri}/${fileName.replace(/\.[^.]+$/, '.lrc')}`;
-    await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
-    await FileSystem.copyAsync({ from: sidecarLrcUri, to: lrcDest });
-  }
+  const lrcDest = sidecarLrcUri
+    ? `${dirUri}/${fileName.replace(/\.[^.]+$/, '.lrc')}`
+    : undefined;
+
+  await Promise.all([
+    FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {}),
+    lrcDest ? FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {}) : undefined,
+  ]);
+  await Promise.all([
+    FileSystem.copyAsync({ from: sourceUri, to: destUri }),
+    lrcDest ? FileSystem.copyAsync({ from: sidecarLrcUri!, to: lrcDest }) : undefined,
+  ]);
 
   return {
     savedLabel: `저장했습니다. 내 파일 > ${NRM_FOLDER} 폴더에서 확인하세요.`,
@@ -349,13 +354,18 @@ async function saveToAppDocumentsFallback(
 
   const fileName = storageFileName(safeName);
   const destUri = `${folderUri}${fileName}`;
-  await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
-  await FileSystem.copyAsync({ from: sourceUri, to: destUri });
-  if (sidecarLrcUri) {
-    const lrcDest = `${folderUri}${fileName.replace(/\.[^.]+$/, '.lrc')}`;
-    await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
-    await FileSystem.copyAsync({ from: sidecarLrcUri, to: lrcDest });
-  }
+  const lrcDest = sidecarLrcUri
+    ? `${folderUri}${fileName.replace(/\.[^.]+$/, '.lrc')}`
+    : undefined;
+
+  await Promise.all([
+    FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {}),
+    lrcDest ? FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {}) : undefined,
+  ]);
+  await Promise.all([
+    FileSystem.copyAsync({ from: sourceUri, to: destUri }),
+    lrcDest ? FileSystem.copyAsync({ from: sidecarLrcUri!, to: lrcDest }) : undefined,
+  ]);
 
   return {
     savedLabel: `저장했습니다. (앱 내부 폴더 — Expo Go 개발 환경)\n앱 폴더 > ${NRM_FOLDER}에서 확인하세요.`,
@@ -736,13 +746,21 @@ export async function persistLocalAudioFile(
       const folderUri = `${docRoot}${NRM_FOLDER}/`;
       await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
       const destUri = `${folderUri}${storedName}`;
-      await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
-      await FileSystem.copyAsync({ from: tempUri, to: destUri });
-      if (lrcToPersist) {
-        const lrcDest = `${folderUri}${storedName.replace(/\.[^.]+$/, '.lrc')}`;
-        await FileSystem.deleteAsync(lrcDest, { idempotent: true }).catch(() => {});
-        await FileSystem.copyAsync({ from: lrcToPersist, to: lrcDest });
-      }
+      const lrcDestIos = lrcToPersist
+        ? `${folderUri}${storedName.replace(/\.[^.]+$/, '.lrc')}`
+        : undefined;
+      await Promise.all([
+        FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {}),
+        lrcDestIos
+          ? FileSystem.deleteAsync(lrcDestIos, { idempotent: true }).catch(() => {})
+          : undefined,
+      ]);
+      await Promise.all([
+        FileSystem.copyAsync({ from: tempUri, to: destUri }),
+        lrcDestIos && lrcToPersist
+          ? FileSystem.copyAsync({ from: lrcToPersist, to: lrcDestIos })
+          : undefined,
+      ]);
 
       return {
         savedLabel: `저장했습니다. iOS «파일» 앱 → 내 iPhone → 이 앱 → «${NRM_FOLDER}» 폴더에서 확인하세요.`,

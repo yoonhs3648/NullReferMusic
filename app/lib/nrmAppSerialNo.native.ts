@@ -1,3 +1,5 @@
+import brandConfig from '../nrm-brand.config.json';
+
 import { NativeModules, Platform } from 'react-native';
 
 type NrmAppBrandNative = {
@@ -30,19 +32,21 @@ export async function getNrmAppSerialNo(): Promise<string> {
 
 export async function getNrmAppUserName(): Promise<string> {
   if (cachedUserName !== null) return cachedUserName;
+  const fromConfig = String(brandConfig.userName ?? '').trim();
   if (Platform.OS !== 'android') {
-    cachedUserName = '';
+    cachedUserName = fromConfig;
     return cachedUserName;
   }
   const mod = NativeModules.NrmAppBrand as NrmAppBrandNative | undefined;
   if (!mod?.getUserName) {
-    cachedUserName = '';
+    cachedUserName = fromConfig;
     return cachedUserName;
   }
   try {
-    cachedUserName = String(await mod.getUserName()).trim();
+    const fromNative = String(await mod.getUserName()).trim();
+    cachedUserName = fromNative || fromConfig;
   } catch {
-    cachedUserName = '';
+    cachedUserName = fromConfig;
   }
   return cachedUserName;
 }

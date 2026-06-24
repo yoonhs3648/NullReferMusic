@@ -1,5 +1,7 @@
+import { NRM_ALARM_ADMIN_SERIAL } from '@/lib/nrmAdminAlarmReceiver';
 import { getNrmAppSerialNo, getNrmAppUserName } from '@/lib/nrmAppSerialNo';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
+import { invalidateAlarmCache } from '@/lib/nrmAlarmClient';
 import {
   fetchGithubJsonDocument,
   putGithubContents,
@@ -8,6 +10,7 @@ import {
 } from '@/lib/nrmGithubContentsApi';
 import { readInquiryAttachmentBase64, type NrmInquiryAttachmentPick } from '@/lib/nrmInquiryAttachment';
 import {
+  NRM_ALARM_JSON_API_PATH,
   NRM_INQUIRY_ATTACH_DIR_API,
   NRM_INQUIRY_JSON_API_PATH,
 } from '@/lib/nrmRemoteDataConfig';
@@ -27,6 +30,7 @@ type InquiryJson = {
     content: string;
     attachedFile: string;
     isAnswered: boolean;
+    replyContent: string;
     Createddate: string;
   }>;
 };
@@ -48,6 +52,67 @@ function sanitizeFileStem(name: string): string {
 
 function formatInquiryJson(doc: InquiryJson): string {
   return `${JSON.stringify(doc, null, '\t')}\n`;
+}
+
+type AlarmJson = {
+  alarm: Array<{
+    id: number;
+    isNoti: boolean;
+    title: string;
+    content: string;
+    SerialNo: string;
+    date: string;
+  }>;
+};
+
+function formatAlarmJson(doc: AlarmJson): string {
+  return `${JSON.stringify(doc, null, '\t')}\n`;
+}
+
+function todayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function inquiryAlarmTitle(userName: string): string {
+  const name = userName.trim();
+  return name ? `${name} 님의 문의` : '문의';
+}
+
+async function registerInquiryAdminAlarm(
+  pat: string,
+  createdDate: string,
+  userName: string,
+): Promise<void> {
+  const { doc, sha } = await fetchGithubJsonDocument<AlarmJson>(
+    NRM_ALARM_JSON_API_PATH,
+    pat,
+    { alarm: [] },
+  );
+  let maxId = 0;
+  for (const row of doc.alarm) {
+    if (typeof row.id === 'number' && row.id > maxId) maxId = row.id;
+  }
+  const entry = {
+    id: maxId + 1,
+    isNoti: false,
+    title: inquiryAlarmTitle(userName),
+    content: createdDate,
+    SerialNo: NRM_ALARM_ADMIN_SERIAL,
+    date: todayYmd(),
+  };
+  doc.alarm.push(entry);
+  await putGithubContents(
+    NRM_ALARM_JSON_API_PATH,
+    pat,
+    utf8ToBase64(formatAlarmJson(doc)),
+    `inquiry: admin alarm id=${entry.id}`,
+    sha || undefined,
+  );
+  invalidateAlarmCache();
 }
 
 export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): Promise<void> {
@@ -96,6 +161,7 @@ export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): P
       content: input.content,
       attachedFile,
       isAnswered: false,
+      replyContent: '',
       Createddate: formatInquiryCreatedDate(new Date()),
     };
     doc.inquiry.push(entry);
@@ -106,6 +172,7 @@ export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): P
       `inquiry: register id=${entry.id}`,
       sha || undefined,
     );
+    await registerInquiryAdminAlarm(pat, entry.Createddate, userName);
     logNrmDev(tag, { event: 'register-ok', inquiryId: entry.id, version, elapsedMs: Date.now() - t0 });
   } catch (e) {
     logNrmRunError(tag, e, { event: 'register-error', elapsedMs: Date.now() - t0 });

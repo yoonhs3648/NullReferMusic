@@ -20,6 +20,8 @@ type SearchField = 'userName' | 'SerialNo';
 
 const PAGE_SIZE = 20;
 
+const keyExtractorUserEntry = (item: NrmUserListEntry) => `${item.id}-${item.SerialNo}`;
+
 type DetailField =
   | { key: Exclude<keyof NrmUserListEntry, 'deviceId'>; label: string; special?: undefined }
   | { key: 'deviceId'; label: string; special: 'device' };
@@ -202,8 +204,11 @@ export function NrmAdminUserListPanel({ titleColor, bodyColor, isDark, onBack }:
       ) : (
         <FlatList
           data={displayRows}
-          keyExtractor={(item) => `${item.id}-${item.SerialNo}`}
+          keyExtractor={keyExtractorUserEntry}
           scrollEnabled={false}
+          initialNumToRender={PAGE_SIZE}
+          maxToRenderPerBatch={PAGE_SIZE}
+          windowSize={5}
           renderItem={({ item }) => (
             <Pressable
               onPress={() => setDetailEntry(item)}

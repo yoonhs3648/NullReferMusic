@@ -317,8 +317,8 @@ export function NrmTermsConsentGate({ onAgreed }: Props) {
   const cardBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.cardLightBg;
   const border = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.cardLightBorder;
 
-  const [termsExpanded, setTermsExpanded] = useState(false);
-  const [privacyExpanded, setPrivacyExpanded] = useState(false);
+  const [termsExpanded, setTermsExpanded] = useState(true);
+  const [privacyExpanded, setPrivacyExpanded] = useState(true);
   const [termsBottom, setTermsBottom] = useState(false);
   const [privacyBottom, setPrivacyBottom] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);

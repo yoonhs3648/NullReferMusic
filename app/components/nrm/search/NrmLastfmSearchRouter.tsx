@@ -1122,7 +1122,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
               const y = e.nativeEvent.contentOffset.y;
               setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
             }}
-            scrollEventThrottle={16}
+            scrollEventThrottle={200}
             keyboardShouldPersistTaps="handled"
             style={styles.scroll}
             contentContainerStyle={[
@@ -1130,6 +1130,9 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
               { paddingHorizontal },
               initialListCentered && styles.scrollInnerInitialCentered,
             ]}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={10}
           />
           <NrmScrollToTopFab
             visible={showScrollTop}

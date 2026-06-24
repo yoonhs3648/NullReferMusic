@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   PanResponder,
   PixelRatio,
   Platform,
@@ -12,6 +13,7 @@ import {
   useWindowDimensions,
   type ViewToken,
 } from 'react-native';
+import { coverArtUrlForDisplaySize } from '@/lib/nrmCoverArtUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
@@ -108,8 +110,8 @@ function menuSwipeGuardPx(insetsLeft: number): number {
 }
 
 const MANUAL_SWIPE_THRESHOLD_FRAC = 0.22;
-/** animated scrollToOffset 후 정확한 페이지 경계로 재고정 */
-const SCROLL_SNAP_MS = Platform.select({ ios: 360, android: 320, default: 300 }) ?? 300;
+/** 애니메이션 완료 대기 — 여유 있게 잡아 silent-jump가 애니메이션 도중 발생하지 않도록 */
+const SCROLL_SNAP_MS = Platform.select({ ios: 480, android: 460, default: 460 }) ?? 460;
 
 type CarouselSlideProps = {
   item: ChartTrackItem;
@@ -182,6 +184,8 @@ export function NrmHomeChartCarousel({
   const [index, setIndex] = useState(() => clampIndex(initialIndex, items.length));
   const indexRef = useRef(index);
   indexRef.current = index;
+  /** 탐색 추적용 — 버튼/자동재생 시 즉시 갱신 (UI 상태 index와 분리) */
+  const navIndexRef = useRef(index);
 
   const countRef = useRef(items.length);
   countRef.current = items.length;
@@ -192,6 +196,8 @@ export function NrmHomeChartCarousel({
   const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const repositioningRef = useRef(false);
+  /** 무음 위치 교정(non-animated jump) 중에만 true — 이 구간만 onViewableItemsChanged 차단 */
+  const silentJumpRef = useRef(false);
   const onIndexChangeRef = useRef(onIndexChange);
   onIndexChangeRef.current = onIndexChange;
 
@@ -246,8 +252,9 @@ export function NrmHomeChartCarousel({
         snapScrollRef.current = null;
       }
       if (animated) {
+        // 애니메이션이 완료될 때까지 대기 후 onComplete 호출
+        // re-snap 없이 onComplete로 바로 이어지므로 불필요한 이중 scrollToOffset 방지
         snapScrollRef.current = setTimeout(() => {
-          listRef.current?.scrollToOffset({ offset, animated: false });
           snapScrollRef.current = null;
           onComplete?.();
         }, SCROLL_SNAP_MS);
@@ -261,41 +268,54 @@ export function NrmHomeChartCarousel({
   const resnapToCurrentPage = useCallback(() => {
     const c = countRef.current;
     if (c <= 0 || pageWidth <= 0) return;
-    scrollToOffset(toPhysicalIndex(indexRef.current, c), false);
+    scrollToOffset(toPhysicalIndex(navIndexRef.current, c), false);
   }, [pageWidth, scrollToOffset]);
 
   const scrollToLogicalIndex = useCallback(
     (logicalIndex: number, animated = true) => {
       const c = countRef.current;
       if (c <= 0) return;
-      const from = indexRef.current;
+      const from = navIndexRef.current;
       const logical = wrapIndex(logicalIndex, c);
 
-      syncIndex(logical, true);
+      // 탐색 ref는 즉시 갱신 (다음 자동재생·버튼 계산에 사용)
+      navIndexRef.current = logical;
 
-      if (!loopEnabledRef.current || c <= 1) {
-        scrollToOffset(clampIndex(logical, c), animated);
+      if (!loopEnabledRef.current || c <= 1 || !animated) {
+        // 루프 없음 또는 즉시 이동: UI도 즉시 갱신
+        syncIndex(logical, true);
+        scrollToOffset(
+          loopEnabledRef.current ? toPhysicalIndex(logical, c) : clampIndex(logical, c),
+          animated,
+        );
         return;
       }
 
-      const wrapForward = animated && isLoopWrapForward(from, logical, c);
-      const wrapBackward = animated && isLoopWrapBackward(from, logical, c);
+      // 애니메이션 루프 탐색:
+      // UI(순위·제목)는 onViewableItemsChanged가 슬라이드가 보이는 시점에 자연스럽게 갱신한다.
+      // silentJumpRef는 무음 위치 교정 구간에만 true — 애니메이션 중에는 false 유지.
+      const wrapForward = isLoopWrapForward(from, logical, c);
+      const wrapBackward = isLoopWrapBackward(from, logical, c);
 
       if (wrapForward) {
-        repositioningRef.current = true;
+        // copy2 TOP20(물리 2c-1) → copy3 TOP1(물리 2c) 1칸 전진 애니메이션
+        // 완료 후 copy2 TOP1(물리 c)으로 무음 교정
         scrollToOffset(2 * c, true, () => {
+          silentJumpRef.current = true;
           scrollToOffset(c, false, () => {
-            repositioningRef.current = false;
+            silentJumpRef.current = false;
           });
         });
         return;
       }
 
       if (wrapBackward) {
-        repositioningRef.current = true;
+        // copy2 TOP1(물리 c) → copy1 TOP20(물리 c-1) 1칸 후진 애니메이션
+        // 완료 후 copy2 TOP20(물리 2c-1)으로 무음 교정
         scrollToOffset(c - 1, true, () => {
+          silentJumpRef.current = true;
           scrollToOffset(c + c - 1, false, () => {
-            repositioningRef.current = false;
+            silentJumpRef.current = false;
           });
         });
         return;
@@ -317,8 +337,8 @@ export function NrmHomeChartCarousel({
     clearAutoAdvance();
     if (!loopEnabledRef.current) return;
     autoTimerRef.current = setInterval(() => {
-      if (!mountedRef.current || userDraggingRef.current) return;
-      scrollToLogicalIndex(indexRef.current + 1, true);
+      if (!mountedRef.current || userDraggingRef.current || silentJumpRef.current) return;
+      scrollToLogicalIndex(navIndexRef.current + 1, true);
     }, AUTO_ADVANCE_MS);
   }, [clearAutoAdvance, scrollToLogicalIndex]);
 
@@ -329,7 +349,8 @@ export function NrmHomeChartCarousel({
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      if (repositioningRef.current || userDraggingRef.current || viewableItems.length === 0) return;
+      // silentJump(무음 위치 교정) 중에만 차단 — 애니메이션 구간에는 허용하여 자연스럽게 UI 갱신
+      if (silentJumpRef.current || userDraggingRef.current || viewableItems.length === 0) return;
       const token = viewableItems.find((v) => v.isViewable) ?? viewableItems[0];
       if (token?.index == null) return;
       const c = countRef.current;
@@ -363,16 +384,29 @@ export function NrmHomeChartCarousel({
   useEffect(() => {
     if (prevFingerprintRef.current === itemsFingerprint) return;
     prevFingerprintRef.current = itemsFingerprint;
+    navIndexRef.current = 0;
     syncIndex(0, true);
     requestAnimationFrame(() => {
       scrollToOffset(toPhysicalIndex(0, count), false);
     });
   }, [count, itemsFingerprint, scrollToOffset, syncIndex]);
 
+  /** 차트 데이터가 바뀌면 이미지 20장을 미리 캐시에 넣는다.
+   *  복제본(copy1·copy3)을 전환할 때 빈 이미지 순간을 방지한다. */
+  useEffect(() => {
+    if (items.length === 0 || coverPixelSize <= 0) return;
+    for (const it of items) {
+      const url = it.imageUrl?.trim();
+      if (!url) continue;
+      const displayUrl = coverArtUrlForDisplaySize(url, coverPixelSize);
+      Image.prefetch(displayUrl).catch(() => {});
+    }
+  }, [items, coverPixelSize]);
+
   useEffect(() => {
     if (count <= 0) return;
     const logical = wrapIndex(initialIndex, count);
-    if (logical === indexRef.current) return;
+    if (logical === navIndexRef.current) return;
     scrollToLogicalIndex(logical, false);
   }, [initialIndex, count, scrollToLogicalIndex]);
 
@@ -383,7 +417,7 @@ export function NrmHomeChartCarousel({
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (evt, gesture) => {
-          if (count <= 1) return false;
+          if (count <= 1 || silentJumpRef.current) return false;
           if (evt.nativeEvent.pageX < edgeGuard) return false;
           return Math.abs(gesture.dx) > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15;
         },
@@ -396,11 +430,11 @@ export function NrmHomeChartCarousel({
           const threshold = pageWidth * MANUAL_SWIPE_THRESHOLD_FRAC;
           if (gesture.dx > threshold) {
             clearAutoAdvance();
-            scrollToLogicalIndex(indexRef.current - 1, true);
+            scrollToLogicalIndex(navIndexRef.current - 1, true);
             scheduleAutoAdvance();
           } else if (gesture.dx < -threshold) {
             clearAutoAdvance();
-            scrollToLogicalIndex(indexRef.current + 1, true);
+            scrollToLogicalIndex(navIndexRef.current + 1, true);
             scheduleAutoAdvance();
           } else {
             scheduleAutoAdvance();
@@ -415,16 +449,16 @@ export function NrmHomeChartCarousel({
   );
 
   const goPrev = useCallback(() => {
-    if (!loopEnabled) return;
+    if (!loopEnabled || silentJumpRef.current) return;
     clearAutoAdvance();
-    scrollToLogicalIndex(indexRef.current - 1, true);
+    scrollToLogicalIndex(navIndexRef.current - 1, true);
     scheduleAutoAdvance();
   }, [clearAutoAdvance, loopEnabled, scheduleAutoAdvance, scrollToLogicalIndex]);
 
   const goNext = useCallback(() => {
-    if (!loopEnabled) return;
+    if (!loopEnabled || silentJumpRef.current) return;
     clearAutoAdvance();
-    scrollToLogicalIndex(indexRef.current + 1, true);
+    scrollToLogicalIndex(navIndexRef.current + 1, true);
     scheduleAutoAdvance();
   }, [clearAutoAdvance, loopEnabled, scheduleAutoAdvance, scrollToLogicalIndex]);
 

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { getResolvedApiBaseUrl } from '@/lib/apiBaseUrl';
 import {
   extractDeepLTextsFromSlots,
+  lrcHasTranslationPairs,
   mergeDeepLResponsesIntoLrc,
   normalizeLrcLines,
   planLrcTranslationSlots,
@@ -253,8 +254,11 @@ export async function translateLrcToKoreanWithDeepL(
   });
 
   const translatedLineCount = outLines.filter((l) => /\([^)]+\)\s*$/.test(l)).length;
-  if (apiTexts.length > 0 && emptyApiTranslations === apiTexts.length && translatedLineCount === 0) {
-    return { ok: false, message: 'DeepL 번역 결과가 비어 있습니다.' };
+  if (apiTexts.length > 0 && !lrcHasTranslationPairs(outLrc)) {
+    if (emptyApiTranslations === apiTexts.length && translatedLineCount === 0) {
+      return { ok: false, message: 'DeepL 번역 결과가 비어 있습니다.' };
+    }
+    return { ok: false, message: 'DeepL 번역 결과에 한글 번역 줄이 없습니다.' };
   }
 
   return { ok: true, lrc: outLrc };

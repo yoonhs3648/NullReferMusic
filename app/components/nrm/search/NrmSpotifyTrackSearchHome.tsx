@@ -37,6 +37,8 @@ type Props = {
   onBackToHome: () => void;
 };
 
+const keyExtractorSpotifyTrack = (item: { id: string }) => item.id;
+
 function mergeSpotifyTrackHits(
   prev: SpotifyTrackSearchHit[],
   next: SpotifyTrackSearchHit[],
@@ -225,7 +227,7 @@ export function NrmSpotifyTrackSearchHome({
       <FlatList
         ref={listRef}
         data={!heroError ? hits : []}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractorSpotifyTrack}
         renderItem={({ item: hit }) => (
           <Pressable
             onPress={() => void openDetail(hit)}
@@ -251,7 +253,7 @@ export function NrmSpotifyTrackSearchHome({
           const y = e.nativeEvent.contentOffset.y;
           setShowScrollTop(y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={200}
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
         contentContainerStyle={[
@@ -259,6 +261,9 @@ export function NrmSpotifyTrackSearchHome({
           { paddingHorizontal },
           initialCentered && styles.scrollInnerInitialCentered,
         ]}
+        initialNumToRender={10}
+        maxToRenderPerBatch={8}
+        windowSize={10}
       />
       <NrmScrollToTopFab
         visible={showScrollTop}

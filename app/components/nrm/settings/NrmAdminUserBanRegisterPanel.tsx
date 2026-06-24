@@ -24,6 +24,8 @@ type SearchField = 'userName' | 'SerialNo';
 
 const PAGE_SIZE = 20;
 
+const keyExtractorUserEntry = (item: NrmUserListEntry) => `${item.id}-${item.SerialNo}`;
+
 const DETAIL_FIELDS: { key: keyof Omit<NrmUserListEntry, 'deviceId'>; label: string }[] = [
   { key: 'id', label: 'ID' },
   { key: 'appName', label: '앱 이름' },
@@ -309,9 +311,12 @@ export function NrmAdminUserBanRegisterPanel({ titleColor, bodyColor, isDark, on
             ) : (
               <FlatList
                 data={displayRows}
-                keyExtractor={(item) => `${item.id}-${item.SerialNo}`}
+                keyExtractor={keyExtractorUserEntry}
                 style={styles.pickerList}
                 keyboardShouldPersistTaps="handled"
+                initialNumToRender={PAGE_SIZE}
+                maxToRenderPerBatch={PAGE_SIZE}
+                windowSize={5}
                 renderItem={({ item }) => (
                   <Pressable
                     onPress={() => onPickerSelect(item)}

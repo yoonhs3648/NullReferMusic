@@ -19,6 +19,7 @@ import {
   type NrmInquiryAttachmentPick,
 } from '@/lib/nrmInquiryAttachment';
 import { validateInquiryContent } from '@/lib/nrmJsonFieldValidation';
+import { inquiryAttachmentExtensionLabel } from '@/lib/nrmInquiryAttachmentPolicy';
 import {
   NRM_INQUIRY_MAX_ATTACHMENT_BYTES,
   NRM_INQUIRY_MAX_CONTENT_CHARS,
@@ -30,7 +31,9 @@ type Props = {
   titleColor: string;
   bodyColor: string;
   isDark: boolean;
-  onBack: () => void;
+  onBack?: () => void;
+  /** Q&A 탭 내부 — 뒤로·제목 숨김 */
+  embedded?: boolean;
 };
 
 const INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -40,9 +43,6 @@ function formatMb(bytes: number): string {
   return (bytes / MB).toFixed(1);
 }
 
-function isTxtAttachmentName(name: string): boolean {
-  return name.trim().toLowerCase().endsWith('.txt');
-}
 
 function MenuBackRow({ onPress }: { onPress: () => void }) {
   return (
@@ -53,7 +53,7 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
-export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
+export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack, embedded = false }: Props) {
   const [content, setContent] = useState('');
   const [attachment, setAttachment] = useState<NrmInquiryAttachmentPick | null>(null);
   const [picking, setPicking] = useState(false);
@@ -80,10 +80,6 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
     try {
       const picked = await pickInquiryAttachmentFile();
       if (!picked) return;
-      if (!isTxtAttachmentName(picked.name)) {
-        void notifyUser('txt 파일만 첨부할 수 있습니다.');
-        return;
-      }
       if (picked.sizeBytes > NRM_INQUIRY_MAX_ATTACHMENT_BYTES) {
         void notifyUser('첨부파일은 20MB 까지 가능합니다.');
         return;
@@ -120,70 +116,80 @@ export function NrmInquiryPanel({ titleColor, bodyColor, isDark, onBack }: Props
     }
   }, [attachment, content]);
 
-  return (
-    <View style={styles.root}>
-      <NrmMenuDrawerScroll>
-        <MenuBackRow onPress={onBack} />
-        <Text style={[styles.panelTitle, { color: titleColor }]}>문의하기</Text>
-        <Text style={[styles.fieldLabel, { color: titleColor }]}>문의내용</Text>
-        <TextInput
-          value={content}
-          onChangeText={onChangeContent}
-          multiline
-          editable={!submitting}
-          textAlignVertical="top"
-          style={[
-            styles.textArea,
-            { color: titleColor, borderColor: hairline, backgroundColor: inputBg },
-          ]}
-        />
-        <Text style={[styles.counter, { color: bodyColor }]}>
-          [{content.length}/{NRM_INQUIRY_MAX_CONTENT_CHARS}]
+  const formBody = (
+    <>
+      <Text style={[styles.fieldLabel, { color: titleColor }]}>문의내용</Text>
+      <TextInput
+        value={content}
+        onChangeText={onChangeContent}
+        multiline
+        editable={!submitting}
+        textAlignVertical="top"
+        style={[
+          styles.textArea,
+          { color: titleColor, borderColor: hairline, backgroundColor: inputBg },
+        ]}
+      />
+      <Text style={[styles.counter, { color: bodyColor }]}>
+        [{content.length}/{NRM_INQUIRY_MAX_CONTENT_CHARS}]
+      </Text>
+
+      <View style={styles.attachHeadRow}>
+        <Text style={[styles.fieldLabel, { color: titleColor, marginTop: 0 }]}>첨부파일</Text>
+        <Text style={[styles.attachQuota, { color: bodyColor }]}>
+          ({attachMb}/{maxMb}MB, {inquiryAttachmentExtensionLabel()})
         </Text>
-
-        <View style={styles.attachHeadRow}>
-          <Text style={[styles.fieldLabel, { color: titleColor, marginTop: 0 }]}>첨부파일</Text>
-          <Text style={[styles.attachQuota, { color: bodyColor }]}>
-            ({attachMb}/{maxMb}MB, txt)
-          </Text>
-        </View>
-        <View style={styles.attachRow}>
-          <Text
-            style={[styles.attachName, { color: titleColor, borderColor: hairline, backgroundColor: inputBg }]}
-            numberOfLines={1}>
-            {attachment?.name ?? '선택된 파일 없음'}
-          </Text>
-          <Pressable
-            onPress={() => void onAttachPress()}
-            disabled={submitting || picking}
-            style={({ pressed }) => [
-              styles.attachBtn,
-              (pressed || picking) && styles.attachBtnPressed,
-              (submitting || picking) && styles.attachBtnDisabled,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="파일 첨부">
-            {picking ? (
-              <ActivityIndicator color={nrmTokens.color.primary} size="small" />
-            ) : (
-              <Ionicons name="folder-open-outline" size={20} color={nrmTokens.color.primary} />
-            )}
-            <Text style={styles.attachBtnLabel}>파일첨부</Text>
-          </Pressable>
-        </View>
-
+      </View>
+      <View style={styles.attachRow}>
+        <Text
+          style={[styles.attachName, { color: titleColor, borderColor: hairline, backgroundColor: inputBg }]}
+          numberOfLines={1}>
+          {attachment?.name ?? '선택된 파일 없음'}
+        </Text>
         <Pressable
-          onPress={() => void onSubmit()}
-          disabled={submitting}
+          onPress={() => void onAttachPress()}
+          disabled={submitting || picking}
           style={({ pressed }) => [
-            styles.submitBtn,
-            (pressed || submitting) && styles.submitBtnPressed,
-            submitting && styles.submitBtnDisabled,
+            styles.attachBtn,
+            (pressed || picking) && styles.attachBtnPressed,
+            (submitting || picking) && styles.attachBtnDisabled,
           ]}
-          accessibilityRole="button">
-          <Text style={styles.submitBtnLabel}>문의하기</Text>
+          accessibilityRole="button"
+          accessibilityLabel="파일 첨부">
+          {picking ? (
+            <ActivityIndicator color={nrmTokens.color.primary} size="small" />
+          ) : (
+            <Ionicons name="folder-open-outline" size={20} color={nrmTokens.color.primary} />
+          )}
+          <Text style={styles.attachBtnLabel}>파일첨부</Text>
         </Pressable>
-      </NrmMenuDrawerScroll>
+      </View>
+
+      <Pressable
+        onPress={() => void onSubmit()}
+        disabled={submitting}
+        style={({ pressed }) => [
+          styles.submitBtn,
+          (pressed || submitting) && styles.submitBtnPressed,
+          submitting && styles.submitBtnDisabled,
+        ]}
+        accessibilityRole="button">
+        <Text style={styles.submitBtnLabel}>문의하기</Text>
+      </Pressable>
+    </>
+  );
+
+  return (
+    <View style={embedded ? undefined : styles.root}>
+      {embedded ? (
+        formBody
+      ) : (
+        <NrmMenuDrawerScroll>
+          {onBack ? <MenuBackRow onPress={onBack} /> : null}
+          <Text style={[styles.panelTitle, { color: titleColor }]}>문의하기</Text>
+          {formBody}
+        </NrmMenuDrawerScroll>
+      )}
 
       {submitting ? (
         <Modal visible transparent animationType="fade">

@@ -26,9 +26,11 @@ export function useWhisperModelStatuses(active: boolean) {
   useEffect(() => {
     if (!active) return;
     void refresh();
+    // 이벤트 구독(subscribeWhisperModelDownloadEvents)이 실시간 변경을 처리하므로
+    // 폴백 폴링은 30초로 늘려 중복 요청을 최소화한다.
     const poll = setInterval(() => {
       void refresh();
-    }, 5000);
+    }, 30_000);
     return () => clearInterval(poll);
   }, [active, refresh]);
 

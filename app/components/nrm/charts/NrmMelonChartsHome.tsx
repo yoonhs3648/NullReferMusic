@@ -98,6 +98,26 @@ export function NrmMelonChartsHome({
     setActiveTab(tab);
   }, []);
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem) => `${activeTab}-${item.trackId}-${item.rank}`,
+    [activeTab],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          coverUrl={item.imageUrl}
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, onTrackPress],
+  );
+
   useEffect(() => {
     const generation = ++loadGenRef.current;
     void loadChart(activeTab, generation);
@@ -171,28 +191,21 @@ export function NrmMelonChartsHome({
       style={styles.list}
       nestedScrollEnabled
       data={loading || errorCode ? [] : items}
-      keyExtractor={(item) => `${activeTab}-${item.trackId}-${item.rank}`}
-      renderItem={({ item }) => (
-        <View style={{ paddingHorizontal: paddingHorizontal }}>
-          <NrmChartTrackRow
-            item={item}
-            titleColor={titleColor}
-            bodyColor={bodyColor}
-            coverUrl={item.imageUrl}
-            onPress={onTrackPress ? () => onTrackPress(item) : undefined}
-          />
-        </View>
-      )}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
       ListHeaderComponent={listHeader}
-      ListEmptyComponent={() => listEmpty}
+      ListEmptyComponent={listEmpty}
       ListFooterComponent={listFooter}
-      onEndReached={() => loadMore()}
+      onEndReached={loadMore}
       onEndReachedThreshold={0.35}
       contentContainerStyle={[
         styles.listContent,
         (loading || errorCode) && styles.listContentEmpty,
       ]}
       keyboardShouldPersistTaps="handled"
+      initialNumToRender={20}
+      maxToRenderPerBatch={15}
+      windowSize={8}
     />
   );
 }

@@ -175,6 +175,27 @@ export function NrmMelonGenreChartsHome({
     });
   }, [loading, loadingMore, hasMore, errorCode, loadPage]);
 
+  const keyExtractor = useCallback(
+    (item: ChartTrackItem, index: number) =>
+      `${queryKey}-${item.trackId}-${item.rank}-${index}`,
+    [queryKey],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChartTrackItem }) => (
+      <View style={{ paddingHorizontal }} collapsable={false}>
+        <NrmChartTrackRow
+          item={item}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          coverUrl={item.imageUrl}
+          onPress={onTrackPress ? () => onTrackPress(item) : undefined}
+        />
+      </View>
+    ),
+    [paddingHorizontal, titleColor, bodyColor, onTrackPress],
+  );
+
   const renderListEmpty = useCallback(() => {
     if (loading || items.length > 0) return null;
     if (errorCode) {
@@ -234,18 +255,8 @@ export function NrmMelonGenreChartsHome({
         style={styles.list}
         nestedScrollEnabled
         data={loading || errorCode ? [] : items}
-        keyExtractor={(item, index) => `${queryKey}-${item.trackId}-${item.rank}-${index}`}
-        renderItem={({ item }) => (
-          <View style={{ paddingHorizontal }} collapsable={false}>
-            <NrmChartTrackRow
-              item={item}
-              titleColor={titleColor}
-              bodyColor={bodyColor}
-              coverUrl={item.imageUrl}
-              onPress={onTrackPress ? () => onTrackPress(item) : undefined}
-            />
-          </View>
-        )}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
         ListHeaderComponent={
           loading ? (
             <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
@@ -254,7 +265,7 @@ export function NrmMelonGenreChartsHome({
         ListHeaderComponentStyle={styles.listHeaderInset}
         ListEmptyComponent={renderListEmpty}
         ListFooterComponent={listFooter}
-        onEndReached={() => loadMore()}
+        onEndReached={loadMore}
         onEndReachedThreshold={0.35}
         contentContainerStyle={[
           styles.listContent,
@@ -263,6 +274,9 @@ export function NrmMelonGenreChartsHome({
         ]}
         keyboardShouldPersistTaps="always"
         removeClippedSubviews={Platform.OS === 'android' ? false : undefined}
+        initialNumToRender={20}
+        maxToRenderPerBatch={15}
+        windowSize={8}
       />
 
       <NrmPeriodChartSharedPickerModal

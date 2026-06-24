@@ -5,6 +5,7 @@ import { logNrmDev } from '@/lib/nrmDevLog';
 import {
   GTX_BATCH_DELAY_MS,
   GTX_BATCH_SIZE,
+  GTX_CONCURRENCY,
   translateTextsViaGtxBatched,
 } from '@/lib/nrmGoogleTranslateGtx';
 
@@ -48,6 +49,7 @@ function buildTranslateInject(jobId: string, texts: string[]): string {
   var texts = ${JSON.stringify(texts)};
   var batchSize = ${GTX_BATCH_SIZE};
   var batchDelayMs = ${GTX_BATCH_DELAY_MS};
+  var concurrencyLimit = ${GTX_CONCURRENCY};
   var fetchTimeoutMs = 15000;
   function parseOne(segments) {
     if (!segments || !segments.length) return '';
@@ -87,23 +89,19 @@ function buildTranslateInject(jobId: string, texts: string[]): string {
         if (!text || !String(text).trim()) continue;
         slots.push({ index: i, text: String(text).trim() });
       }
-      for (var b = 0; b < slots.length; b += batchSize) {
-        var batch = slots.slice(b, b + batchSize);
-        var batchTexts = batch.map(function(s) { return s.text; });
-        var data = await fetchJson(buildUrl(batchTexts));
-        var src = (data && data[2]) ? String(data[2]).toUpperCase() : 'EN';
-        if (batch.length === 1) {
+      for (var b = 0; b < slots.length; b += concurrencyLimit) {
+        var group = slots.slice(b, b + concurrencyLimit);
+        var groupResults = await Promise.all(group.map(async function(slot) {
+          var data = await fetchJson(buildUrl([slot.text]));
+          var src = (data && data[2]) ? String(data[2]).toUpperCase() : 'EN';
           var segs = data && data[0];
-          results[batch[0].index] = parseOne(segs);
-          sourceLangs[batch[0].index] = src;
-        } else {
-          var rows = data && data[0];
-          for (var k = 0; k < batch.length; k++) {
-            results[batch[k].index] = parseOne(rows && rows[k]);
-            sourceLangs[batch[k].index] = src;
-          }
+          return { index: slot.index, text: parseOne(segs), src: src };
+        }));
+        for (var k = 0; k < groupResults.length; k++) {
+          results[groupResults[k].index] = groupResults[k].text;
+          sourceLangs[groupResults[k].index] = groupResults[k].src;
         }
-        if (b + batchSize < slots.length) {
+        if (b + concurrencyLimit < slots.length) {
           await new Promise(function(r) { setTimeout(r, batchDelayMs); });
         }
       }

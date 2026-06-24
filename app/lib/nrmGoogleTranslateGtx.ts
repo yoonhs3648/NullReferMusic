@@ -1,7 +1,11 @@
 /** Google Translate gtx 엔드포인트 공통 유틸 (웹·네이티브 공유). */
 
-export const GTX_BATCH_SIZE = 20;
+/** gtx는 다중 q= 요청 시 첫 줄만 번역하므로 1줄씩 요청 */
+export const GTX_BATCH_SIZE = 1;
+/** 그룹 간 지연 (rate-limit 방어) */
 export const GTX_BATCH_DELAY_MS = 60;
+/** 동시에 발사하는 요청 수 — 순차 대비 ~3배 속도, 그룹 사이 딜레이로 rate-limit 보호 */
+export const GTX_CONCURRENCY = 3;
 export const GTX_FETCH_TIMEOUT_MS = 15_000;
 
 export function buildGtxTranslateUrl(texts: string[]): string {
@@ -90,47 +94,41 @@ export async function translateTextsViaGtxBatched(
   }
 
   const outTexts: string[] = new Array(texts.length).fill('');
-  const sourceLangs: string[] = new Array(texts.length).fill('');
+  const outSourceLangs: string[] = new Array(texts.length).fill('');
 
   type Slot = { index: number; text: string };
   const slots: Slot[] = [];
   for (let i = 0; i < texts.length; i++) {
     const trimmed = String(texts[i] ?? '').trim();
-    if (!trimmed) {
-      outTexts[i] = '';
-      sourceLangs[i] = '';
-    } else {
+    if (trimmed) {
       slots.push({ index: i, text: trimmed });
     }
   }
 
-  for (let batchStart = 0; batchStart < slots.length; batchStart += GTX_BATCH_SIZE) {
-    const batch = slots.slice(batchStart, batchStart + GTX_BATCH_SIZE);
-    if (batch.length === 0) continue;
+  // GTX_BATCH_SIZE=1(API 제약)이므로 1줄씩 요청하되,
+  // GTX_CONCURRENCY 개를 동시에 발사해 속도를 높인다.
+  // 그룹 사이에는 GTX_BATCH_DELAY_MS 지연으로 rate-limit을 방어한다.
+  for (let groupStart = 0; groupStart < slots.length; groupStart += GTX_CONCURRENCY) {
+    const group = slots.slice(groupStart, groupStart + GTX_CONCURRENCY);
 
-    if (batch.length === 1) {
-      const url = buildGtxTranslateUrl([batch[0]!.text]);
-      const data = await fetchGtxJson(fetchFn, url);
-      const row = parseGtxSingleResponse(data);
-      outTexts[batch[0]!.index] = row.text;
-      sourceLangs[batch[0]!.index] = row.sourceLang;
-    } else {
-      const url = buildGtxTranslateUrl(batch.map((s) => s.text));
-      const data = await fetchGtxJson(fetchFn, url);
-      const parsed = parseGtxMultiResponse(data, batch.length);
-      if (parsed.texts.length !== batch.length) {
-        throw new Error('Google Translate 배치 결과 개수가 요청과 일치하지 않습니다.');
-      }
-      for (let j = 0; j < batch.length; j++) {
-        outTexts[batch[j]!.index] = parsed.texts[j] ?? '';
-        sourceLangs[batch[j]!.index] = parsed.sourceLangs[j] ?? 'EN';
-      }
+    const results = await Promise.all(
+      group.map(async (slot) => {
+        const url = buildGtxTranslateUrl([slot.text]);
+        const data = await fetchGtxJson(fetchFn, url);
+        const row = parseGtxSingleResponse(data);
+        return { index: slot.index, text: row.text, sourceLang: row.sourceLang };
+      }),
+    );
+
+    for (const r of results) {
+      outTexts[r.index] = r.text;
+      outSourceLangs[r.index] = r.sourceLang;
     }
 
-    if (batchStart + GTX_BATCH_SIZE < slots.length) {
-      await new Promise((r) => setTimeout(r, GTX_BATCH_DELAY_MS));
+    if (groupStart + GTX_CONCURRENCY < slots.length) {
+      await new Promise<void>((resolve) => setTimeout(resolve, GTX_BATCH_DELAY_MS));
     }
   }
 
-  return { texts: outTexts, sourceLangs };
+  return { texts: outTexts, sourceLangs: outSourceLangs };
 }

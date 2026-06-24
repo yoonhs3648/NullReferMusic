@@ -1,5 +1,7 @@
 import {
+  containsHangul,
   extractDeepLTextsFromSlots,
+  lrcHasTranslationPairs,
   mergeDeepLResponsesIntoLrc,
   normalizeLrcLines,
   planLrcTranslationSlots,
@@ -70,7 +72,6 @@ export async function translateLrcToKoreanWithGoogleTranslate(
         message: 'Google Translate 번역 결과 개수가 요청과 일치하지 않습니다.',
       };
     }
-    const { containsHangul } = await import('@/lib/nrmDeepLLrcFormat');
     const hasKoreanLine = responses.some((line) => containsHangul(line));
     if (!hasKoreanLine) {
       return {
@@ -87,6 +88,17 @@ export async function translateLrcToKoreanWithGoogleTranslate(
     responses,
     sourceLangs,
   );
+
+  if (apiTexts.length > 0 && !lrcHasTranslationPairs(outLrc)) {
+    logNrmDev('lyrics.translate', {
+      event: 'googletranslate_no_pairs',
+      apiLineCount: apiTexts.length,
+    });
+    return {
+      ok: false,
+      message: 'Google Translate 번역 결과에 한글 번역 줄이 없습니다.',
+    };
+  }
 
   logNrmDev('lyrics.translate', {
     event: 'googletranslate_ok',

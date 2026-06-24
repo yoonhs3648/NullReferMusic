@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { NrmChartTrackArt } from '@/components/nrm/charts/NrmChartTrackArt';
@@ -33,7 +34,7 @@ type Props = {
   coverUrl?: string;
 };
 
-export function NrmChartTrackRow({
+export const NrmChartTrackRow = memo(function NrmChartTrackRow({
   item,
   titleColor,
   bodyColor,
@@ -76,4 +77,4 @@ export function NrmChartTrackRow({
       </View>
     </Pressable>
   );
-}
+});

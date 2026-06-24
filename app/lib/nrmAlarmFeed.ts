@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
@@ -107,15 +107,28 @@ export function useNrmAlarmFeed(): NrmAlarmFeed {
     setRefreshing(false);
   }, [reload]);
 
-  return {
-    items,
-    unreadCount,
-    loading,
-    refreshing,
-    expandedIds,
-    reload,
-    pullToRefresh,
-    toggleExpanded,
-    collapseAllExpanded,
-  };
+  return useMemo(
+    () => ({
+      items,
+      unreadCount,
+      loading,
+      refreshing,
+      expandedIds,
+      reload,
+      pullToRefresh,
+      toggleExpanded,
+      collapseAllExpanded,
+    }),
+    [
+      items,
+      unreadCount,
+      loading,
+      refreshing,
+      expandedIds,
+      reload,
+      pullToRefresh,
+      toggleExpanded,
+      collapseAllExpanded,
+    ],
+  );
 }

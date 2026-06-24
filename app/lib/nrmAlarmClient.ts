@@ -1,4 +1,8 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
+import {
+  NRM_ALARM_ADMIN_SERIAL,
+  resolvesAdminTargetedAlarms,
+} from '@/lib/nrmAdminAlarmReceiver';
 import { countUnreadAlarmIds, pruneAlarmReadIds } from '@/lib/nrmAlarmReadState';
 
 import { NRM_ALARM_JSON_RAW_URL, NRM_ALARM_DISPLAY_DAYS } from '@/lib/nrmRemoteDataConfig';
@@ -54,10 +58,17 @@ function isWithinDisplayWindow(dateStr: string, nowMs: number): boolean {
   return itemMs >= cutoff;
 }
 
-function isSerialVisible(alarmSerial: string, appSerial: string): boolean {
+function isSerialVisible(
+  alarmSerial: string,
+  appSerial: string,
+  receiveAdminAlarms: boolean,
+): boolean {
   const target = alarmSerial.trim();
   if (!target) return true;
-  return target === appSerial.trim();
+  if (receiveAdminAlarms && target === NRM_ALARM_ADMIN_SERIAL) return true;
+  const app = appSerial.trim();
+  if (!app) return false;
+  return target === app;
 }
 
 function normalizeAlarmRow(
@@ -91,13 +102,14 @@ function sortAlarms(items: NrmAlarmItem[]): NrmAlarmItem[] {
 function filterAlarms(
   rows: NrmAlarmItem[],
   appSerialNo: string,
+  receiveAdminAlarms: boolean,
   nowMs: number,
 ): NrmAlarmItem[] {
   return sortAlarms(
     rows.filter(
       (row) =>
         isWithinDisplayWindow(row.date, nowMs) &&
-        isSerialVisible(row.SerialNo, appSerialNo),
+        isSerialVisible(row.SerialNo, appSerialNo, receiveAdminAlarms),
     ),
   );
 }
@@ -140,9 +152,10 @@ export async function fetchAlarmsForApp(options?: {
 
   inflight = (async () => {
     const appSerialNo = await getNrmAppSerialNo();
+    const receiveAdminAlarms = await resolvesAdminTargetedAlarms();
     const nowMs = Date.now();
     const raw = await fetchAlarmPayload(options?.signal);
-    const items = filterAlarms(raw, appSerialNo, nowMs);
+    const items = filterAlarms(raw, appSerialNo, receiveAdminAlarms, nowMs);
     memoryCache = { items, fetchedAt: nowMs, appSerialNo };
     await pruneAlarmReadIds(items.map((row) => row.id));
     return items;

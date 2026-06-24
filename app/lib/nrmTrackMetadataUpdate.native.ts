@@ -205,6 +205,13 @@ async function deleteSidecarLrcForTrack(
   }
 }
 
+export type ApplyTrackMetadataUpdateResult = {
+  /** 가사(LRC) 저장·생성 성공 여부 (가사 작업이 없으면 undefined) */
+  lyricsSaved?: boolean;
+  /** 번역지원 요청 후 번역만 실패(원문 가사는 저장됨) */
+  lyricsTranslationFailed?: boolean;
+};
+
 export type ApplyTrackMetadataUpdateInput = {
   track: NrmDownloadTrackItem;
   newFileName: string;
@@ -243,7 +250,7 @@ async function readExistingSyncLrcText(
 
 export async function applyTrackMetadataUpdate(
   input: ApplyTrackMetadataUpdateInput,
-): Promise<void> {
+): Promise<ApplyTrackMetadataUpdateResult> {
   if (Platform.OS === 'web') {
     throw new Error('트랙 메타데이터 설정은 앱에서만 사용할 수 있습니다.');
   }
@@ -287,11 +294,11 @@ export async function applyTrackMetadataUpdate(
     if (ext === '.mp3' || ext === '.m4a') {
       await stripSyncedEmbeddedLyricsFromAudio(location.audioUri, ext);
     }
-    return;
+    return {};
   }
 
   if (lyricsAction.kind === 'none') {
-    return;
+    return {};
   }
 
   const ext = location.fileName.slice(location.fileName.lastIndexOf('.')).toLowerCase();
@@ -353,18 +360,18 @@ export async function applyTrackMetadataUpdate(
       const { translateLrcToKorean } = await import('@/lib/nrmTranslationClient');
       const translated = await translateLrcToKorean(existingLrcText);
       if (!translated.ok) {
-        // 번역 실패 — 원본 LRC 유지 후 경고 throw (UI에서 에러 메시지 표시)
         await saveLrc(
           existingLrcText,
           initialLyricsMode !== 'unset' ? initialLyricsMode : 'configured',
         );
         finishLyricsWork(false);
         const isExhausted = (translated.message ?? '').includes('사용량이 초과');
-        throw new Error(
+        notifyUser(
           isExhausted
             ? 'DeepL 사용량이 초과되었습니다. 번역 없이 원본 가사로 저장되었습니다.'
             : `번역에 실패했습니다. 원본 가사로 저장되었습니다. (${translated.message ?? ''})`,
         );
+        return { lyricsSaved: true, lyricsTranslationFailed: true };
       }
       if (newLyricsMode === 'unset') {
         finishLyricsWork(false);
@@ -372,11 +379,11 @@ export async function applyTrackMetadataUpdate(
       }
       await saveLrc(translated.lrc, newLyricsMode);
       finishLyricsWork(true);
+      return { lyricsSaved: true };
     } catch (e) {
       finishLyricsWork(false);
       throw e;
     }
-    return;
   }
 
   // translation → configured: Whisper 재실행 없이 한글 번역 줄만 제거
@@ -392,10 +399,11 @@ export async function applyTrackMetadataUpdate(
         await saveLrc(stripped || existingLrcText, newLyricsMode);
       }
       finishLyricsWork(true);
+      return { lyricsSaved: true };
     } catch {
       finishLyricsWork(false);
     }
-    return;
+    return { lyricsSaved: false };
   }
 
   // generate-melon: Forced Alignment으로 멜론 가사 정렬
@@ -406,7 +414,7 @@ export async function applyTrackMetadataUpdate(
     if (!plain) {
       finishLyricsWork(false);
       notifyUser('멜론 가사를 가져올 수 없습니다.');
-      return;
+      return { lyricsSaved: false };
     }
     try {
       const alignLang =
@@ -420,7 +428,7 @@ export async function applyTrackMetadataUpdate(
             })();
       if (!alignLang) {
         finishLyricsWork(false);
-        return;
+        return { lyricsSaved: false };
       }
       const workUri = await materializeToCache(location.audioUri, location.fileName);
       const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
@@ -431,6 +439,10 @@ export async function applyTrackMetadataUpdate(
       if (melon.lrcFull?.trim()) {
         await saveLrc(melon.lrcFull, lyricsAction.mode);
         finishLyricsWork(true);
+        return {
+          lyricsSaved: true,
+          lyricsTranslationFailed: melon.lyricsTranslationFailed ?? false,
+        };
       } else if (melon.lyricsMelonMemoryInsufficient) {
         finishLyricsWork(false);
         notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
@@ -443,7 +455,7 @@ export async function applyTrackMetadataUpdate(
       finishLyricsWork(false);
       notifyUser('가사 생성 중 오류가 발생했습니다.');
     }
-    return;
+    return { lyricsSaved: false };
   }
 
   // generate: Whisper 재전사 후 저장
@@ -456,13 +468,17 @@ export async function applyTrackMetadataUpdate(
     if (whisper.lrcFull?.trim()) {
       await saveLrc(whisper.lrcFull, lyricsAction.mode);
       finishLyricsWork(true);
-    } else {
-      finishLyricsWork(false);
-      notifyUser('가사 생성에 실패했습니다. 오디오는 저장되어 있습니다.');
+      return {
+        lyricsSaved: true,
+        lyricsTranslationFailed: whisper.lyricsTranslationFailed ?? false,
+      };
     }
+    finishLyricsWork(false);
+    notifyUser('가사 생성에 실패했습니다. 오디오는 저장되어 있습니다.');
     await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
   } catch {
     finishLyricsWork(false);
     notifyUser('가사 생성 중 오류가 발생했습니다.');
   }
+  return { lyricsSaved: false };
 }

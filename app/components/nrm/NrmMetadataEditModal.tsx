@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NrmMelonAdultAuthLoginModal } from '@/components/nrm/settings/NrmMelonAdultAuthLoginModal';
 import {
   melonCookieHeaderHasLogin,
@@ -169,7 +169,7 @@ type InlineSelectProps = {
   scrollStyle?: object;
 };
 
-function MetadataInlineSelect({
+const MetadataInlineSelect = memo(function MetadataInlineSelect({
   label,
   value,
   options,
@@ -215,7 +215,8 @@ function MetadataInlineSelect({
         </Text>
         <Ionicons name="chevron-down" size={16} color={bodyColor} />
       </Pressable>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+      {open ? (
+      <Modal visible transparent animationType="fade" onRequestClose={close}>
         <Pressable style={styles.selectScrim} onPress={close}>
           <View
             style={[
@@ -282,9 +283,10 @@ function MetadataInlineSelect({
           </View>
         </Pressable>
       </Modal>
+      ) : null}
     </View>
   );
-}
+});
 
 type InlineTextFieldProps = {
   label: string;
@@ -296,7 +298,7 @@ type InlineTextFieldProps = {
   editable?: boolean;
 };
 
-function InlineTextField({
+const InlineTextField = memo(function InlineTextField({
   label,
   value,
   onChangeText,
@@ -318,7 +320,7 @@ function InlineTextField({
       />
     </View>
   );
-}
+});
 
 export function NrmMetadataEditModal({
   visible,
@@ -398,11 +400,14 @@ export function NrmMetadataEditModal({
   const scrollInlineStyle = webScrollInlineStyle(isDark);
   const bodyColor = isDark ? nrmTokens.color.bodyMuted : nrmTokens.color.inkMuted80;
 
-  const inputColors = {
-    backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
-    color: titleColor,
-    borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
-  };
+  const inputColors = useMemo(
+    () => ({
+      backgroundColor: isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas,
+      color: titleColor,
+      borderColor: isDark ? nrmTokens.color.borderOnDark : 'rgba(0, 0, 0, 0.08)',
+    }),
+    [isDark, titleColor],
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -994,10 +999,11 @@ export function NrmMetadataEditModal({
   }, [visible, lyricsMode, lyricsOptions, purpose, storedLyricsMode]);
 
   useEffect(() => {
+    if (!visible) return;
     if (!translationOptionEnabled && (lyricsMode === 'translation' || lyricsMode === 'melon_translation')) {
       setLyricsMode('unset');
     }
-  }, [lyricsMode, translationOptionEnabled]);
+  }, [visible, lyricsMode, translationOptionEnabled]);
 
   function resolveLyricsForSubmit(
     plainOverride?: string,
@@ -1457,13 +1463,15 @@ export function NrmMetadataEditModal({
         ) : null}
       </View>
 
-      <NrmMelonAdultAuthLoginModal
-        visible={melonAuthModalOpen}
-        titleColor={isDark ? '#fff' : '#000'}
-        webViewSessionKey={melonAuthWebViewKey}
-        onClose={() => setMelonAuthModalOpen(false)}
-        onCookieCaptured={(cookie) => void handleMelonAdultCookieCaptured(cookie)}
-      />
+      {melonAuthModalOpen ? (
+        <NrmMelonAdultAuthLoginModal
+          visible
+          titleColor={isDark ? '#fff' : '#000'}
+          webViewSessionKey={melonAuthWebViewKey}
+          onClose={() => setMelonAuthModalOpen(false)}
+          onCookieCaptured={(cookie) => void handleMelonAdultCookieCaptured(cookie)}
+        />
+      ) : null}
     </Modal>
   );
 }

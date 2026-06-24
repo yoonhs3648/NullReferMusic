@@ -1,7 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,6 +13,11 @@ import {
 
 import { NrmMelonAdultAuthLoginModal } from '@/components/nrm/settings/NrmMelonAdultAuthLoginModal';
 import { nrmTokens } from '@/constants/nrmTokens';
+import {
+  NRM_API_SETTINGS_SAVED_MESSAGE,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM,
+  NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+} from '@/lib/nrmApiSettingsUi';
 import {
   clearMelonAdultSession,
   getMelonAdultSession,
@@ -24,7 +30,7 @@ import {
   hasNrmMelonCookieNativeModule,
 } from '@/lib/nrmMelonCookie';
 import { copyToClipboard } from '@/lib/nrmCopyText';
-import { notifyUser } from '@/lib/nrmUserNotify';
+import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 const FIELD_BORDER_COLOR = 'rgba(128,128,128,0.4)';
@@ -34,6 +40,9 @@ type Props = {
   bodyColor: string;
   rowHover: string;
   onBack: () => void;
+  onCloseDrawer?: () => void;
+  registerBackHandler?: (handler: (() => boolean) | null) => void;
+  registerDrawerDismiss?: (handler: (() => void) | null) => void;
 };
 
 function MenuBackRow({ onPress }: { onPress: () => void }) {
@@ -95,7 +104,15 @@ function formatSavedAt(ms: number): string {
   }
 }
 
-export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack }: Props) {
+export function NrmMelonAdultAuthPanel({
+  titleColor,
+  bodyColor,
+  rowHover,
+  onBack,
+  onCloseDrawer,
+  registerBackHandler,
+  registerDrawerDismiss,
+}: Props) {
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -103,6 +120,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
   const [loginVisible, setLoginVisible] = useState(false);
   const [webViewSessionKey, setWebViewSessionKey] = useState(0);
   const [saving, setSaving] = useState(false);
+  const savedCookieRef = useRef('');
 
   const canUseWebView = Platform.OS === 'android' && hasNrmMelonCookieNativeModule();
 
@@ -110,9 +128,11 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
     setLoading(true);
     try {
       const session = await getMelonAdultSession();
+      const cookie = session?.cookieHeader ?? '';
       setSaved(session != null);
       setSavedAt(session?.savedAt ?? null);
-      setCookieField(session?.cookieHeader ?? '');
+      setCookieField(cookie);
+      savedCookieRef.current = cookie.trim();
     } finally {
       setLoading(false);
     }
@@ -121,6 +141,15 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
+
+  const isDraftDirty = useCallback(
+    () => cookieField.trim() !== savedCookieRef.current,
+    [cookieField],
+  );
+
+  const restoreDraft = useCallback(() => {
+    setCookieField(savedCookieRef.current);
+  }, []);
 
   const persistCookieHeader = useCallback(
     async (rawCookie: string, source: 'webview' | 'manual'): Promise<boolean> => {
@@ -141,6 +170,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
         setSaved(true);
         setSavedAt(Date.now());
         setCookieField(trimmed);
+        savedCookieRef.current = trimmed;
         notifyUser(
           source === 'webview'
             ? '멜론 성인인증 세션이 저장되었습니다.'
@@ -154,6 +184,64 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
     [],
   );
 
+  const handleSaveManual = useCallback(async () => {
+    await persistCookieHeader(cookieField, 'manual');
+  }, [cookieField, persistCookieHeader]);
+
+  const handleLeave = useCallback(
+    async (target: 'appSettings' | 'closeDrawer') => {
+      if (isDraftDirty()) {
+        const save = await confirmUser(
+          NRM_API_SETTINGS_UNSAVED_CONFIRM_MESSAGE,
+          NRM_API_SETTINGS_UNSAVED_CONFIRM,
+        );
+        if (save) {
+          const ok = await persistCookieHeader(cookieField, 'manual');
+          if (!ok) return;
+          void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
+        } else {
+          restoreDraft();
+        }
+      }
+      if (target === 'appSettings') {
+        onBack();
+      } else {
+        onCloseDrawer?.();
+      }
+    },
+    [cookieField, isDraftDirty, onBack, onCloseDrawer, persistCookieHeader, restoreDraft],
+  );
+
+  useEffect(() => {
+    registerBackHandler?.(() => {
+      if (isDraftDirty()) {
+        void handleLeave('appSettings');
+        return true;
+      }
+      return false;
+    });
+    return () => registerBackHandler?.(null);
+  }, [handleLeave, isDraftDirty, registerBackHandler]);
+
+  useEffect(() => {
+    registerDrawerDismiss?.(() => {
+      void handleLeave('closeDrawer');
+    });
+    return () => registerDrawerDismiss?.(null);
+  }, [handleLeave, registerDrawerDismiss]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isDraftDirty()) {
+        void handleLeave('appSettings');
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [handleLeave, isDraftDirty]);
+
   /** WebView 에서 MLCP 쿠키를 감지하면 자동 저장 후 모달 닫기 */
   const handleWebViewCookieCaptured = useCallback(
     async (cookieHeader: string) => {
@@ -163,10 +251,6 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
     [persistCookieHeader],
   );
 
-  const handleSaveManual = useCallback(async () => {
-    await persistCookieHeader(cookieField, 'manual');
-  }, [cookieField, persistCookieHeader]);
-
   const handleClear = useCallback(async () => {
     setSaving(true);
     try {
@@ -175,6 +259,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
       setSaved(false);
       setSavedAt(null);
       setCookieField('');
+      savedCookieRef.current = '';
       setWebViewSessionKey((k) => k + 1);
       notifyUser('멜론 성인인증 세션이 삭제되었습니다.');
     } finally {
@@ -189,7 +274,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
 
   return (
     <>
-      <MenuBackRow onPress={onBack} />
+      <MenuBackRow onPress={() => void handleLeave('appSettings')} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>멜론 성인인증</Text>
 
       {canUseWebView ? (
@@ -202,7 +287,7 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
             saving && styles.disabled,
           ]}>
           <Text style={[styles.primaryBtnLabel, { color: titleColor }]}>
-            멜론 로그인 · 성인인증
+            멜론 WebView 로그인
           </Text>
         </Pressable>
       ) : (
@@ -235,10 +320,6 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
         <TextInput
           value={cookieField}
           onChangeText={setCookieField}
-          placeholder="MLCP=...; keyCookie=...; JSESSIONID=..."
-          placeholderTextColor="rgba(128,128,128,0.7)"
-          multiline
-          textAlignVertical="top"
           autoCapitalize="none"
           autoCorrect={false}
           style={[styles.fieldInner, { color: titleColor }]}
@@ -250,11 +331,11 @@ export function NrmMelonAdultAuthPanel({ titleColor, bodyColor, rowHover, onBack
         disabled={saving || !cookieField.trim()}
         style={({ pressed }) => [
           styles.primaryBtn,
-          styles.manualSaveBtn,
+          styles.saveBtn,
           (saving || !cookieField.trim()) && styles.disabled,
           pressed && !saving && cookieField.trim() ? styles.primaryBtnPressed : undefined,
         ]}>
-        <Text style={[styles.primaryBtnLabel, { color: titleColor }]}>저장</Text>
+        <Text style={[styles.saveBtnLabel, { color: titleColor }]}>저장</Text>
       </Pressable>
 
       {loading ? (
@@ -312,8 +393,8 @@ const styles = StyleSheet.create({
     paddingVertical: nrmTokens.space.md,
     paddingHorizontal: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
-    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryBtnPressed: {
     opacity: 0.75,
@@ -321,10 +402,15 @@ const styles = StyleSheet.create({
   primaryBtnLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
-    flex: 1,
+    textAlign: 'center',
   },
-  manualSaveBtn: {
-    justifyContent: 'center',
+  saveBtn: {
+    marginBottom: nrmTokens.space.sm,
+  },
+  saveBtnLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   webUnavailableNote: {
     fontSize: nrmTokens.font.caption,
@@ -355,11 +441,10 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.sm,
   },
   fieldInner: {
-    minHeight: 88,
+    minHeight: 44,
     paddingHorizontal: nrmTokens.space.sm,
     paddingVertical: nrmTokens.space.sm,
-    fontSize: nrmTokens.font.caption,
-    textAlignVertical: 'top',
+    fontSize: nrmTokens.font.body,
   },
   loader: {
     marginVertical: nrmTokens.space.lg,
