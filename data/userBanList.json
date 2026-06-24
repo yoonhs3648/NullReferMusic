@@ -7,6 +7,14 @@
 			"content": "dummydata",
 			"isBanned": false,
 			"date": "1970-01-01"
+		},
+		{
+			"id": 2,
+			"userName": "테스트계정2",
+			"SerialNo": "tester2",
+			"content": "test",
+			"isBanned": true,
+			"date": "2026-06-25"
 		}
 	]
 }
