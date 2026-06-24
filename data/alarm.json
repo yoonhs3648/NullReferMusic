@@ -3,34 +3,10 @@
 		{
 			"id": 1,
 			"isNoti": true,
-			"title": "앱 업데이트 안내",
-			"content": "NullReference Music 2.1.4가 배포되었습니다. 알림·문의하기 기능이 추가되었습니다.",
+			"title": "앱 신규 버전 릴리즈 안내",
+			"content": "NullReference Music v.2.1.1 배포되었습니다.",
 			"SerialNo": "",
-			"date": "2026-06-23"
-		},
-		{
-			"id": 2,
-			"isNoti": true,
-			"title": "전체 공지 (테스트)",
-			"content": "GitHub data/alarm.json 임시 샘플 데이터입니다. SerialNo가 비어 있으면 모든 사용자에게 표시됩니다.",
-			"SerialNo": "",
-			"date": "2026-06-22"
-		},
-		{
-			"id": 3,
-			"isNoti": false,
-			"title": "맞춤 APK 사용자 안내",
-			"content": "SerialNo가 등록된 사용자에게만 보이는 일반 알림 샘플입니다.",
-			"SerialNo": "01027523648",
-			"date": "2026-06-21"
-		},
-		{
-			"id": 4,
-			"isNoti": true,
-			"title": "긴급 공지 샘플",
-			"content": "isNoti가 true이면 앱 상단에 공지 딱지가 표시됩니다. (임시 테스트)",
-			"SerialNo": "01098765432",
-			"date": "2026-06-20"
+			"date": "2026-06-13"
 		}
 	]
 }
