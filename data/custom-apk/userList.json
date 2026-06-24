@@ -3,32 +3,24 @@
 		{
 			"id": 1,
 			"appName": "NullReference Music",
-			"userName": "김테스트",
-			"SerialNo": "01027523648",
-			"version": "2.1.4",
-			"Createddate": "2026-06-18",
+			"userName": "테스트계정1",
+			"SerialNo": "tester1",
+			"version": "2.1.1",
+			"Createddate": "2026-06-01",
 			"deviceId": null,
-			"lastAccessDate": null
+			"lastAccessDate": null,
+			"isAdmin": false
 		},
 		{
 			"id": 2,
-			"appName": "NullReference Music",
-			"userName": "이샘플",
-			"SerialNo": "01098765432",
-			"version": "2.1.3",
-			"Createddate": "2026-06-20",
-			"deviceId": null,
-			"lastAccessDate": null
-		},
-		{
-			"id": 3,
-			"appName": "Custom Music",
-			"userName": "박데모",
-			"SerialNo": "01011112222",
-			"version": "2.1.4",
-			"Createddate": "2026-06-23",
-			"deviceId": null,
-			"lastAccessDate": null
+			"appName": "NullReference Sound",
+			"userName": "테스트계정2",
+			"SerialNo": "tester2",
+			"version": "2.1.2",
+			"Createddate": "2026-06-02",
+			"deviceId": "androidtestdevice",
+			"lastAccessDate": "2026-06-06 12:00:00.000",
+			"isAdmin": false
 		}
 	]
 }
