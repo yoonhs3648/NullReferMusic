@@ -23,6 +23,14 @@
 			"content": "123",
 			"isBanned": true,
 			"date": "2026-06-25"
+		},
+		{
+			"id": 4,
+			"userName": "테스트계정1",
+			"SerialNo": "tester1",
+			"content": "dh4",
+			"isBanned": true,
+			"date": "2026-06-25"
 		}
 	]
 }
