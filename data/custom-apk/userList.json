@@ -8,8 +8,7 @@
 			"version": "2.1.1",
 			"Createddate": "2026-06-01",
 			"deviceId": null,
-			"lastAccessDate": null,
-			"isAdmin": false
+			"lastAccessDate": null
 		},
 		{
 			"id": 2,
@@ -19,8 +18,7 @@
 			"version": "2.1.2",
 			"Createddate": "2026-06-02",
 			"deviceId": "androidtestdevice",
-			"lastAccessDate": "2026-06-06 12:00:00.000",
-			"isAdmin": false
+			"lastAccessDate": "2026-06-06 12:00:00.000"
 		}
 	]
 }
