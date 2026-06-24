@@ -7,8 +7,9 @@
 			"version": "2.1.4",
 			"content": "테스트",
 			"attachedFile": "",
-			"isAnswered": false,
-			"Createddate": "2026-06-18 10:15:42.080"
+			"isAnswered": true,
+			"Createddate": "2026-06-18 10:15:42.080",
+			"replyContent": "256"
 		},
 		{
 			"id": 2,
