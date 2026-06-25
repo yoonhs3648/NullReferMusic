@@ -49,6 +49,16 @@
                          "Createddate":  "2026-06-25",
                          "deviceId":  null,
                          "lastAccessDate":  null
+                     },
+                     {
+                         "id":  6,
+                         "appName":  "상용\u0027s Music",
+                         "userName":  "이상용",
+                         "SerialNo":  "01092452918",
+                         "version":  "2.4.6",
+                         "Createddate":  "2026-06-25",
+                         "deviceId":  null,
+                         "lastAccessDate":  null
                      }
                  ]
 }
