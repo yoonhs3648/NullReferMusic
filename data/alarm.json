@@ -7,22 +7,6 @@
 			"content": "NullReference Music V.2 릴리즈",
 			"SerialNo": "",
 			"date": "2026-06-13"
-		},
-		{
-			"id": 2,
-			"isNoti": false,
-			"title": "愿由ъ옄 님의 문의",
-			"content": "2026-06-25 09:04:37.462",
-			"SerialNo": "admin",
-			"date": "2026-06-25"
-		},
-		{
-			"id": 3,
-			"isNoti": false,
-			"title": "문의답변이 도착했습니다.",
-			"content": "문의답변이 도착했습니다.",
-			"SerialNo": "admin",
-			"date": "2026-06-25"
 		}
 	]
 }
