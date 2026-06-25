@@ -4,10 +4,8 @@ import { NativeModules } from 'react-native';
 
 import { getNrmFileLogFolderDisplayPath } from '@/lib/nrmAppBrand';
 
+/** 파일 로깅 on/off — 앱 내 AsyncStorage 단일 저장 (기본 off) */
 export const STORAGE_KEY = 'nrm_file_logging_enabled';
-
-/** 앱 재설치 감지 — firstInstallTime 과 짝 */
-const INSTALL_SCOPE_KEY = 'nrm_file_logging_install_scope_ms';
 
 /** APK 파일 로깅 사용자 설정 UI */
 export type NrmFileLoggingMode = 'off' | 'on';
@@ -23,76 +21,32 @@ function formatDailyLogFileName(date = new Date()): string {
 
 export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}${formatDailyLogFileName()}`;
 
-async function readAndroidFirstInstallTimeMs(): Promise<number | null> {
-  if (Platform.OS !== 'android') return null;
-  const mod = NativeModules.NrmFileLogger as
-    | { getFirstInstallTimeMs?: () => Promise<number> }
-    | undefined;
-  try {
-    const ms = await mod?.getFirstInstallTimeMs?.();
-    return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 재설치(또는 백업 복원 후 새 설치) 시 파일 로깅을 기본 off 로 맞춘다.
- * 동일 설치에서의 업데이트·기존 사용자 설정은 유지한다.
- */
-export async function reconcileNrmFileLoggingInstallScope(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  const installMs = await readAndroidFirstInstallTimeMs();
-  if (installMs == null) return;
-
-  let scopeRaw: string | null;
-  try {
-    scopeRaw = await AsyncStorage.getItem(INSTALL_SCOPE_KEY);
-  } catch {
-    return;
-  }
-
-  if (scopeRaw === null) {
-    try {
-      await AsyncStorage.setItem(INSTALL_SCOPE_KEY, String(installMs));
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-
-  const scopeMs = Number(scopeRaw);
-  if (scopeMs === installMs) return;
-
-  try {
-    await AsyncStorage.multiSet([
-      [STORAGE_KEY, 'false'],
-      [INSTALL_SCOPE_KEY, String(installMs)],
-    ]);
-  } catch {
-    /* ignore */
-  }
-}
-
-export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
+/** 저장값이 없거나 잘못된 경우 false (기본 off) */
+export async function readFileLoggingEnabledFromStorage(): Promise<boolean> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw === null) {
-      await AsyncStorage.setItem(STORAGE_KEY, 'false');
-      return false;
-    }
     return raw === 'true';
   } catch {
     return false;
   }
 }
 
-export async function saveNrmFileLoggingEnabled(enabled: boolean): Promise<void> {
+export async function writeFileLoggingEnabledToStorage(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
 }
 
+/** @deprecated readFileLoggingEnabledFromStorage 사용 */
+export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
+  return readFileLoggingEnabledFromStorage();
+}
+
+/** @deprecated writeFileLoggingEnabledToStorage 사용 */
+export async function saveNrmFileLoggingEnabled(enabled: boolean): Promise<void> {
+  return writeFileLoggingEnabledToStorage(enabled);
+}
+
 export async function loadNrmFileLoggingMode(): Promise<NrmFileLoggingMode> {
-  return (await loadNrmFileLoggingEnabled()) ? 'on' : 'off';
+  return (await readFileLoggingEnabledFromStorage()) ? 'on' : 'off';
 }
 
 /** 로그 폴더 내 일별·레거시 로그 파일 전부 삭제 (Android 네이티브) */

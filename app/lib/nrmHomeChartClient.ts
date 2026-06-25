@@ -60,6 +60,18 @@ function isSpotifyHomeChartSource(chartSource: NrmMainPageChartSource): boolean 
   );
 }
 
+async function fetchSpotifyHomeChartWithRenew(
+  chart: 'top100-kr-daily' | 'top100-global-daily',
+  signal?: AbortSignal,
+): Promise<ChartFetchOutcome> {
+  const fetchOnce = () => fetchSpotifyPlaylistChart(chart, 'charts', signal);
+  return retrySpotifyChartsFetchOnce(
+    fetchOnce,
+    (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
+    homeChartSpotifyAuthHandlers?.onRenewChartsBearer,
+  );
+}
+
 function sliceTopN(items: ChartTrackItem[], n: number): ChartTrackItem[] {
   return items.slice(0, n).map((row, i) => ({
     ...row,
@@ -135,30 +147,10 @@ async function fetchChartPayload(
       return fetchMelonRealtimeChart('top100');
     case 'melon-hot100':
       return fetchMelonRealtimeChart('hot100');
-    case 'spotify-top100-kr': {
-      const fetchOnce = () =>
-        fetchSpotifyPlaylistChart('top100-kr-daily', 'charts', signal);
-      if (homeChartSpotifyAuthHandlers?.onRenewChartsBearer) {
-        return retrySpotifyChartsFetchOnce(
-          fetchOnce,
-          (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
-          homeChartSpotifyAuthHandlers.onRenewChartsBearer,
-        );
-      }
-      return fetchOnce();
-    }
-    case 'spotify-top100-global': {
-      const fetchOnce = () =>
-        fetchSpotifyPlaylistChart('top100-global-daily', 'charts', signal);
-      if (homeChartSpotifyAuthHandlers?.onRenewChartsBearer) {
-        return retrySpotifyChartsFetchOnce(
-          fetchOnce,
-          (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
-          homeChartSpotifyAuthHandlers.onRenewChartsBearer,
-        );
-      }
-      return fetchOnce();
-    }
+    case 'spotify-top100-kr':
+      return fetchSpotifyHomeChartWithRenew('top100-kr-daily', signal);
+    case 'spotify-top100-global':
+      return fetchSpotifyHomeChartWithRenew('top100-global-daily', signal);
     case 'apple-top100-kr':
       return fetchAppleMusicChart('top100-kr');
     case 'apple-top100-global':
@@ -178,7 +170,10 @@ async function fetchHomeChartTop20Network(
 ): Promise<HomeChartLoadResult> {
   if (signal?.aborted) return { ok: false };
 
-  if (!(await isMainPageChartSourceTokenReady(chartSource))) {
+  if (
+    !isSpotifyHomeChartSource(chartSource) &&
+    !(await isMainPageChartSourceTokenReady(chartSource))
+  ) {
     return { ok: false };
   }
 

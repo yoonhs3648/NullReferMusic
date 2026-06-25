@@ -57,17 +57,6 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
   override fun getName(): String = "NrmFileLogger"
 
   @ReactMethod
-  fun getFirstInstallTimeMs(promise: Promise) {
-    try {
-      val ctx = reactApplicationContext.applicationContext
-      val pkgInfo = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
-      promise.resolve(pkgInfo.firstInstallTime.toDouble())
-    } catch (e: Exception) {
-      promise.reject("E_NRM_INSTALL", e.message ?: e.toString(), e)
-    }
-  }
-
-  @ReactMethod
   fun setLoggingEnabled(enabled: Boolean) {
     NrmFileLogger.init(reactApplicationContext.applicationContext)
     NrmFileLogger.setUserLoggingEnabled(enabled)

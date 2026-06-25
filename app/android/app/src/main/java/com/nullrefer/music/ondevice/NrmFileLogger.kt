@@ -24,11 +24,11 @@ import java.util.TimeZone
  * 경로: Download/{@link NrmBrand#STORAGE_FOLDER_NAME}/logs/yyyy-MM-dd-NullReferenceMusicLog.txt
  * (Android/data 아래가 아님)
  *
- * on/off — SharedPreferences `nrm_file_logging` / JS AsyncStorage 와 동기화. 기본 off.
+ * on/off — JS AsyncStorage 단일 저장. 네이티브는 세션 메모리만 (기본 off).
  */
 object NrmFileLogger {
-  private const val PREFS_NAME = "nrm_file_logging"
-  private const val KEY_ENABLED = "enabled"
+  private const val LEGACY_PREFS_NAME = "nrm_file_logging"
+  private const val LEGACY_KEY_ENABLED = "enabled"
 
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_BASE = "NullReferenceMusicLog.txt"
@@ -50,20 +50,25 @@ object NrmFileLogger {
     synchronized(lock) {
       if (appContext != null) return
       appContext = context.applicationContext
-      // on/off는 JS AsyncStorage가 단일 소스 — bridge 동기화 전까지는 항상 off
       userLoggingEnabled = false
+      clearLegacyLoggingPreference(context.applicationContext)
       displayPath = buildDisplayPath(todayLogFileName())
     }
   }
 
-  fun setUserLoggingEnabled(enabled: Boolean) {
-    val ctx = appContext
-    if (ctx != null) {
-      ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+  /** 예전 네이티브 SharedPreferences 플래그 제거 — JS AsyncStorage만 사용 */
+  fun clearLegacyLoggingPreference(context: Context) {
+    try {
+      context.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
           .edit()
-          .putBoolean(KEY_ENABLED, enabled)
+          .clear()
           .apply()
+    } catch (_: Exception) {
+      /* ignore */
     }
+  }
+
+  fun setUserLoggingEnabled(enabled: Boolean) {
     synchronized(lock) {
       userLoggingEnabled = enabled
       if (!enabled) {

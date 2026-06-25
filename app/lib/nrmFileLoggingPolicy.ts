@@ -1,6 +1,6 @@
 /**
  * APK 파일 로깅 빌드 허용 여부.
- * 실제 on/off는 사용자 설정(AsyncStorage + NrmFileLogger SharedPreferences)으로 제어.
+ * on/off는 AsyncStorage(`nrm_file_logging_enabled`) 단일 저장 — 기본 off.
  */
 export const NRM_FILE_LOGGING_BUILD_ALLOWED = true as const;
 

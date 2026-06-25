@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
 
@@ -201,6 +201,36 @@ export default function HomeScreen() {
     ChartErrorCode | LastfmSearchErrorCode
   >('auth_failed');
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
+  const renewChartsBearerRef = useRef<(() => Promise<boolean>) | null>(null);
+
+  const renewChartsBearerViaWebView = useCallback((): Promise<boolean> => {
+    if (Platform.OS === 'web') {
+      return Promise.resolve(false);
+    }
+    if (Platform.OS === 'android') {
+      return new Promise((resolve) => {
+        chartsBearerRenewResolver.current = resolve;
+        setChartsBearerModalExpired(false);
+        setSilentCaptureActive(true);
+      });
+    }
+    return new Promise((resolve) => {
+      chartsBearerRenewResolver.current = resolve;
+      setChartsBearerModalExpired(false);
+      setChartsBearerModalOpen(true);
+    });
+  }, []);
+
+  renewChartsBearerRef.current = renewChartsBearerViaWebView;
+
+  useLayoutEffect(() => {
+    registerHomeChartSpotifyAuthHandlers({
+      onRenewChartsBearer: () =>
+        renewChartsBearerRef.current?.() ?? Promise.resolve(false),
+    });
+    return () => registerHomeChartSpotifyAuthHandlers(null);
+  }, []);
+
   const menuRef = useRef<NrmAppMenuHandle>(null);
   const notificationRef = useRef<NrmAppNotificationDrawerHandle>(null);
   const exitPromptOpenRef = useRef(false);
@@ -559,35 +589,10 @@ export default function HomeScreen() {
     menuRef.current?.openChartsSession();
   }, []);
 
-  const renewChartsBearerViaWebView = useCallback((): Promise<boolean> => {
-    if (Platform.OS === 'web') {
-      return Promise.resolve(false);
-    }
-    if (Platform.OS === 'android') {
-      return new Promise((resolve) => {
-        chartsBearerRenewResolver.current = resolve;
-        setChartsBearerModalExpired(false);
-        setSilentCaptureActive(true);
-      });
-    }
-    return new Promise((resolve) => {
-      chartsBearerRenewResolver.current = resolve;
-      setChartsBearerModalExpired(false);
-      setChartsBearerModalOpen(true);
-    });
-  }, []);
-
   const showChartsBearerExpiredOverlay = useCallback(() => {
     setChartsBearerModalExpired(true);
     setChartsBearerModalOpen(true);
   }, []);
-
-  useEffect(() => {
-    registerHomeChartSpotifyAuthHandlers({
-      onRenewChartsBearer: renewChartsBearerViaWebView,
-    });
-    return () => registerHomeChartSpotifyAuthHandlers(null);
-  }, [renewChartsBearerViaWebView]);
 
   const openMelonSearch = useCallback((kind: MelonSearchKind) => {
     setSearchViewEpoch((v) => v + 1);
