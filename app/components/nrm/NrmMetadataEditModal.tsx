@@ -926,24 +926,13 @@ export function NrmMetadataEditModal({
 
   const melonLyricsUnavailableMessage = useMemo(() => {
     if (melonAdultAuthRequired) {
-      if (melonHasAdultCookie) {
-        return '이 곡은 멜론 성인 인증이 필요합니다. 멜론에서 성인 인증을 완료한 뒤, 앱 설정 → 멜론 성인인증에서 다시 로그인해 주세요.';
-      }
-      if (canUseMelonWebView) {
-        return '이 곡은 멜론 성인 인증 후에만 가사를 볼 수 있습니다.';
-      }
-      return '이 곡은 멜론 성인 인증이 필요합니다. 앱 설정 → 멜론 성인인증에서 로그인해 주세요.';
+      return '가사를 생성하려면 성인인증을 하세요.';
     }
     if (melonLyricsNotRegistered) {
-      return '멜론에 아직 가사가 등록되지 않았습니다. ([가사 준비중])';
+      return '가사가 등록되지 않았습니다.';
     }
     return '멜론에서 가사를 가져올 수 없습니다.';
-  }, [
-    canUseMelonWebView,
-    melonAdultAuthRequired,
-    melonHasAdultCookie,
-    melonLyricsNotRegistered,
-  ]);
+  }, [melonAdultAuthRequired, melonLyricsNotRegistered]);
 
   const melonAdultAuthButtonLabel = melonHasAdultCookie
     ? '멜론 성인 인증 계정으로 다시 로그인'

@@ -22,6 +22,9 @@ export const NRM_USER_BAN_POLL_INTERVAL_MS = 30 * 60 * 1000;
 /** 알림 리스트에 표시할 최대 일수 */
 export const NRM_ALARM_DISPLAY_DAYS = 30;
 
+/** 문의내역 주기적 갱신 간격 */
+export const NRM_INQUIRY_POLL_INTERVAL_MS = 60 * 1000;
+
 export const NRM_INQUIRY_MAX_CONTENT_CHARS = 500;
 export const NRM_INQUIRY_MAX_REPLY_CHARS = 2000;
 export const NRM_INQUIRY_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;

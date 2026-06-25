@@ -75,16 +75,23 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
     });
   }, [rows, searchActive, searchField, searchText]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const all = await fetchUserBanListViaApi();
       setRows(listCurrentlyBannedUsers(all));
     } catch {
-      setRows([]);
-      void notifyUser('블랙리스트를 불러오지 못했습니다.');
+      if (!silent) {
+        setRows([]);
+        void notifyUser('블랙리스트를 불러오지 못했습니다.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -97,8 +104,10 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
       setGlobalBusy(true);
       try {
         await unbanUserOnGithub(entry);
+        setRows((prev) => prev.filter((row) => row.id !== entry.id));
+        setDetailEntry((cur) => (cur?.id === entry.id ? null : cur));
         void notifyUser('차단이 해제되었습니다.');
-        await reload();
+        void reload({ silent: true });
       } catch (e) {
         notifyUserError('admin.userBanUnban', e, '차단 해제에 실패했습니다.');
       } finally {

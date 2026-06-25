@@ -81,6 +81,7 @@ import {
   homeChartDownloadSource,
   invalidateHomeChartCache,
   peekHomeChartCache,
+  registerHomeChartSpotifyAuthHandlers,
 } from '@/lib/nrmHomeChartClient';
 import {
   DEFAULT_MAIN_PAGE_CHART_SOURCE,
@@ -580,6 +581,13 @@ export default function HomeScreen() {
     setChartsBearerModalExpired(true);
     setChartsBearerModalOpen(true);
   }, []);
+
+  useEffect(() => {
+    registerHomeChartSpotifyAuthHandlers({
+      onRenewChartsBearer: renewChartsBearerViaWebView,
+    });
+    return () => registerHomeChartSpotifyAuthHandlers(null);
+  }, [renewChartsBearerViaWebView]);
 
   const openMelonSearch = useCallback((kind: MelonSearchKind) => {
     setSearchViewEpoch((v) => v + 1);

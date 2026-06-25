@@ -41,15 +41,20 @@ export function useNrmAlarmFeed(): NrmAlarmFeed {
   const lastFetchAt = useRef(0);
 
   const reload = useCallback(async (force = false) => {
-    const shouldForce =
+    const shouldFetch =
       force || Date.now() - lastFetchAt.current >= NRM_ALARM_POLL_INTERVAL_MS;
-    if (!shouldForce && peekAlarmCache()) {
-      const cached = peekAlarmCache()!;
-      await applyItems(cached, setItems, setUnreadCount);
+    if (!shouldFetch) {
+      const cached = peekAlarmCache();
+      if (cached) {
+        await applyItems(cached, setItems, setUnreadCount);
+      }
       return;
     }
+    if (force) {
+      invalidateAlarmCache();
+    }
     try {
-      const rows = await fetchAlarmsForApp({ force: shouldForce });
+      const rows = await fetchAlarmsForApp({ force: true });
       lastFetchAt.current = Date.now();
       await applyItems(rows, setItems, setUnreadCount);
     } catch {
@@ -94,7 +99,7 @@ export function useNrmAlarmFeed(): NrmAlarmFeed {
 
   useEffect(() => {
     const onState = (state: AppStateStatus) => {
-      if (state === 'active') void reload(false);
+      if (state === 'active') void reload(true);
     };
     const sub = AppState.addEventListener('change', onState);
     return () => sub.remove();

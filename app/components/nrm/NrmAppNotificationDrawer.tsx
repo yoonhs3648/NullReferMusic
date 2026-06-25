@@ -178,7 +178,7 @@ export const NrmAppNotificationDrawer = forwardRef<NrmAppNotificationDrawerHandl
         useNativeDriver: true,
       }).start();
       const task = InteractionManager.runAfterInteractions(() => {
-        void feedRef.current.reload(false);
+        void feedRef.current.reload(true);
         void peekReadAlarmIds().then(setReadIds);
       });
       return () => task.cancel();

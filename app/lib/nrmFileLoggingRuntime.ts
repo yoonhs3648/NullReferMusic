@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import {
   loadNrmFileLoggingEnabled,
+  reconcileNrmFileLoggingInstallScope,
   saveNrmFileLoggingEnabled,
   STORAGE_KEY as FILE_LOGGING_STORAGE_KEY,
 } from '@/lib/nrmFileLoggingSettings';
@@ -20,6 +21,7 @@ async function syncNativeLoggingEnabled(enabled: boolean): Promise<void> {
 export function initNrmFileLoggingRuntime(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
+      await reconcileNrmFileLoggingInstallScope();
       const enabled = await loadNrmFileLoggingEnabled();
       cachedEnabled = enabled;
       await syncNativeLoggingEnabled(enabled);

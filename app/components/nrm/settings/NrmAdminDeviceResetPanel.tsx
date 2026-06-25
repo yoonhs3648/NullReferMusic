@@ -73,18 +73,25 @@ export function NrmAdminDeviceResetPanel({ titleColor, bodyColor, isDark, onBack
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const surfaceBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
 
-  const reload = useCallback(async (): Promise<NrmUserListEntry[]> => {
-    setLoading(true);
-    setAllRows([]);
+  const reload = useCallback(async (opts?: { silent?: boolean }): Promise<NrmUserListEntry[]> => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setAllRows([]);
+    }
     try {
       const rows = await fetchDedupedUserListEntriesViaApi();
       setAllRows(rows);
       return rows;
     } catch {
-      void notifyUser('사용자 목록을 불러오지 못했습니다.');
+      if (!silent) {
+        void notifyUser('사용자 목록을 불러오지 못했습니다.');
+      }
       return [];
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -97,10 +104,14 @@ export function NrmAdminDeviceResetPanel({ titleColor, bodyColor, isDark, onBack
       setGlobalBusy(true);
       try {
         await resetDeviceIdOnGithub(entry.id);
+        setAllRows((prev) =>
+          prev.map((row) =>
+            row.id === entry.id ? { ...row, deviceId: null, lastAccessDate: row.lastAccessDate } : row,
+          ),
+        );
+        setDetailEntry(null);
         void notifyUser('기기 등록이 해제되었습니다.');
-        const freshRows = await reload();
-        const updated = freshRows.find((r) => r.id === entry.id) ?? null;
-        setDetailEntry(updated);
+        void reload({ silent: true });
       } catch (e) {
         notifyUserError('admin.deviceReset', e, '기기 등록 해제에 실패했습니다.');
       } finally {

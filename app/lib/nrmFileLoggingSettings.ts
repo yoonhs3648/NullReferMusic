@@ -6,6 +6,9 @@ import { getNrmFileLogFolderDisplayPath } from '@/lib/nrmAppBrand';
 
 export const STORAGE_KEY = 'nrm_file_logging_enabled';
 
+/** 앱 재설치 감지 — firstInstallTime 과 짝 */
+const INSTALL_SCOPE_KEY = 'nrm_file_logging_install_scope_ms';
+
 /** APK 파일 로깅 사용자 설정 UI */
 export type NrmFileLoggingMode = 'off' | 'on';
 
@@ -19,6 +22,57 @@ function formatDailyLogFileName(date = new Date()): string {
 }
 
 export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}${formatDailyLogFileName()}`;
+
+async function readAndroidFirstInstallTimeMs(): Promise<number | null> {
+  if (Platform.OS !== 'android') return null;
+  const mod = NativeModules.NrmFileLogger as
+    | { getFirstInstallTimeMs?: () => Promise<number> }
+    | undefined;
+  try {
+    const ms = await mod?.getFirstInstallTimeMs?.();
+    return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 재설치(또는 백업 복원 후 새 설치) 시 파일 로깅을 기본 off 로 맞춘다.
+ * 동일 설치에서의 업데이트·기존 사용자 설정은 유지한다.
+ */
+export async function reconcileNrmFileLoggingInstallScope(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const installMs = await readAndroidFirstInstallTimeMs();
+  if (installMs == null) return;
+
+  let scopeRaw: string | null;
+  try {
+    scopeRaw = await AsyncStorage.getItem(INSTALL_SCOPE_KEY);
+  } catch {
+    return;
+  }
+
+  if (scopeRaw === null) {
+    try {
+      await AsyncStorage.setItem(INSTALL_SCOPE_KEY, String(installMs));
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  const scopeMs = Number(scopeRaw);
+  if (scopeMs === installMs) return;
+
+  try {
+    await AsyncStorage.multiSet([
+      [STORAGE_KEY, 'false'],
+      [INSTALL_SCOPE_KEY, String(installMs)],
+    ]);
+  } catch {
+    /* ignore */
+  }
+}
 
 export async function loadNrmFileLoggingEnabled(): Promise<boolean> {
   try {

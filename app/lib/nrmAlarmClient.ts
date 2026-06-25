@@ -130,11 +130,21 @@ export async function fetchAlarmsForApp(options?: {
   signal?: AbortSignal;
 }): Promise<NrmAlarmItem[]> {
   const force = options?.force === true;
-  if (!force) {
+  if (force) {
+    memoryCache = null;
+  } else {
     const peek = peekAlarmCache();
     if (peek) return peek;
   }
-  if (inflight && !force) return inflight;
+
+  if (inflight) {
+    if (!force) return inflight;
+    try {
+      await inflight;
+    } catch {
+      /* force 재조회 */
+    }
+  }
 
   inflight = (async () => {
     const appSerialNo = await getNrmAppSerialNo();

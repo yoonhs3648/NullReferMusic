@@ -8,6 +8,10 @@ import {
   homeChartDownloadSourceFromChartSource,
   isMainPageChartSourceTokenReady,
 } from '@/lib/nrmMainPageChartSettings';
+import {
+  isSpotifyChartsFetchAuthError,
+  retrySpotifyChartsFetchOnce,
+} from '@/lib/nrmSpotifyChartsAuthFlow';
 
 export const NRM_HOME_CHART_TOP_N = 20;
 
@@ -36,6 +40,25 @@ type HomeChartMemoryCache = {
 let memoryCache: HomeChartMemoryCache | null = null;
 let inflight: Promise<HomeChartLoadResult> | null = null;
 let inflightChartSource: NrmMainPageChartSource | null = null;
+
+type HomeChartSpotifyAuthHandlers = {
+  onRenewChartsBearer?: () => Promise<boolean>;
+};
+
+let homeChartSpotifyAuthHandlers: HomeChartSpotifyAuthHandlers | null = null;
+
+/** 메인 홈 Spotify 차트 — Bearer 만료 시 WebView 갱신 콜백 (index.tsx) */
+export function registerHomeChartSpotifyAuthHandlers(
+  handlers: HomeChartSpotifyAuthHandlers | null,
+): void {
+  homeChartSpotifyAuthHandlers = handlers;
+}
+
+function isSpotifyHomeChartSource(chartSource: NrmMainPageChartSource): boolean {
+  return (
+    chartSource === 'spotify-top100-kr' || chartSource === 'spotify-top100-global'
+  );
+}
 
 function sliceTopN(items: ChartTrackItem[], n: number): ChartTrackItem[] {
   return items.slice(0, n).map((row, i) => ({
@@ -112,10 +135,30 @@ async function fetchChartPayload(
       return fetchMelonRealtimeChart('top100');
     case 'melon-hot100':
       return fetchMelonRealtimeChart('hot100');
-    case 'spotify-top100-kr':
-      return fetchSpotifyPlaylistChart('top100-kr-daily', 'charts', signal);
-    case 'spotify-top100-global':
-      return fetchSpotifyPlaylistChart('top100-global-daily', 'charts', signal);
+    case 'spotify-top100-kr': {
+      const fetchOnce = () =>
+        fetchSpotifyPlaylistChart('top100-kr-daily', 'charts', signal);
+      if (homeChartSpotifyAuthHandlers?.onRenewChartsBearer) {
+        return retrySpotifyChartsFetchOnce(
+          fetchOnce,
+          (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
+          homeChartSpotifyAuthHandlers.onRenewChartsBearer,
+        );
+      }
+      return fetchOnce();
+    }
+    case 'spotify-top100-global': {
+      const fetchOnce = () =>
+        fetchSpotifyPlaylistChart('top100-global-daily', 'charts', signal);
+      if (homeChartSpotifyAuthHandlers?.onRenewChartsBearer) {
+        return retrySpotifyChartsFetchOnce(
+          fetchOnce,
+          (r) => !r.ok && isSpotifyChartsFetchAuthError(r),
+          homeChartSpotifyAuthHandlers.onRenewChartsBearer,
+        );
+      }
+      return fetchOnce();
+    }
     case 'apple-top100-kr':
       return fetchAppleMusicChart('top100-kr');
     case 'apple-top100-global':

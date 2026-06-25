@@ -2,6 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  type AppStateStatus,
   Pressable,
   StyleSheet,
   Text,
@@ -16,6 +18,7 @@ import {
   type NrmInquiryItem,
 } from '@/lib/nrmInquiryClient';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { NRM_INQUIRY_POLL_INTERVAL_MS } from '@/lib/nrmRemoteDataConfig';
 
 type Props = {
   titleColor: string;
@@ -110,23 +113,47 @@ export function NrmInquiryHistoryPanel({ titleColor, bodyColor, isDark }: Props)
   const [error, setError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const rows = await fetchInquiriesForApp();
       setItems(rows);
-      setExpandedIds(new Set());
+      if (!silent) {
+        setExpandedIds(new Set());
+      }
     } catch (e) {
-      logNrmRunError('inquiry.historyLoad', e);
-      setError(e instanceof Error ? e.message : '문의 내역을 불러오지 못했습니다.');
+      if (!silent) {
+        logNrmRunError('inquiry.historyLoad', e);
+        setError(e instanceof Error ? e.message : '문의 내역을 불러오지 못했습니다.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void load({ silent: true });
+    }, NRM_INQUIRY_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  useEffect(() => {
+    const onState = (state: AppStateStatus) => {
+      if (state === 'active') void load({ silent: true });
+    };
+    const sub = AppState.addEventListener('change', onState);
+    return () => sub.remove();
   }, [load]);
 
   const onToggle = useCallback((id: number) => {
