@@ -7,6 +7,14 @@
 			"content": "dummydata",
 			"isBanned": false,
 			"date": "1970-01-01"
+		},
+		{
+			"id": 2,
+			"userName": "이상용",
+			"SerialNo": "01092452918",
+			"content": "테스트",
+			"isBanned": true,
+			"date": "2026-06-25"
 		}
 	]
 }
