@@ -59,6 +59,16 @@
                          "Createddate":  "2026-06-25",
                          "deviceId":  null,
                          "lastAccessDate":  null
+                     },
+                     {
+                         "id":  7,
+                         "appName":  "재학\u0027s Music",
+                         "userName":  "한재학",
+                         "SerialNo":  "01064724632",
+                         "version":  "2.4.7",
+                         "Createddate":  "2026-06-25",
+                         "deviceId":  null,
+                         "lastAccessDate":  null
                      }
                  ]
 }
