@@ -30,6 +30,13 @@ object NrmFileLogger {
   private const val LEGACY_PREFS_NAME = "nrm_file_logging"
   private const val LEGACY_KEY_ENABLED = "enabled"
 
+  /**
+   * noBackupFilesDir 아래의 파일에 로깅 on/off를 저장한다.
+   * noBackupFilesDir 은 Android Auto Backup(Google) 에서 제외되고,
+   * 앱 삭제 시 반드시 함께 삭제된다 → 재설치 시 항상 기본값(off).
+   */
+  private const val LOGGING_PREF_FILE = "nrm_logging"
+
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_BASE = "NullReferenceMusicLog.txt"
   /** 레거시 파일 — 삭제·정리 시에만 참조 */
@@ -56,16 +63,34 @@ object NrmFileLogger {
     }
   }
 
-  /** 예전 네이티브 SharedPreferences 플래그 제거 — JS AsyncStorage만 사용 */
+  /** 레거시 SharedPreferences 제거 */
   fun clearLegacyLoggingPreference(context: Context) {
     try {
       context.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
-          .edit()
-          .clear()
-          .apply()
+          .edit().clear().apply()
+    } catch (_: Exception) { /* ignore */ }
+  }
+
+  /**
+   * noBackupFilesDir 에서 로깅 활성화 여부를 읽는다.
+   * 파일이 없거나 읽기 실패 시 false (기본 off).
+   */
+  fun readPersistedLoggingEnabled(context: Context): Boolean {
+    return try {
+      val file = File(context.noBackupFilesDir, LOGGING_PREF_FILE)
+      file.exists() && file.readText().trim() == "1"
     } catch (_: Exception) {
-      /* ignore */
+      false
     }
+  }
+
+  /** noBackupFilesDir 에 로깅 활성화 여부를 저장한다. */
+  fun persistLoggingEnabled(context: Context, enabled: Boolean) {
+    try {
+      val dir = context.noBackupFilesDir
+      if (!dir.exists()) dir.mkdirs()
+      File(dir, LOGGING_PREF_FILE).writeText(if (enabled) "1" else "0")
+    } catch (_: Exception) { /* ignore */ }
   }
 
   fun setUserLoggingEnabled(enabled: Boolean) {

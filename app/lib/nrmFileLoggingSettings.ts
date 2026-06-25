@@ -4,7 +4,10 @@ import { NativeModules } from 'react-native';
 
 import { getNrmFileLogFolderDisplayPath } from '@/lib/nrmAppBrand';
 
-/** 파일 로깅 on/off — 앱 내 AsyncStorage 단일 저장 (기본 off) */
+/**
+ * 로깅 on/off 저장은 noBackupFilesDir (네이티브) 로 이전됨.
+ * 이 키는 하위 호환 export용으로만 남긴다 (initNrmFileLoggingRuntime 에서 정리됨).
+ */
 export const STORAGE_KEY = 'nrm_file_logging_enabled';
 
 /** APK 파일 로깅 사용자 설정 UI */
@@ -21,7 +24,10 @@ function formatDailyLogFileName(date = new Date()): string {
 
 export const NRM_FILE_LOG_DISPLAY_PATH = `${NRM_FILE_LOG_FOLDER_DISPLAY_PATH}${formatDailyLogFileName()}`;
 
-/** 저장값이 없거나 잘못된 경우 false (기본 off) */
+/**
+ * @deprecated noBackupFilesDir(네이티브) 로 이전됨.
+ * nrmFileLoggingRuntime 의 getNrmFileLoggingEnabled / setNrmFileLoggingActive 를 사용하세요.
+ */
 export async function readFileLoggingEnabledFromStorage(): Promise<boolean> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
@@ -31,6 +37,7 @@ export async function readFileLoggingEnabledFromStorage(): Promise<boolean> {
   }
 }
 
+/** @deprecated noBackupFilesDir(네이티브) 로 이전됨. */
 export async function writeFileLoggingEnabledToStorage(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
 }

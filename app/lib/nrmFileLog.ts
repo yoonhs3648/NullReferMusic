@@ -9,4 +9,8 @@ export async function getNrmLogFilePath(): Promise<string | null> {
   return null;
 }
 
+export async function getNativeFileLoggingEnabled(): Promise<boolean> {
+  return false;
+}
+
 export async function syncNativeFileLoggingEnabled(_enabled: boolean): Promise<void> {}

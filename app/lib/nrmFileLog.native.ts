@@ -7,6 +7,8 @@ type NrmFileLoggerNative = {
   log?: (tag: string, level: string, message: string) => void;
   getLogFilePath?: () => Promise<string>;
   setLoggingEnabled?: (enabled: boolean) => void;
+  /** noBackupFilesDir 에서 로깅 활성화 여부 읽기 — 앱 삭제 시 초기화됨 */
+  getLoggingEnabled?: () => Promise<boolean>;
   deleteAllLogFiles?: () => Promise<number>;
 };
 
@@ -34,6 +36,19 @@ export async function getNrmLogFilePath(): Promise<string | null> {
     return path?.trim() || null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * noBackupFilesDir 에서 저장된 로깅 활성화 여부를 읽는다.
+ * 파일이 없으면 false (신규 설치/재설치 기본값 off).
+ */
+export async function getNativeFileLoggingEnabled(): Promise<boolean> {
+  try {
+    const result = await mod?.getLoggingEnabled?.();
+    return result === true;
+  } catch {
+    return false;
   }
 }
 

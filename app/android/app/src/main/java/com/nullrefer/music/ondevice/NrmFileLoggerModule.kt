@@ -56,9 +56,26 @@ class NrmFileLoggerModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = "NrmFileLogger"
 
+  /**
+   * noBackupFilesDir 에서 로깅 활성화 여부를 읽어 반환한다.
+   * 앱 삭제/재설치 시 항상 false (기본 off).
+   */
+  @ReactMethod
+  fun getLoggingEnabled(promise: Promise) {
+    try {
+      val ctx = reactApplicationContext.applicationContext
+      NrmFileLogger.init(ctx)
+      promise.resolve(NrmFileLogger.readPersistedLoggingEnabled(ctx))
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
+  }
+
   @ReactMethod
   fun setLoggingEnabled(enabled: Boolean) {
-    NrmFileLogger.init(reactApplicationContext.applicationContext)
+    val ctx = reactApplicationContext.applicationContext
+    NrmFileLogger.init(ctx)
+    NrmFileLogger.persistLoggingEnabled(ctx, enabled)
     NrmFileLogger.setUserLoggingEnabled(enabled)
   }
 
