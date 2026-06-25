@@ -10,17 +10,6 @@
 			"isAnswered": true,
 			"Createddate": "2026-06-18 10:15:42.080",
 			"replyContent": "테스트 완료"
-		},
-		{
-			"id": 2,
-			"userName": "愿由ъ옄",
-			"SerialNo": "admin",
-			"version": "2.3.8",
-			"content": "가사생성느림.\n번역기 안되는것.\n가사 데이터못가져옴",
-			"attachedFile": "2026-06-25-NullReferenceMusicLog_1782345873604_uqitc318.txt",
-			"isAnswered": true,
-			"replyContent": "ㅇㅋ",
-			"Createddate": "2026-06-25 09:04:37.462"
 		}
 	]
 }
