@@ -7,6 +7,14 @@
 			"content": "NullReference Music V.2 릴리즈",
 			"SerialNo": "",
 			"date": "2026-06-13"
+		},
+		{
+			"id": 2,
+			"isNoti": false,
+			"title": "알림테스트",
+			"content": "테스트\n입\n니\n다\n\nad\n\n☺\n\n★",
+			"SerialNo": "01092452918",
+			"date": "2026-06-25"
 		}
 	]
 }
