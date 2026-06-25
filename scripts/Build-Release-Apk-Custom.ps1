@@ -10,6 +10,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path $RepoRoot).Path
+. (Join-Path $RepoRoot 'scripts\NrmUtf8.ps1')
+Initialize-NrmUtf8Console
+
 $AppDir = Join-Path $RepoRoot 'app'
 $AndroidDir = Join-Path $AppDir 'android'
 $BrandConfigPath = Join-Path $AppDir 'nrm-brand.config.json'
@@ -33,19 +36,14 @@ function Invoke-Npm {
     }
 }
 
-function Write-Utf8NoBom {
-    param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
-}
-
 function Restore-BrandConfig {
     param([string]$OriginalJson)
     if (-not $OriginalJson) { return }
-    Write-Utf8NoBom -Path $BrandConfigPath -Content $OriginalJson
+    Write-TextFileUtf8NoBom -Path $BrandConfigPath -Content $OriginalJson
     Invoke-Npm @('run', 'sync:brand')
 }
 
-$originalBrandJson = Get-Content -LiteralPath $BrandConfigPath -Raw -Encoding UTF8
+$originalBrandJson = Read-TextFileUtf8 -Path $BrandConfigPath
 $buildFailed = $false
 
 try {
@@ -61,13 +59,14 @@ try {
         $cfg.versionInfoAdminBuild = $false
     }
     else {
-        $cfg.displayName = 'NullReference Music'
-        $cfg.serialNo = 'admin'
-        $cfg.userName = '관리자'
+        $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
+        $cfg.displayName = $adminDefaults.displayName.Trim()
+        $cfg.serialNo = $adminDefaults.serialNo.Trim()
+        $cfg.userName = $adminDefaults.userName.Trim()
         $cfg.versionInfoAdminBuild = $true
     }
 
-    Write-Utf8NoBom -Path $BrandConfigPath -Content ($cfg | ConvertTo-Json -Depth 5)
+    Write-JsonFileUtf8 -Path $BrandConfigPath -InputObject $cfg -Depth 8
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Verify-AndroidReleaseAssets.ps1')
     if ($LASTEXITCODE -ne 0) {

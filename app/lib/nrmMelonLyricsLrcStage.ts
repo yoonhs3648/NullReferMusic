@@ -7,7 +7,15 @@ import { resolveMelonAlignLanguageForPlain } from '@/lib/nrmPickMelonAlignLangua
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
+import type { NrmMelonSyncSettings } from '@/lib/nrmMelonSyncSettings';
+import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
 import type { WhisperLrcStageResult } from '@/lib/nrmWhisperLrcStage';
+
+export type MelonLyricsLrcPreload = {
+  alignModelPreference?: NrmAlignModelId;
+  melonSyncSettings?: NrmMelonSyncSettings;
+  translationClient?: typeof import('@/lib/nrmTranslationClient');
+};
 
 export async function transcribeMelonLyricsLrc(
   fileUri: string,
@@ -15,6 +23,7 @@ export async function transcribeMelonLyricsLrc(
   extension: string,
   melonLyricsPlain: string,
   alignLangOverride?: MelonAlignLyricsLanguage,
+  preload?: MelonLyricsLrcPreload,
 ): Promise<WhisperLrcStageResult> {
   const canUseBackend = usesPcBackendInDev();
   const canUseNative = Platform.OS === 'android';
@@ -47,20 +56,33 @@ export async function transcribeMelonLyricsLrc(
     audioUri: fileUri.slice(0, 120),
   });
 
+  const translationPrep =
+    mode === 'melon_translation'
+      ? preload?.translationClient
+        ? Promise.resolve(preload.translationClient)
+        : import('@/lib/nrmTranslationClient')
+      : null;
+
   const t0 = Date.now();
   let lrc = '';
   let lyricsMelonAlignFailed = false;
   let lyricsMelonMemoryInsufficient = false;
   try {
-    const { loadAlignModelPreference } = await import('@/lib/nrmDownloadSettings');
-    const { alignMelonLyricsToLrcNative } = await import('@/lib/nrmAlignModelNative');
-    const alignPref = await loadAlignModelPreference();
+    const [{ loadAlignModelPreference }, { alignMelonLyricsToLrcNative }] = await Promise.all([
+      import('@/lib/nrmDownloadSettings'),
+      import('@/lib/nrmAlignModelNative'),
+    ]);
+    const alignPref =
+      preload?.alignModelPreference ?? (await loadAlignModelPreference());
     const aligned = await alignMelonLyricsToLrcNative(
       fileUri,
       plain,
       mode,
       alignPref,
       alignLang,
+      preload?.melonSyncSettings
+        ? { syncSettings: preload.melonSyncSettings }
+        : undefined,
     );
     lrc = normalizeWhisperLrc(aligned.lrc);
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
@@ -95,7 +117,9 @@ export async function transcribeMelonLyricsLrc(
     });
     const translateT0 = Date.now();
     try {
-      const { translateLrcToKorean } = await import('@/lib/nrmTranslationClient');
+      const { translateLrcToKorean } = translationPrep
+        ? await translationPrep
+        : await import('@/lib/nrmTranslationClient');
       const translated = await translateLrcToKorean(lrc);
       if (translated.ok) {
         lrc = translated.lrc;

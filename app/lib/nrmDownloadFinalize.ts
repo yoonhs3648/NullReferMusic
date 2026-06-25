@@ -32,6 +32,10 @@ import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 import {
+  startLyricsPipelinePreload,
+  type LyricsPipelinePreloadBundle,
+} from '@/lib/nrmLyricsPipelinePreload';
+import {
   transcribeWhisperLrc,
   type WhisperLrcStageResult,
 } from '@/lib/nrmWhisperLrcStage';
@@ -204,6 +208,9 @@ async function finalizeNativeParallel(
     melonMode: melonMode ?? null,
   });
 
+  const lyricsPreloadTask =
+    lyricsModeActive && embedMetadata ? startLyricsPipelinePreload(embedMetadata) : null;
+
   const safeName = applyDownloadExtension(fileName, encode.extension);
   const extension = encode.extension;
   const temps = new Set<string>([extractionUri]);
@@ -261,30 +268,29 @@ async function finalizeNativeParallel(
   }
   if (processedUri !== extractionUri) temps.add(processedUri);
 
-  // persist 시 원본 캐시가 삭제되므로, 가사용 로컬 복사본을 먼저 만든다
+  // persist 시 원본 캐시가 삭제되므로, 가사용 로컬 복사본을 먼저 만든다 (저장과 병렬)
   let whisperSourceUri = processedUri;
-  if (lyricsModeActive) {
-    try {
-      const wCopy = await copyAudioForWhisperParallel(processedUri);
-      temps.add(wCopy);
-      whisperSourceUri = wCopy;
-    } catch {
-      whisperSourceUri = processedUri;
-    }
-  }
+  const whisperCopyTask = lyricsModeActive
+    ? copyAudioForWhisperParallel(processedUri).catch(() => processedUri)
+    : null;
 
   // ── 2단계: 오디오 저장 → 완료 알림 ─────────────────────────────────────────
   await nrmYieldToEventLoop();
   const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
-  const audioSaved = await persistAudioToDestination(processedUri, safeName, embedMetadata);
-  options?.onAudioPersisted?.(audioSaved.savedLabel);
-  if (!lyricsModeActive) {
-    void appendActivityHistory({
-      fileName: displayLabelFromAudioFileName(safeName),
-      audioUri: audioSaved.location.audioUri,
-      kind: 'download',
-    });
+  const [audioSaved, whisperCopyResult] = await Promise.all([
+    persistAudioToDestination(processedUri, safeName, embedMetadata),
+    whisperCopyTask ?? Promise.resolve(processedUri),
+  ]);
+  if (whisperCopyResult !== processedUri) {
+    temps.add(whisperCopyResult);
+    whisperSourceUri = whisperCopyResult;
   }
+  options?.onAudioPersisted?.(audioSaved.savedLabel);
+  void appendActivityHistory({
+    fileName: displayLabelFromAudioFileName(safeName),
+    audioUri: audioSaved.location.audioUri,
+    kind: 'download',
+  });
 
   // ── 3단계: 가사 생성 (오디오가 저장된 뒤) ───────────────────────────────────
   let lyricsStageStarted = false;
@@ -299,15 +305,42 @@ async function finalizeNativeParallel(
       extension,
       engine: melonMode ? 'whisperx-align' : 'whisper',
     });
-    const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+    let lyricsPreload: LyricsPipelinePreloadBundle | null = null;
+    if (lyricsPreloadTask) {
+      try {
+        lyricsPreload = await lyricsPreloadTask;
+      } catch {
+        lyricsPreload = null;
+      }
+    }
+    const { runWhisperTranscribeSerial } =
+      lyricsPreload?.serialGate ?? (await import('@/lib/nrmWhisperSerialGate'));
     let plainForMelonAlign = melonLyricsPlain?.trim() ?? '';
     if (melonMode && !plainForMelonAlign && embedMetadata?.website) {
       const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
       plainForMelonAlign = (await fetchMelonPlainLyricsFromWebsite(embedMetadata.website)).trim();
     }
+    const melonPreload = lyricsPreload
+      ? {
+          alignModelPreference: lyricsPreload.alignModelPreference,
+          melonSyncSettings: lyricsPreload.melonSyncSettings,
+          translationClient: lyricsPreload.translationClient,
+        }
+      : undefined;
     try {
       const result = await runWhisperTranscribeSerial(safeName, () => {
         if (melonMode && plainForMelonAlign) {
+          const melonStage = lyricsPreload?.melonStage;
+          if (melonStage) {
+            return melonStage.transcribeMelonLyricsLrc(
+              whisperSourceUri,
+              melonMode,
+              extension,
+              plainForMelonAlign,
+              melonAlignLang,
+              melonPreload,
+            );
+          }
           return import('@/lib/nrmMelonLyricsLrcStage').then((m) =>
             m.transcribeMelonLyricsLrc(
               whisperSourceUri,
@@ -315,6 +348,7 @@ async function finalizeNativeParallel(
               extension,
               plainForMelonAlign,
               melonAlignLang,
+              melonPreload,
             ),
           );
         }

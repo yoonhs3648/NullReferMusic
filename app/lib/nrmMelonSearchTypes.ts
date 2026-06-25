@@ -142,6 +142,8 @@ export type MelonTrackInfo = {
   url: string;
   lyrics: string;
   lyricsAdultAuthRequired?: boolean;
+  /** 멜론 [가사 준비중] 등 — 가사 미등록 */
+  lyricsNotRegistered?: boolean;
   credits: MelonTrackCredits;
 };
 

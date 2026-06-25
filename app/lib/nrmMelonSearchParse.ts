@@ -505,16 +505,55 @@ export function parseMelonAlbumTrackList(html: string): MelonAlbumTrack[] {
 }
 
 function extractMelonSongLyricsBlock(html: string): string {
-  return html.match(/<!--\s*가사\s*-->[\s\S]*?<!--\s*\/\/가사\s*-->/i)?.[0] ?? '';
+  const legacy = html.match(/<!--\s*가사\s*-->[\s\S]*?<!--\s*\/\/가사\s*-->/i)?.[0];
+  if (legacy) return legacy;
+  return (
+    html.match(
+      /class="section_lyric"[\s\S]*?id="lyricArea"[\s\S]*?<\/div>\s*<\/div>/i,
+    )?.[0] ?? ''
+  );
+}
+
+function extractMelonLyricAreaInner(html: string): string {
+  const block = extractMelonSongLyricsBlock(html);
+  if (!block) return '';
+  return block.match(/id="lyricArea"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? '';
+}
+
+function extractMelonLyricNoneText(html: string): string {
+  const inner = extractMelonLyricAreaInner(html);
+  if (!inner || !/lyric_none/i.test(inner)) return '';
+  const raw = inner.match(/class="lyric_none"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? '';
+  return cleanMultilineText(raw);
 }
 
 function extractMelonSongLyricsRawText(html: string): string {
   const block = extractMelonSongLyricsBlock(html);
-  const raw =
+  const legacy =
     block.match(/class="lyric"[^>]*id="d_video_summary"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
     block.match(/id="d_video_summary"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
     '';
-  return cleanMultilineText(raw);
+  if (legacy && !/lyric_none/i.test(legacy)) {
+    const text = cleanMultilineText(legacy);
+    if (text && !isMelonAdultAuthBlockedLyrics(text)) return text;
+  }
+
+  const inner = extractMelonLyricAreaInner(html);
+  if (inner) {
+    if (/lyric_none/i.test(inner)) return '';
+    const lyricDiv =
+      inner.match(/class="lyric"[^>]*id="d_video_summary"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
+      inner.match(/class="lyric"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
+      '';
+    const text = cleanMultilineText(lyricDiv);
+    if (text && !isMelonAdultAuthBlockedLyrics(text)) return text;
+  }
+
+  if (legacy) {
+    const text = cleanMultilineText(legacy);
+    return isMelonAdultAuthBlockedLyrics(text) ? '' : text;
+  }
+  return '';
 }
 
 function parseMelonSongLyrics(html: string): string {
@@ -528,19 +567,32 @@ export function isMelonAdultAuthBlockedLyrics(text: string | undefined): boolean
   const t = (text ?? '').trim();
   if (!t) return false;
   if (t.length > 200) return false;
-  return /성인\s*인증|19\s*세\s*이상|본인\s*인증|청소년\s*유해/i.test(t);
+  return /성인\s*인증|19\s*세\s*이상|본인\s*인증|청소년\s*보호법|청소년\s*유해/i.test(t);
+}
+
+/** 멜론 [가사 준비중]·가사등록하기 안내 */
+export function isMelonLyricsSectionPending(html: string): boolean {
+  const block = extractMelonSongLyricsBlock(html);
+  if (!block.trim()) return false;
+  if (/가사\s*준비중|가사등록하기|d_register/i.test(block)) return true;
+  const lyricNone = extractMelonLyricNoneText(html);
+  if (!lyricNone) return false;
+  if (isMelonAdultAuthBlockedLyrics(lyricNone)) return false;
+  return true;
 }
 
 /**
- * 가사 섹션(<!-- 가사 -->) 안에서만 성인인증 필요 여부 판별.
+ * 가사 섹션(<!-- 가사 --> 또는 section_lyric) 안에서만 성인인증 필요 여부 판별.
  * 실제 가사가 없어서 빈 경우와 구분할 수 있을 때만 true.
  */
 export function isMelonLyricsSectionAdultAuthRequired(html: string): boolean {
   const block = extractMelonSongLyricsBlock(html);
   if (!block.trim()) return false;
-  if (/adultcheck|goAdult|btn_adult|needAdult|성인\s*인증\s*후/i.test(block)) {
+  if (/adult_register|adultcheck|goAdult|btn_adult|needAdult|성인\s*인증\s*후/i.test(block)) {
     return true;
   }
+  const lyricNone = extractMelonLyricNoneText(html);
+  if (lyricNone && isMelonAdultAuthBlockedLyrics(lyricNone)) return true;
   return isMelonAdultAuthBlockedLyrics(extractMelonSongLyricsRawText(html));
 }
 
@@ -635,6 +687,7 @@ export function parseMelonSongDetailHtml(html: string, songId: string) {
       url: `${MELON_BASE}/song/detail.htm?songId=${songId}`,
       lyrics,
       lyricsAdultAuthRequired: isMelonLyricsSectionAdultAuthRequired(html) && !lyrics,
+      lyricsNotRegistered: isMelonLyricsSectionPending(html) && !lyrics,
       credits: parseMelonSongCredits(html),
     },
     similarTracks: parseMelonSimilarTrackRows(similarBlock),

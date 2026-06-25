@@ -4,6 +4,7 @@ import { NrmMelonAdultAuthLoginModal } from '@/components/nrm/settings/NrmMelonA
 import {
   melonCookieHeaderHasLogin,
   saveMelonAdultSession,
+  hasMelonAdultSession,
 } from '@/lib/nrmMelonAdultSession';
 import { hasNrmMelonCookieNativeModule } from '@/lib/nrmMelonCookie';
 import {
@@ -370,6 +371,7 @@ export function NrmMetadataEditModal({
   const [melonPlainLyrics, setMelonPlainLyrics] = useState('');
   const [melonLyricsAvailable, setMelonLyricsAvailable] = useState(false);
   const [melonAdultAuthRequired, setMelonAdultAuthRequired] = useState(false);
+  const [melonLyricsNotRegistered, setMelonLyricsNotRegistered] = useState(false);
   const [melonProbeLoading, setMelonProbeLoading] = useState(false);
   const [melonAuthModalOpen, setMelonAuthModalOpen] = useState(false);
   const [melonAuthWebViewKey, setMelonAuthWebViewKey] = useState(0);
@@ -492,6 +494,7 @@ export function NrmMetadataEditModal({
     if (!isMelonTrackWebsite(site) && !melonSource) {
       setMelonLyricsAvailable(false);
       setMelonAdultAuthRequired(false);
+      setMelonLyricsNotRegistered(false);
       setMelonPlainLyrics('');
       setMelonProbeLoading(false);
       return;
@@ -501,6 +504,7 @@ export function NrmMetadataEditModal({
     if (!isMelonTrackWebsite(site) && !songId) {
       setMelonLyricsAvailable(false);
       setMelonAdultAuthRequired(false);
+      setMelonLyricsNotRegistered(false);
       setMelonPlainLyrics('');
       setMelonProbeLoading(false);
       return;
@@ -516,6 +520,7 @@ export function NrmMetadataEditModal({
         const ok = probe.plain.trim().length > 0;
         setMelonLyricsAvailable(ok);
         setMelonAdultAuthRequired(!ok && probe.adultAuthRequired);
+        setMelonLyricsNotRegistered(!ok && probe.lyricsNotRegistered);
         setMelonPlainLyrics(ok ? probe.plain : '');
         setMelonProbeLoading(false);
       })
@@ -523,6 +528,7 @@ export function NrmMetadataEditModal({
         if (cancelled) return;
         setMelonLyricsAvailable(false);
         setMelonAdultAuthRequired(false);
+        setMelonLyricsNotRegistered(false);
         setMelonPlainLyrics('');
         setMelonProbeLoading(false);
       });
@@ -821,13 +827,25 @@ export function NrmMetadataEditModal({
     void refreshGate();
     const poll = setInterval(() => {
       void refreshGate();
-    }, 5000);
+    }, 12000);
 
     return () => {
       cancelled = true;
       clearInterval(poll);
     };
   }, [visible, lyricsUnsupported, purpose, storedLyricsMode]);
+  useEffect(() => {
+    if (!visible || lyricsUnsupported) return;
+    if (lyricsMode === 'melon' || lyricsMode === 'melon_translation') {
+      void import('@/lib/nrmMelonLyricsLrcStage');
+      void import('@/lib/nrmAlignModelNative');
+      void import('@/lib/nrmDownloadSettings').then((m) => m.loadAlignModelPreference());
+      void import('@/lib/nrmMelonSyncSettings').then((m) => m.loadMelonSyncSettings());
+    }
+    if (lyricsMode === 'melon_translation' || lyricsMode === 'translation') {
+      void import('@/lib/nrmTranslationClient');
+    }
+  }, [visible, lyricsMode, lyricsUnsupported]);
   useEffect(() => {
     if (!visible || lyricsUnsupported) return;
     let cancelled = false;
@@ -841,7 +859,7 @@ export function NrmMetadataEditModal({
     void refreshTranslationGate();
     const poll = setInterval(() => {
       void refreshTranslationGate();
-    }, 5000);
+    }, 12000);
     return () => {
       cancelled = true;
       clearInterval(poll);
@@ -896,6 +914,40 @@ export function NrmMetadataEditModal({
   }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
 
   const canUseMelonWebView = Platform.OS === 'android' && hasNrmMelonCookieNativeModule();
+  const [melonHasAdultCookie, setMelonHasAdultCookie] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !isMelonContext) {
+      setMelonHasAdultCookie(false);
+      return;
+    }
+    void hasMelonAdultSession().then(setMelonHasAdultCookie);
+  }, [isMelonContext, melonProbeBump, visible]);
+
+  const melonLyricsUnavailableMessage = useMemo(() => {
+    if (melonAdultAuthRequired) {
+      if (melonHasAdultCookie) {
+        return '이 곡은 멜론 성인 인증이 필요합니다. 멜론에서 성인 인증을 완료한 뒤, 앱 설정 → 멜론 성인인증에서 다시 로그인해 주세요.';
+      }
+      if (canUseMelonWebView) {
+        return '이 곡은 멜론 성인 인증 후에만 가사를 볼 수 있습니다.';
+      }
+      return '이 곡은 멜론 성인 인증이 필요합니다. 앱 설정 → 멜론 성인인증에서 로그인해 주세요.';
+    }
+    if (melonLyricsNotRegistered) {
+      return '멜론에 아직 가사가 등록되지 않았습니다. ([가사 준비중])';
+    }
+    return '멜론에서 가사를 가져올 수 없습니다.';
+  }, [
+    canUseMelonWebView,
+    melonAdultAuthRequired,
+    melonHasAdultCookie,
+    melonLyricsNotRegistered,
+  ]);
+
+  const melonAdultAuthButtonLabel = melonHasAdultCookie
+    ? '멜론 성인 인증 계정으로 다시 로그인'
+    : '멜론 성인 인증 — 탭하여 로그인';
 
   /** 성인인증이 필요하면 WebView 자동 오픈 (Android APK 한정) */
   useEffect(() => {
@@ -907,10 +959,15 @@ export function NrmMetadataEditModal({
 
   const handleMelonAdultCookieCaptured = useCallback(
     async (cookieHeader: string) => {
-      if (!melonCookieHeaderHasLogin(cookieHeader)) return;
+      if (!melonCookieHeaderHasLogin(cookieHeader)) {
+        const { notifyUser } = await import('@/lib/nrmUserNotify');
+        void notifyUser(
+          '멜론 로그인 쿠키(MLCP)가 없습니다. 로그인·성인인증을 완료한 뒤 [완료]를 눌러 주세요.',
+        );
+        return;
+      }
       await saveMelonAdultSession(cookieHeader);
       setMelonAuthModalOpen(false);
-      setMelonAdultAuthRequired(false);
       setMelonProbeBump((b) => b + 1);
     },
     [],
@@ -1335,22 +1392,27 @@ export function NrmMetadataEditModal({
           </Text>
           {showMelonLyricsUnavailableHint ? (
             melonAdultAuthRequired && canUseMelonWebView ? (
-              <Pressable
-                onPress={() => {
-                  setMelonAuthWebViewKey((k) => k + 1);
-                  setMelonAuthModalOpen(true);
-                }}
-                style={({ pressed }) => [
-                  styles.melonAdultAuthBtn,
-                  pressed && styles.pressed,
-                ]}>
-                <Text style={[styles.melonAdultAuthBtnLabel, { color: nrmTokens.color.primary }]}>
-                  멜론 성인인증 필요 — 탭하여 로그인
+              <>
+                <Text style={[styles.melonLyricsMissingHint, { color: bodyColor }]}>
+                  {melonLyricsUnavailableMessage}
                 </Text>
-              </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setMelonAuthWebViewKey((k) => k + 1);
+                    setMelonAuthModalOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.melonAdultAuthBtn,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Text style={[styles.melonAdultAuthBtnLabel, { color: nrmTokens.color.primary }]}>
+                    {melonAdultAuthButtonLabel}
+                  </Text>
+                </Pressable>
+              </>
             ) : (
               <Text style={[styles.melonLyricsMissingHint, { color: bodyColor }]}>
-                {melonAdultAuthRequired ? '멜론 성인인증을 하세요.' : '가사 정보가 없습니다.'}
+                {melonLyricsUnavailableMessage}
               </Text>
             )
           ) : null}
@@ -1467,6 +1529,7 @@ export function NrmMetadataEditModal({
         <NrmMelonAdultAuthLoginModal
           visible
           titleColor={isDark ? '#fff' : '#000'}
+          bodyColor={bodyColor}
           webViewSessionKey={melonAuthWebViewKey}
           onClose={() => setMelonAuthModalOpen(false)}
           onCookieCaptured={(cookie) => void handleMelonAdultCookieCaptured(cookie)}

@@ -53,7 +53,10 @@ import { NrmSpotifyArtistSearchHome } from '@/components/nrm/search/NrmSpotifyAr
 import { NrmSpotifyTrackSearchHome } from '@/components/nrm/search/NrmSpotifyTrackSearchHome';
 
 import { NrmAppMenu, type NrmAppMenuHandle } from '@/components/nrm/NrmAppMenu';
-import { NrmAppNotificationDrawer } from '@/components/nrm/NrmAppNotificationDrawer';
+import {
+  NrmAppNotificationDrawer,
+  type NrmAppNotificationDrawerHandle,
+} from '@/components/nrm/NrmAppNotificationDrawer';
 import { NrmAppTopBar } from '@/components/nrm/NrmAppTopBar';
 import { NrmHomeBottomTabBar, type NrmHomeTab } from '@/components/nrm/NrmHomeBottomTabBar';
 import { NrmHomeFavoritePlaceholder } from '@/components/nrm/NrmHomeFavoritePlaceholder';
@@ -198,6 +201,7 @@ export default function HomeScreen() {
   >('auth_failed');
   const chartsBearerRenewResolver = useRef<((ok: boolean) => void) | null>(null);
   const menuRef = useRef<NrmAppMenuHandle>(null);
+  const notificationRef = useRef<NrmAppNotificationDrawerHandle>(null);
   const exitPromptOpenRef = useRef(false);
   const alarmFeed = useNrmAlarmFeed();
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -1101,7 +1105,7 @@ export default function HomeScreen() {
           <NrmAppTopBar
             isDark={isDark}
             onMenuPress={() => menuRef.current?.openMenu()}
-            onNotificationPress={() => setNotificationOpen(true)}
+            onNotificationPress={() => notificationRef.current?.open()}
             onLogoPress={onMainLogoPress}
             podiumTier={homePodiumTier}
             unreadAlarmCount={alarmFeed.unreadCount}
@@ -1147,6 +1151,7 @@ export default function HomeScreen() {
         ) : null}
 
         <NrmAppNotificationDrawer
+          ref={notificationRef}
           isDark={isDark}
           open={notificationOpen}
           onOpenChange={setNotificationOpen}

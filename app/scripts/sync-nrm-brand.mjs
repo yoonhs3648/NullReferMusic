@@ -137,9 +137,38 @@ function escapeXml(s) {
 }
 
 function kotlinString(s) {
-  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return `"${escapeKotlinString(s)}"`;
 }
 
 function swiftString(s) {
-  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return `"${escapeKotlinString(s)}"`;
+}
+
+/** Kotlin 소스 인코딩과 무관하게 비ASCII를 안전하게 임베드 */
+function escapeKotlinString(s) {
+  let out = '';
+  for (const ch of s) {
+    if (ch === '\\') {
+      out += '\\\\';
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\"';
+      continue;
+    }
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp >= 0x20 && cp <= 0x7e) {
+      out += ch;
+      continue;
+    }
+    if (cp > 0xffff) {
+      const adjusted = cp - 0x10000;
+      const high = 0xd800 + (adjusted >> 10);
+      const low = 0xdc00 + (adjusted & 0x3ff);
+      out += `\\u${high.toString(16).padStart(4, '0')}\\u${low.toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    out += `\\u${cp.toString(16).padStart(4, '0')}`;
+  }
+  return out;
 }

@@ -128,6 +128,7 @@ public final class MelonSearchDtos {
       String url,
       String lyrics,
       boolean lyricsAdultAuthRequired,
+      boolean lyricsNotRegistered,
       MelonTrackCreditsDto credits) {}
 
   public record MelonTrackDetailResult(

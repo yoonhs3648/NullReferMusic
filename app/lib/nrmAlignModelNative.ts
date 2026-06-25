@@ -282,6 +282,7 @@ export async function alignMelonLyricsToLrcNative(
   mode: 'melon' | 'melon_translation',
   alignModelPreference: NrmAlignModelId = DEFAULT_ALIGN_MODEL_PREFERENCE,
   lyricsLang: MelonAlignLyricsLanguage = 'ko',
+  options?: { syncSettings?: import('@/lib/nrmMelonSyncSettings').NrmMelonSyncSettings },
 ): Promise<MelonAlignNativeResult> {
   const pref = resolveAlignModelForMelonSync(
     isNrmAlignModelId(alignModelPreference)
@@ -298,7 +299,7 @@ export async function alignMelonLyricsToLrcNative(
   }
   const fsPath = audioPath.startsWith('file://') ? audioPath.slice(7) : audioPath;
   try {
-    const syncSettings = await loadMelonSyncSettings();
+    const syncSettings = options?.syncSettings ?? (await loadMelonSyncSettings());
     const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang);
     const result = await mod.alignMelonLyricsToLrc(
       fsPath,

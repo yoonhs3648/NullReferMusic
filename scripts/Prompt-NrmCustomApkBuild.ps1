@@ -6,13 +6,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path $RepoRoot).Path
+. (Join-Path $RepoRoot 'scripts\NrmUtf8.ps1')
+Initialize-NrmUtf8Console
+
 $WorkDir = Join-Path $RepoRoot '.build-release-apk-custom'
 $SecretsPath = Join-Path $RepoRoot '.secrets\nrm-github-data.pat'
 $NrmGithubRepo = 'yoonhs3648/NullReferMusic'
 
 function Write-Utf8NoBom {
     param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+    Write-TextFileUtf8NoBom -Path $Path -Content $Content
 }
 
 function Test-GithubPatFormat {
@@ -167,8 +170,9 @@ if ($doCustom -match '^(?i)Y$') {
 }
 
 if ($doCustom -match '^(?i)N$') {
+    $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
     Write-Host ""
-    Write-Host 'Building admin APK: NullReference Music, user=관리자, SerialNo=Admin'
+    Write-Host "Building admin APK: $($adminDefaults.displayName), user=$($adminDefaults.userName), SerialNo=$($adminDefaults.serialNo)"
     Write-Host '(No userList.json update; license check skipped in app.)'
     exit 0
 }

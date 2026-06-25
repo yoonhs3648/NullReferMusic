@@ -4,8 +4,8 @@
 export const GTX_BATCH_SIZE = 1;
 /** 그룹 간 지연 (rate-limit 방어) */
 export const GTX_BATCH_DELAY_MS = 60;
-/** 동시에 발사하는 요청 수 — 순차 대비 ~3배 속도, 그룹 사이 딜레이로 rate-limit 보호 */
-export const GTX_CONCURRENCY = 3;
+/** 동시에 발사하는 요청 수 — 순차 대비 가속, 그룹 사이 딜레이로 rate-limit 보호 */
+export const GTX_CONCURRENCY = 5;
 export const GTX_FETCH_TIMEOUT_MS = 15_000;
 
 export function buildGtxTranslateUrl(texts: string[]): string {

@@ -101,6 +101,8 @@ export type MelonPlainLyricsProbe = {
   plain: string;
   /** 가사 섹션 HTML 기준 — 성인인증 때문에 가사를 못 가져온 경우만 true */
   adultAuthRequired: boolean;
+  /** 멜론 [가사 준비중] 등 — 가사 미등록 */
+  lyricsNotRegistered: boolean;
 };
 
 /** 멜론 곡 가사 조회 + 성인인증 필요 여부 (다운로드 팝업 안내용) */
@@ -108,17 +110,23 @@ export async function probeMelonPlainLyricsFromWebsite(
   website: string | undefined,
 ): Promise<MelonPlainLyricsProbe> {
   const songId = extractMelonSongIdFromUrl(website);
-  if (!songId) return { plain: '', adultAuthRequired: false };
+  if (!songId) {
+    return { plain: '', adultAuthRequired: false, lyricsNotRegistered: false };
+  }
   try {
     const { fetchMelonTrackDetail } = await import('@/lib/nrmMelonSearchClient');
     const r = await fetchMelonTrackDetail(songId, { enrich: false });
-    if (!r.ok) return { plain: '', adultAuthRequired: false };
+    if (!r.ok) {
+      return { plain: '', adultAuthRequired: false, lyricsNotRegistered: false };
+    }
     const plain = (r.data.info.lyrics ?? '').trim();
     const okPlain = isMelonPlainLyricsText(plain) ? plain : '';
     const adultAuthRequired = !!r.data.info.lyricsAdultAuthRequired && !okPlain;
-    return { plain: okPlain, adultAuthRequired };
+    const lyricsNotRegistered =
+      !!r.data.info.lyricsNotRegistered && !okPlain && !adultAuthRequired;
+    return { plain: okPlain, adultAuthRequired, lyricsNotRegistered };
   } catch {
-    return { plain: '', adultAuthRequired: false };
+    return { plain: '', adultAuthRequired: false, lyricsNotRegistered: false };
   }
 }
 

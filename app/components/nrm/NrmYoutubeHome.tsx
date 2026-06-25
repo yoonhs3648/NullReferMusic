@@ -643,6 +643,11 @@ export function NrmYoutubeHome({
       };
 
       try {
+        if (metadata) {
+          void import('@/lib/nrmLyricsPipelinePreload').then((m) =>
+            m.startLyricsPipelinePreload(metadata),
+          );
+        }
         const extraction = await session.extractionPromise;
         if (session.aborted) return;
         const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata, {

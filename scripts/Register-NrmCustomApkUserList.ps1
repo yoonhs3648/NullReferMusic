@@ -14,6 +14,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path $RepoRoot).Path
+. (Join-Path $RepoRoot 'scripts\NrmUtf8.ps1')
+Initialize-NrmUtf8Console
+
 $relPath = 'data/custom-apk/userList.json'
 $jsonPath = Join-Path $RepoRoot ($relPath -replace '/', [IO.Path]::DirectorySeparatorChar)
 $dir = Split-Path $jsonPath -Parent
@@ -24,7 +27,7 @@ if (-not (Test-Path $dir)) {
 
 $doc = @{ userList = @() }
 if (Test-Path -LiteralPath $jsonPath) {
-    $raw = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8
+    $raw = Read-TextFileUtf8 -Path $jsonPath
     if ($raw.Trim()) {
         $parsed = $raw | ConvertFrom-Json
         if ($parsed.userList) {
@@ -52,8 +55,7 @@ $newEntry = [ordered]@{
 }
 $doc.userList += $newEntry
 
-$json = ($doc | ConvertTo-Json -Depth 6)
-[System.IO.File]::WriteAllText($jsonPath, $json + "`n", [System.Text.UTF8Encoding]::new($false))
+Write-JsonFileUtf8 -Path $jsonPath -InputObject $doc -Depth 6
 
 Write-Host ""
 Write-Host "[userList] Registered entry id=$newId in $relPath"

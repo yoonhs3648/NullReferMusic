@@ -809,6 +809,7 @@ public class MelonSearchService {
     List<MelonTrackSummaryDto> similar = parseSimilarTracks(similarTbody);
     String lyrics = parseSongLyrics(html);
     boolean lyricsAdultAuthRequired = isMelonLyricsSectionAdultAuthRequired(html) && lyrics.isBlank();
+    boolean lyricsNotRegistered = isMelonLyricsSectionPending(html) && lyrics.isBlank();
     MelonTrackInfoDto info =
         new MelonTrackInfoDto(
             songId,
@@ -824,56 +825,135 @@ public class MelonSearchService {
             BASE + "/song/detail.htm?songId=" + songId,
             lyrics,
             lyricsAdultAuthRequired,
+            lyricsNotRegistered,
             parseSongCredits(html));
     return new MelonTrackDetailResult(info, similar, null);
   }
 
   private static boolean isMelonLyricsSectionAdultAuthRequired(String html) {
-    String block =
-        firstMatchGroup(
-            html,
-            Pattern.compile("<!--\\s*가사\\s*-->[\\s\\S]*?<!--\\s*//가사\\s*-->", Pattern.CASE_INSENSITIVE));
+    String block = extractMelonSongLyricsBlock(html);
     if (block.isBlank()) {
       return false;
     }
-    if (Pattern.compile("adultcheck|goAdult|btn_adult|needAdult|성인\\s*인증\\s*후", Pattern.CASE_INSENSITIVE)
+    if (Pattern.compile(
+            "adult_register|adultcheck|goAdult|btn_adult|needAdult|성인\\s*인증\\s*후",
+            Pattern.CASE_INSENSITIVE)
         .matcher(block)
         .find()) {
       return true;
     }
-    String raw =
+    String lyricNone = extractMelonLyricNoneText(html);
+    if (!lyricNone.isBlank() && isMelonAdultAuthBlockedLyrics(lyricNone)) {
+      return true;
+    }
+    return isMelonAdultAuthBlockedLyrics(extractMelonSongLyricsRawText(html));
+  }
+
+  private static boolean isMelonLyricsSectionPending(String html) {
+    String block = extractMelonSongLyricsBlock(html);
+    if (block.isBlank()) {
+      return false;
+    }
+    if (Pattern.compile("가사\\s*준비중|가사등록하기|d_register", Pattern.CASE_INSENSITIVE)
+        .matcher(block)
+        .find()) {
+      return true;
+    }
+    String lyricNone = extractMelonLyricNoneText(html);
+    if (lyricNone.isBlank()) {
+      return false;
+    }
+    return !isMelonAdultAuthBlockedLyrics(lyricNone);
+  }
+
+  private static String extractMelonSongLyricsBlock(String html) {
+    Matcher legacy =
+        Pattern.compile("<!--\\s*가사\\s*-->[\\s\\S]*?<!--\\s*//가사\\s*-->", Pattern.CASE_INSENSITIVE)
+            .matcher(html);
+    if (legacy.find()) {
+      return legacy.group();
+    }
+    Matcher section =
+        Pattern.compile(
+                "class=\"section_lyric\"[\\s\\S]*?id=\"lyricArea\"[\\s\\S]*?</div>\\s*</div>",
+                Pattern.CASE_INSENSITIVE)
+            .matcher(html);
+    return section.find() ? section.group() : "";
+  }
+
+  private static String extractMelonLyricAreaInner(String html) {
+    String block = extractMelonSongLyricsBlock(html);
+    if (block.isBlank()) {
+      return "";
+    }
+    Matcher m =
+        Pattern.compile("id=\"lyricArea\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE)
+            .matcher(block);
+    return m.find() ? m.group(1) : "";
+  }
+
+  private static String extractMelonLyricNoneText(String html) {
+    String inner = extractMelonLyricAreaInner(html);
+    if (inner.isBlank() || !inner.toLowerCase().contains("lyric_none")) {
+      return "";
+    }
+    Matcher m =
+        Pattern.compile("class=\"lyric_none\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE)
+            .matcher(inner);
+    return m.find() ? cleanMultilineText(m.group(1)) : "";
+  }
+
+  private static String extractMelonSongLyricsRawText(String html) {
+    String block = extractMelonSongLyricsBlock(html);
+    String legacy =
         firstMatchGroup(
             block,
             Pattern.compile(
                 "class=\"lyric\"[^>]*id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>",
                 Pattern.CASE_INSENSITIVE));
-    if (raw.isBlank()) {
-      raw =
+    if (legacy.isBlank()) {
+      legacy =
           firstMatchGroup(
               block,
               Pattern.compile("id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE));
     }
-    return isMelonAdultAuthBlockedLyrics(cleanMultilineText(raw));
+    if (!legacy.isBlank() && !legacy.toLowerCase().contains("lyric_none")) {
+      String text = cleanMultilineText(legacy);
+      if (!text.isBlank() && !isMelonAdultAuthBlockedLyrics(text)) {
+        return text;
+      }
+    }
+    String inner = extractMelonLyricAreaInner(html);
+    if (!inner.isBlank()) {
+      if (inner.toLowerCase().contains("lyric_none")) {
+        return "";
+      }
+      String lyricDiv =
+          firstMatchGroup(
+              inner,
+              Pattern.compile(
+                  "class=\"lyric\"[^>]*id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>",
+                  Pattern.CASE_INSENSITIVE));
+      if (lyricDiv.isBlank()) {
+        lyricDiv =
+            firstMatchGroup(
+                inner,
+                Pattern.compile("class=\"lyric\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE));
+      }
+      String text = cleanMultilineText(lyricDiv);
+      if (!text.isBlank() && !isMelonAdultAuthBlockedLyrics(text)) {
+        return text;
+      }
+    }
+    if (!legacy.isBlank()) {
+      String text = cleanMultilineText(legacy);
+      return isMelonAdultAuthBlockedLyrics(text) ? "" : text;
+    }
+    return "";
   }
 
   private static String parseSongLyrics(String html) {
-    String block =
-        firstMatchGroup(
-            html,
-            Pattern.compile("<!--\\s*가사\\s*-->[\\s\\S]*?<!--\\s*//가사\\s*-->", Pattern.CASE_INSENSITIVE));
-    String raw =
-        firstMatchGroup(
-            block,
-            Pattern.compile(
-                "class=\"lyric\"[^>]*id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>",
-                Pattern.CASE_INSENSITIVE));
-    if (raw.isBlank()) {
-      raw =
-          firstMatchGroup(
-              block,
-              Pattern.compile("id=\"d_video_summary\"[^>]*>([\\s\\S]*?)</div>", Pattern.CASE_INSENSITIVE));
-    }
-    String text = cleanMultilineText(raw);
+    String text = extractMelonSongLyricsRawText(html);
     if (isMelonAdultAuthBlockedLyrics(text)) {
       return "";
     }
@@ -888,6 +968,7 @@ public class MelonSearchService {
     return t.contains("성인") && t.contains("인증")
         || t.contains("19") && t.contains("세")
         || t.contains("본인") && t.contains("인증")
+        || t.contains("청소년") && t.contains("보호법")
         || t.contains("청소년") && t.contains("유해");
   }
 

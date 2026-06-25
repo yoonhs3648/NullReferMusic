@@ -8,9 +8,9 @@ object NrmBrand {
     const val DISPLAY_NAME: String = "NullReference Music"
     const val STORAGE_FOLDER_NAME: String = "NullReferenceMusic"
     /** Custom APK only — embedded for future licensing logic; not shown in version UI */
-    const val SERIAL_NO: String = ""
+    const val SERIAL_NO: String = "admin"
     /** Custom APK only — inquiry registration; not shown in version UI */
-    const val USER_NAME: String = ""
+    const val USER_NAME: String = "\uad00\ub9ac\uc790"
     val STORAGE_LOGS_PATH: String get() = "$STORAGE_FOLDER_NAME/logs"
     fun userAgent(version: String): String = "$STORAGE_FOLDER_NAME/$version"
 }

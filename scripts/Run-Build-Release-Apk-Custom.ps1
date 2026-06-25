@@ -5,19 +5,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path $RepoRoot).Path
+. (Join-Path $RepoRoot 'scripts\NrmUtf8.ps1')
+Initialize-NrmUtf8Console
+
 $AppDir = Join-Path $RepoRoot 'app'
 $SecretsPath = Join-Path $RepoRoot '.secrets\nrm-github-data.pat'
 $NrmGithubRepo = 'yoonhs3648/NullReferMusic'
 $UserListApiUri = "https://api.github.com/repos/$NrmGithubRepo/contents/data/custom-apk/userList.json"
 
-function Write-Utf8NoBom {
-    param([string]$Path, [string]$Content)
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
-}
-
 function Get-ReleaseVersionName {
-    $pkg = Get-Content (Join-Path $AppDir 'package.json') -Raw | ConvertFrom-Json
-    $gradle = Get-Content (Join-Path $AppDir 'android\app\build.gradle') -Raw
+    $pkgRaw = Read-TextFileUtf8 -Path (Join-Path $AppDir 'package.json')
+    $pkg = $pkgRaw | ConvertFrom-Json
+    $gradle = Read-TextFileUtf8 -Path (Join-Path $AppDir 'android\app\build.gradle')
     $versionName = $pkg.version
     if ($gradle -match 'versionName\s+"([^"]+)"') {
         $versionName = $matches[1]
@@ -57,7 +56,7 @@ function Save-GithubPat {
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
-    Write-Utf8NoBom -Path $SecretsPath -Content $Pat.Trim()
+    Write-TextFileUtf8NoBom -Path $SecretsPath -Content $Pat.Trim()
 }
 
 function Read-CustomizeYn {
@@ -189,15 +188,15 @@ function Add-UserListEntryViaGithub {
     }
     $doc.userList += $newEntry
 
-    $json = ($doc | ConvertTo-Json -Depth 6) + "`n"
-    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+    $json = ConvertTo-NrmJson -InputObject $doc -Depth 6
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json + "`n"))
     $body = @{
         message = "custom-apk: register userList entry id=$newId (v$Version)"
         content = $b64
         sha     = $sha
-    } | ConvertTo-Json -Depth 6
+    }
 
-    Invoke-RestMethod -Uri $UserListApiUri -Headers $headers -Method Put -Body $body -ContentType 'application/json; charset=utf-8'
+    Invoke-NrmGithubPutJsonUtf8 -Uri $UserListApiUri -Headers $headers -BodyObject $body | Out-Null
 }
 
 function Show-LicenseResult {
@@ -228,15 +227,16 @@ $doCustomize = Read-CustomizeYn
 $githubPat = Read-GithubPat
 
 # ── 4. branding values ────────────────────────────────────────────────────────
+$adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
 if ($doCustomize) {
     $appName = Read-AppName
     $userName = Read-UserName
     $serialNo = Read-SerialNo
 }
 else {
-    $appName = 'NullReference Music'
-    $userName = '관리자'
-    $serialNo = 'admin'
+    $appName = $adminDefaults.displayName
+    $userName = $adminDefaults.userName
+    $serialNo = $adminDefaults.serialNo
 }
 
 # ── 5. build APK ──────────────────────────────────────────────────────────────

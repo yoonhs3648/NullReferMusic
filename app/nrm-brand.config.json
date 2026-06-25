@@ -1,9 +1,9 @@
 {
-  "displayName": "NullReference Music",
-  "storageFolderName": "NullReferenceMusic",
-  "versionInfoProductName": "NullReference Music",
-  "versionInfoCustomizing": "",
-  "versionInfoAdminBuild": false,
-  "serialNo": "",
-  "userName": ""
+    "displayName":  "NullReference Music",
+    "storageFolderName":  "NullReferenceMusic",
+    "versionInfoProductName":  "NullReference Music",
+    "versionInfoCustomizing":  "",
+    "versionInfoAdminBuild":  true,
+    "serialNo":  "admin",
+    "userName":  "관리자"
 }

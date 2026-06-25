@@ -26,7 +26,7 @@ import { NrmMenuNotifyHost } from '@/components/nrm/NrmMenuNotifyHost';
 import { NrmMenuChartPanels } from '@/components/nrm/charts/NrmMenuChartPanels';
 import { NrmMenuPeriodChartPanels } from '@/components/nrm/charts/NrmMenuPeriodChartPanels';
 import { NrmMenuSearchPanels } from '@/components/nrm/search/NrmMenuSearchPanels';
-import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
+import { NrmAppDrawerShell } from '@/components/nrm/NrmAppDrawerShell';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
 import {
@@ -833,7 +833,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
             ]}
             accessibilityViewIsModal>
             {panel === 'root' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -989,11 +989,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'settings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1154,11 +1154,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={!hasAppSerialNo ? rowHover : bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'appSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1222,11 +1222,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'lyricsOrderSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1239,11 +1239,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   registerBackHandler={registerLyricsOrderBackHandler}
                   registerDrawerDismiss={registerLyricsOrderDrawerDismiss}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'alignLyricsLangDetectionSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1267,11 +1267,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   rowHover={rowHover}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'weeklySnapshotSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1280,11 +1280,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'genreTagSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1294,11 +1294,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   rowHover={rowHover}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'spotifyApiManage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1315,11 +1315,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   registerBackHandler={registerSpotifyBackHandler}
                   registerDrawerDismiss={registerSpotifyDrawerDismiss}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'lastfmApiManage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1333,11 +1333,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   registerBackHandler={registerLastfmBackHandler}
                   registerDrawerDismiss={registerLastfmDrawerDismiss}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'deeplApiManage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1350,11 +1350,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   registerBackHandler={registerDeepLBackHandler}
                   registerDrawerDismiss={registerDeepLDrawerDismiss}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadManage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1463,11 +1463,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'lyricsManage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1591,11 +1591,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'melonAdultAuth' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={requestDrawerDismiss}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1608,11 +1608,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   registerBackHandler={registerMelonAdultBackHandler}
                   registerDrawerDismiss={registerMelonAdultDrawerDismiss}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'mainPageSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1621,11 +1621,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminPage' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1734,11 +1734,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminAlarmRegister' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1748,11 +1748,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminUserBanList' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1762,11 +1762,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminUserBanRegister' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1776,11 +1776,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminInquiryList' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1790,11 +1790,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminUserList' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1804,11 +1804,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'adminDeviceReset' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1818,11 +1818,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'historyManagementSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1831,11 +1831,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'fileLoggingSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1844,11 +1844,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'inquirySettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1858,11 +1858,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   isDark={isDark}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadPathSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1872,11 +1872,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadExtensionSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1886,11 +1886,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadQualitySettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1900,11 +1900,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadVbrSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1914,11 +1914,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadLosslessSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1928,11 +1928,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadFilenameSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1942,11 +1942,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadMetadataSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1956,11 +1956,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadLyricsOutputSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1970,11 +1970,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadLyricsEmbedSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1984,11 +1984,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'downloadLyricsSyncerSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -1998,11 +1998,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   onBack={popPanel}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {isChartMenuPanel(panel) ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2019,11 +2019,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   onOpenLastfmCharts={closeMenuAndNavigateLastfmCharts}
                   onOpenMelonCharts={closeMenuAndNavigateMelonCharts}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {isPeriodChartMenuPanel(panel) ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2036,11 +2036,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   onOpenLastfm={() => void closeMenuAndNavigatePeriodLastfmCharts()}
                   onOpenSpotify={() => void closeMenuAndNavigatePeriodSpotifyCharts()}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {isSearchMenuPanel(panel) ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2068,11 +2068,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   }
                   onOpenMelonSearch={(kind) => closeMenuAndNavigateMelonSearch(kind)}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'searchSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2120,11 +2120,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     </Pressable>
                   );
                 })}
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'translationSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2149,11 +2149,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   rowHover={rowHover}
                   active={panel === 'translationSettings'}
                 />
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
 
             {panel === 'screenSettings' ? (
-              <DrawerShell
+              <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
@@ -2216,7 +2216,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     }
                   />
                 </Pressable>
-              </DrawerShell>
+              </NrmAppDrawerShell>
             ) : null}
           </Animated.View>
           <NrmMenuNotifyHost isDark={isDark} active={open} />
@@ -2543,53 +2543,6 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
   },
-  drawerColumn: {
-    flex: 1,
-    minHeight: 0,
-    width: '100%',
-    flexDirection: 'column',
-  },
-  drawerScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  drawerScrollContent: {
-    flexGrow: 1,
-    paddingBottom: nrmTokens.space.sm,
-    ...Platform.select({
-      web: {},
-      default: {
-        paddingRight: nrmTokens.space.xxs,
-      },
-    }),
-  },
-  footerClose: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 11,
-    marginTop: nrmTokens.space.sm,
-    marginBottom: nrmTokens.layout.menuDrawerCloseBottomGap,
-    borderRadius: nrmTokens.radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(128,128,128,0.35)',
-    ...Platform.select({
-      web: {},
-      default: {
-        marginRight: nrmTokens.space.xxs,
-      },
-    }),
-  },
-  footerCloseCompact: {
-    marginTop: nrmTokens.space.xs,
-  },
-  footerClosePressed: {
-    opacity: 0.92,
-  },
-  footerCloseLabel: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-  },
   versionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2630,38 +2583,3 @@ const styles = StyleSheet.create({
     paddingRight: nrmTokens.space.sm,
   },
 });
-
-function DrawerShell({
-  titleColor,
-  onDismiss,
-  compactFooter = false,
-  children,
-}: {
-  titleColor: string;
-  onDismiss: () => void;
-  compactFooter?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.drawerColumn}>
-      <NrmMenuDrawerScroll
-        style={styles.drawerScroll}
-        contentContainerStyle={styles.drawerScrollContent}>
-        {children}
-      </NrmMenuDrawerScroll>
-      <Pressable
-        onPress={onDismiss}
-        style={({ pressed }) => [
-          styles.footerClose,
-          compactFooter && styles.footerCloseCompact,
-          pressed && styles.footerClosePressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="닫기">
-        <Text style={[styles.footerCloseLabel, { color: titleColor }]}>
-          닫기
-        </Text>
-      </Pressable>
-    </View>
-  );
-}

@@ -1,36 +1,13 @@
-import { useCallback } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import WebView from 'react-native-webview';
-import type { WebViewNavigation } from 'react-native-webview';
 
-import { NRM_MELON_LOGIN_URL } from '@/lib/nrmMelonAdultPlatform';
-import { melonCookieHeaderHasLogin } from '@/lib/nrmMelonAdultSession';
-import { hasNrmMelonCookieNativeModule, readMelonLoginCookieHeader } from '@/lib/nrmMelonCookie';
-
-/** 모바일 UA — KakaoTalk 등 소셜 로그인 버튼 노출 */
-const MELON_MOBILE_UA =
-  'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+import { NRM_MELON_LOGIN_URL, NRM_MELON_MOBILE_UA } from '@/lib/nrmMelonAdultPlatform';
 
 type Props = {
   sessionKey?: number;
-  /** melon.com 에서 MLCP 쿠키가 감지되면 호출 — WebView 자동 닫기에 사용 */
-  onCookieCaptured?: (cookieHeader: string) => void;
 };
 
-export function NrmMelonAdultAuthWebView({ sessionKey = 0, onCookieCaptured }: Props) {
-  const checkCookieOnNavigation = useCallback(
-    async (nav: WebViewNavigation) => {
-      if (!hasNrmMelonCookieNativeModule()) return;
-      const url = nav.url ?? '';
-      if (!url.includes('melon.com')) return;
-      const cookie = await readMelonLoginCookieHeader();
-      if (cookie && melonCookieHeaderHasLogin(cookie)) {
-        onCookieCaptured?.(cookie);
-      }
-    },
-    [onCookieCaptured],
-  );
-
+export function NrmMelonAdultAuthWebView({ sessionKey = 0 }: Props) {
   return (
     <View style={styles.wrap}>
       <WebView
@@ -39,7 +16,7 @@ export function NrmMelonAdultAuthWebView({ sessionKey = 0, onCookieCaptured }: P
         cacheEnabled={false}
         incognito={false}
         source={{ uri: NRM_MELON_LOGIN_URL }}
-        userAgent={MELON_MOBILE_UA}
+        userAgent={NRM_MELON_MOBILE_UA}
         applicationNameForUserAgent=""
         originWhitelist={['https://*', 'http://*']}
         javaScriptEnabled
@@ -48,9 +25,6 @@ export function NrmMelonAdultAuthWebView({ sessionKey = 0, onCookieCaptured }: P
         thirdPartyCookiesEnabled
         setSupportMultipleWindows={false}
         allowsInlineMediaPlayback
-        onNavigationStateChange={(nav) => {
-          void checkCookieOnNavigation(nav);
-        }}
         onShouldStartLoadWithRequest={(req) => {
           // kakao/intent 계열 스킴은 외부 앱으로 열기
           if (

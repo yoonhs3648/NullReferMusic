@@ -60,10 +60,18 @@ import {
   enrichMelonTrackSearchHits,
 } from '@/lib/nrmMelonSearchEnrich';
 import { readMelonHtmlCache, writeMelonHtmlCache } from '@/lib/nrmMelonHtmlCache';
+import { NRM_MELON_MOBILE_UA } from '@/lib/nrmMelonAdultPlatform';
 import { getMelonAdultCookieHeader } from '@/lib/nrmMelonAdultSession';
 
 const MELON_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function melonFetchUserAgent(url: string, cookieHeader: string | null): string {
+  if (cookieHeader && /\/song\/detail\.htm/i.test(url)) {
+    return NRM_MELON_MOBILE_UA;
+  }
+  return MELON_UA;
+}
 
 function messageForError(code: MelonSearchErrorCode): string {
   if (code === 'bad_request') return '검색어 또는 선택 항목을 확인하세요.';
@@ -85,7 +93,7 @@ async function melonFetchHtml(url: string, referer = `${MELON_BASE}/`): Promise<
   }
   try {
     const headers: Record<string, string> = {
-      'User-Agent': MELON_UA,
+      'User-Agent': melonFetchUserAgent(url, cookieHeader),
       Accept: 'text/html,application/xhtml+xml',
       'Accept-Language': 'ko-KR,ko;q=0.9',
       Referer: referer,
