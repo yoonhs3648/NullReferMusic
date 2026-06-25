@@ -198,6 +198,8 @@ export function NrmLyricsOrderSettingsPanel({
       <View style={styles.list}>
         {order.map((id, index) => {
           const isDefault = index === 0;
+          const canMoveUp = index > 0 && !saving;
+          const canMoveDown = index < order.length - 1 && !saving;
           return (
             <View
               key={id}
@@ -222,36 +224,36 @@ export function NrmLyricsOrderSettingsPanel({
               <View style={styles.moveBtns}>
                 <Pressable
                   onPress={() => moveByIndex(index, index - 1)}
-                  disabled={index === 0 || saving}
+                  disabled={!canMoveUp}
                   style={({ pressed }) => [
                     styles.moveBtn,
-                    (index === 0 || saving) && styles.moveBtnDisabled,
-                    pressed && index > 0 && !saving && { backgroundColor: rowHover },
+                    !canMoveUp && styles.moveBtnDisabled,
+                    pressed && canMoveUp && { backgroundColor: rowHover },
                   ]}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: !canMoveUp }}
                   accessibilityLabel="위로">
                   <Ionicons
                     name="chevron-up"
                     size={18}
-                    color={index === 0 ? 'rgba(128,128,128,0.35)' : titleColor}
+                    color={canMoveUp ? titleColor : 'rgba(128,128,128,0.5)'}
                   />
                 </Pressable>
                 <Pressable
                   onPress={() => moveByIndex(index, index + 1)}
-                  disabled={index === order.length - 1 || saving}
+                  disabled={!canMoveDown}
                   style={({ pressed }) => [
                     styles.moveBtn,
-                    (index === order.length - 1 || saving) && styles.moveBtnDisabled,
-                    pressed && index < order.length - 1 && !saving && { backgroundColor: rowHover },
+                    !canMoveDown && styles.moveBtnDisabled,
+                    pressed && canMoveDown && { backgroundColor: rowHover },
                   ]}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: !canMoveDown }}
                   accessibilityLabel="아래로">
                   <Ionicons
                     name="chevron-down"
                     size={18}
-                    color={
-                      index === order.length - 1 ? 'rgba(128,128,128,0.35)' : titleColor
-                    }
+                    color={canMoveDown ? titleColor : 'rgba(128,128,128,0.5)'}
                   />
                 </Pressable>
               </View>
@@ -326,7 +328,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(128,128,128,0.35)',
   },
-  moveBtnDisabled: { opacity: 0.45 },
+  moveBtnDisabled: {
+    backgroundColor: 'rgba(128,128,128,0.08)',
+  },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(128,128,128,0.25)',

@@ -91,7 +91,7 @@ export const NRM_ALIGN_MODEL_OPTIONS: readonly NrmAlignModelCatalogEntry[] = [
     id: NRM_ALIGN_WAV2VEC2_BASE_ID,
     label: 'wav2vec2-base',
     speedLabel: '보통',
-    qualityLabel: '매우 높음',
+    qualityLabel: '높음',
     sizeLabel: '~760 MB',
     assets: [],
   },

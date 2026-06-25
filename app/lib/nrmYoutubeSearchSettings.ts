@@ -13,7 +13,7 @@ export type NrmYoutubeSearchSuffixMode =
   | 'official_mv';
 
 export const NRM_YOUTUBE_SEARCH_SUFFIX_DEFAULT: NrmYoutubeSearchSuffixMode =
-  'default';
+  'topic';
 
 export const NRM_YOUTUBE_SEARCH_SUFFIX_LABELS: Record<
   NrmYoutubeSearchSuffixMode,

@@ -7,19 +7,19 @@ export const NRM_MELON_SYNC_QUALITY_OPTIONS: readonly EncodeOptionItem[] = [
   {
     id: 'accurate',
     label: '정확 (느림)',
-    description: '전곡 1-pass 우선, 청크 overlap, trellis 여유 확대',
+    description: '',
     icon: 'diamond-outline',
   },
   {
     id: 'standard',
     label: '표준',
-    description: '정확도와 속도 균형',
+    description: '',
     icon: 'options-outline',
   },
   {
     id: 'fast',
     label: '빠름 (메모리 절약)',
-    description: '작은 청크·빠른 분할 (저사양 기기)',
+    description: '',
     icon: 'flash-outline',
   },
 ];

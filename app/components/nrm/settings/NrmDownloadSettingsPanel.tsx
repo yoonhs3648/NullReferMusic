@@ -604,8 +604,8 @@ export function NrmDownloadSettingsPanel({
             </Text>
           ) : null}
           <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
-            비트레이트(Bit rate)는 오디오 파일이 1초 동안 담는 데이터 양(kbps)입니다.{'\n'}
-            VBR 설정이 «고정(CBR)»일 때 mp3·m4a 변환에 적용됩니다.
+            비트레이트(Bit rate)는 오디오 파일 1초 동안 담는 데이터 양(kbps) 입니다.{'\n'}
+            높을수록 음질은 좋지만 용량이 커집니다.
           </Text>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
