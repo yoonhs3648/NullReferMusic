@@ -82,7 +82,8 @@ function Test-AppName {
     param([string]$Raw)
     $t = $Raw.Trim()
     if ($t.Length -eq 0 -or $t.Length -gt 50) { return $false }
-    return ($t -match '^[\p{L}\p{N}]+ [\p{L}\p{N}]+$')
+    # 줄바꿈·탭 등 제어 문자만 금지 (특수문자·공백 허용)
+    return ($t -notmatch '[\r\n\t]')
 }
 
 function Test-CustomField {
@@ -101,8 +102,9 @@ function Test-SerialNo {
 
 function Read-AppName {
     while ($true) {
-        $line = Read-Host 'Input appName(two words)'
+        $line = Read-Host 'Input appName'
         if (Test-AppName $line) { return $line.Trim() }
+        Write-Host 'Invalid appName (1-50 chars, no line breaks)'
     }
 }
 
