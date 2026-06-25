@@ -18,7 +18,7 @@ import {
   NRM_FILE_LOG_FOLDER_DISPLAY_PATH,
 } from '@/lib/nrmFileLoggingSettings';
 import {
-  getNrmFileLoggingEnabled,
+  refreshNrmFileLoggingFromStorage,
   setNrmFileLoggingActive,
 } from '@/lib/nrmFileLoggingRuntime';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
@@ -55,7 +55,7 @@ export function NrmFileLoggingSettingsPanel({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const stored = await getNrmFileLoggingEnabled();
+      const stored = await refreshNrmFileLoggingFromStorage();
       if (cancelled) return;
       setEnabled(stored);
       setLoading(false);

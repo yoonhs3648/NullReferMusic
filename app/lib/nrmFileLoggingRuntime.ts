@@ -83,7 +83,8 @@ export function isNrmFileLoggingActive(): boolean {
 
 /** 저장값 로드 완료 후 현재 on/off (UI·설정 화면용) */
 export async function getNrmFileLoggingEnabled(): Promise<boolean> {
-  return initNrmFileLoggingRuntime();
+  await initNrmFileLoggingRuntime();
+  return cachedEnabled;
 }
 
 export function subscribeNrmFileLoggingActive(
