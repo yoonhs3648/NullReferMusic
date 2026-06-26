@@ -99,6 +99,16 @@
                          "Createddate":  "2026-06-26",
                          "deviceId":  null,
                          "lastAccessDate":  null
+                     },
+                     {
+                         "id":  11,
+                         "appName":  "주형\u0027s Music",
+                         "userName":  "박주형",
+                         "SerialNo":  "01024147762",
+                         "version":  "2.4.7",
+                         "Createddate":  "2026-06-26",
+                         "deviceId":  null,
+                         "lastAccessDate":  null
                      }
                  ]
 }
