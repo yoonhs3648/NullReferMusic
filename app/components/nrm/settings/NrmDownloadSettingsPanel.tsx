@@ -53,6 +53,7 @@ import { NrmWhisperModelPicker } from '@/components/nrm/settings/NrmWhisperModel
 import { NrmAlignModelPicker } from '@/components/nrm/settings/NrmAlignModelPicker';
 import { NrmMelonSyncSettingsPanel } from '@/components/nrm/settings/NrmMelonSyncSettingsPanel';
 import { NrmDownloadEncodeOptionPicker } from '@/components/nrm/settings/NrmDownloadEncodeOptionPicker';
+import { NrmSettingsOptionPicker } from '@/components/nrm/settings/NrmSettingsOptionPicker';
 import { NRM_DOWNLOAD_PUBLIC_FOLDER_NAME } from '@/lib/nrmPersistDownload.native';
 import {
   LOSSLESS_SETTING_OPTIONS,
@@ -104,13 +105,17 @@ type Props = {
   section: NrmDownloadSettingsSection;
   titleColor: string;
   bodyColor: string;
+  rowHover?: string;
   onBack: () => void;
 };
+
+const DEFAULT_ROW_HOVER = 'rgba(128,128,128,0.12)';
 
 export function NrmDownloadSettingsPanel({
   section,
   titleColor,
   bodyColor,
+  rowHover = DEFAULT_ROW_HOVER,
   onBack,
 }: Props) {
   const [dirUri, setDirUri] = useState<string | null>(null);
@@ -347,49 +352,18 @@ export function NrmDownloadSettingsPanel({
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <>
-              <View
-                style={styles.extSegmentBar}
-                accessibilityRole="radiogroup"
-                accessibilityLabel="오디오 확장자">
-                {(NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).map((ext, idx) => {
-                  const active = extension === ext;
-                  return (
-                    <Pressable
-                      key={ext}
-                      onPress={() => selectExtension(ext as NrmAudioExtension)}
-                      style={({ pressed }) => [
-                        styles.extSegmentCell,
-                        idx > 0 && styles.extSegmentDivider,
-                        active && styles.extSegmentCellActive,
-                        pressed && !active && styles.extSegmentCellPressed,
-                      ]}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: active }}>
-                      <Text
-                        style={[
-                          styles.extSegmentLabel,
-                          { color: active ? '#ffffff' : bodyColor },
-                          active && styles.extSegmentLabelActive,
-                        ]}>
-                        {ext.slice(1).toUpperCase()}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <View style={styles.extDisabledRow}>
-                {(NRM_AUDIO_EXTENSIONS as readonly string[])
-                  .filter((e) => !(NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(e))
-                  .map((ext) => (
-                    <View key={ext} style={styles.extDisabledTag}>
-                      <Text style={[styles.extDisabledTagLabel, { color: bodyColor }]}>
-                        {ext.slice(1).toUpperCase()}
-                      </Text>
-                    </View>
-                  ))}
-              </View>
-            </>
+            <NrmSettingsOptionPicker
+              options={NRM_AUDIO_EXTENSIONS.map((ext) => ({
+                id: ext,
+                label: ext.slice(1).toUpperCase(),
+                disabled: !(NRM_ENABLED_AUDIO_EXTENSIONS as readonly string[]).includes(ext),
+              }))}
+              value={extension}
+              onChange={(id) => selectExtension(id as NrmAudioExtension)}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              rowHover={rowHover}
+            />
           )}
         </View>
       ) : null}
@@ -399,47 +373,17 @@ export function NrmDownloadSettingsPanel({
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <View style={styles.formatCol}>
-              {NRM_DOWNLOAD_FILENAME_FORMATS.map((opt) => {
-                const active = fileNameFormat === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => selectFileNameFormat(opt.id)}
-                    style={({ pressed }) => [
-                      styles.formatRow,
-                      {
-                        borderColor: active
-                          ? nrmTokens.color.primary
-                          : 'rgba(128,128,128,0.35)',
-                        backgroundColor: active
-                          ? 'rgba(0,102,204,0.12)'
-                          : 'transparent',
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}>
-                    <Text
-                      style={[
-                        styles.formatRowLabel,
-                        { color: active ? nrmTokens.color.primary : titleColor },
-                      ]}>
-                      {opt.label}
-                    </Text>
-                    {active ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={20}
-                        color={nrmTokens.color.primary}
-                      />
-                    ) : (
-                      <View style={styles.formatRowSpacer} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <NrmSettingsOptionPicker
+              options={NRM_DOWNLOAD_FILENAME_FORMATS.map((opt) => ({
+                id: opt.id,
+                label: opt.label,
+              }))}
+              value={fileNameFormat}
+              onChange={(id) => selectFileNameFormat(id as NrmDownloadFileNameFormat)}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              rowHover={rowHover}
+            />
           )}
         </View>
       ) : null}
@@ -499,47 +443,17 @@ export function NrmDownloadSettingsPanel({
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
-            <View style={styles.formatCol}>
-              {NRM_LYRICS_OUTPUT_MODES.map((opt) => {
-                const active = lyricsOutputMode === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => selectLyricsOutputMode(opt.id)}
-                    style={({ pressed }) => [
-                      styles.formatRow,
-                      {
-                        borderColor: active
-                          ? nrmTokens.color.primary
-                          : 'rgba(128,128,128,0.35)',
-                        backgroundColor: active
-                          ? 'rgba(0,102,204,0.12)'
-                          : 'transparent',
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}>
-                    <Text
-                      style={[
-                        styles.formatRowLabel,
-                        { color: active ? nrmTokens.color.primary : titleColor },
-                      ]}>
-                      {opt.label}
-                    </Text>
-                    {active ? (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={20}
-                        color={nrmTokens.color.primary}
-                      />
-                    ) : (
-                      <View style={styles.formatRowSpacer} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <NrmSettingsOptionPicker
+              options={NRM_LYRICS_OUTPUT_MODES.map((opt) => ({
+                id: opt.id,
+                label: opt.label,
+              }))}
+              value={lyricsOutputMode}
+              onChange={(id) => selectLyricsOutputMode(id as NrmLyricsOutputMode)}
+              titleColor={titleColor}
+              bodyColor={bodyColor}
+              rowHover={rowHover}
+            />
           )}
         </View>
       ) : null}
@@ -639,6 +553,7 @@ export function NrmDownloadSettingsPanel({
               onChange={(id) => selectVbrMode(id as NrmDownloadVbrMode)}
               titleColor={titleColor}
               bodyColor={bodyColor}
+              rowHover={rowHover}
             />
           )}
         </View>
@@ -663,6 +578,7 @@ export function NrmDownloadSettingsPanel({
               onChange={(id) => selectLosslessMode(id as NrmDownloadLosslessMode)}
               titleColor={titleColor}
               bodyColor={bodyColor}
+              rowHover={rowHover}
             />
           )}
         </View>

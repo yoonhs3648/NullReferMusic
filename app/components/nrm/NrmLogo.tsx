@@ -5,7 +5,7 @@ import {
   type HomeChartPodiumTier,
 } from '@/components/nrm/NrmHomeChartRankCrown';
 import { nrmTokens } from '@/constants/nrmTokens';
-import { getNrmLogoWordmark } from '@/lib/nrmAppBrand';
+import { getNrmLogoWordmark, splitNrmLogoWordmark } from '@/lib/nrmAppBrand';
 
 type Props = {
   compact?: boolean;
@@ -19,6 +19,8 @@ type Props = {
   markOnly?: boolean;
   /** markOnly일 때 마크 한 변 길이(px) */
   markSize?: number;
+  /** 메인 상단 CI 전용 표시명 — 미지정 시 APK 브랜드 displayName */
+  displayName?: string;
   onPress?: () => void;
 };
 
@@ -42,10 +44,14 @@ export function NrmLogo({
   podiumTier = null,
   markOnly = false,
   markSize: markSizeProp,
+  displayName,
   onPress,
 }: Props) {
   const { width } = useWindowDimensions();
-  const { primary: logoPrimary, accent: logoAccent } = getNrmLogoWordmark();
+  const { primary: logoPrimary, accent: logoAccent } =
+    displayName !== undefined
+      ? splitNrmLogoWordmark(displayName)
+      : getNrmLogoWordmark();
   const nullColor = disabled
     ? 'rgba(128,128,128,0.45)'
     : tone === 'dark'

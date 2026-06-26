@@ -5,10 +5,11 @@ import { Platform } from 'react-native';
 import { isStandaloneIos } from '@/lib/nrmStandalonePlatform';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { NrmAudioExtension, NrmDownloadEncodeSettings } from '@/lib/nrmDownloadSettings';
-import { sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
+import { displayLabelFromAudioFileName, sanitizeFileBase } from '@/lib/nrmYoutubeDownloadMeta';
 import { downloadGooglevideoAudioToFileUri } from '@/lib/nrmYoutubeGooglevideoDownload.native';
 import {
   isOnDeviceDownloadAvailable,
+  cancelActiveYtdlpDownload,
   downloadOnDevice,
   transcodeAudioOnDevice,
 } from '@/lib/onDeviceDownload';
@@ -18,6 +19,10 @@ import type {
 } from '@/lib/youtubeSearchTypes';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
+import {
+  NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
+  NRM_YTDLP_EXTRACT_TIMEOUT_MS,
+} from '@/lib/nrmDownloadTimeouts';
 import {
   nrmYoutubeSearchEmptyQueryMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
@@ -374,8 +379,62 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
   return rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 }
 
-/** Android: yt-dlp · innertube 병렬 — 먼저 끝난 audio-only 경로 사용 */
-async function extractAudioWithFallback(videoId: string): Promise<string> {
+/** innertube·yt-dlp 추출 중단 (타임아웃·폴백 전환) */
+class ExtractAbortedError extends Error {
+  readonly reason: 'timeout' | 'cancelled';
+
+  constructor(reason: 'timeout' | 'cancelled') {
+    super(reason === 'timeout' ? 'EXTRACT_TIMEOUT' : 'EXTRACT_CANCELLED');
+    this.name = 'ExtractAbortedError';
+    this.reason = reason;
+  }
+}
+
+/** yt-dlp 5분 초과 — 다운로드 요청 전체 취소 대상 */
+export class YtdlpExtractTimeoutError extends ExtractAbortedError {
+  constructor() {
+    super('timeout');
+    this.name = 'YtdlpExtractTimeoutError';
+  }
+}
+
+/** @deprecated ExtractAbortedError 사용 */
+class ExtractRaceCancelledError extends ExtractAbortedError {
+  constructor() {
+    super('cancelled');
+    this.name = 'ExtractRaceCancelledError';
+  }
+}
+
+async function withExtractTimeout<T>(
+  run: (isAborted: () => boolean) => Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T> {
+  let aborted = false;
+  const isAborted = () => aborted;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(isAborted),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          aborted = true;
+          onTimeout();
+          reject(new ExtractAbortedError('timeout'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Android: innertube 우선 → (실패·1분 타임아웃) yt-dlp 폴백.
+ * yt-dlp는 5분 내 완료되지 않으면 YtdlpExtractTimeoutError.
+ */
+async function extractAudioSequentialFallback(videoId: string): Promise<string> {
   const ytDlpAvailable =
     Platform.OS === 'android' && isOnDeviceDownloadAvailable();
 
@@ -383,53 +442,64 @@ async function extractAudioWithFallback(videoId: string): Promise<string> {
     return extractWithInnertube(videoId);
   }
 
-  return new Promise<string>((resolve, reject) => {
-    let settled = false;
-    let raceCancelled = false;
-    let failures = 0;
-    const errors: unknown[] = [];
+  let innertubeErr: unknown;
+  try {
+    const uri = await withExtractTimeout(
+      (isAborted) => extractWithInnertube(videoId, isAborted),
+      NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
+      () => {
+        logDownloadStage('innertube', 'extract_timeout', {
+          videoId,
+          timeoutMs: NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
+        });
+      },
+    );
+    logDownloadStage('pipeline', 'extract_innertube_ok', { videoId });
+    return uri;
+  } catch (e) {
+    innertubeErr = e;
+    if (e instanceof YtdlpExtractTimeoutError) throw e;
+    logNrmRunError('download.innertube', e, {
+      videoId,
+      fallback: 'ytdlp',
+      timedOut: e instanceof ExtractAbortedError && e.reason === 'timeout',
+    });
+  }
 
-    const win = (lane: 'ytdlp' | 'innertube', fileUri: string) => {
-      if (settled) return;
-      settled = true;
-      raceCancelled = true;
-      logDownloadStage('pipeline', 'extract_race_won', { videoId, lane });
-      resolve(fileUri);
-    };
-
-    const lose = (lane: 'ytdlp' | 'innertube', err: unknown) => {
-      if (raceCancelled || err instanceof ExtractRaceCancelledError) return;
-      errors.push(err);
-      failures += 1;
-      logNrmRunError(`download.${lane}.race_failed`, err, { videoId, failures });
-      if (failures >= 2 && !settled) {
-        settled = true;
-        const first = errors[0];
-        reject(first instanceof Error ? first : new Error(String(first)));
-      }
-    };
-
-    void extractWithYtDlp(videoId)
-      .then((uri) => win('ytdlp', uri))
-      .catch((e) => lose('ytdlp', e));
-
-    void extractWithInnertube(videoId, () => raceCancelled)
-      .then((uri) => win('innertube', uri))
-      .catch((e) => lose('innertube', e));
-  });
-}
-
-// ── youtubei.js (innertube) 폴백 경로 ────────────────────────────────────────
-/**
- * iOS와 Android yt-dlp 실패 시 사용하는 youtubei.js 기반 다운로드.
- * Android → iOS → Web 클라이언트 타입 순으로 재시도합니다.
- */
-class ExtractRaceCancelledError extends Error {
-  constructor() {
-    super('EXTRACT_RACE_CANCELLED');
-    this.name = 'ExtractRaceCancelledError';
+  try {
+    const uri = await withExtractTimeout(
+      (_isAborted) => extractWithYtDlp(videoId),
+      NRM_YTDLP_EXTRACT_TIMEOUT_MS,
+      () => {
+        void cancelActiveYtdlpDownload();
+        logDownloadStage('ytdlp', 'extract_timeout', {
+          videoId,
+          timeoutMs: NRM_YTDLP_EXTRACT_TIMEOUT_MS,
+        });
+      },
+    );
+    logDownloadStage('pipeline', 'extract_ytdlp_ok', {
+      videoId,
+      afterInnertubeFail: true,
+    });
+    return uri;
+  } catch (ytdlpErr) {
+    if (
+      ytdlpErr instanceof ExtractAbortedError &&
+      ytdlpErr.reason === 'timeout'
+    ) {
+      throw new YtdlpExtractTimeoutError();
+    }
+    logNrmRunError('download.ytdlp', ytdlpErr, { videoId });
+    const second =
+      ytdlpErr instanceof Error ? ytdlpErr : new Error(String(ytdlpErr));
+    const first =
+      innertubeErr instanceof Error ? innertubeErr : new Error(String(innertubeErr));
+    throw second.message ? second : first;
   }
 }
+
+// ── youtubei.js (innertube) 경로 ────────────────────────────────────────────────
 
 async function extractWithInnertube(
   videoId: string,
@@ -509,7 +579,7 @@ async function extractWithInnertube(
 
       return tempUri;
     } catch (e) {
-      if (e instanceof ExtractRaceCancelledError) {
+      if (e instanceof ExtractAbortedError) {
         if (tempUriForCleanup) {
           await FileSystem.deleteAsync(tempUriForCleanup, { idempotent: true }).catch(() => {});
         }
@@ -552,7 +622,7 @@ async function downloadWithInnertube(
 /** yt-dlp/innertube로 오디오만 추출 (ffmpeg·저장 전) */
 export async function extractYoutubeAudioOnDevice(videoId: string): Promise<{ fileUri: string }> {
   if (Platform.OS === 'android') {
-    return { fileUri: await extractAudioWithFallback(videoId) };
+    return { fileUri: await extractAudioSequentialFallback(videoId) };
   }
   return { fileUri: await extractWithInnertube(videoId) };
 }
@@ -601,7 +671,7 @@ export async function getAudioStreamUrlWithInnertube(
 /**
  * 모바일 오디오 다운로드 진입점.
  *
- * Android: yt-dlp(Chaquopy) 우선 → 실패 시 youtubei.js(innertube) 폴백.
+ * Android: innertube 우선 → 실패·1분 타임아웃 시 yt-dlp(Chaquopy) 폴백.
  * iOS: youtubei.js 경로 (yt-dlp 바이너리 실행 불가).
  */
 export async function downloadYoutubeAudioOnDevice(
@@ -618,10 +688,24 @@ export async function downloadYoutubeAudioOnDevice(
     videoId,
   });
 
-  if (Platform.OS === 'android') {
-    const fileUri = await extractAudioWithFallback(videoId);
-    return tagThenPersist(fileUri, userSuggestedFileName, metadata);
-  }
+  const { applyDownloadExtension, loadDownloadEncodeSettings } =
+    await import('@/lib/nrmDownloadSettings');
+  const encode = await loadDownloadEncodeSettings();
+  const displayLabel = displayLabelFromAudioFileName(
+    applyDownloadExtension(userSuggestedFileName, encode.extension),
+  );
 
-  return downloadWithInnertube(videoId, userSuggestedFileName, metadata);
+  try {
+    if (Platform.OS === 'android') {
+      const fileUri = await extractAudioSequentialFallback(videoId);
+      return tagThenPersist(fileUri, userSuggestedFileName, metadata);
+    }
+
+    return downloadWithInnertube(videoId, userSuggestedFileName, metadata);
+  } catch (e) {
+    const { reportNativeDownloadExtractFailure } =
+      await import('@/lib/nrmDownloadFailureReport');
+    await reportNativeDownloadExtractFailure(videoId, displayLabel, e);
+    throw e;
+  }
 }

@@ -50,6 +50,8 @@ import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDevi
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
+import { NrmMainLogoDisplayNameSettingsPanel } from '@/components/nrm/settings/NrmMainLogoDisplayNameSettingsPanel';
+import { NrmSettingsOptionPicker } from '@/components/nrm/settings/NrmSettingsOptionPicker';
 import { NrmFileLoggingSettingsPanel } from '@/components/nrm/settings/NrmFileLoggingSettingsPanel';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmMainPageSettingsPanel } from '@/components/nrm/settings/NrmMainPageSettingsPanel';
@@ -180,6 +182,7 @@ type Panel =
   | 'downloadLyricsOutputSettings'
   | 'mainPageSettings'
   | 'historyManagementSettings'
+  | 'mainLogoDisplayNameSettings'
   | 'fileLoggingSettings'
   | 'inquirySettings'
   | 'adminPage'
@@ -238,6 +241,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const deeplDrawerDismissRef = useRef<(() => void) | null>(null);
   const lyricsOrderBackHandlerRef = useRef<(() => boolean) | null>(null);
   const lyricsOrderDrawerDismissRef = useRef<(() => void) | null>(null);
+  const mainLogoDisplayNameBackHandlerRef = useRef<(() => boolean) | null>(null);
+  const mainLogoDisplayNameDrawerDismissRef = useRef<(() => void) | null>(null);
   const melonAdultBackHandlerRef = useRef<(() => boolean) | null>(null);
   const melonAdultDrawerDismissRef = useRef<(() => void) | null>(null);
 
@@ -250,6 +255,8 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const registerDeepLDrawerDismiss = useCallback((h: (() => void) | null) => { deeplDrawerDismissRef.current = h; }, []);
   const registerLyricsOrderBackHandler = useCallback((h: (() => boolean) | null) => { lyricsOrderBackHandlerRef.current = h; }, []);
   const registerLyricsOrderDrawerDismiss = useCallback((h: (() => void) | null) => { lyricsOrderDrawerDismissRef.current = h; }, []);
+  const registerMainLogoDisplayNameBackHandler = useCallback((h: (() => boolean) | null) => { mainLogoDisplayNameBackHandlerRef.current = h; }, []);
+  const registerMainLogoDisplayNameDrawerDismiss = useCallback((h: (() => void) | null) => { mainLogoDisplayNameDrawerDismissRef.current = h; }, []);
   const registerMelonAdultBackHandler = useCallback((h: (() => boolean) | null) => { melonAdultBackHandlerRef.current = h; }, []);
   const registerMelonAdultDrawerDismiss = useCallback((h: (() => void) | null) => { melonAdultDrawerDismissRef.current = h; }, []);
 
@@ -589,6 +596,9 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     if (panel === 'lyricsOrderSettings' && lyricsOrderBackHandlerRef.current?.()) {
       return;
     }
+    if (panel === 'mainLogoDisplayNameSettings' && mainLogoDisplayNameBackHandlerRef.current?.()) {
+      return;
+    }
     if (panel === 'melonAdultAuth' && melonAdultBackHandlerRef.current?.()) {
       return;
     }
@@ -617,6 +627,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
       lyricsOrderBackHandlerRef.current = null;
       lyricsOrderDrawerDismissRef.current = null;
     }
+    if (panel !== 'mainLogoDisplayNameSettings') {
+      mainLogoDisplayNameBackHandlerRef.current = null;
+      mainLogoDisplayNameDrawerDismissRef.current = null;
+    }
     if (panel !== 'melonAdultAuth') {
       melonAdultBackHandlerRef.current = null;
       melonAdultDrawerDismissRef.current = null;
@@ -638,6 +652,10 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     }
     if (panel === 'lyricsOrderSettings' && lyricsOrderDrawerDismissRef.current) {
       lyricsOrderDrawerDismissRef.current();
+      return;
+    }
+    if (panel === 'mainLogoDisplayNameSettings' && mainLogoDisplayNameDrawerDismissRef.current) {
+      mainLogoDisplayNameDrawerDismissRef.current();
       return;
     }
     if (panel === 'melonAdultAuth' && melonAdultDrawerDismissRef.current) {
@@ -1118,6 +1136,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => pushPanel('mainLogoDisplayNameSettings')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    앱 이름 변경
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => pushPanel('fileLoggingSettings')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1278,6 +1311,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmWeeklySnapshotSettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1829,7 +1863,25 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <NrmActivityHistorySettingsPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'mainLogoDisplayNameSettings' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={requestDrawerDismiss}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmMainLogoDisplayNameSettingsPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                  onBack={popPanel}
+                  onCloseDrawer={dismissDrawer}
+                  registerBackHandler={registerMainLogoDisplayNameBackHandler}
+                  registerDrawerDismiss={registerMainLogoDisplayNameDrawerDismiss}
                 />
               </NrmAppDrawerShell>
             ) : null}
@@ -1870,6 +1922,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="path"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1884,6 +1937,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="extension"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1898,6 +1952,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="quality"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1912,6 +1967,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="vbr"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1926,6 +1982,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="lossless"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1940,6 +1997,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="filename"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1954,6 +2012,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="metadata"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1968,6 +2027,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="lyricsOutput"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1982,6 +2042,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="lyricsEmbed"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -1996,6 +2057,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   section="lyricsSyncer"
                   titleColor={titleColor}
                   bodyColor={bodyColor}
+                  rowHover={rowHover}
                   onBack={popPanel}
                 />
               </NrmAppDrawerShell>
@@ -2091,35 +2153,23 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 <Text style={[styles.panelTitle, { color: titleColor }]}>
                   검색 설정
                 </Text>
-                {listYoutubeSearchSuffixModes().map((mode) => {
-                  const selected = suffixMode === mode;
-                  return (
-                    <Pressable
-                      key={mode}
-                      onPress={() => {
-                        void setYoutubeSearchSuffixMode(mode).then(() => {
-                          setSuffixMode(mode);
-                        });
-                      }}
-                      style={({ pressed }) => [
-                        styles.optionRow,
-                        selected && styles.optionRowSelected,
-                        pressed && { backgroundColor: rowHover },
-                      ]}>
-                      <Text
-                        style={[styles.optionLabel, { color: titleColor }]}>
-                        {NRM_YOUTUBE_SEARCH_SUFFIX_LABELS[mode]}
-                      </Text>
-                      <Ionicons
-                        name={selected ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={22}
-                        color={
-                          selected ? nrmTokens.color.primary : bodyColor
-                        }
-                      />
-                    </Pressable>
-                  );
-                })}
+                <NrmSettingsOptionPicker
+                  options={listYoutubeSearchSuffixModes().map((mode) => ({
+                    id: mode,
+                    label: NRM_YOUTUBE_SEARCH_SUFFIX_LABELS[mode],
+                  }))}
+                  value={suffixMode}
+                  onChange={(mode) => {
+                    void setYoutubeSearchSuffixMode(
+                      mode as NrmYoutubeSearchSuffixMode,
+                    ).then(() => {
+                      setSuffixMode(mode as NrmYoutubeSearchSuffixMode);
+                    });
+                  }}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  rowHover={rowHover}
+                />
               </NrmAppDrawerShell>
             ) : null}
 

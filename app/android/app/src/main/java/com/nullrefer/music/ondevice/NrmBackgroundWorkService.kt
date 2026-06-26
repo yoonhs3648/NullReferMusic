@@ -54,8 +54,10 @@ class NrmBackgroundWorkService : Service() {
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
-    NrmFileLogger.log("bg-work", "Task removed — stopping background work")
-    NrmBackgroundWorkCoordinator.clearAll(applicationContext, "task_removed")
+    NrmFileLogger.log(
+        "bg-work",
+        "Task removed — foreground UI stopped; in-flight native work keeps tokens until release",
+    )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
       stopForeground(STOP_FOREGROUND_REMOVE)
     } else {

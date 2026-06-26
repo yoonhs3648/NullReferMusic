@@ -26,7 +26,7 @@ import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import {
   buildTrackListSections,
   filterTracksByQuery,
-  resolveSectionIndexForIndexLabel,
+  resolveScrollTargetForIndexLabel,
   sortTracksForList,
   type TrackListIndexLabel,
   type TrackListSection,
@@ -285,39 +285,19 @@ export function NrmTrackMetadataSettingsHome({
 
   const onSelectIndexLabel = useCallback(
     (label: TrackListIndexLabel, animated = true) => {
-      const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
-      if (sectionIndex < 0) return;
+      const location = resolveScrollTargetForIndexLabel(
+        label,
+        sections,
+        listViewportHeightRef.current,
+      );
+      if (!location) return;
 
-      // 해당 섹션 이하 남은 행 수(헤더 1 + 아이템 n) 합산
-      const remainingRows = sections
-        .slice(sectionIndex)
-        .reduce((sum, s) => sum + 1 + s.data.length, 0);
-
-      // 트랙 행 평균 높이(dp)로 남은 콘텐츠 높이 추산
-      const APPROX_ROW_H = 58;
-      const estimatedH = remainingRows * APPROX_ROW_H;
-      const viewportH = listViewportHeightRef.current;
-
-      if (viewportH > 0 && estimatedH < viewportH) {
-        // 남은 콘텐츠가 뷰포트를 채우기 부족 → 빈 공간 방지를 위해 리스트 맨 끝으로 이동
-        const lastSectionIndex = sections.length - 1;
-        const lastSection = sections[lastSectionIndex];
-        if (!lastSection) return;
-        sectionListRef.current?.scrollToLocation({
-          sectionIndex: lastSectionIndex,
-          itemIndex: Math.max(0, lastSection.data.length - 1),
-          animated,
-          viewPosition: 1,
-        });
-      } else {
-        // 충분한 콘텐츠 → 선택 섹션 헤더를 뷰포트 최상단에 고정
-        sectionListRef.current?.scrollToLocation({
-          sectionIndex,
-          itemIndex: 0,
-          animated,
-          viewPosition: 0,
-        });
-      }
+      sectionListRef.current?.scrollToLocation({
+        sectionIndex: location.sectionIndex,
+        itemIndex: location.itemIndex,
+        animated,
+        viewPosition: 0,
+      });
     },
     [sections],
   );

@@ -30,13 +30,18 @@ export function shouldShowVersionInfoSerialNumber(): boolean {
 }
 
 /** 로고 워드마크 — 마지막 단어를 accent 색으로 분리 */
-export function getNrmLogoWordmark(): { primary: string; accent: string } {
-  const parts = NRM_BRAND_DISPLAY_NAME.split(/\s+/).filter(Boolean);
+export function splitNrmLogoWordmark(displayName: string): { primary: string; accent: string } {
+  const normalized = displayName.trim() || NRM_BRAND_DISPLAY_NAME;
+  const parts = normalized.split(/\s+/).filter(Boolean);
   if (parts.length <= 1) {
-    return { primary: NRM_BRAND_DISPLAY_NAME, accent: '' };
+    return { primary: normalized, accent: '' };
   }
   const accent = parts.pop()!;
   return { primary: `${parts.join(' ')} `, accent };
+}
+
+export function getNrmLogoWordmark(): { primary: string; accent: string } {
+  return splitNrmLogoWordmark(NRM_BRAND_DISPLAY_NAME);
 }
 
 export function getNrmFileLogFolderDisplayPath(): string {

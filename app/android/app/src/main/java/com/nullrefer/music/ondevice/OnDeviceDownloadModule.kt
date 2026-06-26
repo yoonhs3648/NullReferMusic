@@ -23,6 +23,8 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = "NrmOnDeviceDownload"
 
+  @Volatile private var activeYtdlpThread: Thread? = null
+
   /** 앱 시작·다운로드 전 ffmpeg+libffmpeg.so 예열 (백그라운드) */
   @ReactMethod
   fun prefetchFfmpeg(promise: Promise) {
@@ -136,6 +138,18 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
 
   // ── 다운로드 ────────────────────────────────────────────────────────────────
   @ReactMethod
+  fun cancelActiveYtdlpDownload(promise: Promise) {
+    val thread = activeYtdlpThread
+    if (thread != null && thread.isAlive) {
+      NrmFileLogger.log("yt-dlp", "cancelActiveYtdlpDownload interrupt thread=${thread.name}")
+      thread.interrupt()
+      promise.resolve(true)
+    } else {
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
   @Suppress("UNUSED_PARAMETER")
   fun downloadAudio(
     url: String,
@@ -145,6 +159,7 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) {
     Thread {
+      activeYtdlpThread = Thread.currentThread()
       var cookieFilePath = ""
       val stageT0 = SystemClock.elapsedRealtime()
       NrmStageLog.log(
@@ -236,6 +251,9 @@ class OnDeviceDownloadModule(reactContext: ReactApplicationContext) :
         NrmFileLogger.error("yt-dlp", "downloadAudio 실패 url=$url", t)
         promise.reject("E_ONDEVICE", t.message ?: t.toString(), t as? Exception)
       } finally {
+        if (activeYtdlpThread === Thread.currentThread()) {
+          activeYtdlpThread = null
+        }
         if (cookieFilePath.isNotBlank()) {
           try { File(cookieFilePath).delete() } catch (_: Exception) {}
         }

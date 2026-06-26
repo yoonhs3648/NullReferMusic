@@ -557,6 +557,34 @@ export function nrmNotifyDownloadWorkEnded(videoId: string): void {
 
 
 
+/** 추출·yt-dlp 타임아웃 등 최종 실패 — 시스템(로컬) 알림 */
+export async function nrmNotifyDownloadFailed(
+  displayLabel: string,
+  videoId?: string,
+): Promise<void> {
+  if (!setupDone) await setupNrmMobileDownloadNotifications();
+
+  const label = displayLabel.trim() || '알 수 없는 트랙';
+  const id = videoId?.trim()
+    ? `nrm-audio-fail-${videoId}`
+    : `nrm-audio-fail-${Date.now()}`;
+
+  await scheduleNotificationAsync({
+    identifier: id,
+    content: {
+      title: `${label} 다운로드에 실패했습니다.`,
+      body: '',
+      data: {},
+      ...(Platform.OS === 'android'
+        ? ({ android: { channelId: CH_AUDIO_COMPLETE } } as object)
+        : {}),
+    },
+    trigger: null,
+  });
+}
+
+
+
 export async function nrmNotifyAttachmentDownloadStarted(fileName: string): Promise<void> {
 
   if (!setupDone) await setupNrmMobileDownloadNotifications();

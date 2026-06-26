@@ -6,8 +6,6 @@ let chain: Promise<unknown> = Promise.resolve();
 
 export function runWhisperTranscribeSerial<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const run = chain.then(async () => {
-    const { waitForDownloadsIdle } = await import('@/lib/nrmDownloadLyricsWorkGate');
-    await waitForDownloadsIdle();
     const { logNrmDev } = await import('@/lib/nrmDevLog');
     logNrmDev('download.whisper', { event: 'serial_gate_start', label });
     try {

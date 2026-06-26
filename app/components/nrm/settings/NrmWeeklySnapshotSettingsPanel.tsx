@@ -2,14 +2,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
-  View,
 } from 'react-native';
 
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
+import { NrmSettingsOptionPicker } from '@/components/nrm/settings/NrmSettingsOptionPicker';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   DEFAULT_WEEKLY_SNAPSHOT_DAY,
@@ -19,11 +18,10 @@ import {
   type WeeklySnapshotDay,
 } from '@/lib/nrmWeeklySnapshotSettings';
 
-const SEGMENT_BORDER_WIDTH = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
-
 type Props = {
   titleColor: string;
   bodyColor: string;
+  rowHover: string;
   onBack: () => void;
 };
 
@@ -43,6 +41,7 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
 export function NrmWeeklySnapshotSettingsPanel({
   titleColor,
   bodyColor,
+  rowHover,
   onBack,
 }: Props) {
   const [selected, setSelected] = useState<WeeklySnapshotDay>(DEFAULT_WEEKLY_SNAPSHOT_DAY);
@@ -62,16 +61,19 @@ export function NrmWeeklySnapshotSettingsPanel({
     };
   }, []);
 
-  const persist = useCallback(async (day: WeeklySnapshotDay) => {
-    if (day === selected) return;
-    setSaving(true);
-    try {
-      await saveWeeklySnapshotDay(day);
-      setSelected(day);
-    } finally {
-      setSaving(false);
-    }
-  }, [selected]);
+  const persist = useCallback(
+    async (day: WeeklySnapshotDay) => {
+      if (saving || day === selected) return;
+      setSaving(true);
+      try {
+        await saveWeeklySnapshotDay(day);
+        setSelected(day);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [saving, selected],
+  );
 
   return (
     <NrmMenuDrawerScroll>
@@ -84,38 +86,17 @@ export function NrmWeeklySnapshotSettingsPanel({
       {loading ? (
         <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
       ) : (
-        <View
-          style={styles.dayRow}
-          accessibilityRole="radiogroup"
-          accessibilityLabel="주간차트 스냅샷 요일">
-          {WEEKLY_SNAPSHOT_DAY_OPTIONS.map((opt) => {
-            const active = selected === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                disabled={saving}
-                onPress={() => void persist(opt.value)}
-                style={({ pressed }) => [
-                  styles.dayBubble,
-                  { borderColor: active ? nrmTokens.color.primary : 'rgba(128,128,128,0.35)' },
-                  active && styles.dayBubbleActive,
-                  pressed && !active && styles.dayBubblePressed,
-                  saving && { opacity: 0.5 },
-                ]}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled: saving }}>
-                <Text
-                  style={[
-                    styles.dayBubbleLabel,
-                    { color: active ? '#ffffff' : bodyColor },
-                    active && styles.dayBubbleLabelActive,
-                  ]}>
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <NrmSettingsOptionPicker
+          options={WEEKLY_SNAPSHOT_DAY_OPTIONS.map((opt) => ({
+            id: String(opt.value),
+            label: opt.label,
+          }))}
+          value={String(selected)}
+          onChange={(id) => void persist(Number(id) as WeeklySnapshotDay)}
+          titleColor={titleColor}
+          bodyColor={bodyColor}
+          rowHover={rowHover}
+        />
       )}
     </NrmMenuDrawerScroll>
   );
@@ -144,32 +125,4 @@ const styles = StyleSheet.create({
     marginBottom: nrmTokens.space.lg,
   },
   loader: { marginVertical: nrmTokens.space.xl },
-  dayRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: nrmTokens.space.xxs,
-  },
-  dayBubble: {
-    flex: 1,
-    aspectRatio: 1,
-    borderRadius: nrmTokens.radius.pill,
-    borderWidth: SEGMENT_BORDER_WIDTH,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  dayBubbleActive: {
-    backgroundColor: nrmTokens.color.primary,
-  },
-  dayBubblePressed: {
-    backgroundColor: 'rgba(128,128,128,0.12)',
-  },
-  dayBubbleLabel: {
-    fontSize: nrmTokens.font.body,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  dayBubbleLabelActive: {
-    fontWeight: '700',
-  },
 });

@@ -2,8 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { NrmDownloadEncodeOptionPicker } from '@/components/nrm/settings/NrmDownloadEncodeOptionPicker';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
+import { NrmSettingsOptionPicker } from '@/components/nrm/settings/NrmSettingsOptionPicker';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { invalidateActivityHistoryCache } from '@/lib/nrmActivityHistory';
 import {
@@ -19,6 +19,7 @@ import {
 type Props = {
   titleColor: string;
   bodyColor: string;
+  rowHover: string;
   onBack: () => void;
 };
 
@@ -35,7 +36,12 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
-export function NrmActivityHistorySettingsPanel({ titleColor, bodyColor, onBack }: Props) {
+export function NrmActivityHistorySettingsPanel({
+  titleColor,
+  bodyColor,
+  rowHover,
+  onBack,
+}: Props) {
   const [displayDays, setDisplayDays] = useState<NrmActivityHistoryDisplayDays>(
     DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS,
   );
@@ -64,12 +70,16 @@ export function NrmActivityHistorySettingsPanel({ titleColor, bodyColor, onBack 
       <Text style={[styles.hint, { color: bodyColor }]}>
         다운로드 및 가사생성 내역을 저장합니다.
       </Text>
-      <NrmDownloadEncodeOptionPicker
-        options={NRM_ACTIVITY_HISTORY_DISPLAY_OPTIONS}
+      <NrmSettingsOptionPicker
+        options={NRM_ACTIVITY_HISTORY_DISPLAY_OPTIONS.map((opt) => ({
+          id: opt.id,
+          label: opt.label,
+        }))}
         value={displayDays}
         onChange={onSelect}
         titleColor={titleColor}
         bodyColor={bodyColor}
+        rowHover={rowHover}
       />
     </NrmMenuDrawerScroll>
   );

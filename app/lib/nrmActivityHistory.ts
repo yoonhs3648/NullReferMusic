@@ -10,6 +10,7 @@ import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 
 export type NrmActivityHistoryKind =
   | 'download'
+  | 'download_fail'
   | 'lyrics'
   | 'lyrics_translation'
   | 'metadata_edit'
@@ -101,6 +102,8 @@ export function formatActivityHistoryLabel(entry: NrmActivityHistoryEntry): stri
   switch (entry.kind) {
     case 'download':
       return `${base} 저장`;
+    case 'download_fail':
+      return `${base} 다운로드 실패`;
     case 'lyrics_translation':
       return `${base} 가사 생성(번역지원)`;
     case 'metadata_edit':
@@ -129,6 +132,70 @@ export function formatActivityHistoryTime(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** yyyy-MM-dd → 오늘·어제·6월 26일·2025년 6월 26일 */
+export function formatActivityHistoryDateTitle(dateKey: string): string {
+  const parts = dateKey.split('-').map((v) => Number(v));
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  if (!y || !m || !d) return dateKey;
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const sectionStart = new Date(y, m - 1, d);
+  const diffDays = Math.round((todayStart.getTime() - sectionStart.getTime()) / 86400000);
+
+  if (diffDays === 0) return '오늘';
+  if (diffDays === 1) return '어제';
+  if (y === now.getFullYear()) return `${m}월 ${d}일`;
+  return `${y}년 ${m}월 ${d}일`;
+}
+
+export function formatActivityHistoryTrackLabel(entry: NrmActivityHistoryEntry): string {
+  return historyTrackLabel(entry.fileName);
+}
+
+/** 삭제·다운로드 실패 등 — 파일을 열 수 없는 기록 (History에서 탭 비활성) */
+export function activityHistoryEntryOpensTrack(entry: NrmActivityHistoryEntry): boolean {
+  switch (entry.kind) {
+    case 'download_fail':
+    case 'track_remove':
+      return false;
+    default:
+      return true;
+  }
+}
+
+export type NrmActivityHistoryKindBadge = {
+  label: string;
+  tone: 'primary' | 'success' | 'neutral' | 'warning' | 'danger';
+};
+
+export function activityHistoryKindBadge(kind: NrmActivityHistoryKind): NrmActivityHistoryKindBadge {
+  switch (kind) {
+    case 'download':
+      return { label: '저장', tone: 'success' };
+    case 'download_fail':
+      return { label: '실패', tone: 'danger' };
+    case 'lyrics':
+      return { label: '가사', tone: 'primary' };
+    case 'lyrics_translation':
+      return { label: '가사·번역', tone: 'primary' };
+    case 'metadata_edit':
+      return { label: '메타', tone: 'neutral' };
+    case 'lyrics_remove':
+      return { label: '가사 제거', tone: 'warning' };
+    case 'lyrics_add_translation':
+      return { label: '번역 추가', tone: 'primary' };
+    case 'lyrics_remove_translation':
+      return { label: '번역 제거', tone: 'warning' };
+    case 'track_remove':
+      return { label: '제거', tone: 'danger' };
+    default:
+      return { label: '기록', tone: 'neutral' };
+  }
 }
 
 export function groupActivityHistoryByDate(

@@ -79,3 +79,5 @@ export async function getAudioStreamUrlWithInnertube(
   const m = await import('./nrmInnertubeYoutube.native');
   return m.getAudioStreamUrlWithInnertube(videoId);
 }
+
+export { YtdlpExtractTimeoutError } from './nrmInnertubeYoutube.native';

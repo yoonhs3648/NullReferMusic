@@ -48,8 +48,8 @@ import {
   cleanupAudioExtraction,
   finalizeAudioDownloadParallel,
   startAudioExtraction,
-  type AudioExtractionResult,
 } from '@/lib/nrmDownloadPipeline';
+import { scheduleNativeDownloadJob } from '@/lib/nrmNativeDownloadOrchestrator';
 import { loadDownloadMetadataMode } from '@/lib/nrmDownloadSettings';
 import {
   DownloadMetadataAuthInterruptedError,
@@ -242,9 +242,7 @@ export function NrmYoutubeHome({
   const latestSearchTokenRef = useRef(0);
 
   type DownloadSession = {
-    extractionPromise: Promise<AudioExtractionResult>;
     aborted: boolean;
-    extractionError: unknown | null;
   };
   const downloadSessionsRef = useRef<Map<string, DownloadSession>>(new Map());
   const melonChartMetaCacheRef = useRef<{
@@ -497,19 +495,6 @@ export function NrmYoutubeHome({
     });
   }, []);
 
-  const cleanupSessionExtraction = useCallback(async (videoId: string) => {
-    const session = downloadSessionsRef.current.get(videoId);
-    if (!session) return;
-    try {
-      const extraction = await session.extractionPromise;
-      if (session.aborted) {
-        await cleanupAudioExtraction(extraction);
-      }
-    } catch {
-      /* 추출 실패·중단 시 임시 파일 없을 수 있음 */
-    }
-  }, []);
-
   const abortMetadataPrefetch = useCallback(
     (videoId: string, options?: { showUnavailableOverlay?: boolean }) => {
       const session = downloadSessionsRef.current.get(videoId);
@@ -517,7 +502,7 @@ export function NrmYoutubeHome({
         session.aborted = true;
         void import('@/lib/nrmDownloadLyricsWorkGate')
           .then((m) => m.registerDownloadPipelineEnd(videoId, 'abort_prefetch'))
-          .finally(() => cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId)));
+          .finally(() => clearDownloadSession(videoId));
       } else {
         clearDownloadSession(videoId);
       }
@@ -525,7 +510,7 @@ export function NrmYoutubeHome({
         setMetadataUnavailableOpen(true);
       }
     },
-    [cleanupSessionExtraction, clearDownloadSession],
+    [clearDownloadSession],
   );
 
   const handleMetadataPrefetchError = useCallback(
@@ -572,56 +557,45 @@ export function NrmYoutubeHome({
     return true;
   }, []);
 
-  const handleExtractionFailure = useCallback(
-    (videoId: string, e: unknown) => {
-      logNrmRunError('download.extract', e, { videoId });
-      notifyUser(mapDownloadUserMessage(e));
-      setDownloadModalItem((cur) => (cur?.videoId === videoId ? null : cur));
-      setDownloadModalInitialFields(undefined);
-      void import('@/lib/nrmDownloadLyricsWorkGate').then((m) =>
-        m.registerDownloadPipelineEnd(videoId, 'extract_fail'),
-      );
-      clearDownloadSession(videoId);
-    },
-    [clearDownloadSession],
-  );
-
-  const beginParallelExtraction = useCallback(
-    (videoId: string) => {
-      void import('@/lib/nrmDownloadLyricsWorkGate').then((m) =>
-        m.registerDownloadPipelineStart(videoId),
-      );
-      const session: DownloadSession = {
-        extractionPromise: startAudioExtraction(videoId),
-        aborted: false,
-        extractionError: null,
-      };
-      downloadSessionsRef.current.set(videoId, session);
-      void session.extractionPromise.catch((e) => {
-        const current = downloadSessionsRef.current.get(videoId);
-        if (!current || current.aborted || current !== session) return;
-        session.extractionError = e;
-        handleExtractionFailure(videoId, e);
+  const applyLyricsWarningsToUi = useCallback((out: { lyricsWarning?: string }) => {
+    if (out.lyricsWarning === 'not_embedded') {
+      void nrmDeferUiWork().then(() => {
+        if (!mountedRef.current) return;
+        setLyricsEmbedUnavailableOpen(true);
       });
-      return session.extractionPromise;
-    },
-    [handleExtractionFailure],
-  );
+    } else if (out.lyricsWarning === 'translation_exhausted') {
+      void nrmDeferUiWork().then(() => {
+        if (!mountedRef.current) return;
+        setLyricsTranslationExhausted(true);
+        setLyricsTranslationFailedOpen(true);
+      });
+    } else if (out.lyricsWarning === 'translation_failed') {
+      void nrmDeferUiWork().then(() => {
+        if (!mountedRef.current) return;
+        setLyricsTranslationExhausted(false);
+        setLyricsTranslationFailedOpen(true);
+      });
+    } else if (out.lyricsWarning === 'memory_insufficient') {
+      void nrmDeferUiWork().then(() => {
+        if (!mountedRef.current) return;
+        notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
+      });
+    } else if (out.lyricsWarning === 'melon_align_failed') {
+      void nrmDeferUiWork().then(() => {
+        if (!mountedRef.current) return;
+        notifyUser('멜론가사 생성에 실패했습니다.');
+      });
+    }
+  }, []);
 
-  const completeDownloadAfterExtraction = useCallback(
+  const runDownloadJob = useCallback(
     async (
       videoId: string,
       fileName: string,
       metadata: NrmAudioFileMetadata | undefined,
-      _options?: {},
     ) => {
       const session = downloadSessionsRef.current.get(videoId);
-      if (!session || session.aborted) {
-        return;
-      }
-      if (session.extractionError) {
-        throw session.extractionError;
-      }
+      if (!session || session.aborted) return;
 
       const { applyDownloadExtension, loadDownloadEncodeSettings } =
         await import('@/lib/nrmDownloadSettings');
@@ -629,9 +603,51 @@ export function NrmYoutubeHome({
       const safeName = applyDownloadExtension(fileName, encode.extension);
       const displayLabel = displayLabelFromAudioFileName(safeName);
 
-      // 다운로드 시작 알림 (중복 설정 로드 없이 여기서 한 번만)
+      if (metadata) {
+        void import('@/lib/nrmLyricsPipelinePreload').then((m) =>
+          m.startLyricsPipelinePreload(metadata),
+        );
+      }
+
+      const isAborted = () => downloadSessionsRef.current.get(videoId)?.aborted ?? false;
+
       if (Platform.OS !== 'web') {
         nrmNotifyDownloadStarted(videoId, displayLabel);
+        try {
+          const out = await scheduleNativeDownloadJob({
+            videoId,
+            fileName,
+            metadata,
+            isAborted,
+            options: {
+              onAudioPersisted: () => {
+                nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
+                nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
+              },
+              onLyricsStageStarted: () => {
+                nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
+                nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
+              },
+              onLyricsStageEnded: () => {
+                nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+                nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
+              },
+              onLyricsPersisted: () => {
+                nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
+              },
+            },
+          });
+          applyLyricsWarningsToUi(out);
+        } catch (e) {
+          if (!isAborted()) {
+            logNrmRunError('download.native', e, {
+              videoId,
+              stage: parseDownloadStage(e),
+            });
+          }
+          throw e;
+        }
+        return;
       }
 
       let pipelineEnded = false;
@@ -643,119 +659,42 @@ export function NrmYoutubeHome({
       };
 
       try {
-        if (metadata) {
-          void import('@/lib/nrmLyricsPipelinePreload').then((m) =>
-            m.startLyricsPipelinePreload(metadata),
-          );
+        const { registerDownloadPipelineStart } = await import('@/lib/nrmDownloadLyricsWorkGate');
+        registerDownloadPipelineStart(videoId);
+        const extraction = await startAudioExtraction(videoId);
+        if (isAborted()) {
+          await cleanupAudioExtraction(extraction);
+          return;
         }
-        const extraction = await session.extractionPromise;
-        if (session.aborted) return;
-        const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata, {
-          onAudioPersisted:
-            Platform.OS !== 'web'
-              ? () => {
-                  void endDownloadPipeline('audio_persisted');
-                  nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
-                  // 오디오 저장 완료 후 dl 토큰 해제 — 가사(Whisper/멜론)는 별도 native 토큰
-                  nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
-                }
-              : undefined,
-          onLyricsStageStarted:
-            Platform.OS !== 'web'
-              ? () => {
-                  nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
-                  nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
-                }
-              : undefined,
-          onLyricsStageEnded:
-            Platform.OS !== 'web'
-              ? () => {
-                  nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
-                  nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
-                }
-              : undefined,
-          onLyricsPersisted:
-            Platform.OS !== 'web'
-              ? () => {
-                  nrmNotifyDownloadFinished(
-                    videoId,
-                    displayLabel,
-                    true,
-                    'lyrics',
-                  );
-                }
-              : undefined,
-        });
-        if (out.lyricsWarning === 'not_embedded') {
-          void nrmDeferUiWork().then(() => {
-            if (!mountedRef.current) return;
-            setLyricsEmbedUnavailableOpen(true);
-          });
-        } else if (out.lyricsWarning === 'translation_exhausted') {
-          void nrmDeferUiWork().then(() => {
-            if (!mountedRef.current) return;
-            setLyricsTranslationExhausted(true);
-            setLyricsTranslationFailedOpen(true);
-          });
-        } else if (out.lyricsWarning === 'translation_failed') {
-          void nrmDeferUiWork().then(() => {
-            if (!mountedRef.current) return;
-            setLyricsTranslationExhausted(false);
-            setLyricsTranslationFailedOpen(true);
-          });
-        } else if (out.lyricsWarning === 'memory_insufficient') {
-          void nrmDeferUiWork().then(() => {
-            if (!mountedRef.current) return;
-            notifyUser('메모리가 부족합니다. 가사생성을 중지합니다.');
-          });
-        } else if (out.lyricsWarning === 'melon_align_failed') {
-          void nrmDeferUiWork().then(() => {
-            if (!mountedRef.current) return;
-            notifyUser('멜론가사 생성에 실패했습니다.');
-          });
-        }
+        const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata);
+        applyLyricsWarningsToUi(out);
       } catch (e) {
-        if (Platform.OS !== 'web') {
-          nrmNotifyDownloadFinished(videoId, displayLabel, false, 'audio');
-          logNrmRunError('download.native', e, {
-            videoId,
-            stage: parseDownloadStage(e),
-          });
-          notifyUser(mapDownloadUserMessage(e));
-        } else {
-          logNrmRunError('download.web', e, { videoId });
-          notifyUser(mapDownloadUserMessage(e));
-        }
+        logNrmRunError('download.web', e, { videoId });
+        notifyUser(mapDownloadUserMessage(e));
         throw e;
       } finally {
         await endDownloadPipeline('finalize_done');
       }
     },
-    [],
+    [applyLyricsWarningsToUi],
   );
 
   const handleModalConfirm = useCallback(
     (videoId: string, fileName: string, metadata: NrmAudioFileMetadata) => {
       const normalized = normalizeDownloadMetadata(metadata);
 
-      // 모달 닫기는 즉시 — UI 커밋·애니메이션이 끝난 후 추출 시작
       setDownloadModalItem(null);
       setDownloadModalInitialFields(undefined);
 
       void nrmDeferUiWork().then(() => {
         if (!mountedRef.current) return;
-        const session: DownloadSession = {
-          extractionPromise: beginParallelExtraction(videoId),
-          aborted: false,
-          extractionError: null,
-        };
-        downloadSessionsRef.current.set(videoId, session);
+        downloadSessionsRef.current.set(videoId, { aborted: false });
 
         void (async () => {
           try {
-            await completeDownloadAfterExtraction(videoId, fileName, normalized);
+            await runDownloadJob(videoId, fileName, normalized);
           } catch {
-            /* notifyUser / overlays inside completeDownloadAfterExtraction */
+            /* notifyUser / failure report inside runDownloadJob */
           } finally {
             if (Platform.OS !== 'web') {
               nrmNotifyDownloadWorkEnded(videoId);
@@ -765,7 +704,7 @@ export function NrmYoutubeHome({
         })();
       });
     },
-    [beginParallelExtraction, clearDownloadSession, completeDownloadAfterExtraction],
+    [clearDownloadSession, runDownloadJob],
   );
 
   const handleModalClose = useCallback(() => {
@@ -778,11 +717,11 @@ export function NrmYoutubeHome({
       session.aborted = true;
       void import('@/lib/nrmDownloadLyricsWorkGate')
         .then((m) => m.registerDownloadPipelineEnd(videoId, 'modal_close'))
-        .finally(() => cleanupSessionExtraction(videoId).finally(() => clearDownloadSession(videoId)));
+        .finally(() => clearDownloadSession(videoId));
       return;
     }
     clearDownloadSession(videoId);
-  }, [cleanupSessionExtraction, clearDownloadSession, downloadModalItem?.videoId]);
+  }, [clearDownloadSession, downloadModalItem?.videoId]);
 
   const startDownloadForItem = useCallback(
     async (item: YoutubeSearchItem) => {
@@ -834,8 +773,8 @@ export function NrmYoutubeHome({
       }
 
       try {
+        downloadSessionsRef.current.set(videoId, { aborted: false });
         if (mode === 'auto') {
-          beginParallelExtraction(videoId);
           const [metadata, fileName] = await Promise.all([
             resolveAutoDownloadMetadataWithAuth(
               item,
@@ -848,9 +787,9 @@ export function NrmYoutubeHome({
             if (!mountedRef.current) return;
             void (async () => {
               try {
-                await completeDownloadAfterExtraction(videoId, fileName, metadata);
+                await runDownloadJob(videoId, fileName, metadata);
               } catch {
-                /* notifyUser / overlays inside completeDownloadAfterExtraction */
+                /* notifyUser inside runDownloadJob */
               } finally {
                 if (Platform.OS !== 'web') {
                   nrmNotifyDownloadWorkEnded(videoId);
@@ -861,14 +800,13 @@ export function NrmYoutubeHome({
           });
         } else {
           const fileName = await resolveDownloadFileName(item, metadataContext);
-          beginParallelExtraction(videoId);
           void nrmDeferUiWork().then(() => {
             if (!mountedRef.current) return;
             void (async () => {
               try {
-                await completeDownloadAfterExtraction(videoId, fileName, undefined);
+                await runDownloadJob(videoId, fileName, undefined);
               } catch {
-                /* notifyUser / overlays inside completeDownloadAfterExtraction */
+                /* notifyUser inside runDownloadJob */
               } finally {
                 if (Platform.OS !== 'web') {
                   nrmNotifyDownloadWorkEnded(videoId);
@@ -889,9 +827,8 @@ export function NrmYoutubeHome({
       }
     },
     [
-      beginParallelExtraction,
       clearDownloadSession,
-      completeDownloadAfterExtraction,
+      runDownloadJob,
       downloadMetadataAuth,
       effectiveChartSource,
       effectiveChartTrack,

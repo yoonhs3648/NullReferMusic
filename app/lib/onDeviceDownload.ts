@@ -14,6 +14,7 @@ type NativeOnDevice = {
     audioFormat: string,
     audioQuality: number,
   ) => Promise<{ path: string; message?: string }>;
+  cancelActiveYtdlpDownload?: () => Promise<boolean>;
   transcodeAudio?: (
     inputPath: string,
     audioFormat: string,
@@ -58,6 +59,18 @@ export async function downloadOnDevice(
     options.audioFormat,
     options.audioQuality,
   );
+}
+
+/** innertube 타임아웃 시 진행 중 yt-dlp(Chaquopy) 스레드 중단 */
+export async function cancelActiveYtdlpDownload(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const mod = NativeModules.NrmOnDeviceDownload as NativeOnDevice | undefined;
+  if (!mod?.cancelActiveYtdlpDownload) return;
+  try {
+    await mod.cancelActiveYtdlpDownload();
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function copyLocalFileToSaf(

@@ -144,7 +144,7 @@ async function copyLocalFileToSafDocument(
   sourceUri: string,
   destUri: string,
 ): Promise<void> {
-  await nrmYieldToEventLoop();
+  await nrmYieldToEventLoop({ critical: true });
   await copyLocalFileToExistingSaf(sourceUri, destUri);
 }
 
@@ -211,7 +211,7 @@ async function copyAudioToSafWithRetry(
   let lastErr: unknown;
   for (let attempt = 1; attempt <= SAF_COPY_MAX_ATTEMPTS; attempt++) {
     try {
-      await nrmYieldToEventLoop();
+      await nrmYieldToEventLoop({ critical: true });
       const destUri = await copyLocalFileToSaf(srcPath, dirUri, fileName, mimeType);
       const persistMs = Date.now() - t0;
       logDownloadStage('persist', 'saf_copy_ok', {
@@ -233,7 +233,7 @@ async function copyAudioToSafWithRetry(
       }
     }
   }
-  await nrmYieldToEventLoop();
+  await nrmYieldToEventLoop({ critical: true });
   const destUri = await StorageAccessFramework.createFileAsync(dirUri, fileName, mimeType);
   try {
     await copyLocalFileToSafDocument(srcPath, destUri);
@@ -738,7 +738,7 @@ export async function persistLocalAudioFile(
     (await FileSystem.getInfoAsync(lrcUri).then((x) => !!x.exists).catch(() => false));
   const lrcToPersist = sidecarExists ? lrcUri : undefined;
   try {
-    await nrmYieldToEventLoop();
+    await nrmYieldToEventLoop({ critical: true });
     if (Platform.OS === 'ios') {
       const docRoot = FileSystem.documentDirectory;
       if (!docRoot) throw new Error('이 기기에서 문서 저장 공간을 사용할 수 없습니다.');
