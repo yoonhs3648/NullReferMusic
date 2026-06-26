@@ -3,7 +3,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  type LayoutChangeEvent,
   Platform,
   Pressable,
   SectionList,
@@ -26,7 +25,7 @@ import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import {
   buildTrackListSections,
   filterTracksByQuery,
-  resolveScrollTargetForIndexLabel,
+  resolveSectionIndexForIndexLabel,
   sortTracksForList,
   type TrackListIndexLabel,
   type TrackListSection,
@@ -157,7 +156,12 @@ export function NrmTrackMetadataSettingsHome({
 }: Props) {
   const row = nrmChartTrackListStyles;
   const sectionListRef = useRef<SectionList<NrmDownloadTrackItem, TrackListSection>>(null);
-  const listViewportHeightRef = useRef(0);
+  const pendingScrollTargetRef = useRef<{
+    sectionIndex: number;
+    itemIndex: number;
+    animated: boolean;
+    retryCount: number;
+  } | null>(null);
   const searchInputRef = useRef<TextInput>(null);
 
   const [loading, setLoading] = useState(true);
@@ -283,23 +287,23 @@ export function NrmTrackMetadataSettingsHome({
     setSearchQuery('');
   }, []);
 
+  const scrollToSectionStart = useCallback((sectionIndex: number, animated: boolean) => {
+    pendingScrollTargetRef.current = { sectionIndex, itemIndex: 0, animated, retryCount: 0 };
+    sectionListRef.current?.scrollToLocation({
+      sectionIndex,
+      itemIndex: 0,
+      animated,
+      viewPosition: 0,
+    });
+  }, []);
+
   const onSelectIndexLabel = useCallback(
     (label: TrackListIndexLabel, animated = true) => {
-      const location = resolveScrollTargetForIndexLabel(
-        label,
-        sections,
-        listViewportHeightRef.current,
-      );
-      if (!location) return;
-
-      sectionListRef.current?.scrollToLocation({
-        sectionIndex: location.sectionIndex,
-        itemIndex: location.itemIndex,
-        animated,
-        viewPosition: 0,
-      });
+      const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
+      if (sectionIndex < 0) return;
+      scrollToSectionStart(sectionIndex, animated);
     },
-    [sections],
+    [scrollToSectionStart, sections],
   );
 
   const openEditor = useCallback(async (track: NrmDownloadTrackItem) => {
@@ -457,19 +461,35 @@ export function NrmTrackMetadataSettingsHome({
     [bodyColor, sectionHeaderBg],
   );
 
-  const onListLayout = useCallback((e: LayoutChangeEvent) => {
-    listViewportHeightRef.current = e.nativeEvent.layout.height;
-  }, []);
+  const onScrollToIndexFailed = useCallback(
+    (info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
+      const pending = pendingScrollTargetRef.current;
+      if (!pending) return;
 
-  const onScrollToIndexFailed = useCallback(() => {
-    setTimeout(() => {
-      sectionListRef.current?.scrollToLocation({
-        sectionIndex: 0,
-        itemIndex: 0,
-        animated: false,
-      });
-    }, 100);
-  }, []);
+      const nextRetryCount = pending.retryCount + 1;
+      if (nextRetryCount > 8) {
+        pendingScrollTargetRef.current = null;
+        return;
+      }
+
+      pendingScrollTargetRef.current = { ...pending, retryCount: nextRetryCount };
+
+      const offset = Math.max(0, info.averageItemLength * info.highestMeasuredFrameIndex);
+      sectionListRef.current?.getScrollResponder()?.scrollTo({ y: offset, animated: false });
+
+      setTimeout(() => {
+        const target = pendingScrollTargetRef.current;
+        if (!target) return;
+        sectionListRef.current?.scrollToLocation({
+          sectionIndex: target.sectionIndex,
+          itemIndex: target.itemIndex,
+          animated: target.animated,
+          viewPosition: 0,
+        });
+      }, 100);
+    },
+    [],
+  );
 
   const listEmpty = loading ? (
     <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
@@ -563,7 +583,6 @@ export function NrmTrackMetadataSettingsHome({
               stickySectionHeadersEnabled
               viewabilityConfig={viewabilityConfig}
               onViewableItemsChanged={onSectionViewableItemsChanged}
-              onLayout={onListLayout}
               onScrollToIndexFailed={onScrollToIndexFailed}
               initialNumToRender={15}
               maxToRenderPerBatch={10}

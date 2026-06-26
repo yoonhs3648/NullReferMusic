@@ -5,6 +5,8 @@ import { NRM_BRAND_DISPLAY_NAME } from '@/lib/nrmAppBrand';
 
 const STORAGE_KEY = 'nrm_main_logo_display_name_v1';
 
+export const NRM_MAIN_LOGO_DISPLAY_NAME_MAX_LENGTH = 50;
+
 type MainLogoDisplayNameListener = (effectiveName: string) => void;
 
 let mainLogoDisplayNameListener: MainLogoDisplayNameListener | null = null;
@@ -29,8 +31,22 @@ export async function loadEffectiveMainLogoDisplayName(): Promise<string> {
   return override ?? NRM_BRAND_DISPLAY_NAME;
 }
 
+export function validateMainLogoDisplayNameInput(name: string): string | null {
+  if (name.length > NRM_MAIN_LOGO_DISPLAY_NAME_MAX_LENGTH) {
+    return '앱이름이 너무 길어요';
+  }
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return '앱 이름을 입력해 주세요.';
+  }
+  return null;
+}
+
 export async function saveMainLogoDisplayNameOverride(name: string | null): Promise<void> {
   const trimmed = name?.trim() ?? '';
+  if (trimmed.length > NRM_MAIN_LOGO_DISPLAY_NAME_MAX_LENGTH) {
+    throw new Error('앱이름이 너무 길어요');
+  }
   if (!trimmed || trimmed === NRM_BRAND_DISPLAY_NAME) {
     await AsyncStorage.removeItem(STORAGE_KEY);
     notifyMainLogoDisplayNameChanged(NRM_BRAND_DISPLAY_NAME);

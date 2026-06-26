@@ -2,10 +2,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Platform,
   Pressable,
   RefreshControl,
+  SectionList,
   StyleSheet,
   Text,
   View,
@@ -15,16 +15,14 @@ import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   activityHistoryEntryOpensTrack,
-  activityHistoryKindBadge,
   formatActivityHistoryDateTitle,
+  formatActivityHistoryLabel,
   formatActivityHistoryTime,
-  formatActivityHistoryTrackLabel,
   groupActivityHistoryByDate,
   invalidateActivityHistoryCache,
   peekActivityHistoryForDisplay,
   registerActivityHistoryRevisionListener,
   type NrmActivityHistoryEntry,
-  type NrmActivityHistoryKindBadge,
 } from '@/lib/nrmActivityHistory';
 import {
   registerActivityHistoryDisplayListener,
@@ -60,10 +58,11 @@ type Props = {
   isDark: boolean;
 };
 
-type HistoryDateBlock = {
+type HistorySection = {
   dateKey: string;
   title: string;
-  entries: NrmActivityHistoryEntry[];
+  entryCount: number;
+  data: NrmActivityHistoryEntry[];
 };
 
 function stemOf(fileName: string): string {
@@ -78,176 +77,6 @@ function fakeYoutubeItem(track: NrmDownloadTrackItem): YoutubeSearchItem {
     channelTitle: '',
     thumbnailUrl: '',
   };
-}
-
-function badgeColors(
-  tone: NrmActivityHistoryKindBadge['tone'],
-  isDark: boolean,
-): { bg: string; fg: string } {
-  switch (tone) {
-    case 'success':
-      return isDark
-        ? { bg: 'rgba(110,207,138,0.22)', fg: '#6ecf8e' }
-        : { bg: 'rgba(46,160,87,0.12)', fg: nrmTokens.color.success };
-    case 'primary':
-      return isDark
-        ? { bg: 'rgba(0,102,204,0.22)', fg: nrmTokens.color.primaryOnDark }
-        : { bg: nrmTokens.color.accentSoft, fg: nrmTokens.color.primary };
-    case 'warning':
-      return isDark
-        ? { bg: 'rgba(255,180,80,0.18)', fg: '#e8a84a' }
-        : { bg: 'rgba(230,140,40,0.12)', fg: '#c27800' };
-    case 'danger':
-      return isDark
-        ? { bg: 'rgba(215,0,21,0.2)', fg: '#ff6b7a' }
-        : { bg: 'rgba(215,0,21,0.1)', fg: nrmTokens.color.danger };
-    case 'neutral':
-    default:
-      return isDark
-        ? { bg: 'rgba(255,255,255,0.08)', fg: nrmTokens.color.textMuted }
-        : { bg: 'rgba(0,0,0,0.06)', fg: nrmTokens.color.inkMuted80 };
-  }
-}
-
-type HistoryEntryRowProps = {
-  entry: NrmActivityHistoryEntry;
-  isDark: boolean;
-  titleColor: string;
-  bodyColor: string;
-  hairline: string;
-  onPress: (entry: NrmActivityHistoryEntry) => void;
-  isLast: boolean;
-};
-
-function HistoryEntryRow({
-  entry,
-  isDark,
-  titleColor,
-  bodyColor,
-  hairline,
-  onPress,
-  isLast,
-}: HistoryEntryRowProps) {
-  const badge = activityHistoryKindBadge(entry.kind);
-  const badgeStyle = badgeColors(badge.tone, isDark);
-  const trackLabel = formatActivityHistoryTrackLabel(entry);
-  const pressable = activityHistoryEntryOpensTrack(entry);
-  const rowStyle = [
-    styles.entryRow,
-    !isLast && { borderBottomColor: hairline, borderBottomWidth: StyleSheet.hairlineWidth },
-    !pressable && styles.entryRowStatic,
-  ];
-
-  const content = (
-    <>
-      <View style={[styles.kindBadge, { backgroundColor: badgeStyle.bg }]}>
-        <Text style={[styles.kindBadgeText, { color: badgeStyle.fg }]} numberOfLines={1}>
-          {badge.label}
-        </Text>
-      </View>
-      <Text
-        style={[
-          styles.entryTitle,
-          { color: pressable ? titleColor : bodyColor },
-        ]}
-        numberOfLines={2}>
-        {trackLabel}
-      </Text>
-      <Text style={[styles.entryTime, { color: bodyColor }]}>
-        {formatActivityHistoryTime(entry.createdAt)}
-      </Text>
-    </>
-  );
-
-  if (!pressable) {
-    return (
-      <View style={rowStyle} accessibilityRole="text">
-        {content}
-      </View>
-    );
-  }
-
-  return (
-    <Pressable
-      onPress={() => onPress(entry)}
-      style={({ pressed }) => [rowStyle, pressed && styles.entryRowPressed]}
-      accessibilityRole="button">
-      {content}
-    </Pressable>
-  );
-}
-
-type HistoryDateSectionProps = {
-  block: HistoryDateBlock;
-  expanded: boolean;
-  isDark: boolean;
-  titleColor: string;
-  bodyColor: string;
-  hairline: string;
-  cardBg: string;
-  onToggle: (dateKey: string) => void;
-  onPressEntry: (entry: NrmActivityHistoryEntry) => void;
-};
-
-function HistoryDateSection({
-  block,
-  expanded,
-  isDark,
-  titleColor,
-  bodyColor,
-  hairline,
-  cardBg,
-  onToggle,
-  onPressEntry,
-}: HistoryDateSectionProps) {
-  const countBg = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
-  const countColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
-
-  return (
-    <View style={styles.dateSection}>
-      <Pressable
-        onPress={() => onToggle(block.dateKey)}
-        style={({ pressed }) => [
-          styles.dateHeader,
-          { borderColor: hairline, backgroundColor: cardBg },
-          pressed && styles.dateHeaderPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ expanded }}
-        accessibilityLabel={`${block.title}, ${block.entries.length}건`}>
-        <View style={styles.dateHeaderMain}>
-          <Text style={[styles.dateTitle, { color: titleColor }]}>{block.title}</Text>
-          <View style={[styles.countBadge, { backgroundColor: countBg }]}>
-            <Text style={[styles.countBadgeText, { color: countColor }]}>
-              {block.entries.length}
-            </Text>
-          </View>
-        </View>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={18}
-          color={bodyColor}
-        />
-      </Pressable>
-
-      {expanded ? (
-        <View style={[styles.entriesCard, { borderColor: hairline, backgroundColor: cardBg }]}>
-          {block.entries.map((entry, index) => (
-            <HistoryEntryRow
-              key={entry.id}
-              entry={entry}
-              isDark={isDark}
-              titleColor={titleColor}
-              bodyColor={bodyColor}
-              hairline={hairline}
-              onPress={onPressEntry}
-              isLast={index === block.entries.length - 1}
-            />
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
 }
 
 /** 설정된 기간의 활동 기록 — 탭 시 Storage와 동일한 메타데이터 편집 */
@@ -276,15 +105,17 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
-  const cardBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas;
+  const sectionHeaderBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
+  const dateColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
 
-  const dateBlocks = useMemo((): HistoryDateBlock[] => {
+  const sections = useMemo((): HistorySection[] => {
     return groupActivityHistoryByDate(items).map((section) => ({
       dateKey: section.title,
       title: formatActivityHistoryDateTitle(section.title),
-      entries: section.data,
+      entryCount: section.data.length,
+      data: collapsedDateKeys.has(section.title) ? [] : section.data,
     }));
-  }, [items]);
+  }, [collapsedDateKeys, items]);
 
   const applySnapshot = useCallback(
     (days: NrmActivityHistoryDisplayDays, rows: NrmActivityHistoryEntry[]) => {
@@ -498,30 +329,69 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
     }
   }, [editTrack, reloadHistory]);
 
-  const renderDateBlock = useCallback(
-    ({ item: block }: { item: HistoryDateBlock }) => (
-      <HistoryDateSection
-        block={block}
-        expanded={!collapsedDateKeys.has(block.dateKey)}
-        isDark={isDark}
-        titleColor={titleColor}
-        bodyColor={bodyColor}
-        hairline={hairline}
-        cardBg={cardBg}
-        onToggle={toggleDateSection}
-        onPressEntry={(entry) => void onPressEntry(entry)}
-      />
-    ),
-    [
-      bodyColor,
-      cardBg,
-      collapsedDateKeys,
-      hairline,
-      isDark,
-      onPressEntry,
-      titleColor,
-      toggleDateSection,
-    ],
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: HistorySection }) => {
+      const expanded = !collapsedDateKeys.has(section.dateKey);
+      return (
+        <Pressable
+          onPress={() => toggleDateSection(section.dateKey)}
+          style={({ pressed }) => [
+            styles.sectionHeader,
+            { backgroundColor: sectionHeaderBg, borderBottomColor: hairline },
+            pressed && styles.sectionHeaderPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={`${section.title}, ${section.entryCount}건`}>
+          <Text style={[styles.sectionHeaderLabel, { color: dateColor }]}>{section.title}</Text>
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={bodyColor}
+          />
+        </Pressable>
+      );
+    },
+    [bodyColor, collapsedDateKeys, dateColor, hairline, sectionHeaderBg, toggleDateSection],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: NrmActivityHistoryEntry }) => {
+      const pressable = activityHistoryEntryOpensTrack(item);
+      const labelStyle = [styles.rowLabel, { color: pressable ? titleColor : bodyColor }];
+
+      if (!pressable) {
+        return (
+          <View style={[styles.row, { borderBottomColor: hairline }]}>
+            <Text style={labelStyle} numberOfLines={2}>
+              {formatActivityHistoryLabel(item)}
+            </Text>
+            <Text style={[styles.rowWhen, { color: bodyColor }]}>
+              {formatActivityHistoryTime(item.createdAt)}
+            </Text>
+          </View>
+        );
+      }
+
+      return (
+        <Pressable
+          onPress={() => void onPressEntry(item)}
+          style={({ pressed }) => [
+            styles.row,
+            { borderBottomColor: hairline },
+            pressed && styles.rowPressed,
+          ]}
+          accessibilityRole="button">
+          <Text style={labelStyle} numberOfLines={2}>
+            {formatActivityHistoryLabel(item)}
+          </Text>
+          <Text style={[styles.rowWhen, { color: bodyColor }]}>
+            {formatActivityHistoryTime(item.createdAt)}
+          </Text>
+        </Pressable>
+      );
+    },
+    [bodyColor, hairline, onPressEntry, titleColor],
   );
 
   return (
@@ -529,23 +399,23 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
       {loading ? (
         <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
       ) : (
-        <FlatList
-          data={dateBlocks}
-          keyExtractor={(block) => block.dateKey}
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.id}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-          contentContainerStyle={
-            dateBlocks.length === 0 ? styles.emptyContent : styles.listContent
-          }
+          contentContainerStyle={sections.length === 0 ? styles.emptyContent : styles.listContent}
           ListEmptyComponent={
             <Text style={[styles.empty, { color: bodyColor }]}>{emptyMessage}</Text>
           }
-          renderItem={renderDateBlock}
+          renderSectionHeader={renderSectionHeader}
+          renderItem={renderItem}
+          stickySectionHeadersEnabled
           showsVerticalScrollIndicator={false}
-          initialNumToRender={8}
-          maxToRenderPerBatch={6}
-          windowSize={8}
+          initialNumToRender={20}
+          maxToRenderPerBatch={15}
+          windowSize={10}
         />
       )}
 
@@ -596,84 +466,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: nrmTokens.font.body,
   },
-  dateSection: {
-    gap: nrmTokens.space.xxs,
-    marginBottom: nrmTokens.space.sm,
-  },
-  dateHeader: {
+  sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: nrmTokens.space.sm,
-    paddingHorizontal: nrmTokens.space.md,
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: nrmTokens.space.xs,
+    paddingTop: nrmTokens.space.sm,
+    paddingBottom: nrmTokens.space.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  dateHeaderPressed: {
+  sectionHeaderPressed: {
     opacity: 0.9,
   },
-  dateHeaderMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: nrmTokens.space.sm,
-    flex: 1,
-    minWidth: 0,
-  },
-  dateTitle: {
+  sectionHeaderLabel: {
     fontSize: nrmTokens.font.bodyStrong,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
-  countBadge: {
-    minWidth: 22,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: nrmTokens.radius.pill,
-    alignItems: 'center',
+  row: {
+    paddingVertical: nrmTokens.space.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 4,
   },
-  countBadgeText: {
-    fontSize: nrmTokens.font.caption,
-    fontWeight: '600',
-  },
-  entriesCard: {
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  entryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.sm,
-    paddingHorizontal: nrmTokens.space.md,
-  },
-  entryRowPressed: {
+  rowPressed: {
     opacity: 0.88,
   },
-  entryRowStatic: {
-    opacity: 0.92,
-  },
-  kindBadge: {
-    borderRadius: nrmTokens.radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    maxWidth: 72,
-  },
-  kindBadgeText: {
-    fontSize: nrmTokens.font.finePrint,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  entryTitle: {
-    flex: 1,
-    minWidth: 0,
+  rowLabel: {
     fontSize: nrmTokens.font.body,
     fontWeight: '500',
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  entryTime: {
+  rowWhen: {
     fontSize: nrmTokens.font.caption,
-    fontVariant: ['tabular-nums'],
-    minWidth: 40,
-    textAlign: 'right',
   },
 });

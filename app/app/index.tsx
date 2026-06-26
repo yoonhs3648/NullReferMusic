@@ -59,7 +59,7 @@ import {
 } from '@/components/nrm/NrmAppNotificationDrawer';
 import { NrmAppTopBar } from '@/components/nrm/NrmAppTopBar';
 import { NrmHomeBottomTabBar, type NrmHomeTab } from '@/components/nrm/NrmHomeBottomTabBar';
-import { NrmHomeFavoritePlaceholder } from '@/components/nrm/NrmHomeFavoritePlaceholder';
+import { NrmHomeDiscoverPlaceholder } from '@/components/nrm/NrmHomeDiscoverPlaceholder';
 import { NrmHomeHistoryScreen } from '@/components/nrm/NrmHomeHistoryScreen';
 import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
@@ -1028,8 +1028,8 @@ export default function HomeScreen() {
           hideBack
         />
       );
-    } else if (homeTab === 'favorite') {
-      bodyContent = <NrmHomeFavoritePlaceholder isDark={isDark} />;
+    } else if (homeTab === 'discover') {
+      bodyContent = <NrmHomeDiscoverPlaceholder isDark={isDark} />;
     } else if (homeTab === 'history') {
       bodyContent = <NrmHomeHistoryScreen isDark={isDark} />;
     } else if (showWelcomeQuote) {

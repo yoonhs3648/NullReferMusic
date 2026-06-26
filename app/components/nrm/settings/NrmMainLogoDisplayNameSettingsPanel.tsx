@@ -22,6 +22,7 @@ import {
   getNrmMainLogoDefaultDisplayName,
   loadMainLogoDisplayNameOverride,
   saveMainLogoDisplayNameOverride,
+  validateMainLogoDisplayNameInput,
 } from '@/lib/nrmMainLogoDisplayNameSettings';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
@@ -76,6 +77,10 @@ export function NrmMainLogoDisplayNameSettingsPanel({
 
   const isDirty = useMemo(() => draft.trim() !== savedEffective, [draft, savedEffective]);
 
+  const validationHint = useMemo(() => validateMainLogoDisplayNameInput(draft), [draft]);
+
+  const canSave = isDirty && !validationHint && !saving;
+
   useEffect(() => {
     let cancelled = false;
     void loadMainLogoDisplayNameOverride().then((override) => {
@@ -93,30 +98,32 @@ export function NrmMainLogoDisplayNameSettingsPanel({
     setDraft(savedEffective);
   }, [savedEffective]);
 
-  const persistDraft = useCallback(async () => {
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      notifyUser('앱 이름을 입력해 주세요.');
-      return;
+  const persistDraft = useCallback(async (): Promise<boolean> => {
+    const validationError = validateMainLogoDisplayNameInput(draft);
+    if (validationError) {
+      notifyUser(validationError);
+      return false;
     }
+    const trimmed = draft.trim();
     const override = trimmed === defaultName ? null : trimmed;
     await saveMainLogoDisplayNameOverride(override);
     setSavedOverride(override);
     setDraft(effectiveNameFromOverride(override));
+    return true;
   }, [defaultName, draft]);
 
   const handleSave = useCallback(async () => {
-    if (!isDirty) return;
+    if (!canSave) return;
     setSaving(true);
     try {
-      await persistDraft();
-      void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
+      const saved = await persistDraft();
+      if (saved) void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
     } catch (e) {
       notifyUserError('settings.mainLogoDisplayNameSave', e, '저장하지 못했습니다.');
     } finally {
       setSaving(false);
     }
-  }, [isDirty, persistDraft]);
+  }, [canSave, persistDraft]);
 
   const handleReset = useCallback(async () => {
     setSaving(true);
@@ -145,7 +152,8 @@ export function NrmMainLogoDisplayNameSettingsPanel({
       if (save) {
         setSaving(true);
         try {
-          await persistDraft();
+          const saved = await persistDraft();
+          if (!saved) return;
           void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
         } catch (e) {
           notifyUserError('settings.mainLogoDisplayNameSave', e, '저장하지 못했습니다.');
@@ -227,7 +235,11 @@ export function NrmMainLogoDisplayNameSettingsPanel({
         editable={!saving}
       />
 
-      <View style={[styles.footer, { borderTopColor: inputBorder }]}>
+      {validationHint === '앱이름이 너무 길어요' ? (
+        <Text style={styles.validationHint}>{validationHint}</Text>
+      ) : null}
+
+      <View style={styles.footer}>
         <Pressable
           onPress={() => void handleReset()}
           disabled={saving}
@@ -242,11 +254,11 @@ export function NrmMainLogoDisplayNameSettingsPanel({
         </Pressable>
         <Pressable
           onPress={() => void handleSave()}
-          disabled={!isDirty || saving}
+          disabled={!canSave}
           style={({ pressed }) => [
             styles.saveBtn,
-            (!isDirty || saving) && styles.saveBtnDisabled,
-            pressed && isDirty && !saving && styles.saveBtnPressed,
+            !canSave && styles.saveBtnDisabled,
+            pressed && canSave && styles.saveBtnPressed,
           ]}
           accessibilityRole="button"
           accessibilityLabel="저장">
@@ -291,16 +303,17 @@ const styles = StyleSheet.create({
     minHeight: nrmTokens.layout.touchMin,
   },
   loader: { marginVertical: nrmTokens.space.lg },
+  validationHint: {
+    color: '#c62828',
+    fontSize: nrmTokens.font.caption,
+    marginTop: nrmTokens.space.sm,
+  },
   footer: {
-    marginTop: 'auto',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: nrmTokens.space.md,
+    marginTop: nrmTokens.space.lg,
     paddingBottom: nrmTokens.space.xs,
-    flexDirection: 'row',
     gap: nrmTokens.space.sm,
   },
   resetBtn: {
-    flex: 1,
     borderRadius: nrmTokens.radius.md,
     borderWidth: PANEL_INPUT_BORDER,
     borderColor: 'rgba(128,128,128,0.35)',
@@ -314,7 +327,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   saveBtn: {
-    flex: 1,
     backgroundColor: nrmTokens.color.primary,
     borderRadius: nrmTokens.radius.md,
     paddingVertical: nrmTokens.space.md,

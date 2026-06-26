@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 
-export type NrmHomeTab = 'library' | 'search' | 'home' | 'favorite' | 'history';
+export type NrmHomeTab = 'library' | 'search' | 'home' | 'discover' | 'history';
 
 type TabSpec = {
   id: NrmHomeTab;
@@ -16,7 +16,7 @@ const TABS: TabSpec[] = [
   { id: 'library', label: 'Storage', icon: 'albums-outline' },
   { id: 'search', label: 'Search', icon: 'search-outline' },
   { id: 'home', label: 'Home', icon: 'home-outline' },
-  { id: 'favorite', label: 'Favorite', icon: 'heart-outline' },
+  { id: 'discover', label: 'Discover', icon: 'compass-outline' },
   { id: 'history', label: 'History', icon: 'time-outline' },
 ];
 
@@ -31,7 +31,7 @@ type Props = {
   backgroundColor?: string;
 };
 
-/** 메인 홈 하단 탭 — Storage · Search · Home · Favorite · History */
+/** 메인 홈 하단 탭 — Storage · Search · Home · Discover · History */
 export function NrmHomeBottomTabBar({ isDark, active, onChange, backgroundColor }: Props) {
   const insets = useSafeAreaInsets();
   const inactive = isDark ? TAB_INACTIVE_DARK : TAB_INACTIVE_LIGHT;

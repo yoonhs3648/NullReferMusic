@@ -7,16 +7,16 @@ type Props = {
   isDark: boolean;
 };
 
-/** Favorite 탭 UI 플레이스홀더 */
-export function NrmHomeFavoritePlaceholder({ isDark }: Props) {
+/** Discover 탭 UI 플레이스홀더 */
+export function NrmHomeDiscoverPlaceholder({ isDark }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted48;
 
   return (
     <View style={styles.wrap}>
-      <Ionicons name="heart-outline" size={48} color="#C9A227" style={styles.icon} />
-      <Text style={[styles.title, { color: titleColor }]}>Favorite</Text>
-      <Text style={[styles.hint, { color: bodyColor }]}>즐겨찾기 기능은 준비 중입니다.</Text>
+      <Ionicons name="compass-outline" size={48} color="#C9A227" style={styles.icon} />
+      <Text style={[styles.title, { color: titleColor }]}>Discover</Text>
+      <Text style={[styles.hint, { color: bodyColor }]}>음악 추천 기능은 준비 중입니다.</Text>
     </View>
   );
 }

@@ -69,6 +69,7 @@ function createLyricsWaiter(
 
 /**
  * 추출·ffmpeg·저장(오디오)과 가사(+번역)를 각각 큐에 넣어 순서·선점 규칙을 적용한다.
+ * 오디오 큐 작업을 먼저 등록·완료한 뒤 가사 큐에 넣는다 (가사 선등록 시 pump 데드락 방지).
  */
 export function scheduleNativeDownloadJob(
   params: ScheduleNativeDownloadParams,
@@ -94,35 +95,7 @@ export function scheduleNativeDownloadJob(
       let lyricsWarning: FinalizeParallelResult['lyricsWarning'];
       let savedLabel = displayLabel;
       let lyricsDone: Promise<void> = Promise.resolve();
-
-      if (needsLyrics) {
-        const waiter = createLyricsWaiter(videoId, options);
-        lyricsDone = enqueueLyricsDownloadWork(
-          videoId,
-          displayLabel,
-          async () => {
-            if (isAborted()) return;
-            try {
-              const audioStage = await waiter.promise;
-              const out = await finalizeNativeLyricsStage(audioStage, {
-                onLyricsStageStarted: waiter.options?.onLyricsStageStarted,
-                onLyricsStageEnded: waiter.options?.onLyricsStageEnded,
-                onLyricsPersisted: waiter.options?.onLyricsPersisted,
-              });
-              lyricsWarning = out.lyricsWarning;
-            } catch (e) {
-              logNrmRunError('download.lyrics_queue', e, { videoId });
-              throw e;
-            } finally {
-              lyricsWaiters.delete(videoId);
-            }
-          },
-          isAborted,
-        ).catch((e) => {
-          lyricsWaiters.delete(videoId);
-          logNrmRunError('download.lyrics_queue_outer', e, { videoId });
-        });
-      }
+      const lyricsWaiter = needsLyrics ? createLyricsWaiter(videoId, options) : null;
 
       try {
         await enqueueAudioDownloadWork(
@@ -154,14 +127,14 @@ export function scheduleNativeDownloadJob(
               });
               savedLabel = audioStage.savedLabel;
 
-              if (needsLyrics) {
-                lyricsWaiters.get(videoId)?.resolve(audioStage);
+              if (lyricsWaiter) {
+                lyricsWaiter.resolve(audioStage);
               } else {
                 await deleteLocalAudioTemps(audioStage.temps);
               }
             } catch (e) {
               endPipeline('audio_fail');
-              lyricsWaiters.get(videoId)?.reject(e);
+              lyricsWaiter?.reject(e);
               const aborted = e instanceof Error && e.message === 'DOWNLOAD_ABORTED';
               if (!aborted && !isAborted()) {
                 await reportNativeDownloadExtractFailure(videoId, displayLabel, e);
@@ -171,6 +144,34 @@ export function scheduleNativeDownloadJob(
           },
           isAborted,
         );
+
+        if (lyricsWaiter) {
+          lyricsDone = enqueueLyricsDownloadWork(
+            videoId,
+            displayLabel,
+            async () => {
+              if (isAborted()) return;
+              try {
+                const audioStage = await lyricsWaiter.promise;
+                const out = await finalizeNativeLyricsStage(audioStage, {
+                  onLyricsStageStarted: lyricsWaiter.options?.onLyricsStageStarted,
+                  onLyricsStageEnded: lyricsWaiter.options?.onLyricsStageEnded,
+                  onLyricsPersisted: lyricsWaiter.options?.onLyricsPersisted,
+                });
+                lyricsWarning = out.lyricsWarning;
+              } catch (e) {
+                logNrmRunError('download.lyrics_queue', e, { videoId });
+                throw e;
+              } finally {
+                lyricsWaiters.delete(videoId);
+              }
+            },
+            isAborted,
+          ).catch((e) => {
+            lyricsWaiters.delete(videoId);
+            logNrmRunError('download.lyrics_queue_outer', e, { videoId });
+          });
+        }
 
         await lyricsDone;
         resolve({ savedLabel, lyricsWarning });

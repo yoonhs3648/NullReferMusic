@@ -197,7 +197,6 @@ export function NrmLyricsOrderSettingsPanel({
       <Text style={[styles.panelTitle, { color: titleColor }]}>가사 설정</Text>
       <View style={styles.list}>
         {order.map((id, index) => {
-          const isDefault = index === 0;
           const canMoveUp = index > 0 && !saving;
           const canMoveDown = index < order.length - 1 && !saving;
           return (
@@ -215,11 +214,6 @@ export function NrmLyricsOrderSettingsPanel({
                 <Text style={[styles.rowLabel, { color: titleColor }]}>
                   {NRM_LYRICS_MODE_LABELS[id]}
                 </Text>
-                {isDefault ? (
-                  <Text style={[styles.defaultBadge, { color: nrmTokens.color.primary }]}>
-                    기본값
-                  </Text>
-                ) : null}
               </View>
               <View style={styles.moveBtns}>
                 <Pressable
@@ -317,7 +311,6 @@ const styles = StyleSheet.create({
   },
   labelBlock: { flex: 1, gap: 2 },
   rowLabel: { fontSize: nrmTokens.font.body, fontWeight: '600' },
-  defaultBadge: { fontSize: nrmTokens.font.caption, fontWeight: '600' },
   moveBtns: { flexDirection: 'row', gap: 4 },
   moveBtn: {
     width: 34,

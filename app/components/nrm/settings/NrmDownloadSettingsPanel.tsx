@@ -342,7 +342,7 @@ export function NrmDownloadSettingsPanel({
       </Text>
 
       {section === 'extension' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
               iOS IPA는 YouTube가 제공하는 오디오 포맷 중에서 선택한 확장자에 가장 가까운
@@ -369,7 +369,7 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'filename' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
@@ -439,7 +439,7 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'lyricsOutput' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {!loaded ? (
             <ActivityIndicator size="small" color={bodyColor} />
           ) : (
@@ -505,7 +505,7 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'quality' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
               비트레이트 설정은 Android APK(yt-dlp)에서만 적용됩니다. iOS는 YouTube 원본
@@ -534,7 +534,7 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'vbr' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
               VBR 설정은 Android APK 변환에만 적용됩니다.
@@ -560,7 +560,7 @@ export function NrmDownloadSettingsPanel({
       ) : null}
 
       {section === 'lossless' ? (
-        <View style={[styles.sectionCard, { borderColor: 'rgba(128,128,128,0.28)' }]}>
+        <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
               무손실 설정은 Android APK 변환에만 적용됩니다.
@@ -692,6 +692,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: nrmTokens.space.md,
     paddingTop: nrmTokens.space.md,
     paddingBottom: nrmTokens.space.sm,
+    gap: nrmTokens.space.sm,
+    marginBottom: nrmTokens.space.md,
+  },
+  sectionBody: {
     gap: nrmTokens.space.sm,
     marginBottom: nrmTokens.space.md,
   },
