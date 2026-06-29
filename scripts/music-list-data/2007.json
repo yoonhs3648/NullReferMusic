@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Good Life",
+    "album": "Graduation"
+  },
+  {
+    "rank": 2,
+    "year": 2007,
+    "artist": "Soulja Boy Tell'Em",
+    "title": "Crank That (Soulja Boy)",
+    "album": "souljaboytellem.com"
+  },
+  {
+    "rank": 3,
+    "year": 2007,
+    "artist": "T.I.",
+    "title": "Big Things Poppin' (Do It)",
+    "album": "T.I. vs. T.I.P."
+  },
+  {
+    "rank": 4,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Flashing Lights",
+    "album": "Graduation"
+  },
+  {
+    "rank": 5,
+    "year": 2007,
+    "artist": "Common",
+    "title": "The People",
+    "album": "Finding Forever"
+  },
+  {
+    "rank": 6,
+    "year": 2007,
+    "artist": "Lil Wayne",
+    "title": "Lollipop",
+    "album": "Tha Carter III"
+  },
+  {
+    "rank": 7,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Can't Tell Me Nothing",
+    "album": "Graduation"
+  },
+  {
+    "rank": 8,
+    "year": 2007,
+    "artist": "UGK feat. OutKast",
+    "title": "International Players Anthem (I Choose You)",
+    "album": "UGK (Underground Kingz)"
+  },
+  {
+    "rank": 9,
+    "year": 2007,
+    "artist": "M.I.A.",
+    "title": "Paper Planes",
+    "album": "Kala"
+  },
+  {
+    "rank": 10,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Drivin' Me Wild (feat. Lily Allen)",
+    "album": "Graduation"
+  },
+  {
+    "rank": 11,
+    "year": 2007,
+    "artist": "Jay-Z",
+    "title": "XR2",
+    "album": "American Gangster"
+  },
+  {
+    "rank": 12,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Black Mags",
+    "album": "Graduation"
+  },
+  {
+    "rank": 13,
+    "year": 2007,
+    "artist": "Lupe Fiasco",
+    "title": "Pro Nails",
+    "album": "Lupe Fiasco's The Cool"
+  },
+  {
+    "rank": 14,
+    "year": 2007,
+    "artist": "Common",
+    "title": "Nike Boots",
+    "album": "Finding Forever"
+  },
+  {
+    "rank": 15,
+    "year": 2007,
+    "artist": "Soulja Boy Tell'em",
+    "title": "Live Your Life (feat. Rihanna)",
+    "album": "souljaboytellem.com"
+  },
+  {
+    "rank": 16,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Heartless",
+    "album": "Graduation"
+  },
+  {
+    "rank": 17,
+    "year": 2007,
+    "artist": "UGK feat. OutKast",
+    "title": "Love Lockdown",
+    "album": "Underground Kingz"
+  },
+  {
+    "rank": 18,
+    "year": 2007,
+    "artist": "T.I.",
+    "title": "Jockin' Jay-Z (Dope Boy Fresh)",
+    "album": "T.I. vs. T.I.P."
+  },
+  {
+    "rank": 19,
+    "year": 2007,
+    "artist": "Lil Wayne",
+    "title": "Whatever You Like",
+    "album": "Tha Carter III"
+  },
+  {
+    "rank": 20,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Day 'n' Nite",
+    "album": "Graduation"
+  },
+  {
+    "rank": 21,
+    "year": 2007,
+    "artist": "Jay-Z",
+    "title": "Lollipop",
+    "album": "American Gangster"
+  },
+  {
+    "rank": 22,
+    "year": 2007,
+    "artist": "50 Cent",
+    "title": "No Matter What",
+    "album": "Curtis"
+  },
+  {
+    "rank": 23,
+    "year": 2007,
+    "artist": "Clipse",
+    "title": "Exhibit A (Transformations)",
+    "album": "Hell Hath No Fury"
+  },
+  {
+    "rank": 24,
+    "year": 2007,
+    "artist": "Lupe Fiasco",
+    "title": "Amazing (feat. Young Jeezy)",
+    "album": "Lupe Fiasco's The Cool"
+  },
+  {
+    "rank": 25,
+    "year": 2007,
+    "artist": "Rick Ross feat. T-Pain",
+    "title": "Put On",
+    "album": "Trilla"
+  },
+  {
+    "rank": 26,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Hero (feat. Keri Hilson)",
+    "album": "Graduation"
+  },
+  {
+    "rank": 27,
+    "year": 2007,
+    "artist": "Lil Wayne",
+    "title": "Swagga Like Us (feat. Jay-Z, Kanye West & Lil Wayne)",
+    "album": "Tha Carter III"
+  },
+  {
+    "rank": 28,
+    "year": 2007,
+    "artist": "Common",
+    "title": "Mrs. Officer (feat. Bobby V & Kidd Kidd)",
+    "album": "Finding Forever"
+  },
+  {
+    "rank": 29,
+    "year": 2007,
+    "artist": "Jay-Z feat. Lil Wayne",
+    "title": "The Boss (feat. T-Pain)",
+    "album": "American Gangster"
+  },
+  {
+    "rank": 30,
+    "year": 2007,
+    "artist": "T-Pain feat. Yung Joc",
+    "title": "Welcome to Heartbreak (feat. Kid Cudi)",
+    "album": "Epiphany"
+  },
+  {
+    "rank": 31,
+    "year": 2007,
+    "artist": "Young Jeezy feat. R. Kelly",
+    "title": "I'll Be in the Sky",
+    "album": "The Inspiration"
+  },
+  {
+    "rank": 32,
+    "year": 2007,
+    "artist": "T.I. feat. Wyclef Jean",
+    "title": "Universal Mind Control (feat. Pharrell)",
+    "album": "T.I. vs. T.I.P."
+  },
+  {
+    "rank": 33,
+    "year": 2007,
+    "artist": "Styles P",
+    "title": "Gettin' Up",
+    "album": "Super Gangster (Extraordinary Gentleman)"
+  },
+  {
+    "rank": 34,
+    "year": 2007,
+    "artist": "Cassidy feat. Swizz Beatz",
+    "title": "What Them Girls Like",
+    "album": "B.A.R.S. The Barry Adrian Reese Story"
+  },
+  {
+    "rank": 35,
+    "year": 2007,
+    "artist": "Talib Kweli",
+    "title": "Can't Believe It",
+    "album": "Eardrum"
+  },
+  {
+    "rank": 36,
+    "year": 2007,
+    "artist": "Young Buck",
+    "title": "My President (feat. Nas)",
+    "album": "Buck the World"
+  },
+  {
+    "rank": 37,
+    "year": 2007,
+    "artist": "Chamillionaire",
+    "title": "Cash Flow",
+    "album": "Ultimate Victory"
+  },
+  {
+    "rank": 38,
+    "year": 2007,
+    "artist": "Blu & Exile",
+    "title": "Embrace the Martian",
+    "album": "Below the Heavens"
+  },
+  {
+    "rank": 39,
+    "year": 2007,
+    "artist": "Little Brother",
+    "title": "Bust It Baby Pt. 2",
+    "album": "Getback"
+  },
+  {
+    "rank": 40,
+    "year": 2007,
+    "artist": "Brother Ali",
+    "title": "Low",
+    "album": "The Undisputed Truth"
+  },
+  {
+    "rank": 41,
+    "year": 2007,
+    "artist": "Pharoahe Monch",
+    "title": "You're Everything",
+    "album": "Desire"
+  },
+  {
+    "rank": 42,
+    "year": 2007,
+    "artist": "El-P",
+    "title": "Cold Hearted",
+    "album": "I'll Sleep When You're Dead"
+  },
+  {
+    "rank": 43,
+    "year": 2007,
+    "artist": "M.I.A.",
+    "title": "Rising Up (feat. Chrisette Michele & Wale)",
+    "album": "Kala"
+  },
+  {
+    "rank": 44,
+    "year": 2007,
+    "artist": "Kidz in the Hall",
+    "title": "Guarantees",
+    "album": "The In Crowd"
+  },
+  {
+    "rank": 45,
+    "year": 2007,
+    "artist": "Sean Kingston",
+    "title": "Motown 25",
+    "album": "Sean Kingston"
+  },
+  {
+    "rank": 46,
+    "year": 2007,
+    "artist": "Fabolous feat. Ne-Yo",
+    "title": "Driving Down the Block",
+    "album": "From Nothin' to Somethin'"
+  },
+  {
+    "rank": 47,
+    "year": 2007,
+    "artist": "DJ Khaled feat. T-Pain, Trick Daddy, Rick Ross, Plies & Lil Wayne",
+    "title": "All My Life (In the Ghetto) (feat. Lil Wayne & will.i.am)",
+    "album": "We the Best"
+  },
+  {
+    "rank": 48,
+    "year": 2007,
+    "artist": "Three 6 Mafia feat. Project Pat, Young D & SuperPower",
+    "title": "We Made It",
+    "album": "Last 2 Walk"
+  },
+  {
+    "rank": 49,
+    "year": 2007,
+    "artist": "Rich Boy feat. Polow da Don",
+    "title": "High Powered",
+    "album": "Rich Boy"
+  },
+  {
+    "rank": 50,
+    "year": 2007,
+    "artist": "Joell Ortiz",
+    "title": "Everyone Nose (Remix) (feat. Kanye West, Lupe Fiasco & Pusha T)",
+    "album": "The Brick: Bodega Chronicles"
+  },
+  {
+    "rank": 51,
+    "year": 2007,
+    "artist": "Papoose",
+    "title": "The One",
+    "album": "Nacirema Dream"
+  },
+  {
+    "rank": 52,
+    "year": 2007,
+    "artist": "UGK",
+    "title": "Brooklyn Girls",
+    "album": "Underground Kingz"
+  },
+  {
+    "rank": 53,
+    "year": 2007,
+    "artist": "Evidence",
+    "title": "I Love College",
+    "album": "The Weatherman LP"
+  },
+  {
+    "rank": 54,
+    "year": 2007,
+    "artist": "Prodigy",
+    "title": "Comfortable (feat. Babyface)",
+    "album": "Return of the Mac"
+  },
+  {
+    "rank": 55,
+    "year": 2007,
+    "artist": "Scarface",
+    "title": "N.I.G.G.E.R. (The Slave and the Master)",
+    "album": "Made"
+  },
+  {
+    "rank": 56,
+    "year": 2007,
+    "artist": "Ghostface Killah",
+    "title": "Move",
+    "album": "The Big Doe Rehab"
+  },
+  {
+    "rank": 57,
+    "year": 2007,
+    "artist": "Masta Ace",
+    "title": "Cappuccino",
+    "album": "A Long Hot Summer"
+  },
+  {
+    "rank": 58,
+    "year": 2007,
+    "artist": "CunninLynguists",
+    "title": "Street Lights",
+    "album": "Dirty Acres"
+  },
+  {
+    "rank": 59,
+    "year": 2007,
+    "artist": "Devin the Dude feat. Snoop Dogg & Andre 3000",
+    "title": "Paranoid (feat. Mr Hudson)",
+    "album": "Waiting to Inhale"
+  },
+  {
+    "rank": 60,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Let the Beat Build",
+    "album": "Graduation"
+  },
+  {
+    "rank": 61,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Dr. Carter",
+    "album": "Graduation"
+  },
+  {
+    "rank": 62,
+    "year": 2007,
+    "artist": "Kanye West",
+    "title": "Dead and Gone (feat. Justin Timberlake)",
+    "album": "Graduation"
+  },
+  {
+    "rank": 63,
+    "year": 2007,
+    "artist": "Jay-Z",
+    "title": "Ready for Whatever",
+    "album": "American Gangster"
+  },
+  {
+    "rank": 64,
+    "year": 2007,
+    "artist": "Jay-Z",
+    "title": "Heaven at Nite",
+    "album": "American Gangster"
+  },
+  {
+    "rank": 65,
+    "year": 2007,
+    "artist": "Common",
+    "title": "Exhibit C",
+    "album": "Finding Forever"
+  },
+  {
+    "rank": 66,
+    "year": 2007,
+    "artist": "Lupe Fiasco",
+    "title": "Vacation",
+    "album": "Lupe Fiasco's The Cool"
+  },
+  {
+    "rank": 67,
+    "year": 2007,
+    "artist": "Clipse",
+    "title": "Luxury Tax",
+    "album": "Hell Hath No Fury"
+  },
+  {
+    "rank": 68,
+    "year": 2007,
+    "artist": "T.I.",
+    "title": "Fried Chicken (feat. Busta Rhymes)",
+    "album": "T.I. vs. T.I.P."
+  },
+  {
+    "rank": 69,
+    "year": 2007,
+    "artist": "50 Cent",
+    "title": "Announcement (feat. Pharrell)",
+    "album": "Curtis"
+  },
+  {
+    "rank": 70,
+    "year": 2007,
+    "artist": "Lil Wayne",
+    "title": "Dance on Glass",
+    "album": "The Leak EP"
+  },
+  {
+    "rank": 71,
+    "year": 2007,
+    "artist": "Rick Ross",
+    "title": "MVP",
+    "album": "Trilla"
+  },
+  {
+    "rank": 72,
+    "year": 2007,
+    "artist": "Talib Kweli",
+    "title": "Haterz Everywhere (feat. Rich Boy)",
+    "album": "Eardrum"
+  },
+  {
+    "rank": 73,
+    "year": 2007,
+    "artist": "Young Buck",
+    "title": "The Kramer",
+    "album": "Buck the World"
+  },
+  {
+    "rank": 74,
+    "year": 2007,
+    "artist": "Chamillionaire",
+    "title": "75 Bars (Black's Reconstruction)",
+    "album": "Ultimate Victory"
+  },
+  {
+    "rank": 75,
+    "year": 2007,
+    "artist": "Blu & Exile",
+    "title": "Shoulda Known",
+    "album": "Below the Heavens"
+  },
+  {
+    "rank": 76,
+    "year": 2007,
+    "artist": "Little Brother",
+    "title": "Brag Swag",
+    "album": "Getback"
+  },
+  {
+    "rank": 77,
+    "year": 2007,
+    "artist": "Brother Ali",
+    "title": "Microphone",
+    "album": "The Undisputed Truth"
+  },
+  {
+    "rank": 78,
+    "year": 2007,
+    "artist": "Pharoahe Monch",
+    "title": "Loser",
+    "album": "Desire"
+  },
+  {
+    "rank": 79,
+    "year": 2007,
+    "artist": "El-P",
+    "title": "Lark on My Go-Kart",
+    "album": "I'll Sleep When You're Dead"
+  },
+  {
+    "rank": 80,
+    "year": 2007,
+    "artist": "M.I.A.",
+    "title": "Forgotten",
+    "album": "Kala"
+  },
+  {
+    "rank": 81,
+    "year": 2007,
+    "artist": "Kidz in the Hall",
+    "title": "Arab Money (feat. Ron Browz)",
+    "album": "The In Crowd"
+  },
+  {
+    "rank": 82,
+    "year": 2007,
+    "artist": "Fabolous",
+    "title": "Spaz",
+    "album": "From Nothin' to Somethin'"
+  },
+  {
+    "rank": 83,
+    "year": 2007,
+    "artist": "DJ Khaled feat. Akon, Rick Ross, T.I., Fat Joe, Birdman & Lil Wayne",
+    "title": "Do My Bitch",
+    "album": "We the Best"
+  },
+  {
+    "rank": 84,
+    "year": 2007,
+    "artist": "Rich Boy",
+    "title": "Bang! Bang!",
+    "album": "Rich Boy"
+  },
+  {
+    "rank": 85,
+    "year": 2007,
+    "artist": "Joell Ortiz",
+    "title": "Ride",
+    "album": "The Brick: Bodega Chronicles"
+  },
+  {
+    "rank": 86,
+    "year": 2007,
+    "artist": "Papoose",
+    "title": "Elevator (feat. Timbaland)",
+    "album": "Nacirema Dream"
+  },
+  {
+    "rank": 87,
+    "year": 2007,
+    "artist": "Prodigy",
+    "title": "Put It on Ya (feat. Chris J)",
+    "album": "Return of the Mac"
+  },
+  {
+    "rank": 88,
+    "year": 2007,
+    "artist": "Scarface",
+    "title": "Pennies",
+    "album": "Made"
+  },
+  {
+    "rank": 89,
+    "year": 2007,
+    "artist": "Ghostface Killah",
+    "title": "Mr. Alladem Swagg",
+    "album": "The Big Doe Rehab"
+  },
+  {
+    "rank": 90,
+    "year": 2007,
+    "artist": "Devin the Dude",
+    "title": "Break Up (The OJ Song)",
+    "album": "Waiting to Inhale"
+  },
+  {
+    "rank": 91,
+    "year": 2007,
+    "artist": "CunninLynguists",
+    "title": "Put On (feat. Kanye West)",
+    "album": "Dirty Acres"
+  },
+  {
+    "rank": 92,
+    "year": 2007,
+    "artist": "Evidence",
+    "title": "Tie My Hands (feat. Robin Thicke)",
+    "album": "The Weatherman LP"
+  },
+  {
+    "rank": 93,
+    "year": 2007,
+    "artist": "Sean Price",
+    "title": "Coldest Winter",
+    "album": "Jesus Price Supastar"
+  },
+  {
+    "rank": 94,
+    "year": 2007,
+    "artist": "AZ",
+    "title": "I'm Illy",
+    "album": "The Format"
+  },
+  {
+    "rank": 95,
+    "year": 2007,
+    "artist": "Murs",
+    "title": "Magnificent (feat. John Legend)",
+    "album": "Murs for President"
+  },
+  {
+    "rank": 96,
+    "year": 2007,
+    "artist": "Styles P",
+    "title": "CuDi Get",
+    "album": "Super Gangster (Extraordinary Gentleman)"
+  },
+  {
+    "rank": 97,
+    "year": 2007,
+    "artist": "Cormega",
+    "title": "Sly Fox",
+    "album": "Who Am I?"
+  },
+  {
+    "rank": 98,
+    "year": 2007,
+    "artist": "Bun B",
+    "title": "Punch Drunk Love (The Eye)",
+    "album": "II Trill"
+  },
+  {
+    "rank": 99,
+    "year": 2007,
+    "artist": "UGK",
+    "title": "Believe",
+    "album": "Underground Kingz"
+  },
+  {
+    "rank": 100,
+    "year": 2007,
+    "artist": "Lil Wayne",
+    "title": "Cloud 9 (feat. Marsha Ambrosius)",
+    "album": "Tha Carter III"
+  }
+]

@@ -22,6 +22,16 @@ type DecipherJob = {
   reject: (e: Error) => void;
 };
 
+/** googlevideo WebView 스트림 — innertube 추출 타임아웃보다 짧게 두어 hang 시 빠른 abort */
+export const NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS = 45_000;
+
+export type WebViewMediaDownloadOptions = {
+  isCancelled?: () => boolean;
+  /** wall-clock 기준 절대 시각(ms). 없으면 timeoutMs만 사용 */
+  deadlineMs?: number;
+  timeoutMs?: number;
+};
+
 type StreamJob = {
   jobId: string;
   destUri: string;
@@ -29,6 +39,7 @@ type StreamJob = {
   nChunks: number | null;
   resolve: () => void;
   reject: (e: Error) => void;
+  cancelWatch?: () => void;
 };
 
 const decipherQueue: DecipherJob[] = [];
@@ -226,6 +237,7 @@ function handleStreamMessage(msg: StreamMsg): void {
       .then(() => {
         streamDownloadActive = false;
         streamJob = null;
+        job.cancelWatch?.();
         job.resolve();
         drainDecipherQueue();
       })
@@ -234,6 +246,7 @@ function handleStreamMessage(msg: StreamMsg): void {
         cleanupStreamParts(job);
         FileSystem.deleteAsync(job.destUri, { idempotent: true }).catch(() => {});
         streamJob = null;
+        job.cancelWatch?.();
         job.reject(e instanceof Error ? e : new Error(String(e)));
         drainDecipherQueue();
       });
@@ -246,6 +259,7 @@ function handleStreamMessage(msg: StreamMsg): void {
       cleanupStreamParts(job);
       FileSystem.deleteAsync(job.destUri, { idempotent: true }).catch(() => {});
       streamJob = null;
+      job.cancelWatch?.();
       const m =
         msg.err ||
         (msg.http != null ? `http_${msg.http}` : 'stream_webview_failed');
@@ -297,8 +311,16 @@ function buildStreamFetchInject(fullUrl: string, jobId: string): string {
 (function(){
   var url = ${JSON.stringify(fullUrl)};
   var jobId = ${JSON.stringify(jobId)};
+  var aborted = false;
+  window.__nrmStreamAbort = function() { aborted = true; };
   (async function() {
     try {
+      if (aborted) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          nrm: 'stream', phase: 'err', jobId: jobId, err: 'aborted'
+        }));
+        return;
+      }
       var res = await fetch(url, {
         method: 'GET',
         headers: {
@@ -308,11 +330,14 @@ function buildStreamFetchInject(fullUrl: string, jobId: string): string {
           'X-YouTube-Client-Name': '5',
           'X-YouTube-Client-Version': '19.29.1'
         },
-        // include: 시스템 CookieManager에 저장된 YouTube 쿠키를 자동 포함.
-        // NrmYoutubeCookieHarvester 가 youtube.com 방문 후 쿠키를 적재했으므로
-        // VISITOR_INFO1_LIVE, YSC, SAPISID 등이 자동으로 첨부됩니다.
         credentials: 'include'
       });
+      if (aborted) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          nrm: 'stream', phase: 'err', jobId: jobId, err: 'aborted'
+        }));
+        return;
+      }
       if (!res.ok) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           nrm: 'stream', phase: 'err', jobId: jobId, http: res.status
@@ -320,10 +345,22 @@ function buildStreamFetchInject(fullUrl: string, jobId: string): string {
         return;
       }
       var buf = await res.arrayBuffer();
+      if (aborted) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          nrm: 'stream', phase: 'err', jobId: jobId, err: 'aborted'
+        }));
+        return;
+      }
       var u8 = new Uint8Array(buf);
       var CHUNK = 262144;
       var seq = 0;
       for (var i = 0; i < u8.length; i += CHUNK) {
+        if (aborted) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            nrm: 'stream', phase: 'err', jobId: jobId, err: 'aborted'
+          }));
+          return;
+        }
         var end = Math.min(i + CHUNK, u8.length);
         var slice = u8.subarray(i, end);
         var bin = '';
@@ -342,11 +379,98 @@ function buildStreamFetchInject(fullUrl: string, jobId: string): string {
       window.ReactNativeWebView.postMessage(JSON.stringify({
         nrm: 'stream', phase: 'err', jobId: jobId, err: __m
       }));
+    } finally {
+      if (window.__nrmStreamAbort) delete window.__nrmStreamAbort;
     }
   })();
 })();
 true;
 `;
+}
+
+function rejectStreamJob(job: StreamJob, message: string): void {
+  streamDownloadActive = false;
+  cleanupStreamParts(job);
+  FileSystem.deleteAsync(job.destUri, { idempotent: true }).catch(() => {});
+  streamJob = null;
+  job.cancelWatch?.();
+  job.reject(new Error(message));
+  drainDecipherQueue();
+}
+
+/** 진행 중 WebView googlevideo 스트림 강제 중단 */
+export function cancelActiveStreamDownload(reason = 'cancelled'): void {
+  if (!streamJob || !streamDownloadActive) return;
+  const job = streamJob;
+  try {
+    webView?.injectJavaScript(
+      `(function(){ if(window.__nrmStreamAbort) window.__nrmStreamAbort(); })(); true;`,
+    );
+  } catch {
+    /* inject 실패 시 아래 reject로 정리 */
+  }
+  rejectStreamJob(job, `stream_cancelled:${reason}`);
+}
+
+function cancelActiveDecipherWork(reason = 'cancelled'): void {
+  if (currentDecipherJob) {
+    const job = currentDecipherJob;
+    currentDecipherJob = null;
+    decipherBusy = false;
+    job.reject(new Error(`decipher_cancelled:${reason}`));
+  }
+  while (decipherQueue.length > 0) {
+    const job = decipherQueue.shift()!;
+    job.reject(new Error(`decipher_cancelled:${reason}`));
+  }
+  drainDecipherQueue();
+}
+
+/** innertube 추출 타임아웃·취소 시 orphan WebView 작업 정리 */
+export function cancelActiveInnertubeExtractions(reason = 'timeout'): void {
+  cancelActiveStreamDownload(reason);
+  cancelActiveDecipherWork(reason);
+}
+
+function armStreamDownloadWatchdog(
+  job: StreamJob,
+  options?: WebViewMediaDownloadOptions,
+): () => void {
+  const isCancelled = options?.isCancelled ?? (() => false);
+  const deadlineMs =
+    options?.deadlineMs ??
+    (options?.timeoutMs != null ? Date.now() + options.timeoutMs : null);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
+
+  const fire = (why: string) => {
+    if (streamJob !== job) return;
+    cancelActiveStreamDownload(why);
+  };
+
+  if (deadlineMs != null) {
+    const msLeft = Math.max(0, deadlineMs - Date.now());
+    timer = setTimeout(() => fire('timeout'), msLeft);
+    interval = setInterval(() => {
+      if (Date.now() >= deadlineMs) fire('timeout');
+      if (isCancelled()) fire('cancelled');
+    }, 500);
+  } else if (options?.timeoutMs != null) {
+    timer = setTimeout(() => fire('timeout'), options.timeoutMs);
+    interval = setInterval(() => {
+      if (isCancelled()) fire('cancelled');
+    }, 500);
+  } else {
+    interval = setInterval(() => {
+      if (isCancelled()) fire('cancelled');
+    }, 500);
+  }
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    if (interval) clearInterval(interval);
+  };
 }
 
 function drainDecipherQueue(): void {
@@ -410,6 +534,7 @@ export async function evalYoutubePlayerInWebView(
 export async function downloadMediaUrlViaWebView(
   fullUrl: string,
   destUri: string,
+  options?: WebViewMediaDownloadOptions,
 ): Promise<void> {
   requestDecipherMount();
   await waitForWebViewReady(15_000);
@@ -422,20 +547,29 @@ export async function downloadMediaUrlViaWebView(
   streamWriteChain = Promise.resolve();
 
   return new Promise((resolve, reject) => {
-    streamJob = {
+    const job: StreamJob = {
       jobId,
       destUri,
       partPaths: {},
       nChunks: null,
-      resolve,
-      reject,
+      resolve: () => {
+        job.cancelWatch?.();
+        resolve();
+      },
+      reject: (e) => {
+        job.cancelWatch?.();
+        reject(e);
+      },
     };
+    streamJob = job;
     streamDownloadActive = true;
+    job.cancelWatch = armStreamDownloadWatchdog(job, options);
     try {
       webView!.injectJavaScript(buildStreamFetchInject(fullUrl, jobId));
     } catch (e) {
       streamDownloadActive = false;
       streamJob = null;
+      job.cancelWatch?.();
       reject(e instanceof Error ? e : new Error(String(e)));
     }
   });

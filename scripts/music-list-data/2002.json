@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Lose Yourself",
+    "album": "8 Mile: Music from and Inspired by the Motion Picture"
+  },
+  {
+    "rank": 2,
+    "year": 2002,
+    "artist": "Nas",
+    "title": "Made You Look",
+    "album": "God's Son"
+  },
+  {
+    "rank": 3,
+    "year": 2002,
+    "artist": "Nelly feat. Kelly Rowland",
+    "title": "Dilemma",
+    "album": "Nellyville"
+  },
+  {
+    "rank": 4,
+    "year": 2002,
+    "artist": "50 Cent",
+    "title": "In da Club",
+    "album": "Get Rich or Die Tryin'"
+  },
+  {
+    "rank": 5,
+    "year": 2002,
+    "artist": "Cam'ron feat. Juelz Santana",
+    "title": "Hey Ma",
+    "album": "Come Home with Me"
+  },
+  {
+    "rank": 6,
+    "year": 2002,
+    "artist": "Jay-Z",
+    "title": "'03 Bonnie & Clyde",
+    "album": "The Blueprint 2: The Gift & The Curse"
+  },
+  {
+    "rank": 7,
+    "year": 2002,
+    "artist": "Missy Elliott",
+    "title": "Work It",
+    "album": "Under Construction"
+  },
+  {
+    "rank": 8,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Cleanin' Out My Closet",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 9,
+    "year": 2002,
+    "artist": "N.O.R.E. feat. Nina Sky",
+    "title": "Nothin'",
+    "album": "God's Favorite"
+  },
+  {
+    "rank": 10,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "I Know What You Want",
+    "album": "8 Mile: Music from and Inspired by the Motion Picture"
+  },
+  {
+    "rank": 11,
+    "year": 2002,
+    "artist": "Clipse",
+    "title": "Life's on the Line",
+    "album": "Lord Willin'"
+  },
+  {
+    "rank": 12,
+    "year": 2002,
+    "artist": "Nas",
+    "title": "When the Last Time",
+    "album": "God's Son"
+  },
+  {
+    "rank": 13,
+    "year": 2002,
+    "artist": "Nelly feat. Kelly Rowland",
+    "title": "Excuse Me Miss",
+    "album": "Nellyville"
+  },
+  {
+    "rank": 14,
+    "year": 2002,
+    "artist": "50 Cent",
+    "title": "Sing for the Moment",
+    "album": "8 Mile: Music from and Inspired by the Motion Picture"
+  },
+  {
+    "rank": 15,
+    "year": 2002,
+    "artist": "Jay-Z",
+    "title": "U Not Like Me",
+    "album": "The Blueprint²: The Gift & The Curse"
+  },
+  {
+    "rank": 16,
+    "year": 2002,
+    "artist": "Missy Elliott",
+    "title": "Air Force Ones",
+    "album": "Under Construction"
+  },
+  {
+    "rank": 17,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Come Close",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 18,
+    "year": 2002,
+    "artist": "N.O.R.E. feat. Nina Sky",
+    "title": "Get By",
+    "album": "God's Favorite"
+  },
+  {
+    "rank": 19,
+    "year": 2002,
+    "artist": "Ludacris",
+    "title": "Multiply",
+    "album": "Word of Mouf"
+  },
+  {
+    "rank": 20,
+    "year": 2002,
+    "artist": "Scarface feat. Jay-Z & Beanie Sigel",
+    "title": "What's Golden",
+    "album": "The Fix"
+  },
+  {
+    "rank": 21,
+    "year": 2002,
+    "artist": "The Roots",
+    "title": "Gossip Folks",
+    "album": "Phrenology"
+  },
+  {
+    "rank": 22,
+    "year": 2002,
+    "artist": "Busta Rhymes feat. Mariah Carey",
+    "title": "Down A** Chick",
+    "album": "It Ain't Safe No More..."
+  },
+  {
+    "rank": 23,
+    "year": 2002,
+    "artist": "50 Cent",
+    "title": "Make It Clap",
+    "album": "Guess Who's Back?"
+  },
+  {
+    "rank": 24,
+    "year": 2002,
+    "artist": "Clipse",
+    "title": "React",
+    "album": "Lord Willin'"
+  },
+  {
+    "rank": 25,
+    "year": 2002,
+    "artist": "Jay-Z",
+    "title": "Feel It in the Air",
+    "album": "The Blueprint²: The Gift & The Curse"
+  },
+  {
+    "rank": 26,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Run",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 27,
+    "year": 2002,
+    "artist": "Cam'ron",
+    "title": "The Essence",
+    "album": "Come Home with Me"
+  },
+  {
+    "rank": 28,
+    "year": 2002,
+    "artist": "Freeway feat. Beanie Sigel",
+    "title": "Dead Man Walking",
+    "album": "Philadelphia Freeway"
+  },
+  {
+    "rank": 29,
+    "year": 2002,
+    "artist": "50 Cent",
+    "title": "Pigeon",
+    "album": "Guess Who's Back?"
+  },
+  {
+    "rank": 30,
+    "year": 2002,
+    "artist": "Nelly",
+    "title": "Blazing Arrow",
+    "album": "Nellyville"
+  },
+  {
+    "rank": 31,
+    "year": 2002,
+    "artist": "Common",
+    "title": "Lynguistics",
+    "album": "Electric Circus"
+  },
+  {
+    "rank": 32,
+    "year": 2002,
+    "artist": "Talib Kweli",
+    "title": "Hell Yeah (Pimp the System)",
+    "album": "Quality"
+  },
+  {
+    "rank": 33,
+    "year": 2002,
+    "artist": "Xzibit",
+    "title": "Acknowledge",
+    "album": "Man vs. Machine"
+  },
+  {
+    "rank": 34,
+    "year": 2002,
+    "artist": "Jurassic 5",
+    "title": "Beautiful",
+    "album": "Power in Numbers"
+  },
+  {
+    "rank": 35,
+    "year": 2002,
+    "artist": "Missy Elliott",
+    "title": "Get Low",
+    "album": "Under Construction"
+  },
+  {
+    "rank": 36,
+    "year": 2002,
+    "artist": "Ja Rule feat. Charli Baltimore",
+    "title": "Too Hot",
+    "album": "The Last Temptation"
+  },
+  {
+    "rank": 37,
+    "year": 2002,
+    "artist": "Busta Rhymes",
+    "title": "Focus",
+    "album": "It Ain't Safe No More..."
+  },
+  {
+    "rank": 38,
+    "year": 2002,
+    "artist": "Redman",
+    "title": "Rap Name",
+    "album": "Malpractice"
+  },
+  {
+    "rank": 39,
+    "year": 2002,
+    "artist": "Beanie Sigel",
+    "title": "Without Me",
+    "album": "The Reason"
+  },
+  {
+    "rank": 40,
+    "year": 2002,
+    "artist": "Ghostface Killah",
+    "title": "Superman",
+    "album": "The Pretty Toney Album"
+  },
+  {
+    "rank": 41,
+    "year": 2002,
+    "artist": "AZ",
+    "title": "Business",
+    "album": "Aziatic"
+  },
+  {
+    "rank": 42,
+    "year": 2002,
+    "artist": "Atmosphere",
+    "title": "Till I Collapse",
+    "album": "God Loves Ugly"
+  },
+  {
+    "rank": 43,
+    "year": 2002,
+    "artist": "Dilated Peoples",
+    "title": "I Can",
+    "album": "Expansion Team"
+  },
+  {
+    "rank": 44,
+    "year": 2002,
+    "artist": "Royce da 5'9\"",
+    "title": "Hovi Baby",
+    "album": "Rock City (Version 2.0)"
+  },
+  {
+    "rank": 45,
+    "year": 2002,
+    "artist": "Cormega",
+    "title": "Back in the Day",
+    "album": "The True Meaning"
+  },
+  {
+    "rank": 46,
+    "year": 2002,
+    "artist": "El-P",
+    "title": "Hot in Herre",
+    "album": "Fantastic Damage"
+  },
+  {
+    "rank": 47,
+    "year": 2002,
+    "artist": "Aesop Rock",
+    "title": "Corner Bodega",
+    "album": "Daylight EP"
+  },
+  {
+    "rank": 48,
+    "year": 2002,
+    "artist": "Cannibal Ox",
+    "title": "Cot Damn",
+    "album": "The Cold Vein"
+  },
+  {
+    "rank": 49,
+    "year": 2002,
+    "artist": "Blackalicious",
+    "title": "On My Block",
+    "album": "Blazing Arrow"
+  },
+  {
+    "rank": 50,
+    "year": 2002,
+    "artist": "CunninLynguists",
+    "title": "Rush",
+    "album": "Will Rap for Food"
+  },
+  {
+    "rank": 51,
+    "year": 2002,
+    "artist": "Dead Prez",
+    "title": "My Name",
+    "album": "RBG: Revolutionary but Gangsta"
+  },
+  {
+    "rank": 52,
+    "year": 2002,
+    "artist": "Masta Ace",
+    "title": "After School Special",
+    "album": "Disposable Arts"
+  },
+  {
+    "rank": 53,
+    "year": 2002,
+    "artist": "Snoop Dogg feat. Pharrell",
+    "title": "Rolling with Heat",
+    "album": "Paid tha Cost to Be da Bo$$"
+  },
+  {
+    "rank": 54,
+    "year": 2002,
+    "artist": "Lil Jon & The East Side Boyz",
+    "title": "Touch It (Prototype)",
+    "album": "Kings of Crunk"
+  },
+  {
+    "rank": 55,
+    "year": 2002,
+    "artist": "DJ Kay Slay feat. 50 Cent",
+    "title": "Be This Way",
+    "album": "The Streetsweeper, Vol. 2"
+  },
+  {
+    "rank": 56,
+    "year": 2002,
+    "artist": "Joe Budden",
+    "title": "Rebirth",
+    "album": "Mood Muzik"
+  },
+  {
+    "rank": 57,
+    "year": 2002,
+    "artist": "Fat Joe feat. Ashanti",
+    "title": "Rock City",
+    "album": "Jealous Ones Still Envy (J.O.S.E.)"
+  },
+  {
+    "rank": 58,
+    "year": 2002,
+    "artist": "Obie Trice",
+    "title": "The True Meaning",
+    "album": "Cheers"
+  },
+  {
+    "rank": 59,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Tuned Mass Damper",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 60,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Paragraph President",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 61,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Mic Like a Memory",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 62,
+    "year": 2002,
+    "artist": "Eminem",
+    "title": "Radio Freq",
+    "album": "The Eminem Show"
+  },
+  {
+    "rank": 63,
+    "year": 2002,
+    "artist": "Nas",
+    "title": "Walk With Me",
+    "album": "God's Son"
+  },
+  {
+    "rank": 64,
+    "year": 2002,
+    "artist": "Jay-Z",
+    "title": "The Set Up",
+    "album": "The Blueprint²: The Gift & The Curse"
+  },
+  {
+    "rank": 65,
+    "year": 2002,
+    "artist": "Missy Elliott",
+    "title": "What We Do",
+    "album": "Under Construction"
+  },
+  {
+    "rank": 66,
+    "year": 2002,
+    "artist": "Cam'ron feat. Juelz Santana, Freekey Zekey & Toya",
+    "title": "Stunt 101",
+    "album": "Come Home with Me"
+  },
+  {
+    "rank": 67,
+    "year": 2002,
+    "artist": "Nelly",
+    "title": "Right Thurr",
+    "album": "Nellyville"
+  },
+  {
+    "rank": 68,
+    "year": 2002,
+    "artist": "50 Cent",
+    "title": "Game Over (Flip)",
+    "album": "Guess Who's Back?"
+  },
+  {
+    "rank": 69,
+    "year": 2002,
+    "artist": "Clipse",
+    "title": "Home",
+    "album": "Lord Willin'"
+  },
+  {
+    "rank": 70,
+    "year": 2002,
+    "artist": "Scarface",
+    "title": "Get Me",
+    "album": "The Fix"
+  },
+  {
+    "rank": 71,
+    "year": 2002,
+    "artist": "Talib Kweli",
+    "title": "Like a Pimp",
+    "album": "Quality"
+  },
+  {
+    "rank": 72,
+    "year": 2002,
+    "artist": "Common feat. Mary J. Blige",
+    "title": "Flipside",
+    "album": "Electric Circus"
+  },
+  {
+    "rank": 73,
+    "year": 2002,
+    "artist": "Xzibit",
+    "title": "The Pain",
+    "album": "Man vs. Machine"
+  },
+  {
+    "rank": 74,
+    "year": 2002,
+    "artist": "Jurassic 5",
+    "title": "Makeshift Patriot",
+    "album": "Power in Numbers"
+  },
+  {
+    "rank": 75,
+    "year": 2002,
+    "artist": "The Roots",
+    "title": "Braggin Writes",
+    "album": "Phrenology"
+  },
+  {
+    "rank": 76,
+    "year": 2002,
+    "artist": "Busta Rhymes",
+    "title": "Callin' Out",
+    "album": "It Ain't Safe No More..."
+  },
+  {
+    "rank": 77,
+    "year": 2002,
+    "artist": "Redman",
+    "title": "In da Club",
+    "album": "Malpractice"
+  },
+  {
+    "rank": 78,
+    "year": 2002,
+    "artist": "Beanie Sigel",
+    "title": "Hey Ya!",
+    "album": "The Reason"
+  },
+  {
+    "rank": 79,
+    "year": 2002,
+    "artist": "Ghostface Killah",
+    "title": "The Way You Move",
+    "album": "Bulletproof Wallets"
+  },
+  {
+    "rank": 80,
+    "year": 2002,
+    "artist": "AZ",
+    "title": "Dirt Off Your Shoulder",
+    "album": "Aziatic"
+  },
+  {
+    "rank": 81,
+    "year": 2002,
+    "artist": "Atmosphere",
+    "title": "99 Problems",
+    "album": "God Loves Ugly"
+  },
+  {
+    "rank": 82,
+    "year": 2002,
+    "artist": "Dilated Peoples",
+    "title": "Pump It Up",
+    "album": "Expansion Team"
+  },
+  {
+    "rank": 83,
+    "year": 2002,
+    "artist": "Royce da 5'9\"",
+    "title": "P.I.M.P.",
+    "album": "Rock City (Version 2.0)"
+  },
+  {
+    "rank": 84,
+    "year": 2002,
+    "artist": "Cormega",
+    "title": "21 Questions",
+    "album": "The True Meaning"
+  },
+  {
+    "rank": 85,
+    "year": 2002,
+    "artist": "El-P",
+    "title": "Where Is the Love?",
+    "album": "Fantastic Damage"
+  },
+  {
+    "rank": 86,
+    "year": 2002,
+    "artist": "Aesop Rock",
+    "title": "Crazy in Love",
+    "album": "Labor Days"
+  },
+  {
+    "rank": 87,
+    "year": 2002,
+    "artist": "Cannibal Ox",
+    "title": "Stand Up",
+    "album": "The Cold Vein"
+  },
+  {
+    "rank": 88,
+    "year": 2002,
+    "artist": "Blackalicious",
+    "title": "Got Some Teeth",
+    "album": "Blazing Arrow"
+  },
+  {
+    "rank": 89,
+    "year": 2002,
+    "artist": "CunninLynguists",
+    "title": "Where the Hood At?",
+    "album": "Will Rap for Food"
+  },
+  {
+    "rank": 90,
+    "year": 2002,
+    "artist": "Dead Prez",
+    "title": "Encore",
+    "album": "RBG: Revolutionary but Gangsta"
+  },
+  {
+    "rank": 91,
+    "year": 2002,
+    "artist": "Masta Ace",
+    "title": "Lucifer",
+    "album": "Disposable Arts"
+  },
+  {
+    "rank": 92,
+    "year": 2002,
+    "artist": "Snoop Dogg feat. Pharrell & Charlie Wilson",
+    "title": "Pass That Dutch",
+    "album": "Paid tha Cost to Be da Bo$$"
+  },
+  {
+    "rank": 93,
+    "year": 2002,
+    "artist": "Lil Jon & The East Side Boyz feat. Ying Yang Twins",
+    "title": "Never Scared",
+    "album": "Kings of Crunk"
+  },
+  {
+    "rank": 94,
+    "year": 2002,
+    "artist": "Joe Budden",
+    "title": "Rubber Band Man",
+    "album": "Mood Muzik"
+  },
+  {
+    "rank": 95,
+    "year": 2002,
+    "artist": "Fat Joe feat. Ashanti",
+    "title": "Fix Up, Look Sharp",
+    "album": "Jealous Ones Still Envy (J.O.S.E.)"
+  },
+  {
+    "rank": 96,
+    "year": 2002,
+    "artist": "Obie Trice",
+    "title": "I Luv U",
+    "album": "Cheers"
+  },
+  {
+    "rank": 97,
+    "year": 2002,
+    "artist": "Freeway",
+    "title": "Through the Wire",
+    "album": "Philadelphia Freeway"
+  },
+  {
+    "rank": 98,
+    "year": 2002,
+    "artist": "G-Unit",
+    "title": "Slow Jamz",
+    "album": "Beg for Mercy"
+  },
+  {
+    "rank": 99,
+    "year": 2002,
+    "artist": "Chingy",
+    "title": "You Don't Want Drama",
+    "album": "Jackpot"
+  },
+  {
+    "rank": 100,
+    "year": 2002,
+    "artist": "Lil Flip",
+    "title": "What da Hook Gon Be",
+    "album": "U Gotta Feel Me"
+  }
+]

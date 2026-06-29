@@ -7,7 +7,7 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
 import { NativeModules } from 'react-native';
 
-import { downloadMediaUrlViaWebView } from '@/lib/nrmYoutubeDecipherBridge';
+import { downloadMediaUrlViaWebView, NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS } from '@/lib/nrmYoutubeDecipherBridge';
 
 type NrmAudioMetaNative = {
   concatFiles?: (parts: string[], dest: string) => Promise<void>;
@@ -110,15 +110,27 @@ function throwNon2xx(status: number): never {
   );
 }
 
+function throwIfCancelled(isCancelled: () => boolean): void {
+  if (isCancelled()) {
+    throw new Error('EXTRACT_CANCELLED');
+  }
+}
+
 async function downloadSingleOrChunked(
   urlWithCpn: string,
   destUri: string,
   contentLength: number,
   headers: Record<string, string>,
+  isCancelled: () => boolean,
 ): Promise<void> {
+  throwIfCancelled(isCancelled);
   const single = await FileSystem.downloadAsync(urlWithCpn, destUri, {
     headers,
   });
+  if (isCancelled()) {
+    await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+    throw new Error('EXTRACT_CANCELLED');
+  }
   if (single.status >= 200 && single.status < 300) {
     return;
   }
@@ -132,12 +144,16 @@ async function downloadSingleOrChunked(
       let chunkStart = 0;
       let chunkEnd = CHUNK_BYTES;
       for (;;) {
+        throwIfCancelled(isCancelled);
         const rangeEnd = Math.min(chunkEnd, len) - 1;
         const rangeUrl = `${urlWithCpn}&range=${chunkStart}-${rangeEnd}`;
         const partPath = `${destUri}.nrm.part-${partUris.length}`;
         const res = await FileSystem.downloadAsync(rangeUrl, partPath, {
           headers,
         });
+        if (isCancelled()) {
+          throw new Error('EXTRACT_CANCELLED');
+        }
         if (res.status < 200 || res.status >= 300) {
           throwNon2xx(res.status);
         }
@@ -150,11 +166,15 @@ async function downloadSingleOrChunked(
       }
     } else {
       /** `content_length` 없을 때 FormatUtils 는 사실상 첫 구간 한 번만 요청 */
+      throwIfCancelled(isCancelled);
       const rangeUrl = `${urlWithCpn}&range=0-${CHUNK_BYTES - 1}`;
       const partPath = `${destUri}.nrm.part-0`;
       const res = await FileSystem.downloadAsync(rangeUrl, partPath, {
         headers,
       });
+      if (isCancelled()) {
+        throw new Error('EXTRACT_CANCELLED');
+      }
       if (res.status < 200 || res.status >= 300) {
         throwNon2xx(res.status);
       }
@@ -182,6 +202,12 @@ type FormatLike = {
   content_length?: number | string;
 };
 
+export type GooglevideoDownloadOptions = {
+  isCancelled?: () => boolean;
+  /** innertube 추출 wall-clock deadline (ms) */
+  deadlineMs?: number;
+};
+
 /**
  * 복호화된 `format_url`과 `cpn`으로 googlevideo를 네이티브 다운로드합니다.
  */
@@ -190,14 +216,25 @@ export async function downloadGooglevideoAudioToFileUri(
   cpn: string,
   destUri: string,
   format: FormatLike,
+  options: GooglevideoDownloadOptions = {},
 ): Promise<void> {
+  const isCancelled = options.isCancelled ?? (() => false);
   const rawLen = format.content_length;
   const contentLength =
     rawLen != null && rawLen !== '' ? Number(rawLen) : 0;
 
   const urlWithCpn = `${formatUrl}&cpn=${encodeURIComponent(cpn)}`;
+  const webviewDeadline =
+    options.deadlineMs != null
+      ? Math.min(options.deadlineMs, Date.now() + NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS)
+      : Date.now() + NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS;
+
   try {
-    await downloadMediaUrlViaWebView(urlWithCpn, destUri);
+    throwIfCancelled(isCancelled);
+    await downloadMediaUrlViaWebView(urlWithCpn, destUri, {
+      isCancelled,
+      deadlineMs: webviewDeadline,
+    });
     return;
   } catch {
     await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
@@ -206,11 +243,13 @@ export async function downloadGooglevideoAudioToFileUri(
   let lastErr: unknown;
   for (const headers of STREAM_HEADER_PRESETS) {
     try {
+      throwIfCancelled(isCancelled);
       await downloadSingleOrChunked(
         urlWithCpn,
         destUri,
         contentLength,
         headers,
+        isCancelled,
       );
       return;
     } catch (e) {
@@ -218,6 +257,9 @@ export async function downloadGooglevideoAudioToFileUri(
       await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(
         () => {},
       );
+      if (e instanceof Error && e.message === 'EXTRACT_CANCELLED') {
+        throw e;
+      }
     }
   }
   throw lastErr instanceof Error

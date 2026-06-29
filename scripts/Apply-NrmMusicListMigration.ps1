@@ -25,6 +25,9 @@ if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
 
 if (-not (Test-Path $SeedPath)) {
     Write-Host 'music_list_seed.sql 없음 — generate-music-list-seed.mjs 실행 중...'
+    & node (Join-Path $RepoRoot 'scripts\music-list-data\build.mjs')
+    & node (Join-Path $RepoRoot 'scripts\music-list-data-global\build.mjs')
+    & node (Join-Path $RepoRoot 'scripts\music-list-data-kr-rap\build.mjs')
     & node (Join-Path $RepoRoot 'scripts\generate-music-list-seed.mjs')
 }
 

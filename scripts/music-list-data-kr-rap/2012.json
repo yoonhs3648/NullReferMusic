@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2012,
+    "artist": "G-Dragon",
+    "title": "One of a Kind",
+    "album": "One of a Kind"
+  },
+  {
+    "rank": 2,
+    "year": 2012,
+    "artist": "G-Dragon",
+    "title": "That XX",
+    "album": "One of a Kind"
+  },
+  {
+    "rank": 3,
+    "year": 2012,
+    "artist": "G-Dragon",
+    "title": "Crayon",
+    "album": "One of a Kind"
+  },
+  {
+    "rank": 4,
+    "year": 2012,
+    "artist": "G-Dragon",
+    "title": "Missing You",
+    "album": "One of a Kind"
+  },
+  {
+    "rank": 5,
+    "year": 2012,
+    "artist": "G-Dragon",
+    "title": "Without You",
+    "album": "One of a Kind"
+  },
+  {
+    "rank": 6,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "99",
+    "album": "99"
+  },
+  {
+    "rank": 7,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "It's Cold",
+    "album": "99"
+  },
+  {
+    "rank": 8,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "Friend?",
+    "album": "99"
+  },
+  {
+    "rank": 9,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "Map of the Human Mind",
+    "album": "99"
+  },
+  {
+    "rank": 10,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "Bouncer",
+    "album": "99"
+  },
+  {
+    "rank": 11,
+    "year": 2012,
+    "artist": "Epik High",
+    "title": "Obligation",
+    "album": "99"
+  },
+  {
+    "rank": 12,
+    "year": 2012,
+    "artist": "Dynamic Duo",
+    "title": "Eunhaeng",
+    "album": "A Giant Step"
+  },
+  {
+    "rank": 13,
+    "year": 2012,
+    "artist": "Dynamic Duo",
+    "title": "Solo",
+    "album": "A Giant Step"
+  },
+  {
+    "rank": 14,
+    "year": 2012,
+    "artist": "Dynamic Duo",
+    "title": "Pledge",
+    "album": "A Giant Step"
+  },
+  {
+    "rank": 15,
+    "year": 2012,
+    "artist": "Dynamic Duo",
+    "title": "Gao",
+    "album": "A Giant Step"
+  },
+  {
+    "rank": 16,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "New Breed",
+    "album": "New Breed"
+  },
+  {
+    "rank": 17,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "Girlfriend",
+    "album": "New Breed"
+  },
+  {
+    "rank": 18,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "Star",
+    "album": "New Breed"
+  },
+  {
+    "rank": 19,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "Turn Off Your Phone",
+    "album": "New Breed"
+  },
+  {
+    "rank": 20,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "Level Up",
+    "album": "New Breed"
+  },
+  {
+    "rank": 21,
+    "year": 2012,
+    "artist": "Jay Park",
+    "title": "Ride or Die",
+    "album": "New Breed"
+  },
+  {
+    "rank": 22,
+    "year": 2012,
+    "artist": "Beenzino",
+    "title": "247",
+    "album": "247"
+  },
+  {
+    "rank": 23,
+    "year": 2012,
+    "artist": "Beenzino",
+    "title": "Perfect Lover",
+    "album": "247"
+  },
+  {
+    "rank": 24,
+    "year": 2012,
+    "artist": "Beenzino",
+    "title": "Slow Down",
+    "album": "247"
+  },
+  {
+    "rank": 25,
+    "year": 2012,
+    "artist": "Beenzino",
+    "title": "Hot Spring",
+    "album": "247"
+  },
+  {
+    "rank": 26,
+    "year": 2012,
+    "artist": "Verbal Jint",
+    "title": "Mainstream",
+    "album": "Mainstream"
+  },
+  {
+    "rank": 27,
+    "year": 2012,
+    "artist": "Verbal Jint",
+    "title": "No Scope",
+    "album": "Mainstream"
+  },
+  {
+    "rank": 28,
+    "year": 2012,
+    "artist": "Verbal Jint",
+    "title": "Good Morning Pt.2",
+    "album": "Mainstream"
+  },
+  {
+    "rank": 29,
+    "year": 2012,
+    "artist": "Simon Dominic",
+    "title": "Cheer Up to You",
+    "album": "Consolation"
+  },
+  {
+    "rank": 30,
+    "year": 2012,
+    "artist": "Simon Dominic",
+    "title": "Consolation",
+    "album": "Consolation"
+  },
+  {
+    "rank": 31,
+    "year": 2012,
+    "artist": "Simon Dominic",
+    "title": "Simplize",
+    "album": "Consolation"
+  },
+  {
+    "rank": 32,
+    "year": 2012,
+    "artist": "Simon Dominic",
+    "title": "I2",
+    "album": "Consolation"
+  },
+  {
+    "rank": 33,
+    "year": 2012,
+    "artist": "Zion.T",
+    "title": "I Need U",
+    "album": "Zion.T Special: ZIP"
+  },
+  {
+    "rank": 34,
+    "year": 2012,
+    "artist": "Zion.T",
+    "title": "Babylon",
+    "album": "Zion.T Special: ZIP"
+  },
+  {
+    "rank": 35,
+    "year": 2012,
+    "artist": "Zion.T",
+    "title": "EPIC",
+    "album": "Zion.T Special: ZIP"
+  },
+  {
+    "rank": 36,
+    "year": 2012,
+    "artist": "Zion.T",
+    "title": "Miss Kim",
+    "album": "Zion.T Special: ZIP"
+  },
+  {
+    "rank": 37,
+    "year": 2012,
+    "artist": "Crush",
+    "title": "Crush on You",
+    "album": "Crush on You"
+  },
+  {
+    "rank": 38,
+    "year": 2012,
+    "artist": "Crush",
+    "title": "Hug Me",
+    "album": "Crush on You"
+  },
+  {
+    "rank": 39,
+    "year": 2012,
+    "artist": "Crush",
+    "title": "I'm Yours",
+    "album": "Crush on You"
+  },
+  {
+    "rank": 40,
+    "year": 2012,
+    "artist": "Crush",
+    "title": "Beautiful",
+    "album": "Crush on You"
+  },
+  {
+    "rank": 41,
+    "year": 2012,
+    "artist": "Loco",
+    "title": "See You",
+    "album": "Blonote"
+  },
+  {
+    "rank": 42,
+    "year": 2012,
+    "artist": "Loco",
+    "title": "Hold Me",
+    "album": "Blonote"
+  },
+  {
+    "rank": 43,
+    "year": 2012,
+    "artist": "Loco",
+    "title": "Blonote",
+    "album": "Blonote"
+  },
+  {
+    "rank": 44,
+    "year": 2012,
+    "artist": "Loco",
+    "title": "Thinking About You",
+    "album": "Blonote"
+  },
+  {
+    "rank": 45,
+    "year": 2012,
+    "artist": "Gray",
+    "title": "Call Me Yours",
+    "album": "Gray Season 1"
+  },
+  {
+    "rank": 46,
+    "year": 2012,
+    "artist": "Gray",
+    "title": "Dangerous",
+    "album": "Gray Season 1"
+  },
+  {
+    "rank": 47,
+    "year": 2012,
+    "artist": "Gray",
+    "title": "Stay the Night",
+    "album": "Gray Season 1"
+  },
+  {
+    "rank": 48,
+    "year": 2012,
+    "artist": "Gray",
+    "title": "Swim",
+    "album": "Gray Season 1"
+  },
+  {
+    "rank": 49,
+    "year": 2012,
+    "artist": "Primary",
+    "title": "Roller Coaster",
+    "album": "Primary and the Messengers LP 2"
+  },
+  {
+    "rank": 50,
+    "year": 2012,
+    "artist": "Primary",
+    "title": "JohnLegend",
+    "album": "Primary and the Messengers LP 2"
+  },
+  {
+    "rank": 51,
+    "year": 2012,
+    "artist": "Primary",
+    "title": "Mission",
+    "album": "Primary and the Messengers LP 2"
+  },
+  {
+    "rank": 52,
+    "year": 2012,
+    "artist": "Primary",
+    "title": "Think About It",
+    "album": "Primary and the Messengers LP 2"
+  },
+  {
+    "rank": 53,
+    "year": 2012,
+    "artist": "Primary",
+    "title": "Don't Stop",
+    "album": "Primary and the Messengers LP 2"
+  },
+  {
+    "rank": 54,
+    "year": 2012,
+    "artist": "Junggigo",
+    "title": "Rookie",
+    "album": "Rookie"
+  },
+  {
+    "rank": 55,
+    "year": 2012,
+    "artist": "Junggigo",
+    "title": "Because",
+    "album": "Rookie"
+  },
+  {
+    "rank": 56,
+    "year": 2012,
+    "artist": "Junggigo",
+    "title": "Looking Star",
+    "album": "Rookie"
+  },
+  {
+    "rank": 57,
+    "year": 2012,
+    "artist": "Gaeko",
+    "title": "West Coast",
+    "album": "Redingray"
+  },
+  {
+    "rank": 58,
+    "year": 2012,
+    "artist": "Gaeko",
+    "title": "Redingray",
+    "album": "Redingray"
+  },
+  {
+    "rank": 59,
+    "year": 2012,
+    "artist": "Gaeko",
+    "title": "Rhythm and Poetry",
+    "album": "Redingray"
+  },
+  {
+    "rank": 60,
+    "year": 2012,
+    "artist": "Bumkey",
+    "title": "Single Life",
+    "album": "Single Life"
+  },
+  {
+    "rank": 61,
+    "year": 2012,
+    "artist": "Bumkey",
+    "title": "Attraction",
+    "album": "Single Life"
+  },
+  {
+    "rank": 62,
+    "year": 2012,
+    "artist": "Zico",
+    "title": "Battle Royale",
+    "album": "Zico on the Block 1.5"
+  },
+  {
+    "rank": 63,
+    "year": 2012,
+    "artist": "Zico",
+    "title": "Hurricane Venus",
+    "album": "Zico on the Block 1.5"
+  },
+  {
+    "rank": 64,
+    "year": 2012,
+    "artist": "Zico",
+    "title": "Human",
+    "album": "Zico on the Block 1.5"
+  },
+  {
+    "rank": 65,
+    "year": 2012,
+    "artist": "E-Sens",
+    "title": "Anonymous Letters",
+    "album": "Anonymous Letters"
+  },
+  {
+    "rank": 66,
+    "year": 2012,
+    "artist": "E-Sens",
+    "title": "The Song of the Sword",
+    "album": "Anonymous Letters"
+  },
+  {
+    "rank": 67,
+    "year": 2012,
+    "artist": "E-Sens",
+    "title": "New York",
+    "album": "Anonymous Letters"
+  },
+  {
+    "rank": 68,
+    "year": 2012,
+    "artist": "Dok2",
+    "title": "Rich",
+    "album": "Dok2ocracy"
+  },
+  {
+    "rank": 69,
+    "year": 2012,
+    "artist": "Dok2",
+    "title": "We Online",
+    "album": "Dok2ocracy"
+  },
+  {
+    "rank": 70,
+    "year": 2012,
+    "artist": "Dok2",
+    "title": "Crown City",
+    "album": "Dok2ocracy"
+  },
+  {
+    "rank": 71,
+    "year": 2012,
+    "artist": "The Quiett",
+    "title": "Q Train",
+    "album": "Q Train"
+  },
+  {
+    "rank": 72,
+    "year": 2012,
+    "artist": "The Quiett",
+    "title": "Guilty Conscience",
+    "album": "Q Train"
+  },
+  {
+    "rank": 73,
+    "year": 2012,
+    "artist": "The Quiett",
+    "title": "Can't Go Home",
+    "album": "Q Train"
+  },
+  {
+    "rank": 74,
+    "year": 2012,
+    "artist": "Paloalto",
+    "title": "Shining Diamond",
+    "album": "Shining Diamond"
+  },
+  {
+    "rank": 75,
+    "year": 2012,
+    "artist": "Paloalto",
+    "title": "Good Morning",
+    "album": "Shining Diamond"
+  },
+  {
+    "rank": 76,
+    "year": 2012,
+    "artist": "Paloalto",
+    "title": "Lonely",
+    "album": "Shining Diamond"
+  },
+  {
+    "rank": 77,
+    "year": 2012,
+    "artist": "Mad Clown",
+    "title": "Potato",
+    "album": "Potato"
+  },
+  {
+    "rank": 78,
+    "year": 2012,
+    "artist": "Mad Clown",
+    "title": "Maximum",
+    "album": "Potato"
+  },
+  {
+    "rank": 79,
+    "year": 2012,
+    "artist": "Yoon Mirae",
+    "title": "Touch Love",
+    "album": ""
+  },
+  {
+    "rank": 80,
+    "year": 2012,
+    "artist": "Tablo",
+    "title": "Baddest Female",
+    "album": "Fever's End Pt. 1"
+  },
+  {
+    "rank": 81,
+    "year": 2012,
+    "artist": "Tablo",
+    "title": "Tomorrow Is Coming",
+    "album": "Fever's End Pt. 1"
+  },
+  {
+    "rank": 82,
+    "year": 2012,
+    "artist": "Jinbo",
+    "title": "Deeper",
+    "album": "555"
+  },
+  {
+    "rank": 83,
+    "year": 2012,
+    "artist": "Jinbo",
+    "title": "O.S.T.",
+    "album": "555"
+  },
+  {
+    "rank": 84,
+    "year": 2012,
+    "artist": "Swings",
+    "title": "I'll Give You Everything",
+    "album": ""
+  },
+  {
+    "rank": 85,
+    "year": 2012,
+    "artist": "Swings",
+    "title": "Sleep Well",
+    "album": ""
+  },
+  {
+    "rank": 86,
+    "year": 2012,
+    "artist": "Vasco",
+    "title": "The Vasco",
+    "album": "The Vasco"
+  },
+  {
+    "rank": 87,
+    "year": 2012,
+    "artist": "Deepflow",
+    "title": "Flow the Life 3",
+    "album": "Flow the Life 3"
+  },
+  {
+    "rank": 88,
+    "year": 2012,
+    "artist": "Deepflow",
+    "title": "Intro",
+    "album": "Flow the Life 3"
+  },
+  {
+    "rank": 89,
+    "year": 2012,
+    "artist": "Don Mills",
+    "title": "Don Mills Is Angry 3",
+    "album": "Don Mills Is Angry 3"
+  },
+  {
+    "rank": 90,
+    "year": 2012,
+    "artist": "Huckleberry P",
+    "title": "Mantra 3",
+    "album": "Mantra 3"
+  },
+  {
+    "rank": 91,
+    "year": 2012,
+    "artist": "Kebee",
+    "title": "Rhythm and Poetry",
+    "album": "Rhythm and Poetry"
+  },
+  {
+    "rank": 92,
+    "year": 2012,
+    "artist": "Myun Do One",
+    "title": "Myun Do One Is Back 2",
+    "album": "Myun Do One Is Back 2"
+  },
+  {
+    "rank": 93,
+    "year": 2012,
+    "artist": "J'Kyun",
+    "title": "Ready to Fly 2",
+    "album": "Ready to Fly 2"
+  },
+  {
+    "rank": 94,
+    "year": 2012,
+    "artist": "Sean2Slow",
+    "title": "Slow Jam 2",
+    "album": "Slow Jam 2"
+  },
+  {
+    "rank": 95,
+    "year": 2012,
+    "artist": "Skull",
+    "title": "Love U",
+    "album": "Skull & Haha 2"
+  },
+  {
+    "rank": 96,
+    "year": 2012,
+    "artist": "Double K",
+    "title": "Fly High 2",
+    "album": "Fly High 2"
+  },
+  {
+    "rank": 97,
+    "year": 2012,
+    "artist": "Pe2ny",
+    "title": "Pe2ny Maker 2",
+    "album": "Pe2ny Maker 2"
+  },
+  {
+    "rank": 98,
+    "year": 2012,
+    "artist": "TBNY",
+    "title": "Million 2",
+    "album": "Million 2"
+  },
+  {
+    "rank": 99,
+    "year": 2012,
+    "artist": "Stuck B",
+    "title": "Stuck B 2",
+    "album": "Stuck B 2"
+  },
+  {
+    "rank": 100,
+    "year": 2012,
+    "artist": "Crown J",
+    "title": "My Friend 2",
+    "album": "My Friend 2"
+  }
+]

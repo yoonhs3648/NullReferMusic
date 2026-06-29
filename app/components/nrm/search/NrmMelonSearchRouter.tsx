@@ -129,6 +129,8 @@ type Props = {
   onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
   restoredState?: MelonSearchRouterState | null;
   scrollTopChrome?: ReactNode;
+  /** 마운트 시 자동 검색할 초기 쿼리 (Discover 등) */
+  initialQuery?: string;
 };
 
 let frameSeq = 0;
@@ -137,7 +139,7 @@ function nextFrameId(): string {
   return `ml-${frameSeq}`;
 }
 
-function emptyListFrame(kind: MelonSearchKind): ListFrame {
+function emptyListFrame(kind: MelonSearchKind, query = ''): ListFrame {
   const type =
     kind === 'artist'
       ? 'artist-list'
@@ -147,7 +149,7 @@ function emptyListFrame(kind: MelonSearchKind): ListFrame {
   return {
     id: nextFrameId(),
     type,
-    query: '',
+    query,
     hits: [],
     searched: false,
     loading: false,
@@ -222,7 +224,16 @@ function artistMetaRows(info: MelonArtistInfo): { label: string; value: string }
 
 export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
   function NrmMelonSearchRouter(
-    { initialKind, isDark, paddingHorizontal, onBackToHome, onNavigateYoutube, restoredState, scrollTopChrome },
+    {
+      initialKind,
+      isDark,
+      paddingHorizontal,
+      onBackToHome,
+      onNavigateYoutube,
+      restoredState,
+      scrollTopChrome,
+      initialQuery,
+    },
     ref,
   ) {
     const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -231,9 +242,12 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     const rowHover = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
 
     const [stack, setStack] = useState<Frame[]>(() =>
-      restoredState?.stack?.length ? restoredState.stack : [emptyListFrame(initialKind)],
+      restoredState?.stack?.length
+        ? restoredState.stack
+        : [emptyListFrame(initialKind, initialQuery?.trim() ?? '')],
     );
     const reqRef = useRef(0);
+    const autoSearchDoneRef = useRef(false);
     const loadMoreLockRef = useRef(false);
     const listRef = useRef<FlatList<MelonArtistSearchHit | MelonAlbumSearchHit | MelonTrackSearchHit>>(null);
     const detailScrollRef = useRef<ScrollView>(null);
@@ -352,6 +366,24 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
       },
       [updateTop],
     );
+
+    useEffect(() => {
+      if (autoSearchDoneRef.current || restoredState?.stack?.length) return;
+      const q = initialQuery?.trim();
+      if (!q) return;
+      const frame = stack[0];
+      if (
+        !frame ||
+        (frame.type !== 'artist-list' &&
+          frame.type !== 'album-list' &&
+          frame.type !== 'track-list') ||
+        frame.searched
+      ) {
+        return;
+      }
+      autoSearchDoneRef.current = true;
+      void runListSearch({ ...frame, query: q });
+    }, [initialQuery, restoredState, runListSearch, stack]);
 
     const loadMoreList = useCallback(
       async (frame: ListFrame) => {

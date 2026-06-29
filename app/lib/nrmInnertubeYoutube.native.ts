@@ -17,12 +17,17 @@ import type {
   YoutubeSearchItem,
   YoutubeSearchOutcome,
 } from '@/lib/youtubeSearchTypes';
-import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
+import { logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
+import {
+  notifyInnertubeExtractFailed,
+  shouldPreferYtdlpFirstForAudioQueue,
+} from '@/lib/nrmInnertubeExtractSession';
 import {
   NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
   NRM_YTDLP_EXTRACT_TIMEOUT_MS,
 } from '@/lib/nrmDownloadTimeouts';
+import { cancelActiveInnertubeExtractions } from '@/lib/nrmYoutubeDecipherBridge';
 import {
   nrmYoutubeSearchEmptyQueryMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
@@ -65,6 +70,34 @@ function shouldRetryInnertubeDownload(msg: string): boolean {
   return /No valid URL to decipher|Failed to decipher|No matching formats|Streaming data not available|STREAMING_DATA_MISSING|NO_DECIPHERABLE_FORMAT|status code 400|non 2xx|FETCH_FAILED|status code 403|read property 'as'|properties of null \(reading 'as'\)/i.test(
     msg,
   );
+}
+
+/** innertubeClientAttempts() 순서와 동일 */
+const INNERTUBE_CLIENT_LABELS = ['default', 'android', 'ios', 'web'] as const;
+
+function isExtractCancelledError(e: unknown): boolean {
+  return (
+    e instanceof ExtractAbortedError ||
+    (e instanceof Error && e.message === 'EXTRACT_CANCELLED')
+  );
+}
+
+async function bindCancellation<T>(
+  promise: Promise<T>,
+  isCancelled: () => boolean,
+): Promise<T> {
+  if (isCancelled()) {
+    throw new ExtractRaceCancelledError();
+  }
+  return Promise.race([
+    promise,
+    (async () => {
+      while (!isCancelled()) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      throw new ExtractRaceCancelledError();
+    })(),
+  ]);
 }
 
 /** Chaquopy·네이티브 모듈 자체가 없을 때만 innertube 폴백을 건너뜁니다. */
@@ -407,26 +440,50 @@ class ExtractRaceCancelledError extends ExtractAbortedError {
 }
 
 async function withExtractTimeout<T>(
-  run: (isAborted: () => boolean) => Promise<T>,
+  run: (isAborted: () => boolean, deadlineMs: number) => Promise<T>,
   timeoutMs: number,
   onTimeout: () => void,
 ): Promise<T> {
   let aborted = false;
   const isAborted = () => aborted;
+  const deadlineMs = Date.now() + timeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let watchdog: ReturnType<typeof setInterval> | undefined;
+
+  const fireTimeout = () => {
+    if (aborted) return;
+    aborted = true;
+    onTimeout();
+  };
+
   try {
     return await Promise.race([
-      run(isAborted),
+      run(isAborted, deadlineMs),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          aborted = true;
-          onTimeout();
-          reject(new ExtractAbortedError('timeout'));
-        }, timeoutMs);
+        const arm = () => {
+          const msLeft = Math.max(0, deadlineMs - Date.now());
+          if (msLeft === 0) {
+            fireTimeout();
+            reject(new ExtractAbortedError('timeout'));
+            return;
+          }
+          timer = setTimeout(() => {
+            fireTimeout();
+            reject(new ExtractAbortedError('timeout'));
+          }, msLeft);
+        };
+        arm();
+        watchdog = setInterval(() => {
+          if (Date.now() >= deadlineMs) {
+            fireTimeout();
+            reject(new ExtractAbortedError('timeout'));
+          }
+        }, 500);
       }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (watchdog) clearInterval(watchdog);
   }
 }
 
@@ -442,33 +499,82 @@ async function extractAudioSequentialFallback(videoId: string): Promise<string> 
     return extractWithInnertube(videoId);
   }
 
+  if (shouldPreferYtdlpFirstForAudioQueue()) {
+    logDownloadStage('pipeline', 'extract_ytdlp_first', { videoId });
+    try {
+      const uri = await withExtractTimeout(
+        (_isAborted, _deadlineMs) => extractWithYtDlp(videoId),
+        NRM_YTDLP_EXTRACT_TIMEOUT_MS,
+        () => {
+          void cancelActiveYtdlpDownload();
+          logDownloadStage('ytdlp', 'extract_timeout', {
+            videoId,
+            timeoutMs: NRM_YTDLP_EXTRACT_TIMEOUT_MS,
+            sessionPreferred: true,
+          });
+        },
+      );
+      logDownloadStage('pipeline', 'extract_ytdlp_ok', {
+        videoId,
+        sessionPreferred: true,
+      });
+      return uri;
+    } catch (ytdlpErr) {
+      if (
+        ytdlpErr instanceof ExtractAbortedError &&
+        ytdlpErr.reason === 'timeout'
+      ) {
+        throw new YtdlpExtractTimeoutError();
+      }
+      logNrmRunError('download.ytdlp', ytdlpErr, {
+        videoId,
+        sessionPreferred: true,
+      });
+      throw ytdlpErr instanceof Error ? ytdlpErr : new Error(String(ytdlpErr));
+    }
+  }
+
   let innertubeErr: unknown;
+  const extractStartedAt = Date.now();
   try {
     const uri = await withExtractTimeout(
-      (isAborted) => extractWithInnertube(videoId, isAborted),
+      (isAborted, deadlineMs) =>
+        extractWithInnertube(videoId, isAborted, deadlineMs),
       NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
       () => {
+        innertubeSingleton = null;
+        void cancelActiveInnertubeExtractions('timeout');
         logDownloadStage('innertube', 'extract_timeout', {
           videoId,
           timeoutMs: NRM_INNERTUBE_EXTRACT_TIMEOUT_MS,
+          elapsedMs: Date.now() - extractStartedAt,
         });
       },
     );
-    logDownloadStage('pipeline', 'extract_innertube_ok', { videoId });
+    logDownloadStage('pipeline', 'extract_innertube_ok', {
+      videoId,
+      elapsedMs: Date.now() - extractStartedAt,
+    });
     return uri;
   } catch (e) {
     innertubeErr = e;
     if (e instanceof YtdlpExtractTimeoutError) throw e;
+    const timedOut = e instanceof ExtractAbortedError && e.reason === 'timeout';
+    notifyInnertubeExtractFailed(
+      videoId,
+      timedOut ? 'timeout' : 'error',
+    );
     logNrmRunError('download.innertube', e, {
       videoId,
       fallback: 'ytdlp',
-      timedOut: e instanceof ExtractAbortedError && e.reason === 'timeout',
+      timedOut,
+      elapsedMs: Date.now() - extractStartedAt,
     });
   }
 
   try {
     const uri = await withExtractTimeout(
-      (_isAborted) => extractWithYtDlp(videoId),
+      (_isAborted, _deadlineMs) => extractWithYtDlp(videoId),
       NRM_YTDLP_EXTRACT_TIMEOUT_MS,
       () => {
         void cancelActiveYtdlpDownload();
@@ -504,6 +610,7 @@ async function extractAudioSequentialFallback(videoId: string): Promise<string> 
 async function extractWithInnertube(
   videoId: string,
   isCancelled: () => boolean = () => false,
+  deadlineMs?: number,
 ): Promise<string> {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
@@ -515,18 +622,27 @@ async function extractWithInnertube(
   let lastError: unknown;
   const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
+  const extractStartedAt = Date.now();
 
   for (let i = 0; i < attempts.length; i++) {
     if (isCancelled()) {
       throw new ExtractRaceCancelledError();
     }
     let tempUriForCleanup: string | undefined;
+    const clientLabel = INNERTUBE_CLIENT_LABELS[i] ?? `client_${i + 1}`;
+    const attemptStartedAt = Date.now();
     try {
-      const yt = await attempts[i]();
+      logDownloadStage('innertube', 'client_attempt', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+      });
+      const yt = await bindCancellation(attempts[i](), isCancelled);
       if (isCancelled()) {
         throw new ExtractRaceCancelledError();
       }
-      const info = await yt.getBasicInfo(videoId);
+      const info = await bindCancellation(yt.getBasicInfo(videoId), isCancelled);
       if (!info.streaming_data) {
         throw new Error('STREAMING_DATA_MISSING');
       }
@@ -553,18 +669,37 @@ async function extractWithInnertube(
       const tempUri = `${tempBase}${Date.now()}-${tempStemName}`;
       tempUriForCleanup = tempUri;
 
-      const formatUrl = await format.decipher(info.actions.session.player);
+      logDownloadStage('innertube', 'decipher_start', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+      });
+      const formatUrl = await bindCancellation(
+        format.decipher(info.actions.session.player),
+        isCancelled,
+      );
       if (!formatUrl) {
         throw new Error('NO_STREAM_URL');
       }
       if (isCancelled()) {
         throw new ExtractRaceCancelledError();
       }
+      logDownloadStage('innertube', 'googlevideo_start', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+      });
       await downloadGooglevideoAudioToFileUri(
         formatUrl,
         info.cpn,
         tempUri,
         format,
+        {
+          isCancelled,
+          deadlineMs,
+        },
       );
       if (isCancelled()) {
         throw new ExtractRaceCancelledError();
@@ -573,17 +708,22 @@ async function extractWithInnertube(
       logDownloadStage('innertube', 'download_ok', {
         videoId,
         attempt: i + 1,
+        client: clientLabel,
         mime,
+        attemptMs: Date.now() - attemptStartedAt,
+        elapsedMs: Date.now() - extractStartedAt,
         uri: tempUri.slice(0, 96),
       });
 
       return tempUri;
     } catch (e) {
-      if (e instanceof ExtractAbortedError) {
+      if (isExtractCancelledError(e)) {
         if (tempUriForCleanup) {
           await FileSystem.deleteAsync(tempUriForCleanup, { idempotent: true }).catch(() => {});
         }
-        throw e;
+        throw e instanceof ExtractAbortedError
+          ? e
+          : new ExtractRaceCancelledError();
       }
       if (tempUriForCleanup) {
         await FileSystem.deleteAsync(tempUriForCleanup, {
@@ -595,6 +735,9 @@ async function extractWithInnertube(
       logNrmRunError('innertube.download', e, {
         videoId,
         attempt: i + 1,
+        client: clientLabel,
+        attemptMs: Date.now() - attemptStartedAt,
+        elapsedMs: Date.now() - extractStartedAt,
         willRetry:
           i < attempts.length - 1 && shouldRetryInnertubeDownload(msg),
       });

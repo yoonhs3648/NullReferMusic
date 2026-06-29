@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2005,
+    "artist": "Mariah Carey",
+    "title": "We Belong Together",
+    "album": ""
+  },
+  {
+    "rank": 2,
+    "year": 2005,
+    "artist": "Gwen Stefani",
+    "title": "Hollaback Girl",
+    "album": ""
+  },
+  {
+    "rank": 3,
+    "year": 2005,
+    "artist": "Mario",
+    "title": "Let Me Love You",
+    "album": ""
+  },
+  {
+    "rank": 4,
+    "year": 2005,
+    "artist": "Kelly Clarkson",
+    "title": "Since U Been Gone",
+    "album": ""
+  },
+  {
+    "rank": 5,
+    "year": 2005,
+    "artist": "Ciara feat. Missy Elliott",
+    "title": "1, 2 Step",
+    "album": ""
+  },
+  {
+    "rank": 6,
+    "year": 2005,
+    "artist": "Kanye West feat. Jamie Foxx",
+    "title": "Gold Digger",
+    "album": ""
+  },
+  {
+    "rank": 7,
+    "year": 2005,
+    "artist": "Green Day",
+    "title": "Boulevard of Broken Dreams",
+    "album": ""
+  },
+  {
+    "rank": 8,
+    "year": 2005,
+    "artist": "50 Cent feat. Olivia",
+    "title": "Candy Shop",
+    "album": ""
+  },
+  {
+    "rank": 9,
+    "year": 2005,
+    "artist": "The Pussycat Dolls feat. Busta Rhymes",
+    "title": "Don't Cha",
+    "album": ""
+  },
+  {
+    "rank": 10,
+    "year": 2005,
+    "artist": "Kelly Clarkson",
+    "title": "Behind These Hazel Eyes",
+    "album": ""
+  },
+  {
+    "rank": 11,
+    "year": 2005,
+    "artist": "50 Cent",
+    "title": "Disco Inferno",
+    "album": ""
+  },
+  {
+    "rank": 12,
+    "year": 2005,
+    "artist": "Lifehouse",
+    "title": "You and Me",
+    "album": ""
+  },
+  {
+    "rank": 13,
+    "year": 2005,
+    "artist": "The Black Eyed Peas",
+    "title": "Don't Phunk With My Heart",
+    "album": ""
+  },
+  {
+    "rank": 14,
+    "year": 2005,
+    "artist": "Missy Elliott feat. Ciara and Fat Man Scoop",
+    "title": "Lose Control",
+    "album": ""
+  },
+  {
+    "rank": 15,
+    "year": 2005,
+    "artist": "Mariah Carey",
+    "title": "Shake it Off",
+    "album": ""
+  },
+  {
+    "rank": 16,
+    "year": 2005,
+    "artist": "The Killers",
+    "title": "Mr. Brightside",
+    "album": ""
+  },
+  {
+    "rank": 17,
+    "year": 2005,
+    "artist": "50 Cent",
+    "title": "Just a Lil Bit",
+    "album": ""
+  },
+  {
+    "rank": 18,
+    "year": 2005,
+    "artist": "Rihanna",
+    "title": "Pon de Replay",
+    "album": ""
+  },
+  {
+    "rank": 19,
+    "year": 2005,
+    "artist": "The Game feat. 50 Cent",
+    "title": "How We Do",
+    "album": ""
+  },
+  {
+    "rank": 20,
+    "year": 2005,
+    "artist": "Weezer",
+    "title": "Beverly Hills",
+    "album": ""
+  },
+  {
+    "rank": 21,
+    "year": 2005,
+    "artist": "Ciara feat. Ludacris",
+    "title": "Oh",
+    "album": ""
+  },
+  {
+    "rank": 22,
+    "year": 2005,
+    "artist": "Rob Thomas",
+    "title": "Lonely No More",
+    "album": ""
+  },
+  {
+    "rank": 23,
+    "year": 2005,
+    "artist": "Lil Jon and The East Side Boyz feat. Usher and Ludacris",
+    "title": "Lovers and Friends",
+    "album": ""
+  },
+  {
+    "rank": 24,
+    "year": 2005,
+    "artist": "Destiny's Child feat. T.I. and Lil Wayne",
+    "title": "Soldier",
+    "album": ""
+  },
+  {
+    "rank": 25,
+    "year": 2005,
+    "artist": "Will Smith",
+    "title": "Switch",
+    "album": ""
+  },
+  {
+    "rank": 26,
+    "year": 2005,
+    "artist": "Bow Wow feat. Omarion",
+    "title": "Let Me HOld You",
+    "album": ""
+  },
+  {
+    "rank": 27,
+    "year": 2005,
+    "artist": "Bow Wow feat. Ciara",
+    "title": "Like You",
+    "album": ""
+  },
+  {
+    "rank": 28,
+    "year": 2005,
+    "artist": "Gwen Stefani feat. Eve",
+    "title": "Rich Girl",
+    "album": ""
+  },
+  {
+    "rank": 29,
+    "year": 2005,
+    "artist": "The Black Eyed Peas",
+    "title": "My Humps",
+    "album": ""
+  },
+  {
+    "rank": 30,
+    "year": 2005,
+    "artist": "Frankie J feat. Baby Bash",
+    "title": "Obsession (No Es Amor)",
+    "album": ""
+  },
+  {
+    "rank": 31,
+    "year": 2005,
+    "artist": "Usher",
+    "title": "Caught Up",
+    "album": ""
+  },
+  {
+    "rank": 32,
+    "year": 2005,
+    "artist": "D.H.T.",
+    "title": "Listen to your Heart",
+    "album": ""
+  },
+  {
+    "rank": 33,
+    "year": 2005,
+    "artist": "Papa Roach",
+    "title": "Scars",
+    "album": ""
+  },
+  {
+    "rank": 34,
+    "year": 2005,
+    "artist": "3 Doors Down",
+    "title": "Let Me Go",
+    "album": ""
+  },
+  {
+    "rank": 35,
+    "year": 2005,
+    "artist": "Green Day",
+    "title": "Holiday",
+    "album": ""
+  },
+  {
+    "rank": 36,
+    "year": 2005,
+    "artist": "Fall Out Boy",
+    "title": "Sugar, we're Goin' Down",
+    "album": ""
+  },
+  {
+    "rank": 37,
+    "year": 2005,
+    "artist": "Pretty Ricky",
+    "title": "Grind With Me",
+    "album": ""
+  },
+  {
+    "rank": 38,
+    "year": 2005,
+    "artist": "Chris Brown",
+    "title": "Run It!",
+    "album": ""
+  },
+  {
+    "rank": 39,
+    "year": 2005,
+    "artist": "Nickelback",
+    "title": "Photograph",
+    "album": ""
+  },
+  {
+    "rank": 40,
+    "year": 2005,
+    "artist": "Akon",
+    "title": "Lonely",
+    "album": ""
+  },
+  {
+    "rank": 41,
+    "year": 2005,
+    "artist": "Howie Day",
+    "title": "Collide",
+    "album": ""
+  },
+  {
+    "rank": 42,
+    "year": 2005,
+    "artist": "Green Day",
+    "title": "Wake Me up When September Ends",
+    "album": ""
+  },
+  {
+    "rank": 43,
+    "year": 2005,
+    "artist": "Bobby Valentino",
+    "title": "Slow Down",
+    "album": ""
+  },
+  {
+    "rank": 44,
+    "year": 2005,
+    "artist": "Trillville feat. Cutty",
+    "title": "Some Cut",
+    "album": ""
+  },
+  {
+    "rank": 45,
+    "year": 2005,
+    "artist": "Fat Joe feat. Nelly",
+    "title": "Get it Poppin'",
+    "album": ""
+  },
+  {
+    "rank": 46,
+    "year": 2005,
+    "artist": "David Banner",
+    "title": "Play",
+    "album": ""
+  },
+  {
+    "rank": 47,
+    "year": 2005,
+    "artist": "Young Jeezy feat. Akon",
+    "title": "Soul Survivor",
+    "album": ""
+  },
+  {
+    "rank": 48,
+    "year": 2005,
+    "artist": "Ludacris feat. Bobby Valentino",
+    "title": "Pimpin' All Over the World",
+    "album": ""
+  },
+  {
+    "rank": 49,
+    "year": 2005,
+    "artist": "Trick Daddy feat. Ludacris, Lil' Kim and Cee-Lo",
+    "title": "Sugar (Gimme Some)",
+    "album": ""
+  },
+  {
+    "rank": 50,
+    "year": 2005,
+    "artist": "Alicia Keys",
+    "title": "Karma",
+    "album": ""
+  },
+  {
+    "rank": 51,
+    "year": 2005,
+    "artist": "Coldplay",
+    "title": "Speed of Sound",
+    "album": ""
+  },
+  {
+    "rank": 52,
+    "year": 2005,
+    "artist": "Gavin DeGraw",
+    "title": "I Don't Want to Be",
+    "album": ""
+  },
+  {
+    "rank": 53,
+    "year": 2005,
+    "artist": "Shakira feat. Alejandro Sanz",
+    "title": "La Tortura",
+    "album": ""
+  },
+  {
+    "rank": 54,
+    "year": 2005,
+    "artist": "Maroon5",
+    "title": "She Will be Loved",
+    "album": ""
+  },
+  {
+    "rank": 55,
+    "year": 2005,
+    "artist": "Baby Bash feat. Akon",
+    "title": "Baby I'm Back",
+    "album": ""
+  },
+  {
+    "rank": 56,
+    "year": 2005,
+    "artist": "Ying Yang Twins",
+    "title": "Wait (The Whisper Song)",
+    "album": ""
+  },
+  {
+    "rank": 57,
+    "year": 2005,
+    "artist": "Backstreet Boys",
+    "title": "Incomplete",
+    "album": ""
+  },
+  {
+    "rank": 58,
+    "year": 2005,
+    "artist": "T.I.",
+    "title": "Bring em Out",
+    "album": ""
+  },
+  {
+    "rank": 59,
+    "year": 2005,
+    "artist": "Destiny's Child",
+    "title": "Cater 2 U",
+    "album": ""
+  },
+  {
+    "rank": 60,
+    "year": 2005,
+    "artist": "Amerie",
+    "title": "1 Thing",
+    "album": ""
+  },
+  {
+    "rank": 61,
+    "year": 2005,
+    "artist": "Foo Fighters",
+    "title": "Best of You",
+    "album": ""
+  },
+  {
+    "rank": 62,
+    "year": 2005,
+    "artist": "Mariah Carey",
+    "title": "It's Like That",
+    "album": ""
+  },
+  {
+    "rank": 63,
+    "year": 2005,
+    "artist": "Natalie",
+    "title": "Goin' Crazy",
+    "album": ""
+  },
+  {
+    "rank": 64,
+    "year": 2005,
+    "artist": "Carrie Underwood",
+    "title": "Inside your Heaven",
+    "album": ""
+  },
+  {
+    "rank": 65,
+    "year": 2005,
+    "artist": "Kelly Clarkson",
+    "title": "Because of You",
+    "album": ""
+  },
+  {
+    "rank": 66,
+    "year": 2005,
+    "artist": "Fantasia",
+    "title": "Truth Is",
+    "album": ""
+  },
+  {
+    "rank": 67,
+    "year": 2005,
+    "artist": "Pretty Ricky",
+    "title": "Your Body",
+    "album": ""
+  },
+  {
+    "rank": 68,
+    "year": 2005,
+    "artist": "Jesse McCartney",
+    "title": "Beautiful Soul",
+    "album": ""
+  },
+  {
+    "rank": 69,
+    "year": 2005,
+    "artist": "Gwen Stefani",
+    "title": "Cool",
+    "album": ""
+  },
+  {
+    "rank": 70,
+    "year": 2005,
+    "artist": "Ludacris",
+    "title": "Get Back",
+    "album": ""
+  },
+  {
+    "rank": 71,
+    "year": 2005,
+    "artist": "50 Cent feat. Mobb Deep",
+    "title": "Outta Control (Remix)",
+    "album": ""
+  },
+  {
+    "rank": 72,
+    "year": 2005,
+    "artist": "T.I.",
+    "title": "U Don't Know Me",
+    "album": ""
+  },
+  {
+    "rank": 73,
+    "year": 2005,
+    "artist": "Natasha Bedingfield",
+    "title": "These Words",
+    "album": ""
+  },
+  {
+    "rank": 74,
+    "year": 2005,
+    "artist": "The Black Eyed Peas",
+    "title": "Don't Lie",
+    "album": ""
+  },
+  {
+    "rank": 75,
+    "year": 2005,
+    "artist": "Jennifer Lopez",
+    "title": "Get Right",
+    "album": ""
+  },
+  {
+    "rank": 76,
+    "year": 2005,
+    "artist": "John Mayer",
+    "title": "Daughters",
+    "album": ""
+  },
+  {
+    "rank": 77,
+    "year": 2005,
+    "artist": "Toby Keith",
+    "title": "As Good as I Once Was",
+    "album": ""
+  },
+  {
+    "rank": 78,
+    "year": 2005,
+    "artist": "Brooke Valentine feat. Lil Jon and Big Boi",
+    "title": "Girlfight",
+    "album": ""
+  },
+  {
+    "rank": 79,
+    "year": 2005,
+    "artist": "John Legend",
+    "title": "Ordinary People",
+    "album": ""
+  },
+  {
+    "rank": 80,
+    "year": 2005,
+    "artist": "Sean Paul",
+    "title": "We Be Burnin'",
+    "album": ""
+  },
+  {
+    "rank": 81,
+    "year": 2005,
+    "artist": "The Click Five",
+    "title": "Just the Girl",
+    "album": ""
+  },
+  {
+    "rank": 82,
+    "year": 2005,
+    "artist": "Ryan Cabrera",
+    "title": "True",
+    "album": ""
+  },
+  {
+    "rank": 83,
+    "year": 2005,
+    "artist": "Omarion",
+    "title": "O",
+    "album": ""
+  },
+  {
+    "rank": 84,
+    "year": 2005,
+    "artist": "Mike Jones",
+    "title": "Back Then",
+    "album": ""
+  },
+  {
+    "rank": 85,
+    "year": 2005,
+    "artist": "Jay-Z/Linkin Park",
+    "title": "Numb/Encore",
+    "album": ""
+  },
+  {
+    "rank": 86,
+    "year": 2005,
+    "artist": "Ja Rule feat. R. Kelly and Ashanti",
+    "title": "Wonderful",
+    "album": ""
+  },
+  {
+    "rank": 87,
+    "year": 2005,
+    "artist": "T-Pain",
+    "title": "I'm Sprung",
+    "album": ""
+  },
+  {
+    "rank": 88,
+    "year": 2005,
+    "artist": "Gavin DeGraw",
+    "title": "Chariot",
+    "album": ""
+  },
+  {
+    "rank": 89,
+    "year": 2005,
+    "artist": "112 feat. Foxy Brown",
+    "title": "U Already Know",
+    "album": ""
+  },
+  {
+    "rank": 90,
+    "year": 2005,
+    "artist": "Faith Hill",
+    "title": "Mississippi Girl",
+    "album": ""
+  },
+  {
+    "rank": 91,
+    "year": 2005,
+    "artist": "Ludacris",
+    "title": "Number One Spot",
+    "album": ""
+  },
+  {
+    "rank": 92,
+    "year": 2005,
+    "artist": "Webbie feat. Bun B",
+    "title": "Give Me That",
+    "album": ""
+  },
+  {
+    "rank": 93,
+    "year": 2005,
+    "artist": "N Sync",
+    "title": "Girlfriend",
+    "album": "Celebrity"
+  },
+  {
+    "rank": 94,
+    "year": 2005,
+    "artist": "Bon Jovi",
+    "title": "Everyday",
+    "album": "Bounce"
+  },
+  {
+    "rank": 95,
+    "year": 2005,
+    "artist": "Disturbed",
+    "title": "Prayer",
+    "album": "Believe"
+  },
+  {
+    "rank": 96,
+    "year": 2005,
+    "artist": "Hoobastank",
+    "title": "Running Away",
+    "album": "The Reason"
+  },
+  {
+    "rank": 97,
+    "year": 2005,
+    "artist": "Beyoncé",
+    "title": "Crazy in Love",
+    "album": "Dangerously in Love"
+  },
+  {
+    "rank": 98,
+    "year": 2005,
+    "artist": "Beyoncé",
+    "title": "Baby Boy",
+    "album": "Dangerously in Love"
+  },
+  {
+    "rank": 99,
+    "year": 2005,
+    "artist": "The White Stripes",
+    "title": "Seven Nation Army",
+    "album": "Elephant"
+  },
+  {
+    "rank": 100,
+    "year": 2005,
+    "artist": "Evanescence",
+    "title": "Bring Me to Life",
+    "album": "Fallen"
+  }
+]

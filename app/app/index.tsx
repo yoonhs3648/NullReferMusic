@@ -1035,8 +1035,7 @@ export default function HomeScreen() {
         <NrmHomeDiscoverScreen
           isDark={isDark}
           paddingHorizontal={pad}
-          lastfmAuth={lastfmAuthHandlers}
-          onNavigateYoutube={navigateToYoutubeFromLastfm}
+          onNavigateYoutube={navigateToYoutubeFromMelon}
         />
       );
     } else if (homeTab === 'history') {

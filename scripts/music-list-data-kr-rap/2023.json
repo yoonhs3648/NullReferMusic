@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Trippy",
+    "album": ""
+  },
+  {
+    "rank": 2,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "In Bed/Makgulli",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 3,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Travel Again",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 4,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Coca Cola Red",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 5,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "990",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 6,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Lemon",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 7,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Like A Fool",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 8,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Crime",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 9,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Camp",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 10,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Change",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 11,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Just One Day",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 12,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Sandman",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 13,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Radio",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 14,
+    "year": 2023,
+    "artist": "Beenzino",
+    "title": "Gym",
+    "album": "NOWITZKI"
+  },
+  {
+    "rank": 15,
+    "year": 2023,
+    "artist": "Jay Park",
+    "title": "Candy",
+    "album": ""
+  },
+  {
+    "rank": 16,
+    "year": 2023,
+    "artist": "Jay Park",
+    "title": "Sunday Night Drive",
+    "album": ""
+  },
+  {
+    "rank": 17,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "VOLVO",
+    "album": ""
+  },
+  {
+    "rank": 18,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "INEEDYOURLOVE",
+    "album": ""
+  },
+  {
+    "rank": 19,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "Pick Pick",
+    "album": "WEAK"
+  },
+  {
+    "rank": 20,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "BROKEN IPHONE",
+    "album": "WEAK"
+  },
+  {
+    "rank": 21,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "NOT OK",
+    "album": "WEAK"
+  },
+  {
+    "rank": 22,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "Window Overlooking the Sea",
+    "album": "WEAK"
+  },
+  {
+    "rank": 23,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "HEEE !",
+    "album": "WEAK"
+  },
+  {
+    "rank": 24,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "Just like this",
+    "album": "WEAK"
+  },
+  {
+    "rank": 25,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "4 U",
+    "album": "WEAK"
+  },
+  {
+    "rank": 26,
+    "year": 2023,
+    "artist": "Loco",
+    "title": "Bonus",
+    "album": "WEAK"
+  },
+  {
+    "rank": 27,
+    "year": 2023,
+    "artist": "Epik High",
+    "title": "Strawberry",
+    "album": "Strawberry"
+  },
+  {
+    "rank": 28,
+    "year": 2023,
+    "artist": "Epik High",
+    "title": "On My Way",
+    "album": "Strawberry"
+  },
+  {
+    "rank": 29,
+    "year": 2023,
+    "artist": "Epik High",
+    "title": "Catch",
+    "album": "Strawberry"
+  },
+  {
+    "rank": 30,
+    "year": 2023,
+    "artist": "Epik High",
+    "title": "Down Bad Freestyle",
+    "album": "Strawberry"
+  },
+  {
+    "rank": 31,
+    "year": 2023,
+    "artist": "Epik High",
+    "title": "God's Latte",
+    "album": "Strawberry"
+  },
+  {
+    "rank": 32,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "Hmm-cheat",
+    "album": "wonderego"
+  },
+  {
+    "rank": 33,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "EZPZ",
+    "album": "wonderego"
+  },
+  {
+    "rank": 34,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "Ego",
+    "album": "wonderego"
+  },
+  {
+    "rank": 35,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "A Man Like Me",
+    "album": "wonderego"
+  },
+  {
+    "rank": 36,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "New Day",
+    "album": "wonderego"
+  },
+  {
+    "rank": 37,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "No Break",
+    "album": "wonderego"
+  },
+  {
+    "rank": 38,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "Me Myself & I",
+    "album": "wonderego"
+  },
+  {
+    "rank": 39,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "Satisfied",
+    "album": "wonderego"
+  },
+  {
+    "rank": 40,
+    "year": 2023,
+    "artist": "Crush",
+    "title": "Nothing Else",
+    "album": "wonderego"
+  },
+  {
+    "rank": 41,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "BEIGE theme",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 42,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "HONDA!",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 43,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Simple Poem",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 44,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Still friend?",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 45,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "R.I.P",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 46,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Test me?",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 47,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "BNC",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 48,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Coupe!",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 49,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Lost and found freestyle",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 50,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Let Me Down!",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 51,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "25",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 52,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "BORA",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 53,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "Buck",
+    "album": "DIFF"
+  },
+  {
+    "rank": 54,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "Just For Fun",
+    "album": "DIFF"
+  },
+  {
+    "rank": 55,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "I Go",
+    "album": "DIFF"
+  },
+  {
+    "rank": 56,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "D.O.D",
+    "album": "DIFF"
+  },
+  {
+    "rank": 57,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "LOCO",
+    "album": "DIFF"
+  },
+  {
+    "rank": 58,
+    "year": 2023,
+    "artist": "Coogie",
+    "title": "Hold It Down",
+    "album": "DIFF"
+  },
+  {
+    "rank": 59,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Perhaps Happy Ending",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 60,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Lips",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 61,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "From Autumn to Winter",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 62,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Forgotten Love",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 63,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Dance with Me",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 64,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Connection",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 65,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Love goes around comes around",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 66,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "UNLOVE",
+    "album": "Zip"
+  },
+  {
+    "rank": 67,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "Stranger",
+    "album": "Zip"
+  },
+  {
+    "rank": 68,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "The Things I Like",
+    "album": "Zip"
+  },
+  {
+    "rank": 69,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "V (Peace)",
+    "album": "Zip"
+  },
+  {
+    "rank": 70,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "NOT FOR SALE",
+    "album": "Zip"
+  },
+  {
+    "rank": 71,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "Invisible Person",
+    "album": "Zip"
+  },
+  {
+    "rank": 72,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "Inside a Dark Room",
+    "album": "Zip"
+  },
+  {
+    "rank": 73,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "Whale",
+    "album": "Zip"
+  },
+  {
+    "rank": 74,
+    "year": 2023,
+    "artist": "Zion.T",
+    "title": "Happy Ending",
+    "album": "Zip"
+  },
+  {
+    "rank": 75,
+    "year": 2023,
+    "artist": "Bobby",
+    "title": "Drowning",
+    "album": "S.i.R"
+  },
+  {
+    "rank": 76,
+    "year": 2023,
+    "artist": "Bobby",
+    "title": "Cherry Blossom",
+    "album": "S.i.R"
+  },
+  {
+    "rank": 77,
+    "year": 2023,
+    "artist": "Lil Moshpit",
+    "title": "TO GO",
+    "album": ""
+  },
+  {
+    "rank": 78,
+    "year": 2023,
+    "artist": "Lil Moshpit",
+    "title": "Money Only Shows Hustle",
+    "album": ""
+  },
+  {
+    "rank": 79,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "I don't know a single thing",
+    "album": ""
+  },
+  {
+    "rank": 80,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Can't stop",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 81,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Wave",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 82,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Moshpit",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 83,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "We like to party",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 84,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Money dance",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 85,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Tsunami",
+    "album": "DAYDATE"
+  },
+  {
+    "rank": 86,
+    "year": 2023,
+    "artist": "Kid Milli",
+    "title": "Overtake",
+    "album": "BEIGE"
+  },
+  {
+    "rank": 87,
+    "year": 2023,
+    "artist": "Mino",
+    "title": "Smoke",
+    "album": "BODY"
+  },
+  {
+    "rank": 88,
+    "year": 2023,
+    "artist": "Changmo",
+    "title": "VOOM",
+    "album": ""
+  },
+  {
+    "rank": 89,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Russian Roulette",
+    "album": "Life is Once"
+  },
+  {
+    "rank": 90,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Boys Like Girls",
+    "album": "Life is Once"
+  },
+  {
+    "rank": 91,
+    "year": 2023,
+    "artist": "Leellamarz",
+    "title": "Masquerade Ball",
+    "album": "Life is Once"
+  },
+  {
+    "rank": 92,
+    "year": 2023,
+    "artist": "Paloalto",
+    "title": "Issues",
+    "album": "BUT FOR NOW LEAVE ME ALONE"
+  },
+  {
+    "rank": 93,
+    "year": 2023,
+    "artist": "Jay Park",
+    "title": "Why",
+    "album": ""
+  },
+  {
+    "rank": 94,
+    "year": 2023,
+    "artist": "Dean",
+    "title": "NO FUN",
+    "album": "howlin' 404"
+  },
+  {
+    "rank": 95,
+    "year": 2023,
+    "artist": "Heize",
+    "title": "Midnight",
+    "album": "Last Winter"
+  },
+  {
+    "rank": 96,
+    "year": 2023,
+    "artist": "Mino",
+    "title": "Aero",
+    "album": "BODY"
+  },
+  {
+    "rank": 97,
+    "year": 2023,
+    "artist": "Changmo",
+    "title": "FWB",
+    "album": ""
+  },
+  {
+    "rank": 98,
+    "year": 2023,
+    "artist": "Punchnello",
+    "title": "Motive",
+    "album": ""
+  },
+  {
+    "rank": 99,
+    "year": 2023,
+    "artist": "Colde",
+    "title": "Wave",
+    "album": ""
+  },
+  {
+    "rank": 100,
+    "year": 2023,
+    "artist": "PH-1",
+    "title": "Rosario",
+    "album": "But For Now Leave Me Alone 2"
+  }
+]

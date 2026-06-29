@@ -1,0 +1,702 @@
+[
+  {
+    "rank": 1,
+    "year": 2020,
+    "artist": "Gabby Barrett featuring Charlie Puth",
+    "title": "I Hope",
+    "album": ""
+  },
+  {
+    "rank": 2,
+    "year": 2020,
+    "artist": "Future featuring Drake",
+    "title": "Life Is Good",
+    "album": ""
+  },
+  {
+    "rank": 3,
+    "year": 2020,
+    "artist": "Sam Smith",
+    "title": "To Die For",
+    "album": ""
+  },
+  {
+    "rank": 4,
+    "year": 2020,
+    "artist": "Jack Harlow featuring DaBaby, Tory Lanez and Lil Wayne",
+    "title": "Whats Poppin",
+    "album": ""
+  },
+  {
+    "rank": 5,
+    "year": 2020,
+    "artist": "Megan Thee Stallion featuring Beyoncé",
+    "title": "Savage",
+    "album": ""
+  },
+  {
+    "rank": 6,
+    "year": 2020,
+    "artist": "Arizona Zervas",
+    "title": "Roxanne",
+    "album": ""
+  },
+  {
+    "rank": 7,
+    "year": 2020,
+    "artist": "Justin Bieber featuring Quavo",
+    "title": "Intentions",
+    "album": ""
+  },
+  {
+    "rank": 8,
+    "year": 2020,
+    "artist": "Billie Eilish",
+    "title": "Everything I Wanted",
+    "album": ""
+  },
+  {
+    "rank": 9,
+    "year": 2020,
+    "artist": "Saint Jhn",
+    "title": "Roses (Imanbek remix)",
+    "album": ""
+  },
+  {
+    "rank": 10,
+    "year": 2020,
+    "artist": "Trevor Daniel",
+    "title": "Falling",
+    "album": ""
+  },
+  {
+    "rank": 11,
+    "year": 2020,
+    "artist": "Dan + Shay and Justin Bieber",
+    "title": "10,000 Hours",
+    "album": ""
+  },
+  {
+    "rank": 12,
+    "year": 2020,
+    "artist": "Cardi B featuring Megan Thee Stallion",
+    "title": "WAP",
+    "album": ""
+  },
+  {
+    "rank": 13,
+    "year": 2020,
+    "artist": "Mustard and Roddy Ricch",
+    "title": "Ballin'",
+    "album": ""
+  },
+  {
+    "rank": 14,
+    "year": 2020,
+    "artist": "Blackbear",
+    "title": "Hot Girl Bummer",
+    "album": ""
+  },
+  {
+    "rank": 15,
+    "year": 2020,
+    "artist": "Lil Mosey",
+    "title": "Blueberry Faygo",
+    "album": ""
+  },
+  {
+    "rank": 16,
+    "year": 2020,
+    "artist": "DaBaby",
+    "title": "Bop",
+    "album": ""
+  },
+  {
+    "rank": 17,
+    "year": 2020,
+    "artist": "Drake",
+    "title": "Toosie Slide",
+    "album": ""
+  },
+  {
+    "rank": 18,
+    "year": 2020,
+    "artist": "Morgan Wallen",
+    "title": "Chasin' You",
+    "album": ""
+  },
+  {
+    "rank": 19,
+    "year": 2020,
+    "artist": "Jawsh 685 and Jason Derulo",
+    "title": "Savage Love (Laxed – Siren Beat)",
+    "album": ""
+  },
+  {
+    "rank": 20,
+    "year": 2020,
+    "artist": "Camila Cabello featuring DaBaby",
+    "title": "My Oh My",
+    "album": ""
+  },
+  {
+    "rank": 21,
+    "year": 2020,
+    "artist": "Chris Brown and Young Thug",
+    "title": "Go Crazy",
+    "album": ""
+  },
+  {
+    "rank": 22,
+    "year": 2020,
+    "artist": "Roddy Ricch featuring Mustard",
+    "title": "High Fashion",
+    "album": ""
+  },
+  {
+    "rank": 23,
+    "year": 2020,
+    "artist": "Drake featuring Lil Durk",
+    "title": "Laugh Now Cry Later",
+    "album": ""
+  },
+  {
+    "rank": 24,
+    "year": 2020,
+    "artist": "Lil Baby",
+    "title": "Woah",
+    "album": ""
+  },
+  {
+    "rank": 25,
+    "year": 2020,
+    "artist": "Powfu featuring Beabadoobee",
+    "title": "Death Bed",
+    "album": ""
+  },
+  {
+    "rank": 26,
+    "year": 2020,
+    "artist": "Travis Scott",
+    "title": "Highest in the Room",
+    "album": ""
+  },
+  {
+    "rank": 27,
+    "year": 2020,
+    "artist": "24kGoldn featuring Iann Dior",
+    "title": "Mood",
+    "album": ""
+  },
+  {
+    "rank": 28,
+    "year": 2020,
+    "artist": "Lady Gaga and Ariana Grande",
+    "title": "Rain on Me",
+    "album": ""
+  },
+  {
+    "rank": 29,
+    "year": 2020,
+    "artist": "Pop Smoke featuring Lil Baby and DaBaby",
+    "title": "For the Night",
+    "album": ""
+  },
+  {
+    "rank": 30,
+    "year": 2020,
+    "artist": "Black Eyed Peas and J Balvin",
+    "title": "Ritmo (Bad Boys for Life)",
+    "album": ""
+  },
+  {
+    "rank": 31,
+    "year": 2020,
+    "artist": "Rod Wave",
+    "title": "Heart on Ice",
+    "album": ""
+  },
+  {
+    "rank": 32,
+    "year": 2020,
+    "artist": "Blake Shelton and Gwen Stefani",
+    "title": "Nobody but You",
+    "album": ""
+  },
+  {
+    "rank": 33,
+    "year": 2020,
+    "artist": "Juice Wrld and Marshmello",
+    "title": "Come & Go",
+    "album": ""
+  },
+  {
+    "rank": 34,
+    "year": 2020,
+    "artist": "JP Saxe featuring Julia Michaels",
+    "title": "If the World Was Ending",
+    "album": ""
+  },
+  {
+    "rank": 35,
+    "year": 2020,
+    "artist": "Lil Baby and 42 Dugg",
+    "title": "We Paid",
+    "album": ""
+  },
+  {
+    "rank": 36,
+    "year": 2020,
+    "artist": "Old Dominion",
+    "title": "One Man Band",
+    "album": ""
+  },
+  {
+    "rank": 37,
+    "year": 2020,
+    "artist": "Jason Aldean",
+    "title": "Got What I Got",
+    "album": ""
+  },
+  {
+    "rank": 38,
+    "year": 2020,
+    "artist": "Eminem featuring Juice Wrld",
+    "title": "Godzilla",
+    "album": ""
+  },
+  {
+    "rank": 39,
+    "year": 2020,
+    "artist": "Juice Wrld and YoungBoy Never Broke Again",
+    "title": "Bandit",
+    "album": ""
+  },
+  {
+    "rank": 40,
+    "year": 2020,
+    "artist": "StaySolidRocky",
+    "title": "Party Girl",
+    "album": ""
+  },
+  {
+    "rank": 41,
+    "year": 2020,
+    "artist": "Maddie & Tae",
+    "title": "Die from a Broken Heart",
+    "album": ""
+  },
+  {
+    "rank": 42,
+    "year": 2020,
+    "artist": "DJ Khaled featuring Drake",
+    "title": "Popstar",
+    "album": ""
+  },
+  {
+    "rank": 43,
+    "year": 2020,
+    "artist": "Mariah Carey",
+    "title": "All I Want for Christmas Is You",
+    "album": ""
+  },
+  {
+    "rank": 44,
+    "year": 2020,
+    "artist": "Lee Brice",
+    "title": "One of Them Girls",
+    "album": ""
+  },
+  {
+    "rank": 45,
+    "year": 2020,
+    "artist": "Sam Hunt",
+    "title": "Hard to Forget",
+    "album": ""
+  },
+  {
+    "rank": 46,
+    "year": 2020,
+    "artist": "Luke Bryan",
+    "title": "One Margarita",
+    "album": ""
+  },
+  {
+    "rank": 47,
+    "year": 2020,
+    "artist": "Young Thug featuring Gunna",
+    "title": "Hot",
+    "album": ""
+  },
+  {
+    "rank": 48,
+    "year": 2020,
+    "artist": "Jonas Brothers",
+    "title": "What A Man Gotta Do",
+    "album": ""
+  },
+  {
+    "rank": 49,
+    "year": 2020,
+    "artist": "Lil Baby",
+    "title": "Emotionally Scarred",
+    "album": ""
+  },
+  {
+    "rank": 50,
+    "year": 2020,
+    "artist": "YNW Melly featuring Juice Wrld",
+    "title": "Suicidal",
+    "album": ""
+  },
+  {
+    "rank": 51,
+    "year": 2020,
+    "artist": "Lil Baby",
+    "title": "The Bigger Picture",
+    "album": ""
+  },
+  {
+    "rank": 52,
+    "year": 2020,
+    "artist": "Pop Smoke featuring 50 Cent and Roddy Ricch",
+    "title": "The Woo",
+    "album": ""
+  },
+  {
+    "rank": 53,
+    "year": 2020,
+    "artist": "Lil Baby",
+    "title": "Sum 2 Prove",
+    "album": ""
+  },
+  {
+    "rank": 54,
+    "year": 2020,
+    "artist": "Ariana Grande and Justin Bieber",
+    "title": "Stuck with U",
+    "album": ""
+  },
+  {
+    "rank": 55,
+    "year": 2020,
+    "artist": "Pop Smoke featuring Lil Tjay",
+    "title": "Mood Swings",
+    "album": ""
+  },
+  {
+    "rank": 56,
+    "year": 2020,
+    "artist": "Halsey",
+    "title": "You Should Be Sad",
+    "album": ""
+  },
+  {
+    "rank": 57,
+    "year": 2020,
+    "artist": "Benee featuring Gus Dapperton",
+    "title": "Supalonely",
+    "album": ""
+  },
+  {
+    "rank": 58,
+    "year": 2020,
+    "artist": "The Scotts (Travis Scott and Kid Cudi)",
+    "title": "The Scotts",
+    "album": ""
+  },
+  {
+    "rank": 59,
+    "year": 2020,
+    "artist": "Doja Cat and Tyga",
+    "title": "Juicy",
+    "album": ""
+  },
+  {
+    "rank": 60,
+    "year": 2020,
+    "artist": "Kane Brown, Swae Lee and Khalid",
+    "title": "Be Like That",
+    "album": ""
+  },
+  {
+    "rank": 61,
+    "year": 2020,
+    "artist": "Kane Brown",
+    "title": "Homesick",
+    "album": ""
+  },
+  {
+    "rank": 62,
+    "year": 2020,
+    "artist": "Rod Wave featuring ATR Son Son",
+    "title": "Rags2Riches",
+    "album": ""
+  },
+  {
+    "rank": 63,
+    "year": 2020,
+    "artist": "Juice Wrld",
+    "title": "Wishing Well",
+    "album": ""
+  },
+  {
+    "rank": 64,
+    "year": 2020,
+    "artist": "Luke Combs featuring Eric Church",
+    "title": "Does to Me",
+    "album": ""
+  },
+  {
+    "rank": 65,
+    "year": 2020,
+    "artist": "Jhené Aiko",
+    "title": "Pussy Fairy (OTW)",
+    "album": ""
+  },
+  {
+    "rank": 66,
+    "year": 2020,
+    "artist": "Surf Mesa featuring Emilee",
+    "title": "ILY (I Love You Baby)",
+    "album": ""
+  },
+  {
+    "rank": 67,
+    "year": 2020,
+    "artist": "Moneybagg Yo",
+    "title": "Said Sum",
+    "album": ""
+  },
+  {
+    "rank": 68,
+    "year": 2020,
+    "artist": "H.E.R. featuring YG",
+    "title": "Slide",
+    "album": ""
+  },
+  {
+    "rank": 69,
+    "year": 2020,
+    "artist": "NLE Choppa featuring Roddy Ricch",
+    "title": "Walk Em Down",
+    "album": ""
+  },
+  {
+    "rank": 70,
+    "year": 2020,
+    "artist": "BTS",
+    "title": "Butter",
+    "album": ""
+  },
+  {
+    "rank": 71,
+    "year": 2020,
+    "artist": "BTS",
+    "title": "Permission to Dance",
+    "album": ""
+  },
+  {
+    "rank": 72,
+    "year": 2020,
+    "artist": "Taylor Swift",
+    "title": "All Too Well (Taylor's Version)",
+    "album": "Red (Taylor's Version)"
+  },
+  {
+    "rank": 73,
+    "year": 2020,
+    "artist": "Masked Wolf",
+    "title": "Astronaut in the Ocean",
+    "album": "Astronaut in the Ocean"
+  },
+  {
+    "rank": 74,
+    "year": 2020,
+    "artist": "Walker Hayes",
+    "title": "Fancy Like",
+    "album": "Country Stuff"
+  },
+  {
+    "rank": 75,
+    "year": 2020,
+    "artist": "Chris Stapleton",
+    "title": "You Should Probably Leave",
+    "album": "Starting Over"
+  },
+  {
+    "rank": 76,
+    "year": 2020,
+    "artist": "Carrie Underwood",
+    "title": "If I Didn't Love You",
+    "album": "Denim & Rhinestones"
+  },
+  {
+    "rank": 77,
+    "year": 2020,
+    "artist": "Morgan Wallen",
+    "title": "Wasted on You",
+    "album": "Dangerous: The Double Album"
+  },
+  {
+    "rank": 78,
+    "year": 2020,
+    "artist": "Giveon",
+    "title": "Heartbreak Anniversary",
+    "album": "Take Time"
+  },
+  {
+    "rank": 79,
+    "year": 2020,
+    "artist": "Måneskin",
+    "title": "Beggin'",
+    "album": "Chosen"
+  },
+  {
+    "rank": 80,
+    "year": 2020,
+    "artist": "PinkPantheress",
+    "title": "Just for Me",
+    "album": ""
+  },
+  {
+    "rank": 81,
+    "year": 2020,
+    "artist": "Dermot Kennedy",
+    "title": "Better Days",
+    "album": "Without Fear"
+  },
+  {
+    "rank": 82,
+    "year": 2020,
+    "artist": "Surf Mesa",
+    "title": "ILY (I Love You Baby)",
+    "album": ""
+  },
+  {
+    "rank": 83,
+    "year": 2020,
+    "artist": "AJR",
+    "title": "World's Smallest Violin",
+    "album": "OK ORCHESTRA"
+  },
+  {
+    "rank": 84,
+    "year": 2020,
+    "artist": "Tai Verdes",
+    "title": "A-O-K",
+    "album": "HDTV"
+  },
+  {
+    "rank": 85,
+    "year": 2020,
+    "artist": "Riton",
+    "title": "Friday (Dopamine Re-Edit)",
+    "album": ""
+  },
+  {
+    "rank": 86,
+    "year": 2020,
+    "artist": "SZA",
+    "title": "Good Days",
+    "album": "SOS"
+  },
+  {
+    "rank": 87,
+    "year": 2020,
+    "artist": "Kane Brown",
+    "title": "One Mississippi",
+    "album": "Different Man"
+  },
+  {
+    "rank": 88,
+    "year": 2020,
+    "artist": "Carly Pearce",
+    "title": "Next Girl",
+    "album": "29"
+  },
+  {
+    "rank": 89,
+    "year": 2020,
+    "artist": "Elle King",
+    "title": "Drunk (And I Don't Wanna Go Home)",
+    "album": "Love Stuff"
+  },
+  {
+    "rank": 90,
+    "year": 2020,
+    "artist": "Zac Brown Band",
+    "title": "Same Boat",
+    "album": "Comeback"
+  },
+  {
+    "rank": 91,
+    "year": 2020,
+    "artist": "Eric Church",
+    "title": "Stick That in Your Country Song",
+    "album": "Heart & Soul"
+  },
+  {
+    "rank": 92,
+    "year": 2020,
+    "artist": "Luke Bryan",
+    "title": "Waves",
+    "album": "Born Here Live Here Die Here"
+  },
+  {
+    "rank": 93,
+    "year": 2020,
+    "artist": "Miranda Lambert",
+    "title": "Settling Down",
+    "album": "Wildcard"
+  },
+  {
+    "rank": 94,
+    "year": 2020,
+    "artist": "Harry Styles",
+    "title": "As It Was",
+    "album": "Harry's House"
+  },
+  {
+    "rank": 95,
+    "year": 2020,
+    "artist": "Harry Styles",
+    "title": "Late Night Talking",
+    "album": "Harry's House"
+  },
+  {
+    "rank": 96,
+    "year": 2020,
+    "artist": "Kate Bush",
+    "title": "Running Up That Hill (A Deal with God)",
+    "album": "Hounds of Love"
+  },
+  {
+    "rank": 97,
+    "year": 2020,
+    "artist": "Lizzo",
+    "title": "About Damn Time",
+    "album": "Special"
+  },
+  {
+    "rank": 98,
+    "year": 2020,
+    "artist": "Beyoncé",
+    "title": "Break My Soul",
+    "album": "Renaissance"
+  },
+  {
+    "rank": 99,
+    "year": 2020,
+    "artist": "Beyoncé",
+    "title": "CUFF IT",
+    "album": "Renaissance"
+  },
+  {
+    "rank": 100,
+    "year": 2020,
+    "artist": "Taylor Swift",
+    "title": "Anti-Hero",
+    "album": "Midnights"
+  }
+]

@@ -1,69 +1,97 @@
 /**
- * musicList.xlsx → supabase/music_list_seed.sql
- *   node scripts/generate-music-list-seed.mjs [xlsxPath]
+ * music_list 시드 SQL 생성 — 글로벌 랩/힙합 + 글로벌 + 한국 랩/힙합 (전 테이블 트랙 유일)
+ *
+ *   node scripts/generate-music-list-seed.mjs
+ *
+ * 사전: node scripts/music-list-data/build.mjs
+ *       node scripts/music-list-data-global/build.mjs
+ *       node scripts/music-list-data-kr-rap/build.mjs
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import {
+  trackKey,
+  sqlStr,
+  sqlInt,
+  validateGenreEntries,
+  loadJsonDir,
+} from './music-list-shared.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const require = createRequire(path.join(repoRoot, 'app/package.json'));
-const XLSX = require('xlsx');
-const defaultXlsx = 'C:\\Users\\hsyoon\\Desktop\\musicList.xlsx';
-const xlsxPath = process.argv[2] ? path.resolve(process.argv[2]) : defaultXlsx;
+const rapDir = path.join(__dirname, 'music-list-data');
+const globalDir = path.join(__dirname, 'music-list-data-global');
+const krRapDir = path.join(__dirname, 'music-list-data-kr-rap');
 const outPath = path.join(repoRoot, 'supabase', 'music_list_seed.sql');
 
-function sqlStr(v) {
-  if (v === null || v === undefined) return "''";
-  return `'${String(v).replace(/'/g, "''")}'`;
-}
+const GENRE_RAP = '글로벌 랩/힙합';
+const GENRE_GLOBAL = '글로벌';
+const GENRE_KR_RAP = '한국 랩/힙합';
 
-function sqlInt(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) throw new Error(`invalid number: ${v}`);
-  return String(Math.trunc(n));
-}
+function main() {
+  const rapRaw = loadJsonDir(rapDir).map((e) => ({ ...e, genre: GENRE_RAP }));
+  const globalRaw = loadJsonDir(globalDir).map((e) => ({ ...e, genre: GENRE_GLOBAL }));
+  const krRapRaw = loadJsonDir(krRapDir).map((e) => ({ ...e, genre: GENRE_KR_RAP }));
 
-if (!fs.existsSync(xlsxPath)) {
-  console.error(`xlsx not found: ${xlsxPath}`);
-  process.exit(1);
-}
+  const rap = validateGenreEntries(rapRaw, {
+    genre: GENRE_RAP,
+    legacyMin: 200,
+    legacyRankMax: 200,
+  });
+  const global = validateGenreEntries(globalRaw, {
+    genre: GENRE_GLOBAL,
+    legacyMin: 100,
+    legacyRankMax: 100,
+  });
+  const krRap = validateGenreEntries(krRapRaw, {
+    genre: GENRE_KR_RAP,
+    yearMin: 2010,
+    yearMax: 2025,
+    legacyMin: 0,
+    legacyRankMax: 0,
+  });
 
-const wb = XLSX.readFile(xlsxPath);
-const ws = wb.Sheets[wb.SheetNames[0]];
-const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-const header = rows[0];
-const expected = ['Seq', '순위', '연도', '아티스트', '노래', '앨범', '장르'];
-for (let i = 0; i < expected.length; i++) {
-  if (String(header[i] ?? '').trim() !== expected[i]) {
-    console.error('unexpected header', header, 'expected', expected);
-    process.exit(1);
+  const allKeys = new Map();
+  const merged = [];
+  for (const e of [...rap, ...global, ...krRap]) {
+    const key = trackKey(e.artist, e.title);
+    if (allKeys.has(key)) {
+      const prev = allKeys.get(key);
+      throw new Error(
+        `cross-genre duplicate: "${e.artist} - ${e.title}" (${e.genre}) vs (${prev.genre})`,
+      );
+    }
+    allKeys.set(key, e);
+    merged.push(e);
   }
-}
 
-const lines = [
-  '-- Discover nrm_music_list seed',
-  `-- 생성: node scripts/generate-music-list-seed.mjs`,
-  `-- 원본: ${xlsxPath}`,
-  'BEGIN;',
-  'TRUNCATE public.nrm_music_list RESTART IDENTITY CASCADE;',
-  '',
-];
+  merged.sort((a, b) => {
+    if (a.genre !== b.genre) return a.genre.localeCompare(b.genre, 'ko');
+    if (a.year !== b.year) return b.year - a.year;
+    return a.rank - b.rank;
+  });
 
-let count = 0;
-for (let r = 1; r < rows.length; r++) {
-  const row = rows[r];
-  if (!row || row.every((c) => String(c ?? '').trim() === '')) continue;
-  const [_seq, rank, year, artist, title, album, genre] = row;
-  if (!rank && !artist && !title) continue;
-  lines.push(
-    `INSERT INTO public.nrm_music_list (rank, year, artist, title, album, genre) VALUES (${sqlInt(rank)}, ${sqlInt(year)}, ${sqlStr(artist)}, ${sqlStr(title)}, ${sqlStr(album)}, ${sqlStr(genre)});`,
+  const lines = [
+    '-- Discover nrm_music_list seed',
+    `-- 생성: node scripts/generate-music-list-seed.mjs`,
+    `-- ${GENRE_RAP}: ${rap.length} | ${GENRE_GLOBAL}: ${global.length} | ${GENRE_KR_RAP}: ${krRap.length} | total: ${merged.length}`,
+    'BEGIN;',
+    'TRUNCATE public.nrm_music_list RESTART IDENTITY CASCADE;',
+    '',
+  ];
+
+  for (const e of merged) {
+    lines.push(
+      `INSERT INTO public.nrm_music_list (rank, year, artist, title, album, genre) VALUES (${sqlInt(e.rank)}, ${sqlInt(e.year)}, ${sqlStr(e.artist)}, ${sqlStr(e.title)}, ${sqlStr(e.album)}, ${sqlStr(e.genre)});`,
+    );
+  }
+
+  lines.push('', 'COMMIT;', '');
+  fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
+  console.log(
+    `OK: ${merged.length} rows (${GENRE_RAP} ${rap.length}, ${GENRE_GLOBAL} ${global.length}, ${GENRE_KR_RAP} ${krRap.length}) → ${outPath}`,
   );
-  count += 1;
 }
 
-lines.push('', 'COMMIT;', '');
-fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
-console.log(`OK: ${count} rows → ${outPath}`);
+main();

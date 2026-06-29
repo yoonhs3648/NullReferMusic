@@ -3,32 +3,29 @@ import { useCallback, useEffect, useRef } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
-  NrmLastfmSearchRouter,
-  type LastfmSearchNavHandle,
-  type LastfmYoutubeNavigateParams,
-} from '@/components/nrm/search/NrmLastfmSearchRouter';
+  NrmMelonSearchRouter,
+  type MelonSearchNavHandle,
+  type MelonYoutubeNavigateParams,
+} from '@/components/nrm/search/NrmMelonSearchRouter';
 import { nrmTokens } from '@/constants/nrmTokens';
-import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 
 type Props = {
   isDark: boolean;
   paddingHorizontal: number;
   query: string;
   onBack: () => void;
-  onNavigateYoutube: (params: LastfmYoutubeNavigateParams) => void;
-  lastfmAuth: LastfmAuthHandlers;
+  onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
 };
 
-/** Discover → Last.fm 앨범 검색 (목록 상태는 부모 Discover 화면에 유지) */
+/** Discover → Melon 트랙 검색 (목록 상태는 부모 Discover 화면에 유지) */
 export function NrmDiscoverAlbumSearchLayer({
   isDark,
   paddingHorizontal,
   query,
   onBack,
   onNavigateYoutube,
-  lastfmAuth,
 }: Props) {
-  const navRef = useRef<LastfmSearchNavHandle>(null);
+  const navRef = useRef<MelonSearchNavHandle>(null);
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
 
   const handleBack = useCallback(() => {
@@ -55,20 +52,19 @@ export function NrmDiscoverAlbumSearchLayer({
           <Ionicons name="chevron-back" size={24} color={nrmTokens.color.primary} />
         </Pressable>
         <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>
-          앨범 검색
+          트랙 검색
         </Text>
         <View style={styles.backSpacer} />
       </View>
-      <NrmLastfmSearchRouter
+      <NrmMelonSearchRouter
         key={query}
         ref={navRef}
-        initialKind="album"
+        initialKind="track"
         initialQuery={query}
         isDark={isDark}
         paddingHorizontal={paddingHorizontal}
         onBackToHome={handleBack}
         onNavigateYoutube={onNavigateYoutube}
-        lastfmAuth={lastfmAuth}
       />
     </View>
   );

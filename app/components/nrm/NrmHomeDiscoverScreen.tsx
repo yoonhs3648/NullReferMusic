@@ -14,13 +14,12 @@ import { NrmDiscoverAlbumSearchLayer } from '@/components/nrm/discover/NrmDiscov
 import { NrmDiscoverFilterDropdown } from '@/components/nrm/discover/NrmDiscoverFilterDropdown';
 import { NrmDiscoverMusicRow } from '@/components/nrm/discover/NrmDiscoverMusicRow';
 import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
-import type { LastfmYoutubeNavigateParams } from '@/components/nrm/search/NrmLastfmSearchRouter';
+import type { MelonYoutubeNavigateParams } from '@/components/nrm/search/NrmMelonSearchRouter';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  NRM_DISCOVER_GENRE_ALL,
+  NRM_DISCOVER_GENRE_DEFAULT,
   NRM_DISCOVER_YEAR_OPTIONS,
 } from '@/lib/nrmDiscoverFilters';
-import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import { fetchMusicListGenres, fetchMusicListPage } from '@/lib/nrmMusicListClient';
 import type { NrmDiscoverYearFilter, NrmMusicListItem } from '@/lib/nrmMusicListTypes';
 import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
@@ -28,16 +27,14 @@ import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 type Props = {
   isDark: boolean;
   paddingHorizontal: number;
-  lastfmAuth: LastfmAuthHandlers;
-  onNavigateYoutube: (params: LastfmYoutubeNavigateParams) => void;
+  onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
 };
 
-type DiscoverSubView = 'list' | 'ai-lab' | 'album-search';
+type DiscoverSubView = 'list' | 'ai-lab' | 'track-search';
 
 export function NrmHomeDiscoverScreen({
   isDark,
   paddingHorizontal,
-  lastfmAuth,
   onNavigateYoutube,
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
@@ -46,9 +43,9 @@ export function NrmHomeDiscoverScreen({
   const aiBtnBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
 
   const [subView, setSubView] = useState<DiscoverSubView>('list');
-  const [albumSearchQuery, setAlbumSearchQuery] = useState('');
+  const [trackSearchQuery, setTrackSearchQuery] = useState('');
   const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>('all');
-  const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_ALL);
+  const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_DEFAULT);
   const [genres, setGenres] = useState<string[]>([]);
   const [items, setItems] = useState<NrmMusicListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,10 +59,7 @@ export function NrmHomeDiscoverScreen({
   const hasMoreRef = useRef(true);
 
   const genreOptions = useMemo(
-    () => [
-      { value: NRM_DISCOVER_GENRE_ALL, label: '전체선택' },
-      ...genres.map((g) => ({ value: g, label: g })),
-    ],
+    () => genres.map((g) => ({ value: g, label: g })),
     [genres],
   );
 
@@ -127,14 +121,14 @@ export function NrmHomeDiscoverScreen({
     void loadInitial(generation);
   }, [filterKey, loadInitial]);
 
-  const openAlbumSearch = useCallback((title: string) => {
+  const openTrackSearch = useCallback((title: string) => {
     const q = title.trim();
     if (!q) return;
-    setAlbumSearchQuery(q);
-    setSubView('album-search');
+    setTrackSearchQuery(q);
+    setSubView('track-search');
   }, []);
 
-  const closeAlbumSearch = useCallback(() => {
+  const closeTrackSearch = useCallback(() => {
     setSubView('list');
   }, []);
 
@@ -143,14 +137,14 @@ export function NrmHomeDiscoverScreen({
   const renderItem = useCallback(
     ({ item }: { item: NrmMusicListItem }) => (
       <Pressable
-        onPress={() => openAlbumSearch(item.title)}
+        onPress={() => openTrackSearch(item.title)}
         style={({ pressed }) => [styles.rowPress, pressed && styles.rowPressPressed]}
         accessibilityRole="button"
-        accessibilityLabel={`${item.title} 앨범 검색`}>
+        accessibilityLabel={`${item.title} 트랙 검색`}>
         <NrmDiscoverMusicRow item={item} titleColor={titleColor} bodyColor={bodyColor} />
       </Pressable>
     ),
-    [bodyColor, openAlbumSearch, titleColor],
+    [bodyColor, openTrackSearch, titleColor],
   );
 
   const listHeader = (
@@ -250,20 +244,19 @@ export function NrmHomeDiscoverScreen({
       </View>
 
       {subView === 'ai-lab' ? (
-        <View style={[styles.overlayLayer, { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas }]}>
+        <View style={styles.overlayLayer}>
           <NrmDiscoverAiLabScreen isDark={isDark} onBack={() => setSubView('list')} />
         </View>
       ) : null}
 
-      {subView === 'album-search' ? (
+      {subView === 'track-search' ? (
         <View style={[styles.overlayLayer, { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas }]}>
           <NrmDiscoverAlbumSearchLayer
             isDark={isDark}
             paddingHorizontal={paddingHorizontal}
-            query={albumSearchQuery}
-            onBack={closeAlbumSearch}
+            query={trackSearchQuery}
+            onBack={closeTrackSearch}
             onNavigateYoutube={onNavigateYoutube}
-            lastfmAuth={lastfmAuth}
           />
         </View>
       ) : null}

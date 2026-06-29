@@ -16,7 +16,7 @@ import { NrmAdminMusicListEditModal } from '@/components/nrm/settings/NrmAdminMu
 import { NrmAdminMusicListSearchBar } from '@/components/nrm/settings/NrmAdminMusicListSearchBar';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  NRM_DISCOVER_GENRE_ALL,
+  NRM_DISCOVER_GENRE_DEFAULT,
   NRM_DISCOVER_YEAR_OPTIONS,
 } from '@/lib/nrmDiscoverFilters';
 import {
@@ -46,7 +46,7 @@ const SEARCH_DEBOUNCE_MS = 400;
 
 export function NrmAdminDiscoverEditPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
   const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>('all');
-  const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_ALL);
+  const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_DEFAULT);
   const [genres, setGenres] = useState<string[]>([]);
   const [searchField, setSearchField] = useState<NrmMusicListTextSearchField>('artist');
   const [searchText, setSearchText] = useState('');
@@ -69,10 +69,7 @@ export function NrmAdminDiscoverEditPanel({ titleColor, bodyColor, isDark, onBac
   const modalScrim = getNrmModalScrimColor(isDark);
 
   const genreOptions = useMemo(
-    () => [
-      { value: NRM_DISCOVER_GENRE_ALL, label: '전체선택' },
-      ...genres.map((g) => ({ value: g, label: g })),
-    ],
+    () => genres.map((g) => ({ value: g, label: g })),
     [genres],
   );
 
@@ -224,7 +221,6 @@ export function NrmAdminDiscoverEditPanel({ titleColor, bodyColor, isDark, onBac
             ]}
             accessibilityRole="button">
             <NrmDiscoverMusicRow item={item} titleColor={titleColor} bodyColor={bodyColor} />
-            <Ionicons name="chevron-forward" size={18} color={bodyColor} />
           </Pressable>
         )}
         onEndReached={() => void loadMore()}
@@ -334,10 +330,7 @@ const styles = StyleSheet.create({
     paddingBottom: nrmTokens.space.md,
   },
   rowPress: {
-    flexDirection: 'row',
-    alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingRight: nrmTokens.space.xs,
   },
   loader: { marginTop: nrmTokens.space.xl },
   footerLoader: { marginVertical: nrmTokens.space.md },
