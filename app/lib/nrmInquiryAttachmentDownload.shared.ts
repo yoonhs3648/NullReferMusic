@@ -1,19 +1,20 @@
 import {
-  NRM_GITHUB_BRANCH,
-  NRM_GITHUB_REPO,
-  NRM_INQUIRY_ATTACH_RAW_BASE,
-} from '@/lib/nrmRemoteDataConfig';
-import { nrmGithubRawCacheBustUrl } from '@/lib/nrmGithubRawFetch';
+  getNrmSupabaseStoragePublicUrl,
+  NRM_SUPABASE_INQUIRY_BUCKET,
+} from '@/lib/nrmSupabaseConfig';
+import { normalizeInquiryAttachmentObjectName } from '@/lib/nrmSupabaseRows';
 
 export function buildInquiryAttachmentRawUrl(fileName: string): string {
-  const name = fileName.trim();
-  const base = `${NRM_INQUIRY_ATTACH_RAW_BASE}/${encodeURIComponent(name)}`;
-  return nrmGithubRawCacheBustUrl(base);
+  const name = normalizeInquiryAttachmentObjectName(fileName);
+  if (!name) {
+    throw new Error('첨부 파일명이 없습니다.');
+  }
+  return getNrmSupabaseStoragePublicUrl(name);
 }
 
-/** GitHub raw 경로 (표시용) */
 export function inquiryAttachmentRepoPath(fileName: string): string {
-  return `${NRM_GITHUB_REPO}/${NRM_GITHUB_BRANCH}/data/inquiryAttachFile/${fileName.trim()}`;
+  const name = normalizeInquiryAttachmentObjectName(fileName);
+  return `${NRM_SUPABASE_INQUIRY_BUCKET}/${name}`;
 }
 
 export async function openInquiryAttachmentOnWeb(fileName: string): Promise<void> {

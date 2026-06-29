@@ -18,7 +18,7 @@ export async function invalidateListCoverDiskCache(coverKey: string): Promise<vo
 }
 
 const CONCURRENCY = 4;
-const INITIAL_PREFETCH_COUNT = 12;
+const INITIAL_PREFETCH_COUNT = 24;
 
 export function trackListCoverKey(track: Pick<NrmDownloadTrackItem, 'audioUri' | 'fileName'>): string {
   return `${track.audioUri.trim()}\0${track.fileName.trim()}`;
@@ -30,6 +30,21 @@ function hashCoverKey(key: string): string {
     hash = ((hash << 5) + hash) ^ key.charCodeAt(i);
   }
   return (hash >>> 0).toString(16);
+}
+
+/** React Native Image가 로컬 파일을 읽으려면 file:// 스킴이 필요하다 */
+function toDisplayableFileUri(localPath: string): string {
+  const trimmed = localPath.trim();
+  if (!trimmed) return '';
+  if (
+    trimmed.startsWith('file://') ||
+    trimmed.startsWith('content://') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  ) {
+    return trimmed;
+  }
+  return trimmed.startsWith('/') ? `file://${trimmed}` : `file:///${trimmed}`;
 }
 
 /** 세션 내 커버 URL 캐시 (listGeneration 갱신 시 초기화) */
@@ -63,7 +78,7 @@ async function isolateListCoverFile(
   try {
     const existing = await FileSystem.getInfoAsync(dest);
     if (existing.exists && 'size' in existing && (existing.size ?? 0) > 256) {
-      return dest;
+      return toDisplayableFileUri(dest);
     }
 
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -71,7 +86,7 @@ async function isolateListCoverFile(
       if (dl.status >= 200 && dl.status < 300) {
         const info = await FileSystem.getInfoAsync(dest);
         if (info.exists && 'size' in info && (info.size ?? 0) > 256) {
-          return dest;
+          return toDisplayableFileUri(dest);
         }
       }
       return trimmed;
@@ -80,16 +95,16 @@ async function isolateListCoverFile(
     const from =
       trimmed.startsWith('file://') || trimmed.startsWith('content://')
         ? trimmed
-        : `file://${trimmed}`;
+        : toDisplayableFileUri(trimmed);
     await FileSystem.copyAsync({ from, to: dest });
     const info = await FileSystem.getInfoAsync(dest);
     if (info.exists && 'size' in info && (info.size ?? 0) > 256) {
-      return dest;
+      return toDisplayableFileUri(dest);
     }
   } catch {
     /* 원본 URI 폴백 */
   }
-  return trimmed;
+  return toDisplayableFileUri(trimmed);
 }
 
 async function loadOneCover(

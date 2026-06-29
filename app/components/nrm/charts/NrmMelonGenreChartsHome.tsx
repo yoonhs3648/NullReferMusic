@@ -15,7 +15,9 @@ import { NrmPeriodChartSharedPickerModal } from '@/components/nrm/charts/NrmPeri
 import { NrmMelonGenreChartFilters } from '@/components/nrm/charts/NrmMelonGenreChartFilters';
 import { useNrmPeriodChartPicker } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import {
@@ -99,6 +101,8 @@ export function NrmMelonGenreChartsHome({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const listRef = useRef<FlatList<ChartTrackItem>>(null);
 
   const loadGenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -252,6 +256,7 @@ export function NrmMelonGenreChartsHome({
       </View>
 
       <FlatList
+        ref={listRef}
         style={styles.list}
         nestedScrollEnabled
         data={loading || errorCode ? [] : items}
@@ -267,6 +272,10 @@ export function NrmMelonGenreChartsHome({
         ListFooterComponent={listFooter}
         onEndReached={loadMore}
         onEndReachedThreshold={0.35}
+        onScroll={(e) => {
+          setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={200}
         contentContainerStyle={[
           styles.listContent,
           { paddingHorizontal },
@@ -277,6 +286,12 @@ export function NrmMelonGenreChartsHome({
         initialNumToRender={20}
         maxToRenderPerBatch={15}
         windowSize={8}
+      />
+
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
       />
 
       <NrmPeriodChartSharedPickerModal

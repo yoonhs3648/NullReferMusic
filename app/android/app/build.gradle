@@ -93,16 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 145
-        versionName "2.4.9"
-
-        def localProps = new Properties()
-        def localPropsFile = rootProject.file('local.properties')
-        if (localPropsFile.exists()) {
-            localPropsFile.withInputStream { localProps.load(it) }
-        }
-        def githubPat = localProps.getProperty('nrm.github.pat', '')
-        buildConfigField "String", "NRM_GITHUB_DATA_PAT", "\"${githubPat.replace('"', '')}\""
+        versionCode 150
+        versionName "2.5.4"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 

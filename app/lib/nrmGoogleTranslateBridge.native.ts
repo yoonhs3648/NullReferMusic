@@ -1,13 +1,24 @@
 /**
- * Android/iOS: gtx 네이티브 fetch(배치) 우선, 실패 시 숨김 WebView fallback.
+ * Android/iOS: Kotlin NrmGtxModule 우선 사용 (OS 레벨 타임아웃, 백그라운드 freeze 무관).
+ * native module 미설치 환경 fallback: JS globalThis.fetch 배치.
  */
+import { NativeModules } from 'react-native';
 import { logNrmDev } from '@/lib/nrmDevLog';
 import {
-  GTX_BATCH_DELAY_MS,
   GTX_BATCH_SIZE,
-  GTX_CONCURRENCY,
+  GTX_FETCH_TIMEOUT_MS,
+  resolveGtxRuntimeLimits,
   translateTextsViaGtxBatched,
 } from '@/lib/nrmGoogleTranslateGtx';
+
+type NrmGtxNative = {
+  translateTexts: (
+    texts: string[],
+    lineDelayMs: number,
+  ) => Promise<{ texts: string[]; sourceLangs: string[] }>;
+};
+
+const gtxNative = NativeModules.NrmGtx as NrmGtxNative | undefined;
 
 type InjectedWebView = {
   injectJavaScript: (script: string) => void;
@@ -15,7 +26,9 @@ type InjectedWebView = {
 
 type TranslateJob = {
   jobId: string;
+  batchId: string;
   texts: string[];
+  limits: ReturnType<typeof resolveGtxRuntimeLimits>;
   resolve: (v: { texts: string[]; sourceLangs: string[] }) => void;
   reject: (e: Error) => void;
 };
@@ -75,15 +88,30 @@ export function markGoogleTranslateWebViewReady(): void {
   drainTranslateQueue();
 }
 
-function buildTranslateInject(jobId: string, texts: string[]): string {
+function buildTranslateInject(
+  jobId: string,
+  texts: string[],
+  batchId: string,
+  concurrencyLimit: number,
+  batchDelayMs: number,
+): string {
   return `
 (function(){
   var jobId = ${JSON.stringify(jobId)};
+  var batchId = ${JSON.stringify(batchId)};
   var texts = ${JSON.stringify(texts)};
   var batchSize = ${GTX_BATCH_SIZE};
-  var batchDelayMs = ${GTX_BATCH_DELAY_MS};
-  var concurrencyLimit = ${GTX_CONCURRENCY};
-  var fetchTimeoutMs = 15000;
+  var batchDelayMs = ${batchDelayMs};
+  var concurrencyLimit = ${concurrencyLimit};
+  var fetchTimeoutMs = ${GTX_FETCH_TIMEOUT_MS};
+  function isoAt(ms) {
+    try { return new Date(ms).toISOString(); } catch (e) { return String(ms); }
+  }
+  function postLine(payload) {
+    try {
+      window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ nrm: 'gt_line', batchId: batchId }, payload)));
+    } catch (e) {}
+  }
   function parseOne(segments) {
     if (!segments || !segments.length) return '';
     var out = '';
@@ -92,15 +120,63 @@ function buildTranslateInject(jobId: string, texts: string[]): string {
     }
     return out;
   }
-  function fetchJson(url) {
+  function fetchJson(url, meta) {
+    var reqAtMs = Date.now();
+    postLine(Object.assign({ event: 'googletranslate_gtx_request', phase: 'request' }, meta, {
+      reqAtMs: reqAtMs,
+      reqAtIso: isoAt(reqAtMs)
+    }));
     return new Promise(function(resolve, reject) {
-      var timer = setTimeout(function() { reject(new Error('fetch timeout')); }, fetchTimeoutMs);
+      var timer = setTimeout(function() {
+        var respAtMs = Date.now();
+        postLine(Object.assign({ event: 'googletranslate_gtx_response', phase: 'response', ok: false }, meta, {
+          reqAtMs: reqAtMs,
+          respAtMs: respAtMs,
+          reqAtIso: isoAt(reqAtMs),
+          respAtIso: isoAt(respAtMs),
+          elapsedMs: respAtMs - reqAtMs,
+          error: 'fetch timeout'
+        }));
+        reject(new Error('fetch timeout'));
+      }, fetchTimeoutMs);
       fetch(url).then(function(res) {
         clearTimeout(timer);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        return res.json();
-      }).then(resolve).catch(function(e) {
+        var respAtMs = Date.now();
+        if (!res.ok) {
+          postLine(Object.assign({ event: 'googletranslate_gtx_response', phase: 'response', ok: false }, meta, {
+            reqAtMs: reqAtMs,
+            respAtMs: respAtMs,
+            reqAtIso: isoAt(reqAtMs),
+            respAtIso: isoAt(respAtMs),
+            elapsedMs: respAtMs - reqAtMs,
+            httpStatus: res.status,
+            error: 'HTTP ' + res.status
+          }));
+          throw new Error('HTTP ' + res.status);
+        }
+        return res.json().then(function(data) {
+          postLine(Object.assign({ event: 'googletranslate_gtx_response', phase: 'response', ok: true }, meta, {
+            reqAtMs: reqAtMs,
+            respAtMs: respAtMs,
+            reqAtIso: isoAt(reqAtMs),
+            respAtIso: isoAt(respAtMs),
+            elapsedMs: respAtMs - reqAtMs,
+            httpStatus: res.status
+          }));
+          return data;
+        });
+      }).catch(function(e) {
         clearTimeout(timer);
+        var respAtMs = Date.now();
+        var msg = (e && e.message) ? e.message : String(e);
+        postLine(Object.assign({ event: 'googletranslate_gtx_response', phase: 'response', ok: false }, meta, {
+          reqAtMs: reqAtMs,
+          respAtMs: respAtMs,
+          reqAtIso: isoAt(reqAtMs),
+          respAtIso: isoAt(respAtMs),
+          elapsedMs: respAtMs - reqAtMs,
+          error: msg
+        }));
         reject(e);
       });
     });
@@ -123,9 +199,16 @@ function buildTranslateInject(jobId: string, texts: string[]): string {
         slots.push({ index: i, text: String(text).trim() });
       }
       for (var b = 0; b < slots.length; b += concurrencyLimit) {
+        var groupIndex = Math.floor(b / concurrencyLimit);
         var group = slots.slice(b, b + concurrencyLimit);
-        var groupResults = await Promise.all(group.map(async function(slot) {
-          var data = await fetchJson(buildUrl([slot.text]));
+        var groupResults = await Promise.all(group.map(async function(slot, offsetInGroup) {
+          var seq = b + offsetInGroup;
+          var data = await fetchJson(buildUrl([slot.text]), {
+            seq: seq,
+            slotIndex: slot.index,
+            groupIndex: groupIndex,
+            textLen: slot.text.length
+          });
           var src = (data && data[2]) ? String(data[2]).toUpperCase() : 'EN';
           var segs = data && data[0];
           return { index: slot.index, text: parseOne(segs), src: src };
@@ -168,7 +251,15 @@ function drainTranslateQueue(): void {
   }
   translateBusy = true;
   currentJob = job;
-  webView.injectJavaScript(buildTranslateInject(job.jobId, job.texts));
+  webView.injectJavaScript(
+    buildTranslateInject(
+      job.jobId,
+      job.texts,
+      job.batchId,
+      job.limits.concurrency,
+      job.limits.batchDelayMs,
+    ),
+  );
 }
 
 export function routeGoogleTranslateWebViewMessage(raw: string): void {
@@ -178,12 +269,17 @@ export function routeGoogleTranslateWebViewMessage(raw: string): void {
   } catch {
     return;
   }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('nrm' in parsed) ||
-    (parsed as { nrm: string }).nrm !== 'gt'
-  ) {
+  if (typeof parsed !== 'object' || parsed === null || !('nrm' in parsed)) {
+    return;
+  }
+  const tag = (parsed as { nrm: string }).nrm;
+  if (tag === 'gt_line') {
+    const line = parsed as Record<string, unknown>;
+    const { nrm: _nrm, phase: _phase, ...payload } = line;
+    logNrmDev('lyrics.translate', payload as Record<string, unknown>);
+    return;
+  }
+  if (tag !== 'gt') {
     return;
   }
   const msg = parsed as {
@@ -222,6 +318,8 @@ async function waitForWebViewReady(timeoutMs: number): Promise<void> {
 
 async function translateViaWebView(
   texts: string[],
+  batchId: string,
+  limits: ReturnType<typeof resolveGtxRuntimeLimits>,
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {
   // WebView가 마운트되지 않은 경우 마운트 요청 후 준비될 때까지 대기
   requestGtMount();
@@ -231,37 +329,77 @@ async function translateViaWebView(
   }
   const jobId = `gt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   return new Promise((resolve, reject) => {
-    translateQueue.push({ jobId, texts, resolve, reject });
+    translateQueue.push({ jobId, batchId, texts, limits, resolve, reject });
     drainTranslateQueue();
   });
 }
 
-async function translateViaNativeFetch(
+async function translateViaNativeModule(
   texts: string[],
+  limits: ReturnType<typeof resolveGtxRuntimeLimits>,
+  batchId: string,
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {
-  return translateTextsViaGtxBatched(texts, globalThis.fetch.bind(globalThis));
+  const result = await gtxNative!.translateTexts(texts, limits.batchDelayMs);
+  return {
+    texts: Array.isArray(result.texts)
+      ? result.texts.map((t) => String(t ?? '').trim())
+      : [],
+    sourceLangs: Array.isArray(result.sourceLangs)
+      ? result.sourceLangs.map((v) => String(v ?? '').trim().toUpperCase())
+      : [],
+  };
+}
+
+async function translateViaJsFetch(
+  texts: string[],
+  batchId: string,
+  limits: ReturnType<typeof resolveGtxRuntimeLimits>,
+): Promise<{ texts: string[]; sourceLangs: string[] }> {
+  return translateTextsViaGtxBatched(texts, globalThis.fetch.bind(globalThis), {
+    batchId,
+    limits,
+  });
 }
 
 export async function translateTextsViaGoogleTranslateWeb(
   texts: string[],
+  batchId?: string,
 ): Promise<{ texts: string[]; sourceLangs: string[] }> {
   if (texts.length === 0) {
     return { texts: [], sourceLangs: [] };
   }
-  try {
-    const out = await translateViaNativeFetch(texts);
+  const resolvedBatchId = batchId ?? `gtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const limits = resolveGtxRuntimeLimits();
+  const t0 = Date.now();
+
+  if (gtxNative?.translateTexts) {
+    // Kotlin HttpURLConnection — readTimeout이 OS 레벨에서 정확히 작동, 백그라운드 freeze 무관
+    const out = await translateViaNativeModule(texts, limits, resolvedBatchId);
     logNrmDev('lyrics.translate', {
-      event: 'googletranslate_native_ok',
+      event: 'googletranslate_native_module_ok',
+      batchId: resolvedBatchId,
       lineCount: texts.length,
+      totalMs: Date.now() - t0,
+      path: 'kotlin_httpclient',
+      limitReason: limits.reason,
+      lineDelayMs: limits.batchDelayMs,
     });
     return out;
-  } catch (nativeErr) {
-    const msg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
-    logNrmDev('lyrics.translate', {
-      event: 'googletranslate_native_fallback',
-      message: msg.slice(0, 120),
-      lineCount: texts.length,
-    });
-    return translateViaWebView(texts);
   }
+
+  // fallback: JS fetch (포그라운드에서만 타임아웃 정확)
+  logNrmDev('lyrics.translate', {
+    event: 'googletranslate_native_module_fallback',
+    batchId: resolvedBatchId,
+    reason: 'NrmGtx unavailable',
+  });
+  const out = await translateViaJsFetch(texts, resolvedBatchId, limits);
+  logNrmDev('lyrics.translate', {
+    event: 'googletranslate_native_ok',
+    batchId: resolvedBatchId,
+    lineCount: texts.length,
+    totalMs: Date.now() - t0,
+    path: 'js_fetch',
+  });
+  return out;
 }

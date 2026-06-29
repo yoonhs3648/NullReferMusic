@@ -51,6 +51,7 @@ import {
 } from '@/lib/nrmDownloadPipeline';
 import { scheduleNativeDownloadJob } from '@/lib/nrmNativeDownloadOrchestrator';
 import { loadDownloadMetadataMode } from '@/lib/nrmDownloadSettings';
+import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import {
   DownloadMetadataAuthInterruptedError,
   DownloadMetadataUnavailableError,
@@ -610,6 +611,8 @@ export function NrmYoutubeHome({
       }
 
       const isAborted = () => downloadSessionsRef.current.get(videoId)?.aborted ?? false;
+      const lyricsSplit = metadata ? splitMetadataForDownloadStages(metadata) : null;
+      const needsLyrics = !!(lyricsSplit?.whisperMode ?? lyricsSplit?.melonMode);
 
       if (Platform.OS !== 'web') {
         nrmNotifyDownloadStarted(videoId, displayLabel);
@@ -622,6 +625,9 @@ export function NrmYoutubeHome({
             options: {
               onAudioPersisted: () => {
                 nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
+                if (needsLyrics) {
+                  nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
+                }
                 nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
               },
               onLyricsStageStarted: () => {
@@ -639,6 +645,9 @@ export function NrmYoutubeHome({
           });
           applyLyricsWarningsToUi(out);
         } catch (e) {
+          if (needsLyrics) {
+            nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
+          }
           if (!isAborted()) {
             logNrmRunError('download.native', e, {
               videoId,

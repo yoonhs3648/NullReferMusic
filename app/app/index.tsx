@@ -59,12 +59,12 @@ import {
 } from '@/components/nrm/NrmAppNotificationDrawer';
 import { NrmAppTopBar } from '@/components/nrm/NrmAppTopBar';
 import { NrmHomeBottomTabBar, type NrmHomeTab } from '@/components/nrm/NrmHomeBottomTabBar';
-import { NrmHomeDiscoverPlaceholder } from '@/components/nrm/NrmHomeDiscoverPlaceholder';
+import { NrmHomeDiscoverScreen } from '@/components/nrm/NrmHomeDiscoverScreen';
 import { NrmHomeHistoryScreen } from '@/components/nrm/NrmHomeHistoryScreen';
 import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
 import { confirmUser } from '@/lib/nrmUserNotify';
-import { getNrmAppExitConfirmMessage } from '@/lib/nrmAppBrand';
+import { formatNrmAppExitConfirmMessage, useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
 import { NrmHomeChartCarousel, homeChartStageMetrics } from '@/components/nrm/NrmHomeChartCarousel';
 import { homeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
@@ -161,6 +161,7 @@ async function formatYoutubeDisplayQuery(artist?: string | null, title?: string 
 export default function HomeScreen() {
 
   const { isDark } = useNrmUiAppearance();
+  const mainLogoDisplayName = useNrmMainLogoDisplayName();
 
   const { width } = useWindowDimensions();
 
@@ -785,7 +786,7 @@ export default function HomeScreen() {
           return;
         }
         exitPromptOpenRef.current = true;
-        const ok = await confirmUser(getNrmAppExitConfirmMessage(), {
+        const ok = await confirmUser(formatNrmAppExitConfirmMessage(mainLogoDisplayName), {
           cancelLabel: '취소',
           confirmLabel: '종료',
         });
@@ -805,6 +806,7 @@ export default function HomeScreen() {
     isLastfmSearchView,
     isMelonSearchView,
     layoutPhase,
+    mainLogoDisplayName,
     resetToYoutubeHome,
     youtubeOverlay,
   ]);
@@ -1029,7 +1031,14 @@ export default function HomeScreen() {
         />
       );
     } else if (homeTab === 'discover') {
-      bodyContent = <NrmHomeDiscoverPlaceholder isDark={isDark} />;
+      bodyContent = (
+        <NrmHomeDiscoverScreen
+          isDark={isDark}
+          paddingHorizontal={pad}
+          lastfmAuth={lastfmAuthHandlers}
+          onNavigateYoutube={navigateToYoutubeFromLastfm}
+        />
+      );
     } else if (homeTab === 'history') {
       bodyContent = <NrmHomeHistoryScreen isDark={isDark} />;
     } else if (showWelcomeQuote) {

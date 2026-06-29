@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">NullReference Music</string>
+  <string name="app_name">"재학's Music"</string>
   <string name="nrm_bg_work_channel_name">백그라운드 작업</string>
   <string name="nrm_bg_work_channel_desc">다운로드·가사 생성이 백그라운드에서 계속 진행됩니다.</string>
-  <string name="nrm_bg_work_notification_title">NullReference Music — 작업 진행 중</string>
+  <string name="nrm_bg_work_notification_title">"재학's Music — 작업 진행 중"</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
   <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
 </resources>

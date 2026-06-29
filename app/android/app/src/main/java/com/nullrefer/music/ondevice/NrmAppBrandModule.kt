@@ -1,11 +1,11 @@
 package com.nullrefer.music.ondevice
 
 import android.provider.Settings
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.nullrefer.music.NrmBrand
 import java.security.MessageDigest
 
 /** APK 빌드 시 내장된 브랜드·시리얼 메타 (버전 UI에는 노출하지 않음) */
@@ -15,9 +15,18 @@ class NrmAppBrandModule(reactContext: ReactApplicationContext) :
   override fun getName(): String = "NrmAppBrand"
 
   @ReactMethod
+  fun initializeBrandIdentity(promise: Promise) {
+    try {
+      promise.resolve(identityToMap(NrmBrandIdentityStore.getIdentity(reactApplicationContext)))
+    } catch (e: Exception) {
+      promise.reject("E_NRM_BRAND", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
   fun getSerialNo(promise: Promise) {
     try {
-      promise.resolve(NrmBrand.SERIAL_NO)
+      promise.resolve(NrmBrandIdentityStore.getIdentity(reactApplicationContext).serialNo)
     } catch (e: Exception) {
       promise.reject("E_NRM_BRAND", e.message ?: e.toString(), e)
     }
@@ -26,7 +35,32 @@ class NrmAppBrandModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun getUserName(promise: Promise) {
     try {
-      promise.resolve(NrmBrand.USER_NAME)
+      promise.resolve(NrmBrandIdentityStore.getIdentity(reactApplicationContext).userName)
+    } catch (e: Exception) {
+      promise.reject("E_NRM_BRAND", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun overwriteBrandIdentity(
+      serialNo: String,
+      userName: String,
+      displayName: String,
+      storageFolderName: String,
+      versionInfoAdminBuild: Boolean,
+      promise: Promise,
+  ) {
+    try {
+      val identity =
+          NrmBrandIdentityStore.Identity(
+              serialNo = serialNo,
+              userName = userName,
+              displayName = displayName,
+              storageFolderName = storageFolderName,
+              versionInfoAdminBuild = versionInfoAdminBuild,
+          )
+      NrmBrandIdentityStore.overwriteIdentity(reactApplicationContext, identity)
+      promise.resolve(identityToMap(identity))
     } catch (e: Exception) {
       promise.reject("E_NRM_BRAND", e.message ?: e.toString(), e)
     }
@@ -47,4 +81,13 @@ class NrmAppBrandModule(reactContext: ReactApplicationContext) :
       promise.reject("E_NRM_BRAND", e.message ?: e.toString(), e)
     }
   }
+
+  private fun identityToMap(identity: NrmBrandIdentityStore.Identity) =
+      Arguments.createMap().apply {
+        putString("serialNo", identity.serialNo)
+        putString("userName", identity.userName)
+        putString("displayName", identity.displayName)
+        putString("storageFolderName", identity.storageFolderName)
+        putBoolean("versionInfoAdminBuild", identity.versionInfoAdminBuild)
+      }
 }

@@ -34,7 +34,10 @@ export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string
 
   const { isOnDeviceDownloadAvailable, transcodeAudioOnDevice } =
     await import('@/lib/onDeviceDownload');
-  if (!isOnDeviceDownloadAvailable()) return uri;
+  if (!isOnDeviceDownloadAvailable()) {
+    logDownloadStage('ffmpeg', 'transcode_unavailable', { reason: 'native_module_missing' });
+    return uri;
+  }
 
   const {
     loadDownloadEncodeSettings,

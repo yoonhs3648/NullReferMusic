@@ -13,7 +13,9 @@ import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import { fetchSpotifyPlaylistChart } from '@/lib/nrmChartsClient';
 import {
   isSpotifyChartsFetchAuthError,
@@ -90,6 +92,8 @@ export function NrmSpotifyChartsHome({
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [tabLoading, setTabLoading] = useState(true);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const listRef = useRef<FlatList<ChartTrackItem>>(null);
 
   const tabCacheRef = useRef<Map<SpotifyChartTabId, TabSnapshot>>(new Map());
   const loadGenRef = useRef(0);
@@ -294,27 +298,42 @@ export function NrmSpotifyChartsHome({
     ) : null;
 
   return (
-    <FlatList
-      style={styles.list}
-      nestedScrollEnabled
-      data={tabLoading && !items.length ? [] : items}
-      keyExtractor={keyExtractor}
-      renderItem={renderItem}
-      ListHeaderComponent={listHeader}
-      ListEmptyComponent={listEmpty}
-      contentContainerStyle={[
-        styles.listContent,
-        (tabLoading || errorCode) && !items.length && styles.listContentEmpty,
-      ]}
-      keyboardShouldPersistTaps="handled"
-      initialNumToRender={20}
-      maxToRenderPerBatch={15}
-      windowSize={8}
-    />
+    <View style={styles.listRoot}>
+      <FlatList
+        ref={listRef}
+        style={styles.list}
+        nestedScrollEnabled
+        data={tabLoading && !items.length ? [] : items}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        onScroll={(e) => {
+          setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={200}
+        contentContainerStyle={[
+          styles.listContent,
+          (tabLoading || errorCode) && !items.length && styles.listContentEmpty,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={20}
+        maxToRenderPerBatch={15}
+        windowSize={8}
+      />
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listRoot: {
+    flex: 1,
+  },
   list: {
     flex: 1,
   },

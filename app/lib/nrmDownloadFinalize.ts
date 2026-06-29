@@ -27,10 +27,9 @@ import {
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
-import { appendActivityHistory } from '@/lib/nrmActivityHistory';
+import { appendActivityHistory, type NrmActivityHistoryKind } from '@/lib/nrmActivityHistory';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
-import { nrmYieldToEventLoop } from '@/lib/nrmYieldToEventLoop';
 import {
   startLyricsPipelinePreload,
   type LyricsPipelinePreloadBundle,
@@ -73,7 +72,6 @@ function whisperWarningFromResult(
 
 /** 웹 백엔드와 동일 — ffmpeg in-place 변환과 Whisper 전사가 같은 파일을 두지 않음 */
 async function copyAudioForWhisperParallel(sourceUri: string): Promise<string> {
-  await nrmYieldToEventLoop();
   const src = sourceUri.startsWith('file://') ? sourceUri : `file://${sourceUri}`;
   const extMatch = src.match(/\.([a-z0-9]+)(?:\?|$)/i);
   const ext = extMatch ? `.${extMatch[1]}` : '.audio';
@@ -249,7 +247,14 @@ export async function finalizeNativeAudioStage(
   const usesCombinedPath =
     Platform.OS === 'android' && willTranscodeNonMp3 && hasCombinableMetadata;
 
-  await nrmYieldToEventLoop({ critical: true });
+  // extract 직후 setTimeout yield는 앱 백그라운드·Task removed 시 RN 타이머가 멈춰
+  // transcode_skip/meta_embed까지 수 분~수십 분 지연될 수 있음 (Troye YOUTH 19분 사례).
+  logDownloadStage('pipeline', 'finalize_transcode_enter', {
+    fileName: safeName,
+    usesCombinedPath,
+    haveExt,
+    wantExt,
+  });
   let processedUri: string;
   if (usesCombinedPath) {
     try {
@@ -287,7 +292,7 @@ export async function finalizeNativeAudioStage(
     ? copyAudioForWhisperParallel(processedUri).catch(() => processedUri)
     : null;
 
-  await nrmYieldToEventLoop({ critical: true });
+  logDownloadStage('pipeline', 'finalize_persist_enter', { fileName: safeName });
   const { persistAudioToDestination } = await import('@/lib/nrmPersistDownload.native');
   const [audioSaved, whisperCopyResult] = await Promise.all([
     persistAudioToDestination(processedUri, safeName, embedMetadata),
@@ -495,12 +500,17 @@ export async function finalizeNativeLyricsStage(
     if (lyricsPersistedOk && whisperRef.result) {
       const translationRequested =
         persistedLyricsMode === 'translation' || persistedLyricsMode === 'melon_translation';
-      const translationSucceeded =
-        translationRequested && !(whisperRef.result.lyricsTranslationFailed ?? false);
+      const translationFailed = whisperRef.result.lyricsTranslationFailed ?? false;
+      let lyricsHistoryKind: NrmActivityHistoryKind = 'lyrics';
+      if (translationRequested) {
+        lyricsHistoryKind = translationFailed
+          ? 'lyrics_translation_failed'
+          : 'lyrics_translation';
+      }
       void appendActivityHistory({
         fileName: displayLabelFromAudioFileName(safeName),
         audioUri: audioSaved.location.audioUri,
-        kind: translationSucceeded ? 'lyrics_translation' : 'lyrics',
+        kind: lyricsHistoryKind,
       });
     }
     options?.onLyricsStageEnded?.();

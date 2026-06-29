@@ -71,6 +71,14 @@ const SCHEMAS = {
       { name: 'lastAccessDate', type: 'string | null', required: '선택', description: '마지막 앱 실행 시각. 형식: YYYY-MM-DD HH:mm:ss.SSS. 미등록 시 null' },
     ],
   },
+  apkVersion: {
+    rootKey: '(루트 객체)',
+    description: 'GitHub Releases 공개 APK 최신 버전 (data/apkVersion.json). 앱 시작 시 PAT 없이 조회',
+    fields: [
+      { name: 'version', type: 'string', required: '필수', description: '최신 릴리스 APK semver (package.json versionName과 동기화)' },
+      { name: 'createdDate', type: 'string (YYYY-MM-DD HH:mm:ss.SSS)', required: '필수', description: '해당 버전 APK 빌드·등록 시각' },
+    ],
+  },
 };
 
 const JSON_FILES = [
@@ -78,6 +86,7 @@ const JSON_FILES = [
   { sheet: 'userBanList', rel: 'data/userBanList.json' },
   { sheet: 'inquiry', rel: 'data/inquiry.json' },
   { sheet: 'userList', rel: 'data/custom-apk/userList.json' },
+  { sheet: 'apkVersion', rel: 'data/apkVersion.json' },
 ];
 
 function sheetFromSchema(schemaKey) {

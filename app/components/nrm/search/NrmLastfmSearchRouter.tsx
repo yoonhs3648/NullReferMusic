@@ -145,6 +145,8 @@ type Props = {
   onNavigateYoutube: (params: LastfmYoutubeNavigateParams) => void;
   restoredState?: LastfmSearchRouterState | null;
   lastfmAuth: LastfmAuthHandlers;
+  /** 마운트 시 자동 검색할 초기 쿼리 (Discover 등) */
+  initialQuery?: string;
 };
 
 let frameSeq = 0;
@@ -153,7 +155,7 @@ function nextFrameId(): string {
   return `lf-${frameSeq}`;
 }
 
-function emptyListFrame(kind: LastfmSearchKind): ListFrame {
+function emptyListFrame(kind: LastfmSearchKind, query = ''): ListFrame {
   const type =
     kind === 'artist'
       ? 'artist-list'
@@ -163,7 +165,7 @@ function emptyListFrame(kind: LastfmSearchKind): ListFrame {
   return {
     id: nextFrameId(),
     type,
-    query: '',
+    query,
     hits: [],
     searched: false,
     loading: false,
@@ -221,6 +223,7 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       onNavigateYoutube,
       restoredState,
       lastfmAuth,
+      initialQuery,
     },
     ref,
   ) {
@@ -232,13 +235,15 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     const [stack, setStack] = useState<Frame[]>(() =>
       restoredState?.stack?.length
         ? restoredState.stack
-        : [emptyListFrame(initialKind)],
+        : [emptyListFrame(initialKind, initialQuery?.trim() ?? '')],
     );
     const reqRef = useRef(0);
     const loadMoreLockRef = useRef(false);
+    const autoSearchDoneRef = useRef(false);
     const listRef = useRef<
       FlatList<LastfmArtistSearchHit | LastfmAlbumSearchHit | LastfmTrackSearchHit>
     >(null);
+    const detailScrollRef = useRef<ScrollView>(null);
     const [showScrollTop, setShowScrollTop] = useState(false);
 
     useEffect(() => {
@@ -248,6 +253,12 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     }, [restoredState]);
 
     const top = stack[stack.length - 1];
+
+    useEffect(() => {
+      detailScrollRef.current?.scrollTo({ y: 0, animated: false });
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setShowScrollTop(false);
+    }, [stack.length, top.id]);
     const artistListFrame = top.type === 'artist-list' ? top : null;
     const { resolveImageUrl: resolveArtistImageUrl } = useNrmLastfmArtistImageLoader({
       hits: artistListFrame ? (artistListFrame.hits as LastfmArtistSearchHit[]) : [],
@@ -423,6 +434,24 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
       },
       [updateTop, withAuth],
     );
+
+    useEffect(() => {
+      if (autoSearchDoneRef.current || restoredState?.stack?.length) return;
+      const q = initialQuery?.trim();
+      if (!q) return;
+      const frame = stack[0];
+      if (
+        !frame ||
+        (frame.type !== 'artist-list' &&
+          frame.type !== 'album-list' &&
+          frame.type !== 'track-list') ||
+        frame.searched
+      ) {
+        return;
+      }
+      autoSearchDoneRef.current = true;
+      void runListSearch(frame, q);
+    }, [initialQuery, restoredState, runListSearch, stack]);
 
     const loadMoreList = useCallback(
       async (frame: ListFrame) => {
@@ -1144,22 +1173,34 @@ export const NrmLastfmSearchRouter = forwardRef<LastfmSearchNavHandle, Props>(
     }
 
     return (
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollInner,
-          { paddingHorizontal },
-        ]}
-        keyboardShouldPersistTaps="handled">
-        <NrmFeatureScreenLogoHeader
+      <View style={styles.listRoot}>
+        <ScrollView
+          ref={detailScrollRef}
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollInner,
+            { paddingHorizontal },
+          ]}
+          onScroll={(e) => {
+            setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+          }}
+          scrollEventThrottle={200}
+          keyboardShouldPersistTaps="handled">
+          <NrmFeatureScreenLogoHeader
+            isDark={isDark}
+            onPressHome={onBackToHome}
+            compact
+          />
+          {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
+          {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
+          {top.type === 'track-detail' ? renderTrackDetail(top) : null}
+        </ScrollView>
+        <NrmScrollToTopFab
+          visible={showScrollTop}
+          onPress={() => detailScrollRef.current?.scrollTo({ y: 0, animated: true })}
           isDark={isDark}
-          onPressHome={onBackToHome}
-          compact
         />
-        {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
-        {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
-        {top.type === 'track-detail' ? renderTrackDetail(top) : null}
-      </ScrollView>
+      </View>
     );
   },
 );

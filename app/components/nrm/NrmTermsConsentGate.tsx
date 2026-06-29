@@ -12,13 +12,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
-import { NRM_BRAND_DISPLAY_NAME } from '@/lib/nrmAppBrand';
+import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 
 const INNER_SCROLL_HEIGHT = 248;
 const SCROLL_BOTTOM_THRESHOLD = 20;
 
-const APP = NRM_BRAND_DISPLAY_NAME;
+function resolveText(raw: string, appName: string): string {
+  return raw.replace(/\[앱명\]/g, appName);
+}
 
 const TERMS_RAW = `제1조 (목적)
 
@@ -169,10 +171,6 @@ const PRIVACY_RAW = `개인정보처리방침
 
 본 약관은 2026.06.24부터 시행합니다.`;
 
-function resolveText(raw: string): string {
-  return raw.replace(/\[앱명\]/g, APP);
-}
-
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -301,6 +299,7 @@ type Props = {
 };
 
 export function NrmTermsConsentGate({ onAgreed }: Props) {
+  const appName = useNrmMainLogoDisplayName();
   const { isDark } = useNrmUiAppearance();
   const insets = useSafeAreaInsets();
 
@@ -352,7 +351,7 @@ export function NrmTermsConsentGate({ onAgreed }: Props) {
         {/* 이용약관 */}
         <ConsentSection
           sectionTitle="이용약관"
-          content={resolveText(TERMS_RAW)}
+          content={resolveText(TERMS_RAW, appName)}
           expanded={termsExpanded}
           onToggle={() => setTermsExpanded((v) => !v)}
           scrolledToBottom={termsBottom}
@@ -366,7 +365,7 @@ export function NrmTermsConsentGate({ onAgreed }: Props) {
         {/* 개인정보처리방침 */}
         <ConsentSection
           sectionTitle="개인정보처리방침"
-          content={resolveText(PRIVACY_RAW)}
+          content={resolveText(PRIVACY_RAW, appName)}
           expanded={privacyExpanded}
           onToggle={() => setPrivacyExpanded((v) => !v)}
           scrolledToBottom={privacyBottom}

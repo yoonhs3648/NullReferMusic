@@ -264,11 +264,12 @@ export function NrmTrackMetadataSettingsHome({
     [],
   );
 
-  /** 목록 로드 직후 상단 일부만 선로드 (전체 일괄 로드 방지) */
+  /** 목록 로드 직후 상단 일부만 선로드 (SectionList 표시 순서 기준) */
   useEffect(() => {
-    if (loading || searchOpen || tracks.length === 0) return;
-    prefetchInitialTrackCovers(tracks, requestCovers);
-  }, [loading, listGeneration, requestCovers, searchOpen, tracks]);
+    if (loading || searchOpen || sections.length === 0) return;
+    const ordered = sections.flatMap((s) => s.data);
+    prefetchInitialTrackCovers(ordered, requestCovers);
+  }, [loading, listGeneration, requestCovers, searchOpen, sections]);
 
   /** 검색 결과 — 캐시에 없는 항목만 비동기 요청 (디바운스) */
   useEffect(() => {

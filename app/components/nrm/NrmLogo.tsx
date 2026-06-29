@@ -5,7 +5,8 @@ import {
   type HomeChartPodiumTier,
 } from '@/components/nrm/NrmHomeChartRankCrown';
 import { nrmTokens } from '@/constants/nrmTokens';
-import { getNrmLogoWordmark, splitNrmLogoWordmark } from '@/lib/nrmAppBrand';
+import { splitNrmLogoWordmark } from '@/lib/nrmAppBrand';
+import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
 type Props = {
   compact?: boolean;
@@ -48,10 +49,9 @@ export function NrmLogo({
   onPress,
 }: Props) {
   const { width } = useWindowDimensions();
-  const { primary: logoPrimary, accent: logoAccent } =
-    displayName !== undefined
-      ? splitNrmLogoWordmark(displayName)
-      : getNrmLogoWordmark();
+  const effectiveDisplayName = useNrmMainLogoDisplayName();
+  const resolvedDisplayName = displayName ?? effectiveDisplayName;
+  const { primary: logoPrimary, accent: logoAccent } = splitNrmLogoWordmark(resolvedDisplayName);
   const nullColor = disabled
     ? 'rgba(128,128,128,0.45)'
     : tone === 'dark'

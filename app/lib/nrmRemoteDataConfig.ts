@@ -16,6 +16,16 @@ export const NRM_INQUIRY_ATTACH_RAW_BASE = `https://raw.githubusercontent.com/${
 export const NRM_USER_BAN_LIST_JSON_RAW_URL = `https://raw.githubusercontent.com/${NRM_GITHUB_REPO}/${NRM_GITHUB_BRANCH}/data/userBanList.json`;
 export const NRM_USER_BAN_LIST_JSON_API_PATH = `https://api.github.com/repos/${NRM_GITHUB_REPO}/contents/data/userBanList.json`;
 
+/** 공개 릴리스 APK 최신 버전 (PAT 불필요) */
+export const NRM_APK_VERSION_JSON_RAW_URL = `https://raw.githubusercontent.com/${NRM_GITHUB_REPO}/${NRM_GITHUB_BRANCH}/data/apkVersion.json`;
+export const NRM_APK_VERSION_JSON_API_PATH = `https://api.github.com/repos/${NRM_GITHUB_REPO}/contents/data/apkVersion.json`;
+
+/** GitHub Releases APK 다운로드 URL (tag: v{version}, asset: NullReferenceMusic-v{version}.apk) */
+export function getNrmApkReleaseDownloadUrl(version: string): string {
+  const v = version.trim();
+  return `https://github.com/${NRM_GITHUB_REPO}/releases/download/v${v}/NullReferenceMusic-v${v}.apk`;
+}
+
 /** 원격 차단 목록 주기적 갱신 간격 (캐시 없음) */
 export const NRM_USER_BAN_POLL_INTERVAL_MS = 30 * 60 * 1000;
 

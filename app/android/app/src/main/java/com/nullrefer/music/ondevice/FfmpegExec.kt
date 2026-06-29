@@ -122,6 +122,8 @@ object FfmpegExec {
 
       tag: String,
 
+      timeoutSec: Long = 600L,
+
   ) {
 
     val argv = NrmExecutableFile.buildExecArgv(binary, ffmpegArgs)
@@ -150,7 +152,17 @@ object FfmpegExec {
 
     }
 
-    p.waitFor()
+    val finished = p.waitFor(timeoutSec, TimeUnit.SECONDS)
+
+    if (!finished) {
+
+      p.destroyForcibly()
+
+      NrmFileLogger.warn(tag, "ffmpeg timeout after ${timeoutSec}s cmd=${argv.joinToString(" ")}")
+
+      throw Exception("ffmpeg_timeout_${timeoutSec}s")
+
+    }
 
     val code = p.exitValue()
 
@@ -375,7 +387,13 @@ object FfmpegExec {
     }
 
     // ffmpeg -i 단독 프로브는 출력 파일 없이 exit=1이 정상 (스트림 정보만 수집)
-    if (exitCode == 1 && (tag == "ffmpeg-probe-audio" || tag == "ffmpeg-fa-probe")) {
+    if (
+        exitCode == 1 &&
+            (tag == "ffmpeg-probe-audio" ||
+                tag == "ffmpeg-fa-probe" ||
+                tag == "ffmpeg-read-meta" ||
+                tag == "ffmpeg-read-cover-probe")
+    ) {
       if (output.contains("Input #") || output.contains("Stream #")) {
         NrmFileLogger.log(tag, "probe ok exit=1")
         return

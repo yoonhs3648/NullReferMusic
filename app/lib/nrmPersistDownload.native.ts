@@ -193,7 +193,7 @@ function showSafFolderGuide(): Promise<void> {
   return new Promise((resolve) => {
     Alert.alert(
       '다운로드 폴더 선택',
-      '다음 화면에서 파일을 저장할 폴더를 선택하세요.\n폴더가 없다면 우상단 메뉴 → 새 폴더 만들기로 먼저 만들어 주세요.',
+      '다음 화면에서 파일을 저장할 폴더를 선택하세요.\n폴더가 없다면 우상단 메뉴 → 새 폴더 만들기로 먼저 만들어 주세요.\nSD 카드는 좌상단 ≡ 메뉴에서 SD 카드를 고른 뒤 폴더를 선택하세요.',
       [{ text: '계속', onPress: () => resolve() }],
       { cancelable: false },
     );

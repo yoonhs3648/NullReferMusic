@@ -1,6 +1,7 @@
-import { fetchGithubJsonDocument, resolveGithubDataPat } from '@/lib/nrmGithubContentsApi';
-import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
-import { NRM_USER_LIST_JSON_API_PATH, NRM_USER_LIST_JSON_RAW_URL } from '@/lib/nrmRemoteDataConfig';
+import { NRM_SUPABASE_TABLES } from '@/lib/nrmSupabaseConfig';
+import { nrmSbMaybeSingle, nrmSbSelect } from '@/lib/nrmSupabaseCrud';
+import { mapUserListRow } from '@/lib/nrmSupabaseRows';
+import type { NrmSupabaseUserListRow } from '@/lib/nrmSupabaseDatabase.types';
 
 export type NrmUserListEntry = {
   id: number;
@@ -13,20 +14,6 @@ export type NrmUserListEntry = {
   lastAccessDate: string | null;
 };
 
-type UserListJson = {
-  userList?: Array<{
-    id?: number;
-    appName?: string;
-    userName?: string;
-    SerialNo?: string;
-    version?: string;
-    Createddate?: string;
-    deviceId?: string | null;
-    lastAccessDate?: string | null;
-  }>;
-};
-
-/** SerialNo별 id가 가장 큰 항목만 유지 */
 export function dedupeUserListBySerialNo(rows: NrmUserListEntry[]): NrmUserListEntry[] {
   const bySerial = new Map<string, NrmUserListEntry>();
   for (const row of rows) {
@@ -40,41 +27,57 @@ export function dedupeUserListBySerialNo(rows: NrmUserListEntry[]): NrmUserListE
   return [...bySerial.values()].sort((a, b) => b.id - a.id);
 }
 
-function normalizeUserListRows(json: UserListJson): NrmUserListEntry[] {
-  const rows = Array.isArray(json.userList) ? json.userList : [];
-  const normalized: NrmUserListEntry[] = [];
+async function fetchUserListRows(): Promise<NrmUserListEntry[]> {
+  const rows = await nrmSbSelect<NrmSupabaseUserListRow>(NRM_SUPABASE_TABLES.userList, (q) =>
+    q.select('*').order('id', { ascending: true }),
+  );
+  const out: NrmUserListEntry[] = [];
   for (const row of rows) {
-    const id = row.id;
-    if (typeof id !== 'number' || !Number.isFinite(id)) continue;
-    const userName = String(row.userName ?? '').trim();
-    const SerialNo = String(row.SerialNo ?? '').trim();
-    if (!userName || !SerialNo) continue;
-    normalized.push({
-      id,
-      appName: String(row.appName ?? '').trim(),
-      userName,
-      SerialNo,
-      version: String(row.version ?? '').trim(),
-      Createddate: String(row.Createddate ?? '').trim(),
-      deviceId: row.deviceId ?? null,
-      lastAccessDate: row.lastAccessDate ?? null,
-    });
+    const item = mapUserListRow(row);
+    if (item) out.push(item);
   }
-  return normalized;
+  return out;
 }
 
 export async function fetchDedupedUserListEntries(): Promise<NrmUserListEntry[]> {
-  const json = await fetchGithubRawJson<UserListJson>(NRM_USER_LIST_JSON_RAW_URL);
-  return dedupeUserListBySerialNo(normalizeUserListRows(json));
+  return dedupeUserListBySerialNo(await fetchUserListRows());
 }
 
-/** GitHub Contents API로 최신 userList.json 조회 (관리자 패널 — CDN 캐시 우회) */
 export async function fetchDedupedUserListEntriesViaApi(): Promise<NrmUserListEntry[]> {
-  const pat = await resolveGithubDataPat();
-  const { doc } = await fetchGithubJsonDocument<UserListJson>(
-    NRM_USER_LIST_JSON_API_PATH,
-    pat,
-    { userList: [] },
+  return fetchDedupedUserListEntries();
+}
+
+export async function fetchUserListEntryBySerialNo(
+  serialNo: string,
+): Promise<NrmUserListEntry | null> {
+  const trimmed = serialNo.trim();
+  if (!trimmed) return null;
+  const data = await nrmSbMaybeSingle<NrmSupabaseUserListRow>(NRM_SUPABASE_TABLES.userList, (q) =>
+    q
+      .select('*')
+      .eq('serial_no', trimmed)
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   );
-  return dedupeUserListBySerialNo(normalizeUserListRows(doc));
+  if (!data) return null;
+  return mapUserListRow(data);
+}
+
+/** 릴리스 APK 업데이트 후 identity 복구 — device_id 바인딩 기준 */
+export async function fetchUserListEntryByDeviceId(
+  deviceId: string,
+): Promise<NrmUserListEntry | null> {
+  const trimmed = deviceId.trim();
+  if (!trimmed) return null;
+  const data = await nrmSbMaybeSingle<NrmSupabaseUserListRow>(NRM_SUPABASE_TABLES.userList, (q) =>
+    q
+      .select('*')
+      .eq('device_id', trimmed)
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (!data) return null;
+  return mapUserListRow(data);
 }

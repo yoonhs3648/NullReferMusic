@@ -95,10 +95,11 @@ try {
     Invoke-Npm @('run', 'generate:music-quotes')
 
     if ($Customize) {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ForceRebundle
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'custom' -ForceRebundle
     }
     else {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'admin' -ForceRebundle
+        # GitHub Releases 공개 채널 — suffix 없는 NullReferenceMusic-v{version}.apk
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ForceRebundle
     }
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'

@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
-import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 import type { HomeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
 
 type Props = {
@@ -32,7 +31,6 @@ export function NrmAppTopBar({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const mainLogoDisplayName = useNrmMainLogoDisplayName();
   const iconColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const padH = Math.max(nrmTokens.space.md, Math.round(width * 0.04));
 
@@ -63,7 +61,6 @@ export function NrmAppTopBar({
           layout="stacked"
           tone={isDark ? 'dark' : 'light'}
           podiumTier={podiumTier}
-          displayName={mainLogoDisplayName}
           onPress={onLogoPress}
         />
       </View>

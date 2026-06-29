@@ -1,11 +1,11 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
-import { fetchGithubJsonDocument, resolveGithubDataPat } from '@/lib/nrmGithubContentsApi';
-import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
-import {
-  NRM_INQUIRY_HISTORY_DAYS,
-  NRM_INQUIRY_JSON_API_PATH,
-  NRM_INQUIRY_JSON_RAW_URL,
-} from '@/lib/nrmRemoteDataConfig';
+import { NRM_SUPABASE_TABLES } from '@/lib/nrmSupabaseConfig';
+import { nrmSbSelect } from '@/lib/nrmSupabaseCrud';
+import { mapInquiryRow } from '@/lib/nrmSupabaseRows';
+import type { NrmSupabaseInquiryRow } from '@/lib/nrmSupabaseDatabase.types';
+
+export const NRM_INQUIRY_HISTORY_DAYS = 90;
+
 export type NrmInquiryItem = {
   id: number;
   userName: string;
@@ -16,20 +16,6 @@ export type NrmInquiryItem = {
   isAnswered: boolean;
   replyContent: string;
   Createddate: string;
-};
-
-type InquiryJson = {
-  inquiry?: Array<{
-    id?: number;
-    userName?: string;
-    SerialNo?: string;
-    version?: string;
-    content?: string;
-    attachedFile?: string;
-    isAnswered?: boolean;
-    replyContent?: string;
-    Createddate?: string;
-  }>;
 };
 
 function parseInquiryCreatedMs(dateStr: string): number | null {
@@ -60,24 +46,6 @@ export function truncateInquiryPreview(text: string, maxLen = 42): string {
   return `${normalized.slice(0, maxLen)}...`;
 }
 
-function normalizeInquiryRow(
-  row: NonNullable<InquiryJson['inquiry']>[number],
-): NrmInquiryItem | null {
-  const id = row.id;
-  if (typeof id !== 'number' || !Number.isFinite(id)) return null;
-  return {
-    id,
-    userName: String(row.userName ?? '').trim(),
-    SerialNo: String(row.SerialNo ?? '').trim(),
-    version: String(row.version ?? '').trim(),
-    content: String(row.content ?? ''),
-    attachedFile: String(row.attachedFile ?? '').trim(),
-    isAnswered: row.isAnswered === true,
-    replyContent: String(row.replyContent ?? ''),
-    Createddate: String(row.Createddate ?? '').trim(),
-  };
-}
-
 export function inquiryListTitle(userName: string): string {
   const name = userName.trim();
   return name ? `${name} 님의 문의` : '문의';
@@ -93,36 +61,30 @@ export function sortInquiriesByCreatedDesc(items: NrmInquiryItem[]): NrmInquiryI
 }
 
 async function fetchInquiryRows(signal?: AbortSignal): Promise<NrmInquiryItem[]> {
-  const json = await fetchGithubRawJson<InquiryJson>(NRM_INQUIRY_JSON_RAW_URL, { signal });
-  const rows = Array.isArray(json.inquiry) ? json.inquiry : [];
+  const rows = await nrmSbSelect<NrmSupabaseInquiryRow>(NRM_SUPABASE_TABLES.inquiry, (q) => {
+    let query = q
+      .select('*')
+      .order('created_date', { ascending: false })
+      .order('id', { ascending: false });
+    if (signal) {
+      query = query.abortSignal(signal);
+    }
+    return query;
+  });
   const items: NrmInquiryItem[] = [];
   for (const row of rows) {
-    const item = normalizeInquiryRow(row);
+    const item = mapInquiryRow(row);
     if (item) items.push(item);
   }
   return items;
 }
 
 export async function fetchAllInquiriesForAdmin(signal?: AbortSignal): Promise<NrmInquiryItem[]> {
-  const items = await fetchInquiryRows(signal);
-  return sortInquiriesByCreatedDesc(items);
+  return sortInquiriesByCreatedDesc(await fetchInquiryRows(signal));
 }
 
-/** GitHub Contents API로 최신 inquiry.json 조회 (관리자 패널 — CDN 캐시 우회) */
 export async function fetchAllInquiriesForAdminViaApi(): Promise<NrmInquiryItem[]> {
-  const pat = await resolveGithubDataPat();
-  const { doc } = await fetchGithubJsonDocument<InquiryJson>(
-    NRM_INQUIRY_JSON_API_PATH,
-    pat,
-    { inquiry: [] },
-  );
-  const rows = Array.isArray(doc.inquiry) ? doc.inquiry : [];
-  const items: NrmInquiryItem[] = [];
-  for (const row of rows) {
-    const item = normalizeInquiryRow(row);
-    if (item) items.push(item);
-  }
-  return sortInquiriesByCreatedDesc(items);
+  return fetchAllInquiriesForAdmin();
 }
 
 export async function fetchInquiriesForApp(signal?: AbortSignal): Promise<NrmInquiryItem[]> {

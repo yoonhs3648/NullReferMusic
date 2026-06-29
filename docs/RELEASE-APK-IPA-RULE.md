@@ -288,6 +288,35 @@ applicationVariants.all { variant ->
 | `app/release-notes/history.json` | 새 항목 추가 |
 | `app/release-notes/versions/{버전}.md` | 릴리즈 노트 파일 |
 
+### 6-4-a. `build-release-apk-custom.bat` — do-custom Y/N 정책
+
+| Do customizing | 결과 APK | GitHub Release 업로드 | Supabase user_list |
+|----------------|----------|----------------------|-------------------|
+| **N** | 공통 `NullReferenceMusic-v{version}.apk` (admin 빌드) | **예** — 패치 채널 | 아니오 |
+| **Y** (일반 사용자) | 커스텀 APK (`-custom-`) | **아니오** — 로컬만 | **예** (라이선스 등록) |
+| **Y** + appName=`admin` | admin APK (로컬) | **아니오** | 아니오 |
+
+- **의도:** GitHub Releases에는 **공통 패치 APK(do-custom=N)만** 올린다. 커스텀·관리자 모두 이 파일로 기능 업데이트하고, SerialNo·identity는 기기에 유지 (`docs/APP-BRAND.md`).
+- **Y로 빌드한 APK는 절대 GitHub Release에 올라가지 않는다.** (과거 `appName=admin`이 N과 동일하게 업로드되던 동작은 제거됨)
+
+### 6-4-b. GitHub Release 본문 한글 (UTF-8 필수)
+
+릴리스 **설명(body)** 한글은 스크립트 `.ps1` 안에 직접 넣지 않는다. (Windows PowerShell 5.1 + `Invoke-RestMethod` 조합에서 CP949 깨짐 발생)
+
+| 파일 | 역할 |
+|------|------|
+| `scripts/data/github-release-apk-body.md` | Release body 원문 (**UTF-8, BOM 없음**) |
+| `scripts/NrmUtf8.ps1` | `Get-NrmGithubReleaseApkBodyText`, `HttpWebRequest`로 POST/PATCH/PUT |
+| `scripts/Publish-NrmApkGithubRelease.ps1` | do-custom=N 후 업로드 (생성·수정 모두 UTF-8 PATCH 재적용) |
+| `scripts/Fix-NrmGithubReleaseNotesUtf8.ps1` | 이미 깨진 릴리스 본문만 수정 (`-Tag v2.5.1`) |
+
+**에이전트·개발자 규칙:**
+
+1. Release 본문 문구 변경 → `github-release-apk-body.md`만 수정 (`.ps1`에 한글 리터럴 추가 금지)
+2. `.md`는 UTF-8 (BOM 없음)로 저장
+3. 이미 깨진 릴리스: `.\scripts\Fix-NrmGithubReleaseNotesUtf8.ps1 -Tag vX.Y.Z`
+4. `.bat` 파일 본문에는 한글 금지 (`docs/SETUP-ENV.md` 동일)
+
 ### 6-5. APK 안정성 자동 검증 규칙 (AI 에이전트 필수)
 
 APK 빌드 완료 후 **앱이 실행 즉시 꺼지거나(crash), 핵심 기능이 작동 안 하는 등 기본 에러**가 보고되면:

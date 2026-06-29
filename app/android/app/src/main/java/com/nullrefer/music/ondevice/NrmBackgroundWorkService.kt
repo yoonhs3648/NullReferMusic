@@ -40,12 +40,7 @@ class NrmBackgroundWorkService : Service() {
           "bg-work",
           "ForegroundService destroyed unexpectedly while work remains; restarting service",
       )
-      val intent = Intent(applicationContext, NrmBackgroundWorkService::class.java)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        applicationContext.startForegroundService(intent)
-      } else {
-        applicationContext.startService(intent)
-      }
+      NrmBackgroundWorkCoordinator.tryRestartServiceFromBackground(applicationContext)
     }
     NrmForegroundNotificationBinder.clearAllProgressNotifications(this)
     NrmFileLogger.log("bg-work", "ForegroundService destroy")
@@ -54,10 +49,15 @@ class NrmBackgroundWorkService : Service() {
   }
 
   override fun onTaskRemoved(rootIntent: Intent?) {
-    NrmFileLogger.log(
-        "bg-work",
-        "Task removed — foreground UI stopped; in-flight native work keeps tokens until release",
-    )
+    if (NrmBackgroundWorkCoordinator.activeTokenCount() > 0) {
+      NrmFileLogger.log(
+          "bg-work",
+          "Task removed — work tokens remain (${NrmBackgroundWorkCoordinator.activeTokenCount()}); keeping FGS",
+      )
+      super.onTaskRemoved(rootIntent)
+      return
+    }
+    NrmFileLogger.log("bg-work", "Task removed — no active work tokens; stopping service")
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
       stopForeground(STOP_FOREGROUND_REMOVE)
     } else {

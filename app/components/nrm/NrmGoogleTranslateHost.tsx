@@ -1,9 +1,7 @@
 /**
- * Google Translate 웹 자동화 — 숨김 WebView로 translate.google.com을 로드합니다.
+ * Google Translate 웹 자동화 — 숨김 WebView (현재 GTX는 네이티브 fetch만 사용).
  *
- * 레이지 마운트: 네이티브 GTX 번역이 실패해 WebView fallback이 실제로 필요할 때만
- * WebView를 마운트하고, 3분 idle 후 언마운트해 translate.google.com 페이지가
- * 상시 메모리를 차지하는 것을 방지합니다.
+ * 레이지 마운트: WebView 브리지가 필요할 때만 마운트하고, 3분 idle 후 언마운트합니다.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';

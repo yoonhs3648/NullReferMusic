@@ -29,6 +29,7 @@ export function classifyLyricsHistoryKind(
   const translationOk = wantTranslation && !options?.translationFailed;
 
   if (!hadLyrics && hasLyricsNow) {
+    if (wantTranslation && options?.translationFailed) return 'lyrics_translation_failed';
     return translationOk ? 'lyrics_translation' : 'lyrics';
   }
   if (hadLyrics && !hasLyricsNow) {
@@ -36,6 +37,7 @@ export function classifyLyricsHistoryKind(
   }
   if (hadLyrics && hasLyricsNow) {
     if (!hadTrans && wantTranslation) {
+      if (options?.translationFailed) return 'lyrics_translation_failed';
       return translationOk ? 'lyrics_add_translation' : 'lyrics';
     }
     if (hadTrans && !wantTranslation) return 'lyrics_remove_translation';

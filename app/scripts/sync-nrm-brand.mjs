@@ -16,6 +16,7 @@ const displayName = String(raw.displayName ?? '').trim();
 const storageFolderName = String(raw.storageFolderName ?? '').trim();
 const serialNo = String(raw.serialNo ?? '').trim();
 const userName = String(raw.userName ?? '').trim();
+const versionInfoAdminBuild = raw.versionInfoAdminBuild === true;
 
 if (!displayName) {
   console.error('sync-nrm-brand: displayName is required in nrm-brand.config.json');
@@ -50,6 +51,8 @@ object NrmBrand {
     const val SERIAL_NO: String = ${kotlinString(serialNo)}
     /** Custom APK only — inquiry registration; not shown in version UI */
     const val USER_NAME: String = ${kotlinString(userName)}
+    /** true = admin/release build (device binding skip); persisted across APK updates */
+    const val VERSION_INFO_ADMIN_BUILD: Boolean = ${versionInfoAdminBuild}
     val STORAGE_LOGS_PATH: String get() = "\$STORAGE_FOLDER_NAME/logs"
     fun userAgent(version: String): String = "\$STORAGE_FOLDER_NAME/\$version"
 }

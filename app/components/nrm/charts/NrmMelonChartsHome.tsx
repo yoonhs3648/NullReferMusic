@@ -13,6 +13,8 @@ import { NrmChartErrorHero } from '@/components/nrm/charts/NrmChartErrorHero';
 import { NrmChartPageHeading } from '@/components/nrm/charts/NrmChartPageHeading';
 import { NrmChartTrackRow } from '@/components/nrm/charts/NrmChartTrackRow';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import { nrmTokens } from '@/constants/nrmTokens';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
@@ -57,6 +59,8 @@ export function NrmMelonChartsHome({
   const [errorCode, setErrorCode] = useState<ChartErrorCode | null>(null);
   const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [items, setItems] = useState<ChartTrackItem[]>([]);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const listRef = useRef<FlatList<ChartTrackItem>>(null);
 
   const loadGenRef = useRef(0);
   const activeTabRef = useRef(activeTab);
@@ -187,30 +191,43 @@ export function NrmMelonChartsHome({
     ) : null;
 
   return (
-    <FlatList
-      style={styles.list}
-      nestedScrollEnabled
-      data={loading || errorCode ? [] : items}
-      keyExtractor={keyExtractor}
-      renderItem={renderItem}
-      ListHeaderComponent={listHeader}
-      ListEmptyComponent={listEmpty}
-      ListFooterComponent={listFooter}
-      onEndReached={loadMore}
-      onEndReachedThreshold={0.35}
-      contentContainerStyle={[
-        styles.listContent,
-        (loading || errorCode) && styles.listContentEmpty,
-      ]}
-      keyboardShouldPersistTaps="handled"
-      initialNumToRender={20}
-      maxToRenderPerBatch={15}
-      windowSize={8}
-    />
+    <View style={styles.listRoot}>
+      <FlatList
+        ref={listRef}
+        style={styles.list}
+        nestedScrollEnabled
+        data={loading || errorCode ? [] : items}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.35}
+        onScroll={(e) => {
+          setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={200}
+        contentContainerStyle={[
+          styles.listContent,
+          (loading || errorCode) && styles.listContentEmpty,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={20}
+        maxToRenderPerBatch={15}
+        windowSize={8}
+      />
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  listRoot: { flex: 1 },
   list: { flex: 1 },
   listContent: { paddingBottom: nrmTokens.space.xxl },
   listContentEmpty: { flexGrow: 1 },

@@ -2,7 +2,10 @@ package com.nullrefer.music.ondevice
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import com.nullrefer.music.NrmBrand
 import java.util.concurrent.ConcurrentHashMap
@@ -11,12 +14,18 @@ import java.util.concurrent.ConcurrentHashMap
  * 다운로드·Whisper 등 장시간 작업 중 프로세스가 OS에 의해 kill 되지 않도록
  * Foreground Service + (선택) WakeLock 참조 카운트를 관리합니다.
  *
- * 사용자가 최근 앱 목록에서 스와이프 종료하면 프로세스와 함께 종료됩니다.
+ * 작업 토큰이 활성인 동안 최근 앱 스와이프로도 FGS를 유지합니다.
  */
 object NrmBackgroundWorkCoordinator {
   private val tokens = ConcurrentHashMap.newKeySet<String>()
+  private val stopHandler = Handler(Looper.getMainLooper())
+  @Volatile private var pendingStopRunnable: Runnable? = null
   @Volatile private var wakeLock: PowerManager.WakeLock? = null
   @Volatile private var stopRequested: Boolean = false
+  @Volatile private var pendingServiceRestart: Boolean = false
+
+  /** lane 전환·큐 handoff 시 FGS/WakeLock 0 틈 방지 (ms) */
+  private const val STOP_DEFER_MS = 750L
 
   fun activeTokenCount(): Int = tokens.size
 
@@ -37,9 +46,29 @@ object NrmBackgroundWorkCoordinator {
 
   fun hasModelTokens(): Boolean = hasModelInstallTokens()
 
+  /** FGS startForeground type — 다운로드(dataSync) vs 가사·align(mediaProcessing, API 34+) */
+  fun resolveForegroundServiceType(): Int {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
+    var type = 0
+    if (hasDownloadTokens()) {
+      type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+    }
+    val mediaWork =
+        hasLyricsTokens() ||
+            tokens.any { it.startsWith("forced-align:") || it.startsWith("whisper-lrc:") }
+    if (mediaWork && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+    }
+    if (type == 0) {
+      type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+    }
+    return type
+  }
+
   fun acquire(context: Context, token: String) {
     val trimmed = token.trim()
     if (trimmed.isEmpty()) return
+    cancelPendingStop()
     tokens.add(trimmed)
     stopRequested = false
     if (tokens.size == 1) {
@@ -63,10 +92,7 @@ object NrmBackgroundWorkCoordinator {
     tokens.remove(trimmed)
     NrmFileLogger.log("bg-work", "release token=$trimmed active=${tokens.size}")
     if (tokens.isEmpty()) {
-      stopRequested = true
-      releaseWakeLock()
-      NrmStaleWorkNotificationCleanup.markWorkActive(context.applicationContext, false)
-      stopService(context.applicationContext)
+      scheduleStopIfIdle(context.applicationContext)
     } else {
       if (shouldRunForegroundService()) {
         NrmBackgroundWorkService.refreshNotification(context.applicationContext)
@@ -80,6 +106,7 @@ object NrmBackgroundWorkCoordinator {
   fun clearAll(context: Context, reason: String) {
     val appContext = context.applicationContext
     val hadTokens = tokens.size
+    cancelPendingStop()
     tokens.clear()
     stopRequested = true
     releaseWakeLock()
@@ -196,6 +223,42 @@ object NrmBackgroundWorkCoordinator {
     return shouldRunForegroundService() && !stopRequested
   }
 
+  /** onDestroy에서 FGS 재시작이 OS에 막힌 경우 — Activity 재진입 시 재시도 */
+  fun markPendingServiceRestart(pending: Boolean) {
+    pendingServiceRestart = pending
+  }
+
+  fun hasPendingServiceRestart(): Boolean = pendingServiceRestart
+
+  fun restartPendingServiceIfNeeded(context: Context) {
+    if (!pendingServiceRestart) return
+    if (!shouldRunForegroundService()) {
+      pendingServiceRestart = false
+      return
+    }
+    try {
+      ensureService(context.applicationContext)
+      pendingServiceRestart = false
+      NrmFileLogger.log("bg-work", "ForegroundService restart recovered on foreground")
+    } catch (e: Exception) {
+      NrmFileLogger.warn("bg-work", "FGS pending restart still blocked err=${e.message}")
+    }
+  }
+
+  /** onDestroy 등 백그라운드에서 FGS 재시작 시도 — 실패하면 pending 플래그만 설정 */
+  fun tryRestartServiceFromBackground(context: Context): Boolean {
+    if (!shouldAutoRestartService()) return false
+    return try {
+      ensureService(context.applicationContext)
+      pendingServiceRestart = false
+      true
+    } catch (e: Exception) {
+      pendingServiceRestart = true
+      NrmFileLogger.warn("bg-work", "FGS restart deferred err=${e.message}")
+      false
+    }
+  }
+
   fun onServiceStarted() {
     if (shouldRunForegroundService()) {
       stopRequested = false
@@ -230,5 +293,28 @@ object NrmBackgroundWorkCoordinator {
     }
     wakeLock = null
     NrmFileLogger.log("bg-work", "WakeLock release")
+  }
+
+  private fun cancelPendingStop() {
+    pendingStopRunnable?.let { stopHandler.removeCallbacks(it) }
+    pendingStopRunnable = null
+  }
+
+  /** 마지막 토큰 release 직후 lane handoff 틈 — WakeLock·FGS를 즉시 내리지 않음 */
+  private fun scheduleStopIfIdle(context: Context) {
+    cancelPendingStop()
+    val runnable =
+        Runnable {
+          pendingStopRunnable = null
+          if (tokens.isNotEmpty()) return@Runnable
+          stopRequested = true
+          releaseWakeLock()
+          NrmStaleWorkNotificationCleanup.markWorkActive(context, false)
+          stopService(context)
+          NrmFileLogger.log("bg-work", "Deferred stop complete active=0")
+        }
+    pendingStopRunnable = runnable
+    stopHandler.postDelayed(runnable, STOP_DEFER_MS)
+    NrmFileLogger.log("bg-work", "Deferred stop scheduled ms=$STOP_DEFER_MS")
   }
 }

@@ -15,6 +15,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $Root 'scripts\NrmUtf8.ps1')
+Initialize-NrmUtf8Console
 $ModelOut = Join-Path $Root 'library\wav2vec2-base-en\model.onnx'
 
 if (-not $SkipExport -and -not (Test-Path $ModelOut)) {
@@ -43,19 +45,22 @@ $headers = @{
 }
 
 $releaseUrl = "https://api.github.com/repos/$Repo/releases/tags/$Tag"
+$releaseBodyText = 'NullReferMusic FA용 facebook/wav2vec2-base-960h ONNX (~380MB). 앱 전용 — 수동 삭제 금지.'
 $release = $null
 try {
     $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
     Write-Host "기존 릴리스 사용: $Tag (id=$($release.id))"
+    Invoke-NrmGithubPatchJsonUtf8 -Uri "https://api.github.com/repos/$Repo/releases/$($release.id)" -Headers $headers -BodyObject @{
+        body = $releaseBodyText
+    } | Out-Null
 } catch {
-    $body = @{
-        tag_name = $Tag
-        name     = 'wav2vec2-base-960h Forced Alignment ONNX'
-        body     = 'NullReferMusic FA용 facebook/wav2vec2-base-960h ONNX (~380MB). 앱 전용 — 수동 삭제 금지.'
-        draft    = $false
+    $release = Invoke-NrmGithubPostJsonUtf8 -Uri "https://api.github.com/repos/$Repo/releases" -Headers $headers -BodyObject @{
+        tag_name   = $Tag
+        name       = 'wav2vec2-base-960h Forced Alignment ONNX'
+        body       = $releaseBodyText
+        draft      = $false
         prerelease = $false
-    } | ConvertTo-Json
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases" -Headers $headers -Method Post -Body $body -ContentType 'application/json; charset=utf-8'
+    }
     Write-Host "릴리스 생성: $Tag (id=$($release.id))"
 }
 

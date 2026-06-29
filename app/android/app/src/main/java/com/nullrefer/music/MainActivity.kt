@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 
 import com.nullrefer.music.ondevice.NrmFileLogger
+import com.nullrefer.music.ondevice.NrmBackgroundWorkCoordinator
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -23,7 +24,13 @@ class MainActivity : ReactActivity() {
     // @generated end expo-splashscreen
     NrmFileLogger.init(applicationContext)
     NrmFileLogger.log("MainActivity", "onCreate — UI Activity 시작")
+    NrmBackgroundWorkCoordinator.restartPendingServiceIfNeeded(applicationContext)
     super.onCreate(null)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    NrmBackgroundWorkCoordinator.restartPendingServiceIfNeeded(applicationContext)
   }
 
   /**

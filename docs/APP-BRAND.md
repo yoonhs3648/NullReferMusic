@@ -43,6 +43,16 @@ npm run sync:brand
 
 릴리스 APK 빌드(`npm run android:release`, `NullReferMusic-Build-Release-Apk.bat`) 시 **자동** 실행됩니다.
 
+## GitHub Releases APK 자동 업데이트 (identity 유지)
+
+공개 릴리스 APK(`do-custom=N`)는 **코드·기능만** 갱신하는 채널입니다. SerialNo·관리자 여부·표시명은 APK에 새로 박히지 않습니다.
+
+1. **최초 실행** 시 APK 내장 브랜드(SerialNo, userName, admin 여부 등)를 기기 `SharedPreferences`에 저장합니다.
+2. **이후 업데이트** 시 저장된 identity를 그대로 사용합니다. (일반 사용자 → SerialNo 검증·디바이스 바인딩 유지, 관리자 → `admin`·검증 생략 유지)
+3. **예외 복구**: persistence 이전에 릴리스 APK로 덮어쓴 경우, Supabase `user_list`의 `device_id` 바인딩으로 identity를 자동 복구합니다.
+
+구현: `NrmBrandIdentityStore.kt`, `app/lib/nrmBrandIdentity.ts`
+
 ## 친구용 APK 절차 (에이전트·개발자)
 
 1. `nrm-brand.config.json` 에 `displayName` / `storageFolderName` 반영

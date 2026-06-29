@@ -22,7 +22,9 @@ import {
 } from '@/components/nrm/charts/NrmSpotifyPeriodChartFilters';
 import { useNrmPeriodChartPicker } from '@/components/nrm/charts/useNrmPeriodChartPicker';
 import { NrmFeatureScreenLogoHeader } from '@/components/nrm/NrmFeatureScreenLogoHeader';
+import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { NRM_SEARCH_SCROLL_TOP_THRESHOLD } from '@/lib/nrmSearchPageSize';
 import type { ChartErrorCode } from '@/lib/nrmChartErrors';
 import type { LastfmAuthHandlers } from '@/lib/nrmLastfmAuthFlow';
 import type { SpotifyChartsAuthHandlers } from '@/lib/nrmSpotifyChartsAuthFlow';
@@ -208,6 +210,8 @@ export function NrmPeriodChartsHome({
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [chartGeneration, setChartGeneration] = useState(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const listRef = useRef<FlatList<ChartTrackItem>>(null);
 
   const loadGenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -469,6 +473,7 @@ export function NrmPeriodChartsHome({
       </View>
 
       <FlatList
+        ref={listRef}
         style={styles.list}
         nestedScrollEnabled
         data={loading || errorCode ? [] : items}
@@ -486,6 +491,10 @@ export function NrmPeriodChartsHome({
         ListFooterComponent={listFooter}
         onEndReached={loadMore}
         onEndReachedThreshold={0.35}
+        onScroll={(e) => {
+          setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+        }}
+        scrollEventThrottle={200}
         contentContainerStyle={[
           styles.listContent,
           { paddingHorizontal },
@@ -496,6 +505,12 @@ export function NrmPeriodChartsHome({
         initialNumToRender={20}
         maxToRenderPerBatch={15}
         windowSize={8}
+      />
+
+      <NrmScrollToTopFab
+        visible={showScrollTop}
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        isDark={isDark}
       />
 
       <NrmPeriodChartSharedPickerModal

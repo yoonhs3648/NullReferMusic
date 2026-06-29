@@ -150,7 +150,10 @@ export function scheduleNativeDownloadJob(
             videoId,
             displayLabel,
             async () => {
-              if (isAborted()) return;
+              if (isAborted()) {
+                lyricsWaiter.options?.onLyricsStageEnded?.();
+                return;
+              }
               try {
                 const audioStage = await lyricsWaiter.promise;
                 const out = await finalizeNativeLyricsStage(audioStage, {

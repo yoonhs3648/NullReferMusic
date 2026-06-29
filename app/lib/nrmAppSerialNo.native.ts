@@ -11,6 +11,11 @@ type NrmAppBrandNative = {
 let cachedSerialNo: string | null = null;
 let cachedUserName: string | null = null;
 
+export function clearNrmAppSerialCache(): void {
+  cachedSerialNo = null;
+  cachedUserName = null;
+}
+
 export async function getNrmAppSerialNo(): Promise<string> {
   if (cachedSerialNo !== null) return cachedSerialNo;
   if (Platform.OS !== 'android') {

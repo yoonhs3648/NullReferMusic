@@ -72,13 +72,91 @@ function Get-NrmBrandAdminDefaults {
     }
 }
 
-function Invoke-NrmGithubPutJsonUtf8 {
+function Get-NrmGithubReleaseApkBodyText {
+    param([Parameter(Mandatory)][string]$RepoRoot)
+    $path = Join-Path $RepoRoot 'scripts\data\github-release-apk-body.md'
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Missing GitHub release body template: $path"
+    }
+    return (Read-TextFileUtf8 -Path $path).Trim()
+}
+
+function Invoke-NrmGithubJsonUtf8 {
     param(
+        [Parameter(Mandatory)][ValidateSet('POST', 'PUT', 'PATCH')]
+        [string]$Method,
         [Parameter(Mandatory)][string]$Uri,
         [Parameter(Mandatory)][hashtable]$Headers,
         [Parameter(Mandatory)]$BodyObject
     )
     $bodyJson = ConvertTo-NrmJson -InputObject $BodyObject -Depth 10 -Compress
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyJson)
-    return Invoke-RestMethod -Uri $Uri -Headers $Headers -Method Put -Body $bodyBytes -ContentType 'application/json; charset=utf-8'
+
+    $request = [System.Net.HttpWebRequest]::Create($Uri)
+    $request.Method = $Method
+    $request.ContentType = 'application/json; charset=utf-8'
+    $request.ContentLength = $bodyBytes.Length
+    foreach ($key in $Headers.Keys) {
+        $k = [string]$key
+        $v = [string]$Headers[$key]
+        if ($k -ieq 'Content-Type') { continue }
+        if ($k -ieq 'Accept') {
+            $request.Accept = $v
+            continue
+        }
+        if ($k -ieq 'User-Agent') {
+            $request.UserAgent = $v
+            continue
+        }
+        if ($k -ieq 'Authorization') {
+            $request.Headers.Add('Authorization', $v) | Out-Null
+            continue
+        }
+        $request.Headers.Add($k, $v) | Out-Null
+    }
+    $stream = $request.GetRequestStream()
+    try {
+        $stream.Write($bodyBytes, 0, $bodyBytes.Length)
+    }
+    finally {
+        $stream.Close()
+    }
+    $response = $request.GetResponse()
+    try {
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), ([System.Text.UTF8Encoding]::new($false)))
+        $text = $reader.ReadToEnd()
+        $reader.Close()
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        return $text | ConvertFrom-Json
+    }
+    finally {
+        $response.Close()
+    }
+}
+
+function Invoke-NrmGithubPutJsonUtf8 {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][hashtable]$Headers,
+        [Parameter(Mandatory)]$BodyObject
+    )
+    return Invoke-NrmGithubJsonUtf8 -Method PUT -Uri $Uri -Headers $Headers -BodyObject $BodyObject
+}
+
+function Invoke-NrmGithubPostJsonUtf8 {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][hashtable]$Headers,
+        [Parameter(Mandatory)]$BodyObject
+    )
+    return Invoke-NrmGithubJsonUtf8 -Method POST -Uri $Uri -Headers $Headers -BodyObject $BodyObject
+}
+
+function Invoke-NrmGithubPatchJsonUtf8 {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][hashtable]$Headers,
+        [Parameter(Mandatory)]$BodyObject
+    )
+    return Invoke-NrmGithubJsonUtf8 -Method PATCH -Uri $Uri -Headers $Headers -BodyObject $BodyObject
 }

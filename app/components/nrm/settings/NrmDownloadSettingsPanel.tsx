@@ -324,7 +324,7 @@ export function NrmDownloadSettingsPanel({
     void saveAlignModelPreference(preference);
   }, []);
 
-  const displayPath = dirUri ? safUriToDisplayPath(dirUri) : null;
+  const displayPath = dirUri ? (safUriToDisplayPath(dirUri) ?? '선택된 폴더') : null;
 
   return (
     <>
@@ -655,6 +655,9 @@ export function NrmDownloadSettingsPanel({
                 </>
               )}
             </View>
+            <Text style={[styles.pathHint, { color: bodyColor }]}>
+              SD 카드는 폴더 선택 화면 좌상단 ≡ 메뉴에서 고를 수 있습니다.
+            </Text>
           </View>
         ) : (
           <Text style={[styles.pathWebNote, { color: bodyColor }]}>

@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.nullrefer.music.MainActivity
@@ -191,7 +190,7 @@ object NrmForegroundNotificationBinder {
       service.startForeground(
           id,
           notification,
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+          NrmBackgroundWorkCoordinator.resolveForegroundServiceType(),
       )
     } else {
       @Suppress("DEPRECATION")

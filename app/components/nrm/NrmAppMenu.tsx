@@ -46,6 +46,7 @@ import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAl
 import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
+import { NrmAdminDiscoverEditPanel } from '@/components/nrm/settings/NrmAdminDiscoverEditPanel';
 import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDeviceResetPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
@@ -191,6 +192,7 @@ type Panel =
   | 'adminUserBanRegister'
   | 'adminInquiryList'
   | 'adminUserList'
+  | 'adminDiscoverEdit'
   | 'adminDeviceReset'
   | ChartMenuPanel
   | 'periodCharts'
@@ -1754,6 +1756,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => pushPanel('adminDiscoverEdit')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    Discover 편집
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => pushPanel('adminDeviceReset')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1833,6 +1850,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminUserListPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminDiscoverEdit' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminDiscoverEditPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

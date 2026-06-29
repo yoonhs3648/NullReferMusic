@@ -1,13 +1,13 @@
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
 import { countUnreadAlarmIds, pruneAlarmReadIds } from '@/lib/nrmAlarmReadState';
-import { fetchGithubRawJson } from '@/lib/nrmGithubRawFetch';
+import { NRM_SUPABASE_TABLES } from '@/lib/nrmSupabaseConfig';
+import { nrmSbSelect } from '@/lib/nrmSupabaseCrud';
+import { mapAlarmRow } from '@/lib/nrmSupabaseRows';
+import type { NrmSupabaseAlarmRow } from '@/lib/nrmSupabaseDatabase.types';
 
-import { NRM_ALARM_JSON_RAW_URL, NRM_ALARM_DISPLAY_DAYS } from '@/lib/nrmRemoteDataConfig';
-
-/** 원격 알림 주기적 갱신 간격 */
 export const NRM_ALARM_POLL_INTERVAL_MS = 1 * 60 * 1000;
 
-export { NRM_ALARM_DISPLAY_DAYS };
+export const NRM_ALARM_DISPLAY_DAYS = 30;
 
 export type NrmAlarmItem = {
   id: number;
@@ -16,17 +16,6 @@ export type NrmAlarmItem = {
   content: string;
   SerialNo: string;
   date: string;
-};
-
-type AlarmJson = {
-  alarm?: Array<{
-    id?: number;
-    isNoti?: boolean;
-    title?: string;
-    content?: string;
-    SerialNo?: string | null;
-    date?: string;
-  }>;
 };
 
 type AlarmMemoryCache = {
@@ -39,7 +28,7 @@ let memoryCache: AlarmMemoryCache | null = null;
 let inflight: Promise<NrmAlarmItem[]> | null = null;
 
 function parseAlarmDateMs(dateStr: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
   if (!m) return null;
   const y = Number(m[1]);
   const mo = Number(m[2]) - 1;
@@ -63,28 +52,8 @@ function isSerialVisible(alarmSerial: string, appSerial: string): boolean {
   return target === app;
 }
 
-function normalizeAlarmRow(
-  row: NonNullable<AlarmJson['alarm']>[number],
-): NrmAlarmItem | null {
-  const id = row.id;
-  if (typeof id !== 'number' || !Number.isFinite(id)) return null;
-  const title = String(row.title ?? '').trim();
-  const content = String(row.content ?? '');
-  const date = String(row.date ?? '').trim();
-  if (!title || !date) return null;
-  return {
-    id,
-    isNoti: row.isNoti === true,
-    title,
-    content,
-    SerialNo: String(row.SerialNo ?? '').trim(),
-    date,
-  };
-}
-
 function sortAlarms(items: NrmAlarmItem[]): NrmAlarmItem[] {
   return [...items].sort((a, b) => {
-    // 공지(isNoti=true)를 먼저, 그룹 안에서는 최신순(date 내림차순 → id 내림차순)
     if (a.isNoti !== b.isNoti) return a.isNoti ? -1 : 1;
     const da = parseAlarmDateMs(a.date) ?? 0;
     const db = parseAlarmDateMs(b.date) ?? 0;
@@ -107,15 +76,23 @@ function filterAlarms(
   );
 }
 
-async function fetchAlarmPayload(signal?: AbortSignal): Promise<NrmAlarmItem[]> {
-  const json = await fetchGithubRawJson<AlarmJson>(NRM_ALARM_JSON_RAW_URL, { signal });
-  const rows = Array.isArray(json.alarm) ? json.alarm : [];
-  const normalized: NrmAlarmItem[] = [];
+async function fetchAlarmRows(signal?: AbortSignal): Promise<NrmAlarmItem[]> {
+  const rows = await nrmSbSelect<NrmSupabaseAlarmRow>(NRM_SUPABASE_TABLES.alarm, (q) => {
+    let query = q
+      .select('*')
+      .order('alarm_date', { ascending: false })
+      .order('id', { ascending: false });
+    if (signal) {
+      query = query.abortSignal(signal);
+    }
+    return query;
+  });
+  const out: NrmAlarmItem[] = [];
   for (const row of rows) {
-    const item = normalizeAlarmRow(row);
-    if (item) normalized.push(item);
+    const item = mapAlarmRow(row);
+    if (item) out.push(item);
   }
-  return normalized;
+  return out;
 }
 
 export function peekAlarmCache(maxAgeMs = NRM_ALARM_POLL_INTERVAL_MS): NrmAlarmItem[] | null {
@@ -153,7 +130,7 @@ export async function fetchAlarmsForApp(options?: {
       memoryCache = { items: [], fetchedAt: nowMs, appSerialNo: '' };
       return [];
     }
-    const raw = await fetchAlarmPayload(options?.signal);
+    const raw = await fetchAlarmRows(options?.signal);
     const items = filterAlarms(raw, appSerialNo, nowMs);
     memoryCache = { items, fetchedAt: nowMs, appSerialNo };
     await pruneAlarmReadIds(items.map((row) => row.id));

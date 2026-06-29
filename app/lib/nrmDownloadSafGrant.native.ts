@@ -12,18 +12,21 @@ const SAF_GRANT_KEY = 'nrm_saf_download_dir_v2';
 
 /**
  * SAF directoryUri를 사용자에게 보이는 경로 문자열로 변환합니다.
- * content://...tree/primary:Music%2FFuck → /Music/Fuck
- * /storage/emulated/0 부분은 생략합니다.
+ * - 내장: content://...tree/primary:Music%2FFoo → /Music/Foo
+ * - SD카드: content://...tree/5726-ABCD%3AMusic%2FFoo → SD 카드 /Music/Foo
  */
 export function safUriToDisplayPath(uri: string): string | null {
   try {
     const decoded = decodeURIComponent(uri);
-    // /tree/primary:FOLDER_PATH 패턴 추출
-    const m = decoded.match(/\/tree\/primary:([^?#]+)/i);
-    if (m?.[1]) {
-      const raw = m[1].split('/document/')[0]; // /document/... 접미사 제거
-      return '/' + raw;
+    const m = decoded.match(/\/tree\/([^:/]+):([^?#]+)/i);
+    if (!m?.[2]) return null;
+    const volumeId = m[1].toLowerCase();
+    const raw = m[2].split('/document/')[0].replace(/\/+$/, '');
+    const path = raw.startsWith('/') ? raw : `/${raw}`;
+    if (volumeId === 'primary') {
+      return path;
     }
+    return `SD 카드 ${path}`;
   } catch {
     /* ignore */
   }

@@ -16,7 +16,6 @@ type Phase =
   | 'checking'
   | 'mismatch'
   | 'unregistered'
-  | { kind: 'outdated'; requiredVersion: string }
   | { kind: 'error'; message: string };
 
 type Props = {
@@ -56,9 +55,6 @@ export function NrmDeviceBindingGate({ onVerified }: Props) {
           break;
         case 'unregistered':
           setPhase('unregistered');
-          break;
-        case 'outdated':
-          setPhase({ kind: 'outdated', requiredVersion: result.requiredVersion });
           break;
         case 'error':
           setPhase({ kind: 'error', message: result.message });
@@ -118,30 +114,6 @@ export function NrmDeviceBindingGate({ onVerified }: Props) {
           <Text style={styles.dialogTitle}>미등록 기기</Text>
           <Text style={styles.dialogBody}>
             제품 시리얼번호가 등록되지 않았습니다.{'\n'}앱을 종료합니다.
-          </Text>
-          <Pressable
-            style={({ pressed }) => [styles.exitBtn, pressed && { opacity: 0.8 }]}
-            onPress={() => BackHandler.exitApp()}>
-            <Text style={styles.exitBtnText}>앱 종료</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  // ── 버전 outdated 경고 ────────────────────────────────────
-  if (typeof phase === 'object' && phase.kind === 'outdated') {
-    return (
-      <View style={styles.root}>
-        <View style={styles.dialog}>
-          <View style={styles.dialogIconRow}>
-            <View style={styles.warnIcon}>
-              <Text style={styles.warnIconText}>!</Text>
-            </View>
-          </View>
-          <Text style={styles.dialogTitle}>업데이트 필요</Text>
-          <Text style={styles.dialogBody}>
-            {`최신버전이 아닙니다.\n앱을 v.${phase.requiredVersion}으로 업데이트하세요.\n앱을 종료합니다.`}
           </Text>
           <Pressable
             style={({ pressed }) => [styles.exitBtn, pressed && { opacity: 0.8 }]}

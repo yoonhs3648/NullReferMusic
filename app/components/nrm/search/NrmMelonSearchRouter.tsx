@@ -250,6 +250,7 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     useEffect(() => {
       detailScrollRef.current?.scrollTo({ y: 0, animated: false });
       listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setShowScrollTop(false);
     }, [stack.length, top.id]);
     const isTopList =
       top.type === 'artist-list' ||
@@ -1157,25 +1158,36 @@ export const NrmMelonSearchRouter = forwardRef<MelonSearchNavHandle, Props>(
     }
 
     return (
-      <ScrollView
-        ref={detailScrollRef}
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollInner,
-          { paddingHorizontal },
-        ]}
-        keyboardShouldPersistTaps="handled">
-        {scrollTopChrome ?? (
-          <NrmFeatureScreenLogoHeader
-            isDark={isDark}
-            onPressHome={onBackToHome}
-            compact
-          />
-        )}
-        {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
-        {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
-        {top.type === 'track-detail' ? renderTrackDetail(top) : null}
-      </ScrollView>
+      <View style={styles.listRoot}>
+        <ScrollView
+          ref={detailScrollRef}
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollInner,
+            { paddingHorizontal },
+          ]}
+          onScroll={(e) => {
+            setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+          }}
+          scrollEventThrottle={200}
+          keyboardShouldPersistTaps="handled">
+          {scrollTopChrome ?? (
+            <NrmFeatureScreenLogoHeader
+              isDark={isDark}
+              onPressHome={onBackToHome}
+              compact
+            />
+          )}
+          {top.type === 'artist-detail' ? renderArtistDetail(top) : null}
+          {top.type === 'album-detail' ? renderAlbumDetail(top) : null}
+          {top.type === 'track-detail' ? renderTrackDetail(top) : null}
+        </ScrollView>
+        <NrmScrollToTopFab
+          visible={showScrollTop}
+          onPress={() => detailScrollRef.current?.scrollTo({ y: 0, animated: true })}
+          isDark={isDark}
+        />
+      </View>
     );
   },
 );
