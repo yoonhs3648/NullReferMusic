@@ -17,6 +17,7 @@ import { NrmAdminMusicListSearchBar } from '@/components/nrm/settings/NrmAdminMu
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   NRM_DISCOVER_GENRE_DEFAULT,
+  NRM_DISCOVER_YEAR_DEFAULT,
   NRM_DISCOVER_YEAR_OPTIONS,
 } from '@/lib/nrmDiscoverFilters';
 import {
@@ -45,7 +46,7 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
 const SEARCH_DEBOUNCE_MS = 400;
 
 export function NrmAdminDiscoverEditPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
-  const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>('all');
+  const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>(NRM_DISCOVER_YEAR_DEFAULT);
   const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_DEFAULT);
   const [genres, setGenres] = useState<string[]>([]);
   const [searchField, setSearchField] = useState<NrmMusicListTextSearchField>('artist');

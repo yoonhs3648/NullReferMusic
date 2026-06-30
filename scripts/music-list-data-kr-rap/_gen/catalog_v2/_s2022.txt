@@ -1,0 +1,1 @@
+﻿2022 simulate 88 artists 67 skip_global 84 skip_artist 31 pool_unique 203

@@ -1,0 +1,12 @@
+﻿python :   File "<string>", line 6
+위치 C:\Users\yunhs\AppData\Local\Temp\ps-script-85d8b1e4-2352-4259-a33c-fba753b220ea.ps1:106 문자:70
++ ... eferMusic\scripts\music-list-data-kr-rap\_gen\catalog_v2; python -c "
++                                                               ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  File "<string>", line 6:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    one=['Qwala','DeVita','Mirani','Woodie Gochild','PLT','Knoxx','Rad Museum','Queenpia','MoonMoon','BE\\'O','Sokodomo
+','Trade L','Wonstein','Ash Island','Hash Swan','Flowsik','Reddy','KittiB','Koonta','Giriboy','Swings','Mirani']
+                                                                                                                       
+                                                                                                              ^
+SyntaxError: unterminated string literal (detected at line 6)

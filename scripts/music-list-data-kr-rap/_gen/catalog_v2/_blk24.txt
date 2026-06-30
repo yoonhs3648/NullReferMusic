@@ -1,0 +1,73 @@
+﻿ok 86 artists 37 capacity 61
+G-Dragon | Drama
+G-Dragon | IBELONGIIU
+G-Dragon | RODMAN
+G-Dragon | Gyro-Drop
+G-Dragon | TOURRRGEN!
+G-Dragon | I FEEL LIKE GOD
+Changmo | BOOM
+Changmo | NEO
+Changmo | SOSO
+Lil Moshpit | K-FLIP
+Lil Moshpit | DOPE
+Lil Moshpit | KOREA
+Kid Milli | RAD MILLI
+Kid Milli | RAD
+Kid Milli | MVP
+Dean | 3:33
+Dean | Rest
+Dean | Normal People
+Sokodomo | Merry Go Round
+Sokodomo | Merry Go Round (Feat. Zion.T)
+Qwala | yorter
+Qwala | 델러가 (Feat. MELOH & Posadic)
+Beenzino | Train
+Epik High | Stop the Rain
+Epik High | Frost
+82MAJOR | X-82
+82MAJOR | 뭘 봐 (TAKEOVER)
+82MAJOR | Stuck
+Don Malik | THURSDAYCLUB MIXTAPE
+Blase | SELF MADE
+blocked 2024 tracks in earlier years: 254
+Counter({2023: 79, 2021: 32, 2022: 31, 2010: 21, 2017: 17, 2018: 17, 2019: 12, 2016: 11, 2020: 9, 2012: 8, 2013: 7, 2011: 4, 2015: 4, 2014: 2})
+2017 Changmo | METEOR
+2023 Dean | Die 4 You
+2022 Beenzino | Monet
+2018 Ash Island | Malibu
+2019 Ash Island | ISLAND
+2022 The Quiett | Luxury Flow
+2022 Jessi | Zoom
+2017 Mino | Trigger
+2022 Mirani | Drama
+2018 Woodie Gochild | Mood Swings
+2023 Lee Young Ji | Not Sure
+2019 Sik-K | Wet
+2017 Nafla | MVP
+2016 YUMDDA | Tic Toc
+2016 Hash Swan | Hash Brand
+2022 Jvcki Wai | Taxi Blurr
+2017 BewhY | Cult of Curiosity
+2013 Penomeco | COCO BOTTLE
+2016 Simon Dominic | Simon Dominic Part 3
+2022 Swings | Per se
+2017 Swings | Remedy
+2016 Dynamic Duo | Highfive
+2023 CAMO | Melody
+2020 Rad Museum | Life
+2020 Queenpia | Queenpia
+2018 MoonMoon | Tourist
+2019 Thama | Long Time No See
+2019 Rohann | Problem
+2020 TOIL | MAZE (메이즈)
+2020 Code Kunst | Buckle Up (버클 업)
+2023 Knoxx | Knoxx
+2023 Polodared | Multiverse
+2023 Hej! | Drive
+2023 Futuristic Swaver | Villain
+2023 Hodaky | Yellow
+2023 Chillin Homie | Good Day
+2023 Bluso | Fade Away
+2023 LeyonC | Fall
+2023 Hyunsang | Take Care
+2023 Woo | Rain Drop

@@ -1,0 +1,11 @@
+﻿python :   File "<string>", line 28
+위치 C:\Users\yunhs\AppData\Local\Temp\ps-script-ec014b57-842e-4a72-bd56-7a902bd7ad7a.ps1:110 문자:57
++ cd C:\NullReferMusic\scripts\music-list-data-kpop\_gen; python -c "
++                                                         ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  File "<string>", line 28:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    ('P1Harmony','It\\'s Alright','Killin\\' It'),('MONSTA X','Do What I Want','REASON'),('CLASS:y','Winter Bloom','Day
+&Night'),
+                 ^^^^^^^
+SyntaxError: invalid syntax. Perhaps you forgot a comma?

@@ -1,0 +1,14 @@
+﻿artists with 1 track 46
+total tracks 88 artists 67
+blocked 2nd for one-track artists 11
+('Sik-K', 'Brought the Heat Back (더운데)')
+('TOIL', 'Rollin')
+('Swings', '우리를 기억해')
+('Lil Moshpit', 'ACHOO')
+('Crush', 'Oasis')
+('Heize', 'Jenga')
+('Zion.T', 'Just (저스트)')
+('Woodie Gochild', 'Mud (머드)')
+('Owen Ovadoz', 'Diana (디ana)')
+('Mirani', 'Villain (빌런)')
+('Primary', '2')

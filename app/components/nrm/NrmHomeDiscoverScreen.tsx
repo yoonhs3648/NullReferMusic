@@ -18,6 +18,7 @@ import type { MelonYoutubeNavigateParams } from '@/components/nrm/search/NrmMelo
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   NRM_DISCOVER_GENRE_DEFAULT,
+  NRM_DISCOVER_YEAR_DEFAULT,
   NRM_DISCOVER_YEAR_OPTIONS,
 } from '@/lib/nrmDiscoverFilters';
 import { fetchMusicListGenres, fetchMusicListPage } from '@/lib/nrmMusicListClient';
@@ -44,7 +45,7 @@ export function NrmHomeDiscoverScreen({
 
   const [subView, setSubView] = useState<DiscoverSubView>('list');
   const [trackSearchQuery, setTrackSearchQuery] = useState('');
-  const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>('all');
+  const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>(NRM_DISCOVER_YEAR_DEFAULT);
   const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_DEFAULT);
   const [genres, setGenres] = useState<string[]>([]);
   const [items, setItems] = useState<NrmMusicListItem[]>([]);

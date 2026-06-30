@@ -1,11 +1,13 @@
 /**
- * music_list 시드 SQL 생성 — 글로벌 랩/힙합 + 글로벌 + 한국 랩/힙합 (전 테이블 트랙 유일)
+ * music_list 시드 SQL 생성 — 글로벌 랩/힙합 + 글로벌 + 한국 랩/힙합 + Kpop
+ * (Kpop·한국 랩/힙합 동일 트랙 cross-genre 허용, 그 외 장르 간 중복 금지)
  *
  *   node scripts/generate-music-list-seed.mjs
  *
  * 사전: node scripts/music-list-data/build.mjs
  *       node scripts/music-list-data-global/build.mjs
  *       node scripts/music-list-data-kr-rap/build.mjs
+ *       node scripts/music-list-data-kpop/build.mjs
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,16 +25,25 @@ const repoRoot = path.resolve(__dirname, '..');
 const rapDir = path.join(__dirname, 'music-list-data');
 const globalDir = path.join(__dirname, 'music-list-data-global');
 const krRapDir = path.join(__dirname, 'music-list-data-kr-rap');
+const kpopDir = path.join(__dirname, 'music-list-data-kpop');
 const outPath = path.join(repoRoot, 'supabase', 'music_list_seed.sql');
 
 const GENRE_RAP = '글로벌 랩/힙합';
 const GENRE_GLOBAL = '글로벌';
 const GENRE_KR_RAP = '한국 랩/힙합';
+const GENRE_KPOP = 'Kpop';
+
+/** Kpop은 다른 장르와 동일 트랙 공존 허용 (Kpop 내부·비-Kpop 장르 간은 불가) */
+function allowsCrossGenreDuplicate(genreA, genreB) {
+  if (genreA === genreB) return false;
+  return genreA === GENRE_KPOP || genreB === GENRE_KPOP;
+}
 
 function main() {
   const rapRaw = loadJsonDir(rapDir).map((e) => ({ ...e, genre: GENRE_RAP }));
   const globalRaw = loadJsonDir(globalDir).map((e) => ({ ...e, genre: GENRE_GLOBAL }));
   const krRapRaw = loadJsonDir(krRapDir).map((e) => ({ ...e, genre: GENRE_KR_RAP }));
+  const kpopRaw = loadJsonDir(kpopDir).map((e) => ({ ...e, genre: GENRE_KPOP }));
 
   const rap = validateGenreEntries(rapRaw, {
     genre: GENRE_RAP,
@@ -51,18 +62,28 @@ function main() {
     legacyMin: 0,
     legacyRankMax: 0,
   });
+  const kpop = validateGenreEntries(kpopRaw, {
+    genre: GENRE_KPOP,
+    yearMin: 2015,
+    yearMax: 2025,
+    legacyMin: 0,
+    legacyRankMax: 0,
+  });
 
   const allKeys = new Map();
   const merged = [];
-  for (const e of [...rap, ...global, ...krRap]) {
+  for (const e of [...rap, ...global, ...krRap, ...kpop]) {
     const key = trackKey(e.artist, e.title);
     if (allKeys.has(key)) {
       const prev = allKeys.get(key);
-      throw new Error(
-        `cross-genre duplicate: "${e.artist} - ${e.title}" (${e.genre}) vs (${prev.genre})`,
-      );
+      if (!allowsCrossGenreDuplicate(e.genre, prev.genre)) {
+        throw new Error(
+          `cross-genre duplicate: "${e.artist} - ${e.title}" (${e.genre}) vs (${prev.genre})`,
+        );
+      }
+    } else {
+      allKeys.set(key, e);
     }
-    allKeys.set(key, e);
     merged.push(e);
   }
 
@@ -75,7 +96,7 @@ function main() {
   const lines = [
     '-- Discover nrm_music_list seed',
     `-- 생성: node scripts/generate-music-list-seed.mjs`,
-    `-- ${GENRE_RAP}: ${rap.length} | ${GENRE_GLOBAL}: ${global.length} | ${GENRE_KR_RAP}: ${krRap.length} | total: ${merged.length}`,
+    `-- ${GENRE_RAP}: ${rap.length} | ${GENRE_GLOBAL}: ${global.length} | ${GENRE_KR_RAP}: ${krRap.length} | ${GENRE_KPOP}: ${kpop.length} | total: ${merged.length}`,
     'BEGIN;',
     'TRUNCATE public.nrm_music_list RESTART IDENTITY CASCADE;',
     '',
@@ -90,7 +111,7 @@ function main() {
   lines.push('', 'COMMIT;', '');
   fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
   console.log(
-    `OK: ${merged.length} rows (${GENRE_RAP} ${rap.length}, ${GENRE_GLOBAL} ${global.length}, ${GENRE_KR_RAP} ${krRap.length}) → ${outPath}`,
+    `OK: ${merged.length} rows (${GENRE_RAP} ${rap.length}, ${GENRE_GLOBAL} ${global.length}, ${GENRE_KR_RAP} ${krRap.length}, ${GENRE_KPOP} ${kpop.length}) → ${outPath}`,
   );
 }
 

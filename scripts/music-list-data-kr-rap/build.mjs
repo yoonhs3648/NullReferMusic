@@ -33,6 +33,14 @@ function loadExcludeKeys() {
   return keys;
 }
 
+const MAX_PER_ARTIST = 2;
+const MIN_ARTISTS = 45;
+const MIN_HANGUL_RATIO = 0.15;
+
+function hasHangul(s) {
+  return /[가-힣]/.test(String(s ?? ''));
+}
+
 function validateBeforeWrite(all, exclude) {
   const globalKeys = new Map();
   const byYear = new Map();
@@ -58,6 +66,26 @@ function validateBeforeWrite(all, exclude) {
     if (rows.length !== 100) throw new Error(`year ${y}: expected 100, got ${rows.length}`);
     for (let r = 1; r <= 100; r++) {
       if (!rows.some((x) => x.rank === r)) throw new Error(`year ${y}: missing rank ${r}`);
+    }
+
+    const artistCount = new Map();
+    let hangul = 0;
+    for (const row of rows) {
+      artistCount.set(row.artist, (artistCount.get(row.artist) ?? 0) + 1);
+      if (hasHangul(row.title)) hangul++;
+    }
+    for (const [artist, count] of artistCount) {
+      if (count > MAX_PER_ARTIST) {
+        throw new Error(`year ${y}: ${artist} has ${count} tracks (max ${MAX_PER_ARTIST})`);
+      }
+    }
+    if (artistCount.size < MIN_ARTISTS) {
+      throw new Error(`year ${y}: only ${artistCount.size} artists (min ${MIN_ARTISTS})`);
+    }
+    if (hangul / rows.length < MIN_HANGUL_RATIO) {
+      throw new Error(
+        `year ${y}: hangul title ratio ${((hangul / rows.length) * 100).toFixed(0)}% (min ${MIN_HANGUL_RATIO * 100}%)`,
+      );
     }
   }
 }

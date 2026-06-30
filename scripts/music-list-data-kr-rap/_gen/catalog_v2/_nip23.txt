@@ -1,0 +1,8 @@
+﻿python : C:\Users\yunhs\AppData\Local\Programs\Python\Python311\python.exe: can't open file 'C:\\NullReferMusic\\script
+s\\music-list-data-kr-rap\\_gen\\catalog_v2\\_notinpool23.py': [Errno 2] No such file or directory
+위치 C:\Users\yunhs\AppData\Local\Temp\ps-script-7d1a6601-f7e0-4155-81a4-dc871fc2b72c.ps1:106 문자:70
++ ... list-data-kr-rap\_gen\catalog_v2; python _notinpool23.py 2>&1 | Out-F ...
++                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\yunhs\...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

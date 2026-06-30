@@ -1,0 +1,10 @@
+﻿python : Traceback (most recent call last):
+위치 C:\Users\yunhs\AppData\Local\Temp\ps-script-a45d24a7-b367-4316-850b-cc52b58cf5f2.ps1:106 문자:70
++ ... st-data-kr-rap\_gen\catalog_v2; python _spare2025find.py 2>&1 | Out-F ...
++                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\NullReferMusic\scripts\music-list-data-kr-rap\_gen\catalog_v2\_spare2025find.py", line 19, in <module>
+    print((a, t, al))
+UnicodeEncodeError: 'cp949' codec can't encode character '\xdc' in position 26: illegal multibyte sequence
