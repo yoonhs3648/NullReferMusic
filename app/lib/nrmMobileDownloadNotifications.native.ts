@@ -513,6 +513,18 @@ export function nrmNotifyDownloadStarted(
 
 
 
+/** 오디오 큐 등록 직후 — dl FGS 토큰 없이 진행 알림만 (추출 시작 전) */
+
+export function nrmNotifyDownloadQueued(videoId: string, displayLabel: string): void {
+
+  activeAudioDownloads.set(videoId, `${displayLabel} (대기)`);
+
+  void refreshAudioProgressNotif();
+
+}
+
+
+
 export function nrmNotifyDownloadFinished(
 
   videoId: string,
@@ -549,13 +561,42 @@ export function nrmNotifyDownloadFinished(
 
 /** ffmpeg·Whisper 포함 전체 후처리가 끝났을 때 호출 (오디오 저장만으로는 release 하지 않음) */
 
-export function nrmNotifyDownloadWorkEnded(videoId: string): void {
+async function showLyricsFailedNotif(
+  label: string,
+  videoId: string,
+  reason?: string,
+): Promise<void> {
+  if (!setupDone) return;
 
-  nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
-
+  const body = reason?.trim() ?? '';
+  await scheduleNotificationAsync({
+    identifier: `nrm-lyrics-fail-${videoId}`,
+    content: {
+      title: `${label} 가사 생성에 실패했습니다.`,
+      body,
+      data: {},
+      ...(Platform.OS === 'android'
+        ? ({ android: { channelId: CH_LYRICS_COMPLETE } } as object)
+        : {}),
+    },
+    trigger: null,
+  });
 }
 
+export async function nrmNotifyLyricsFailed(
+  displayLabel: string,
+  videoId: string,
+  reason?: string,
+): Promise<void> {
+  if (!setupDone) await setupNrmMobileDownloadNotifications();
+  const label = displayLabel.trim() || '알 수 없는 트랙';
+  await showLyricsFailedNotif(label, videoId, reason);
+}
 
+/** ffmpeg·Whisper 포함 전체 후처리가 끝났을 때 호출 (오디오 저장만으로는 release 하지 않음) */
+export function nrmNotifyDownloadWorkEnded(videoId: string): void {
+  nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(videoId));
+}
 
 /** 추출·yt-dlp 타임아웃 등 최종 실패 — 시스템(로컬) 알림 */
 export async function nrmNotifyDownloadFailed(

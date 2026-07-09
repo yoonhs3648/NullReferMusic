@@ -76,7 +76,6 @@ object AlignModelDownloader {
           val dest = File(dir, spec.fileName)
           if (!isAssetReady(dest, spec)) {
             if (marker.isFile) marker.delete()
-            logAssetNotReady(spec.fileName, dest, spec.minBytes)
             return null
           }
         }
@@ -178,6 +177,8 @@ object AlignModelDownloader {
     for (assetPath in entry.bundledAssetPaths) {
       val fileName = assetPath.substringAfterLast('/')
       val dest = File(modelDir(context, entry), fileName)
+      val spec = entry.assets.find { it.fileName == fileName }
+      if (spec != null && isAssetReady(dest, spec)) continue
       copyAssetIfPresent(context, assetPath, dest)
     }
   }

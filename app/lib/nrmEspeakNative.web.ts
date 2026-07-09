@@ -12,6 +12,10 @@ export async function isEspeakNgInstalled(): Promise<boolean> {
   return false;
 }
 
+export async function probeEspeakNgForAlign(): Promise<boolean> {
+  return false;
+}
+
 export async function startEspeakNgDownload(): Promise<boolean> {
   return false;
 }

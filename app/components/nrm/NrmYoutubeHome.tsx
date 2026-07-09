@@ -31,8 +31,11 @@ import {
 } from '@/lib/nrmYoutubeStrings';
 import {
   nrmNotifyDownloadFinished,
+  nrmNotifyDownloadQueued,
   nrmNotifyDownloadStarted,
   nrmNotifyDownloadWorkEnded,
+  nrmNotifyLyricsFailed,
+  setupNrmMobileDownloadNotifications,
 } from '@/lib/nrmMobileDownloadNotifications';
 import {
   nrmBackgroundWorkAcquire,
@@ -598,6 +601,14 @@ export function NrmYoutubeHome({
       const session = downloadSessionsRef.current.get(videoId);
       if (!session || session.aborted) return;
 
+      if (Platform.OS === 'android') {
+        const { ensureBatteryOptimizationExemptForDownload } = await import(
+          '@/lib/nrmBatteryOptimizationGate'
+        );
+        const batteryOk = await ensureBatteryOptimizationExemptForDownload();
+        if (!batteryOk || downloadSessionsRef.current.get(videoId)?.aborted) return;
+      }
+
       const { applyDownloadExtension, loadDownloadEncodeSettings } =
         await import('@/lib/nrmDownloadSettings');
       const encode = await loadDownloadEncodeSettings();
@@ -615,7 +626,8 @@ export function NrmYoutubeHome({
       const needsLyrics = !!(lyricsSplit?.whisperMode ?? lyricsSplit?.melonMode);
 
       if (Platform.OS !== 'web') {
-        nrmNotifyDownloadStarted(videoId, displayLabel);
+        void setupNrmMobileDownloadNotifications();
+        nrmNotifyDownloadQueued(videoId, displayLabel);
         try {
           const out = await scheduleNativeDownloadJob({
             videoId,
@@ -623,6 +635,9 @@ export function NrmYoutubeHome({
             metadata,
             isAborted,
             options: {
+              onAudioDownloadStarted: () => {
+                nrmNotifyDownloadStarted(videoId, displayLabel);
+              },
               onAudioPersisted: () => {
                 nrmNotifyDownloadFinished(videoId, displayLabel, true, 'audio');
                 if (needsLyrics) {
@@ -634,9 +649,22 @@ export function NrmYoutubeHome({
                 nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
                 nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
               },
-              onLyricsStageEnded: () => {
-                nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+              onLyricsStageEnded: (success) => {
+                nrmNotifyDownloadFinished(videoId, displayLabel, success, 'lyrics');
                 nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
+              },
+              onLyricsStageFailed: (warning) => {
+                const reason =
+                  warning === 'memory_insufficient'
+                    ? '메모리가 부족합니다.'
+                    : warning === 'melon_align_failed'
+                      ? '가사 정렬에 실패했습니다.'
+                      : warning === 'translation_failed'
+                        ? '번역에 실패했습니다.'
+                        : warning === 'translation_exhausted'
+                          ? '번역 사용량이 초과되었습니다.'
+                          : undefined;
+                void nrmNotifyLyricsFailed(displayLabel, videoId, reason);
               },
               onLyricsPersisted: () => {
                 nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');

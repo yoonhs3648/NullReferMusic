@@ -18,23 +18,12 @@ object EspeakPhonemeToHangul {
 
   fun transliterateLineMixed(line: String, paths: EspeakBootstrap.EspeakPaths): String {
     if (!LATIN_WORD.containsMatchIn(line)) return line
-    val sb = StringBuilder()
-    var last = 0
-    for (m in LATIN_WORD.findAll(line)) {
-      sb.append(line.substring(last, m.range.first))
-      val latin = m.value
-      val ko =
-          try {
-            EspeakNgExec.transliterateLatinSegment(latin, paths)
-          } catch (e: Exception) {
-            NrmFileLogger.warn("espeak", "latin_fail word=$latin err=${e.message?.take(80)}")
-            latin
-          }
-      sb.append(ko)
-      last = m.range.last + 1
+    return try {
+      EspeakNgExec.transliterateLine(line, paths)
+    } catch (e: Exception) {
+      NrmFileLogger.warn("espeak", "line_fail line=${line.take(40)} err=${e.message?.take(80)}")
+      line
     }
-    sb.append(line.substring(last))
-    return sb.toString()
   }
 
   private fun isHangulSyllable(ch: Char): Boolean {

@@ -29,6 +29,24 @@ object NrmExecutableFile {
     return dir
   }
 
+  /** API 29+ — linker가 거부하는 쓰기 가능 .so 방지 */
+  fun ensureNativeLibLoadable(lib: File) {
+    if (!lib.isFile) return
+    prepareForExecution(lib)
+  }
+
+  fun writeLinkerMarker(binary: File, linker: String) {
+    if (linker.isBlank()) return
+    linkerMarkerFile(binary).writeText(linker)
+  }
+
+  fun clearLinkerMarker(binary: File) {
+    try {
+      linkerMarkerFile(binary).delete()
+    } catch (_: Exception) {
+    }
+  }
+
   fun prepareForExecution(file: File) {
     if (!file.isFile) return
     applyExecMode(file)
@@ -69,21 +87,13 @@ object NrmExecutableFile {
     if (linker.isNotEmpty()) {
       for (probeArgs in probeVariants) {
         if (probeExec(linker, binary.absolutePath, *probeArgs.toTypedArray())) {
-          marker.writeText(linker)
+          writeLinkerMarker(binary, linker)
           NrmFileLogger.log(
             "exec",
             "linker 경유 실행 path=${binary.absolutePath} linker=$linker probe=$probeArgs",
           )
           return
         }
-      }
-      if (isWxorDirectExecBlocked(binary)) {
-        marker.writeText(linker)
-        NrmFileLogger.log(
-          "exec",
-          "linker 경유 (W^X fallback) path=${binary.absolutePath} linker=$linker",
-        )
-        return
       }
     }
     NrmFileLogger.warn("exec", "exec 프로브 실패 path=${binary.absolutePath}")
@@ -115,13 +125,6 @@ object NrmExecutableFile {
   }
 
   private fun linkerMarkerFile(binary: File): File = File(binary.parentFile, "${binary.name}.use-linker")
-
-  private fun clearLinkerMarker(binary: File) {
-    try {
-      linkerMarkerFile(binary).delete()
-    } catch (_: Exception) {
-    }
-  }
 
   private fun logExecState(file: File, tag: String) {
     NrmFileLogger.log(

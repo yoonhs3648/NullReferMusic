@@ -11,6 +11,7 @@ export type EspeakNgStatus = {
 type NrmWhisperEspeakNative = {
   getEspeakNgStatus?: () => Promise<EspeakNgStatus>;
   startEspeakNgDownload?: () => Promise<{ started?: boolean }>;
+  probeEspeakNgForAlign?: () => Promise<boolean>;
   transliteratePlainLinesForEspeak?: (lines: string[]) => Promise<string[]>;
 };
 
@@ -39,6 +40,18 @@ export async function fetchEspeakNgStatus(): Promise<EspeakNgStatus> {
 export async function isEspeakNgInstalled(): Promise<boolean> {
   const s = await fetchEspeakNgStatus();
   return s.installed && !s.downloading;
+}
+
+/** FA 전처리 직전 — eSpeak transliteration 프로브 (실패 시 원문 FA) */
+export async function probeEspeakNgForAlign(): Promise<boolean> {
+  if (!isEspeakNgNativeAvailable() || !mod?.probeEspeakNgForAlign) {
+    return false;
+  }
+  try {
+    return !!(await mod.probeEspeakNgForAlign());
+  } catch {
+    return false;
+  }
 }
 
 export async function startEspeakNgDownload(): Promise<boolean> {

@@ -14,6 +14,14 @@ export function nrmNotifyDownloadFinished(
   _kind: 'audio' | 'lyrics' = 'audio',
 ): void {}
 
+export function nrmNotifyDownloadQueued(_videoId: string, _displayLabel: string): void {}
+
+export async function nrmNotifyLyricsFailed(
+  _displayLabel: string,
+  _videoId?: string,
+  _reason?: string,
+): Promise<void> {}
+
 export function nrmNotifyDownloadWorkEnded(_videoId: string): void {}
 
 export async function nrmNotifyDownloadFailed(

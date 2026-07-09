@@ -43,12 +43,18 @@ import type { NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export type FinalizeParallelOptions = {
+  /** APK: 오디오 큐 작업이 실제 시작될 때 (추출 직전, 알림·FGS dl 토큰) */
+  onAudioDownloadStarted?: () => void;
   /** APK: 오디오가 저장 경로에 쓰인 직후 (알림용) */
   onAudioPersisted?: (savedLabel: string) => void;
   /** APK: 가사 생성 작업 큐 진입/시작 (알림용) */
   onLyricsStageStarted?: () => void;
-  /** APK: 가사 생성 작업 종료 (성공/실패 무관) */
-  onLyricsStageEnded?: () => void;
+  /** APK: 가사 생성 작업 종료 (성공 여부) */
+  onLyricsStageEnded?: (success: boolean) => void;
+  /** APK: 가사 생성 실패 (History 기록 직후) */
+  onLyricsStageFailed?: (
+    warning: NonNullable<FinalizeParallelResult['lyricsWarning']>,
+  ) => void;
   /** APK: LRC 사이드카가 실제 저장 경로에 쓰인 직후 (알림용) */
   onLyricsPersisted?: (lrcUri: string) => void;
 };
@@ -57,6 +63,18 @@ export type FinalizeParallelResult = {
   savedLabel: string;
   lyricsWarning?: 'not_embedded' | 'translation_failed' | 'translation_exhausted' | 'melon_align_failed' | 'memory_insufficient';
 };
+
+function lyricsFailureHistoryKind(
+  result: WhisperLrcStageResult,
+  persistedLyricsMode: NrmMelonLyricsMode | NrmWhisperLyricsMode | null,
+): NrmActivityHistoryKind {
+  const translationRequested =
+    persistedLyricsMode === 'translation' || persistedLyricsMode === 'melon_translation';
+  if (translationRequested && result.lyricsTranslationFailed) {
+    return 'lyrics_translation_failed';
+  }
+  return 'lyrics_fail';
+}
 
 function whisperWarningFromResult(
   result: WhisperLrcStageResult | null,
@@ -333,7 +351,7 @@ export async function finalizeNativeLyricsStage(
   audioStage: NativeAudioStageResult,
   options?: Pick<
     FinalizeParallelOptions,
-    'onLyricsStageStarted' | 'onLyricsStageEnded' | 'onLyricsPersisted'
+    'onLyricsStageStarted' | 'onLyricsStageEnded' | 'onLyricsPersisted' | 'onLyricsStageFailed'
   >,
 ): Promise<FinalizeParallelResult> {
   const {
@@ -512,8 +530,18 @@ export async function finalizeNativeLyricsStage(
         audioUri: audioSaved.location.audioUri,
         kind: lyricsHistoryKind,
       });
+    } else if (whisperRef.result?.lyricsRequested) {
+      const warning = whisperWarningFromResult(whisperRef.result);
+      void appendActivityHistory({
+        fileName: displayLabelFromAudioFileName(safeName),
+        audioUri: audioSaved.location.audioUri,
+        kind: lyricsFailureHistoryKind(whisperRef.result, persistedLyricsMode),
+      });
+      if (warning) {
+        options?.onLyricsStageFailed?.(warning);
+      }
     }
-    options?.onLyricsStageEnded?.();
+    options?.onLyricsStageEnded?.(lyricsPersistedOk);
   }
 
   await deleteLocalAudioTemps(temps);
@@ -553,6 +581,7 @@ async function finalizeNativeParallel(
     onLyricsStageStarted: options?.onLyricsStageStarted,
     onLyricsStageEnded: options?.onLyricsStageEnded,
     onLyricsPersisted: options?.onLyricsPersisted,
+    onLyricsStageFailed: options?.onLyricsStageFailed,
   });
 }
 

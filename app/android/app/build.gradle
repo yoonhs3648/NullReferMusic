@@ -93,8 +93,8 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 157
-        versionName "2.5.11"
+        versionCode 159
+        versionName "2.5.13"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 

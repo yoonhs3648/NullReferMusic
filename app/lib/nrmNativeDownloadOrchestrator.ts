@@ -101,10 +101,11 @@ export function scheduleNativeDownloadJob(
         await enqueueAudioDownloadWork(
           videoId,
           displayLabel,
-          async () => {
+            async () => {
             if (isAborted()) {
               throw new Error('DOWNLOAD_ABORTED');
             }
+            options?.onAudioDownloadStarted?.();
             registerDownloadPipelineStart(videoId);
             let pipelineEnded = false;
             const endPipeline = (reason: string) => {
@@ -151,7 +152,7 @@ export function scheduleNativeDownloadJob(
             displayLabel,
             async () => {
               if (isAborted()) {
-                lyricsWaiter.options?.onLyricsStageEnded?.();
+                lyricsWaiter.options?.onLyricsStageEnded?.(false);
                 return;
               }
               try {
@@ -160,6 +161,7 @@ export function scheduleNativeDownloadJob(
                   onLyricsStageStarted: lyricsWaiter.options?.onLyricsStageStarted,
                   onLyricsStageEnded: lyricsWaiter.options?.onLyricsStageEnded,
                   onLyricsPersisted: lyricsWaiter.options?.onLyricsPersisted,
+                  onLyricsStageFailed: lyricsWaiter.options?.onLyricsStageFailed,
                 });
                 lyricsWarning = out.lyricsWarning;
               } catch (e) {

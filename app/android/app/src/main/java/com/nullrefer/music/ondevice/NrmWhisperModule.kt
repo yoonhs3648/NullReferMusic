@@ -588,6 +588,19 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun probeEspeakNgForAlign(promise: Promise) {
+    Thread {
+      try {
+        val paths = EspeakBootstrap.pathsIfReady(reactApplicationContext)
+        promise.resolve(paths != null)
+      } catch (t: Throwable) {
+        NrmFileLogger.warn("espeak", "probeEspeakNgForAlign 실패 err=${t.message}")
+        promise.resolve(false)
+      }
+    }.start()
+  }
+
+  @ReactMethod
   fun transliteratePlainLinesForEspeak(lines: com.facebook.react.bridge.ReadableArray, promise: Promise) {
     Thread {
       try {

@@ -12,6 +12,7 @@ export type NrmActivityHistoryKind =
   | 'download'
   | 'download_fail'
   | 'lyrics'
+  | 'lyrics_fail'
   | 'lyrics_translation'
   | 'lyrics_translation_failed'
   | 'metadata_edit'
@@ -109,6 +110,8 @@ export function formatActivityHistoryLabel(entry: NrmActivityHistoryEntry): stri
       return `${base} 가사 생성(번역지원)`;
     case 'lyrics_translation_failed':
       return `${base} 가사 생성(번역 실패)`;
+    case 'lyrics_fail':
+      return `${base} 가사 생성 실패`;
     case 'metadata_edit':
       return `${base} 메타데이터 수정`;
     case 'lyrics_remove':
@@ -188,6 +191,8 @@ export function activityHistoryKindBadge(kind: NrmActivityHistoryKind): NrmActiv
       return { label: '가사·번역', tone: 'primary' };
     case 'lyrics_translation_failed':
       return { label: '번역 실패', tone: 'warning' };
+    case 'lyrics_fail':
+      return { label: '가사 실패', tone: 'danger' };
     case 'metadata_edit':
       return { label: '메타', tone: 'neutral' };
     case 'lyrics_remove':

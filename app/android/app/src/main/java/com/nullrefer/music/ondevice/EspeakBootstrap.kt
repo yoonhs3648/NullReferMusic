@@ -37,7 +37,12 @@ object EspeakBootstrap {
   fun pathsIfReady(context: Context): EspeakPaths? {
     val paths = buildPaths(context)
     if (!paths.isReady()) return null
-    NrmExecutableFile.ensureExecMode(paths.binary, NrmExecutableFile.PROBE_HELP)
+    if (!EspeakNgExec.probePaths(paths)) {
+      paths.installMarker.delete()
+      EspeakNgExec.invalidateProbeCache()
+      NrmFileLogger.warn("espeak", "캐시 프로브 실패 — 재설치 필요")
+      return null
+    }
     return paths
   }
 
@@ -57,11 +62,7 @@ object EspeakBootstrap {
       wipeInstall(paths)
 
       if (copyFromAssets(context, paths) && paths.hasInstalledFiles()) {
-        paths.installMarker.writeText("ok")
-        NrmExecutableFile.ensureExecMode(paths.binary, NrmExecutableFile.PROBE_HELP)
-        onProgress?.invoke(100)
-        NrmFileLogger.log("espeak", "assets 부트스트랩 OK")
-        return paths
+        finalizeInstall(paths, onProgress)?.let { return it }
       }
 
       return try {
@@ -116,6 +117,7 @@ object EspeakBootstrap {
           val lib = File(paths.libDir, spec.fileName)
           NrmExecutableFile.prepareWritable(lib)
           dest.copyTo(lib, overwrite = true)
+          NrmExecutableFile.ensureNativeLibLoadable(lib)
         }
         spec.fileName == "espeak-ng" -> {
           NrmExecutableFile.prepareWritable(paths.binary)
@@ -132,8 +134,23 @@ object EspeakBootstrap {
               "phondata=${File(paths.dataDir, "phondata").isFile}",
       )
     }
+    return finalizeInstall(paths, onProgress)
+      ?: throw IllegalStateException("espeak 기능 프로브 실패")
+  }
+
+  private fun finalizeInstall(
+      paths: EspeakPaths,
+      onProgress: ((Int) -> Unit)? = null,
+  ): EspeakPaths? {
+    val lib = File(paths.libDir, "libespeak-ng.so")
+    NrmExecutableFile.ensureNativeLibLoadable(lib)
+    EspeakNgExec.invalidateProbeCache()
+    if (!EspeakNgExec.probePaths(paths)) {
+      NrmFileLogger.warn("espeak", "기능 프로브 실패 — 설치 무효")
+      wipeInstall(paths)
+      return null
+    }
     paths.installMarker.writeText("ok")
-    NrmExecutableFile.ensureExecMode(paths.binary, NrmExecutableFile.PROBE_HELP)
     onProgress?.invoke(100)
     NrmFileLogger.log("espeak", "부트스트랩 OK path=${paths.binary.absolutePath}")
     return paths
@@ -214,10 +231,15 @@ object EspeakBootstrap {
   private fun copyFromAssets(context: Context, paths: EspeakPaths): Boolean {
     return try {
       val lib = File(paths.libDir, "libespeak-ng.so")
-      copyAssetIfPresent(context, "espeak-ng/libespeak-ng.so", lib) &&
-          copyAssetIfPresent(context, "espeak-ng/espeak-ng", paths.binary) &&
-          copyAssetTreeIfPresent(context, "espeak-ng/espeak-data", paths.dataDir) &&
-          File(paths.dataDir, "phondata").isFile
+      val copied =
+          copyAssetIfPresent(context, "espeak-ng/libespeak-ng.so", lib) &&
+              copyAssetIfPresent(context, "espeak-ng/espeak-ng", paths.binary) &&
+              copyAssetTreeIfPresent(context, "espeak-ng/espeak-data", paths.dataDir) &&
+              File(paths.dataDir, "phondata").isFile
+      if (copied) {
+        NrmExecutableFile.ensureNativeLibLoadable(lib)
+      }
+      copied
     } catch (e: Exception) {
       NrmFileLogger.warn("espeak", "assets 복사 실패: ${e.message}")
       false

@@ -18,6 +18,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object NrmBackgroundWorkCoordinator {
   private val tokens = ConcurrentHashMap.newKeySet<String>()
+  /** yt-dlp/innertube 추출이 실제 진행 중인 jobId — 큐 대기(dl 토큰만)와 구분 */
+  private val activeAudioExtractJobs = ConcurrentHashMap.newKeySet<String>()
   private val stopHandler = Handler(Looper.getMainLooper())
   @Volatile private var pendingStopRunnable: Runnable? = null
   @Volatile private var wakeLock: PowerManager.WakeLock? = null
@@ -30,6 +32,23 @@ object NrmBackgroundWorkCoordinator {
   fun activeTokenCount(): Int = tokens.size
 
   fun hasDownloadTokens(): Boolean = tokens.any { it.startsWith("dl:") }
+
+  fun hasActiveAudioExtractJobs(): Boolean = activeAudioExtractJobs.isNotEmpty()
+
+  fun registerActiveAudioExtract(jobId: String) {
+    val trimmed = jobId.trim()
+    if (trimmed.isEmpty()) return
+    activeAudioExtractJobs.add(trimmed)
+    NrmFileLogger.log("bg-work", "audio_extract_start jobId=$trimmed active=${activeAudioExtractJobs.size}")
+  }
+
+  fun unregisterActiveAudioExtract(jobId: String) {
+    val trimmed = jobId.trim()
+    if (trimmed.isEmpty()) return
+    if (activeAudioExtractJobs.remove(trimmed)) {
+      NrmFileLogger.log("bg-work", "audio_extract_end jobId=$trimmed active=${activeAudioExtractJobs.size}")
+    }
+  }
 
   fun hasLyricsTokens(): Boolean =
       tokens.any { it.startsWith("lyrics:") || it.startsWith("whisper-lrc:") }

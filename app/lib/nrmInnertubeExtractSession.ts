@@ -1,32 +1,36 @@
 /**
- * 오디오 다운로드 큐 세션: innertube 1회 실패 시 남은 큐 항목은 yt-dlp 우선.
- * 큐가 완전히 비면 innertube 우선으로 복원 (nrmDownloadWorkQueue idle 훅).
+ * 오디오 다운로드 큐 — innertube 우선 유지.
+ * (구) 세션 단위 yt-dlp 우선 전환은 제거 — 곡마다 innertube → yt-dlp 폴백.
  */
 import { logNrmDev } from '@/lib/nrmDevLog';
 
-let preferYtdlpForActiveAudioQueue = false;
-
+/** @deprecated 항상 false — 곡마다 innertube 우선 */
 export function shouldPreferYtdlpFirstForAudioQueue(): boolean {
-  return preferYtdlpForActiveAudioQueue;
+  return false;
 }
 
-/** innertube 추출 실패·타임아웃 시 호출 — 동일 큐 세션의 후속 오디오는 yt-dlp 우선 */
-export function notifyInnertubeExtractFailed(videoId?: string, reason?: string): void {
-  if (preferYtdlpForActiveAudioQueue) return;
-  preferYtdlpForActiveAudioQueue = true;
+/** innertube 전 클라이언트 소진 — 로그만 (yt-dlp 폴백은 호출부에서 수행) */
+export function notifyInnertubeExtractFailed(
+  videoId?: string,
+  reason?: string,
+): void {
   logNrmDev('download.extract_session', {
-    event: 'prefer_ytdlp_on',
+    event: 'innertube_exhausted',
     videoId: videoId ?? null,
     reason: reason ?? 'innertube_fail',
   });
 }
 
-/** audio·lyrics 큐 모두 idle — innertube 우선 복원 */
-export function resetInnertubeExtractSessionOnQueueIdle(): void {
-  if (!preferYtdlpForActiveAudioQueue) return;
-  preferYtdlpForActiveAudioQueue = false;
+export function notifyInnertubeExtractSucceeded(videoId?: string): void {
   logNrmDev('download.extract_session', {
-    event: 'prefer_ytdlp_off',
-    reason: 'queue_idle',
+    event: 'innertube_ok',
+    videoId: videoId ?? null,
+  });
+}
+
+/** 큐 idle — 호환용 no-op */
+export function resetInnertubeExtractSessionOnQueueIdle(): void {
+  logNrmDev('download.extract_session', {
+    event: 'queue_idle',
   });
 }

@@ -13,3 +13,9 @@ export function nrmBackgroundWorkRelease(_token: string): void {}
 export async function nrmHasActiveDownloadOrLyricsWork(): Promise<boolean> {
   return false;
 }
+
+export async function nrmIsIgnoringBatteryOptimizations(): Promise<boolean> {
+  return true;
+}
+
+export async function nrmOpenBatteryOptimizationSettings(): Promise<void> {}

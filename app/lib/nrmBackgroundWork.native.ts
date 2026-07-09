@@ -3,7 +3,11 @@ import { NativeModules, Platform } from 'react-native';
 type NrmBackgroundWorkNative = {
   acquire?: (token: string) => void;
   release?: (token: string) => void;
+  registerActiveAudioExtract?: (jobId: string) => void;
+  unregisterActiveAudioExtract?: (jobId: string) => void;
   hasActiveDownloadOrLyricsWork?: () => Promise<boolean>;
+  isIgnoringBatteryOptimizations?: () => Promise<boolean>;
+  requestIgnoreBatteryOptimizations?: () => Promise<boolean>;
 };
 
 const mod = NativeModules.NrmBackgroundWork as NrmBackgroundWorkNative | undefined;
@@ -41,6 +45,29 @@ export function nrmBackgroundWorkRelease(token: string): void {
   }
 }
 
+/** yt-dlp/innertube 추출이 실제 시작·종료될 때 (큐 대기와 구분 — FA defer 판단용) */
+export function nrmBackgroundWorkRegisterActiveAudioExtract(jobId: string): void {
+  if (Platform.OS !== 'android') return;
+  const id = jobId.trim();
+  if (!id) return;
+  try {
+    mod?.registerActiveAudioExtract?.(id);
+  } catch {
+    /* native unavailable */
+  }
+}
+
+export function nrmBackgroundWorkUnregisterActiveAudioExtract(jobId: string): void {
+  if (Platform.OS !== 'android') return;
+  const id = jobId.trim();
+  if (!id) return;
+  try {
+    mod?.unregisterActiveAudioExtract?.(id);
+  } catch {
+    /* native unavailable */
+  }
+}
+
 /** Android — 오디오 다운로드 또는 가사 생성 작업이 진행 중인지 */
 export async function nrmHasActiveDownloadOrLyricsWork(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
@@ -48,5 +75,24 @@ export async function nrmHasActiveDownloadOrLyricsWork(): Promise<boolean> {
     return !!(await mod?.hasActiveDownloadOrLyricsWork?.());
   } catch {
     return false;
+  }
+}
+
+export async function nrmIsIgnoringBatteryOptimizations(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    return !!(await mod?.isIgnoringBatteryOptimizations?.());
+  } catch {
+    return false;
+  }
+}
+
+/** 시스템 배터리 최적화 예외 요청 화면 (이미 예외면 아무 것도 안 함) */
+export async function nrmOpenBatteryOptimizationSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await mod?.requestIgnoreBatteryOptimizations?.();
+  } catch {
+    /* native unavailable */
   }
 }

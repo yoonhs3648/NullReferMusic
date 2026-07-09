@@ -5,7 +5,13 @@
  * - 새 가사 작업은 activeDownloadPipeline 이 0이 될 때까지 대기
  * - 다운로드 파이프라인: 추출 시작(beginParallelExtraction) ~ 오디오 저장(onAudioPersisted)
  */
+import { Platform } from 'react-native';
+
 import { logNrmDev } from '@/lib/nrmDevLog';
+import {
+  nrmBackgroundWorkRegisterActiveAudioExtract,
+  nrmBackgroundWorkUnregisterActiveAudioExtract,
+} from '@/lib/nrmBackgroundWork.native';
 
 const activeDownloadPipelines = new Set<string>();
 const pipelineStartedAt = new Map<string, number>();
@@ -57,6 +63,9 @@ export function registerDownloadPipelineStart(jobId: string): void {
   if (!token || token === 'pipeline:' || activeDownloadPipelines.has(token)) return;
   activeDownloadPipelines.add(token);
   pipelineStartedAt.set(token, Date.now());
+  if (Platform.OS === 'android') {
+    nrmBackgroundWorkRegisterActiveAudioExtract(jobId);
+  }
   logNrmDev('download.gate', {
     event: 'pipeline_start',
     jobId,
@@ -70,6 +79,9 @@ export function registerDownloadPipelineEnd(jobId: string, reason?: string): voi
   if (!token || token === 'pipeline:') return;
   if (!activeDownloadPipelines.delete(token)) return;
   pipelineStartedAt.delete(token);
+  if (Platform.OS === 'android') {
+    nrmBackgroundWorkUnregisterActiveAudioExtract(jobId);
+  }
   logNrmDev('download.gate', {
     event: 'pipeline_end',
     jobId,

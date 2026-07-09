@@ -183,7 +183,8 @@ object NrmMemoryGuard {
 
   fun shouldDeferForActiveDownload(context: Context): Boolean {
     val avail = availMemMb(context)
-    return NrmBackgroundWorkCoordinator.hasDownloadTokens() && avail < LOW_AVAIL_MB
+    // 큐에만 있고 추출이 시작되지 않은 dl 토큰은 FA를 막지 않는다
+    return NrmBackgroundWorkCoordinator.hasActiveAudioExtractJobs() && avail < LOW_AVAIL_MB
   }
 
   /** 청크·세그먼트 사이 GC. 여유 RAM이 충분하면 sleep·로그를 최소화한다. */
