@@ -21,16 +21,17 @@ object EspeakBootstrap {
       val dataDir: File,
       val installMarker: File,
   ) {
-    fun isReady(): Boolean {
+    fun hasInstalledFiles(): Boolean {
       val lib = File(libDir, "libespeak-ng.so")
       return binary.isFile &&
           binary.length() >= 50_000L &&
           lib.isFile &&
           lib.length() >= 200_000L &&
           dataDir.isDirectory &&
-          File(dataDir, "phondata").isFile &&
-          installMarker.isFile
+          File(dataDir, "phondata").isFile
     }
+
+    fun isReady(): Boolean = hasInstalledFiles() && installMarker.isFile
   }
 
   fun pathsIfReady(context: Context): EspeakPaths? {
@@ -55,7 +56,7 @@ object EspeakBootstrap {
       val paths = buildPaths(context)
       wipeInstall(paths)
 
-      if (copyFromAssets(context, paths) && paths.isReady()) {
+      if (copyFromAssets(context, paths) && paths.hasInstalledFiles()) {
         paths.installMarker.writeText("ok")
         NrmExecutableFile.ensureExecMode(paths.binary, NrmExecutableFile.PROBE_HELP)
         onProgress?.invoke(100)
@@ -124,8 +125,12 @@ object EspeakBootstrap {
     }
 
     staging.deleteRecursively()
-    if (!paths.isReady()) {
-      throw IllegalStateException("espeak 검증 실패")
+    if (!paths.hasInstalledFiles()) {
+      val lib = File(paths.libDir, "libespeak-ng.so")
+      throw IllegalStateException(
+          "espeak 검증 실패 bin=${paths.binary.length()} lib=${lib.length()} " +
+              "phondata=${File(paths.dataDir, "phondata").isFile}",
+      )
     }
     paths.installMarker.writeText("ok")
     NrmExecutableFile.ensureExecMode(paths.binary, NrmExecutableFile.PROBE_HELP)
