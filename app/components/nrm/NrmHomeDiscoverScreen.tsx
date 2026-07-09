@@ -17,6 +17,8 @@ import { NrmScrollToTopFab } from '@/components/nrm/NrmScrollToTopFab';
 import type { MelonYoutubeNavigateParams } from '@/components/nrm/search/NrmMelonSearchRouter';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
+  buildDiscoverGenreOptions,
+  isDiscoverGenreDisabledTemporarily,
   NRM_DISCOVER_GENRE_DEFAULT,
   NRM_DISCOVER_YEAR_DEFAULT,
   NRM_DISCOVER_YEAR_OPTIONS,
@@ -59,10 +61,13 @@ export function NrmHomeDiscoverScreen({
   const loadMoreLockRef = useRef(false);
   const hasMoreRef = useRef(true);
 
-  const genreOptions = useMemo(
-    () => genres.map((g) => ({ value: g, label: g })),
-    [genres],
-  );
+  const genreOptions = useMemo(() => buildDiscoverGenreOptions(genres), [genres]);
+
+  useEffect(() => {
+    if (isDiscoverGenreDisabledTemporarily(genreFilter)) {
+      setGenreFilter(NRM_DISCOVER_GENRE_DEFAULT);
+    }
+  }, [genreFilter]);
 
   const filterKey = `${yearFilter}|${genreFilter}`;
 

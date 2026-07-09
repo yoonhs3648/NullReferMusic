@@ -185,7 +185,7 @@ export async function alignMelonLyricsViaBackend(
     form.append('lyricsPlain', lyricsPlain);
     form.append('mode', mode);
     const syncSettings = await loadMelonSyncSettings();
-    const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang);
+    const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang, alignModelPreference);
     void syncOptions;
     const res = await nrmBackendFetch(`${base}/api/align/melon`, {
       method: 'POST',

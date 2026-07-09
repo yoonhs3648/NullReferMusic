@@ -5,14 +5,14 @@ package com.nullrefer.music
  * Source: app/nrm-brand.config.json
  */
 object NrmBrand {
-    const val DISPLAY_NAME: String = "\uc7ac\ud559's Music"
+    const val DISPLAY_NAME: String = "NullReference Music"
     const val STORAGE_FOLDER_NAME: String = "NullReferenceMusic"
     /** Custom APK only — embedded for future licensing logic; not shown in version UI */
-    const val SERIAL_NO: String = "01064724632"
+    const val SERIAL_NO: String = "admin"
     /** Custom APK only — inquiry registration; not shown in version UI */
-    const val USER_NAME: String = "\ud55c\uc7ac\ud559"
+    const val USER_NAME: String = "\uad00\ub9ac\uc790"
     /** true = admin/release build (device binding skip); persisted across APK updates */
-    const val VERSION_INFO_ADMIN_BUILD: Boolean = false
+    const val VERSION_INFO_ADMIN_BUILD: Boolean = true
     val STORAGE_LOGS_PATH: String get() = "$STORAGE_FOLDER_NAME/logs"
     fun userAgent(version: String): String = "$STORAGE_FOLDER_NAME/$version"
 }

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { NrmAlignModelId } from '@/lib/nrmAlignModelCatalog';
-import { NRM_ALIGN_WAV2VEC2_BASE_ID } from '@/lib/nrmAlignModelCatalog';
+import {
+  NRM_ALIGN_WAV2VEC2_BASE_ID,
+  isAlignModelInstallDisabled,
+} from '@/lib/nrmAlignModelCatalog';
 import {
   fetchAlignModelStatuses,
   isAlignModelNativeAvailable,
@@ -41,6 +44,8 @@ export function useAlignModelStatuses(active: boolean) {
   }, [active, refresh]);
 
   const downloadModel = useCallback(async (modelId: NrmAlignModelId) => {
+    if (isAlignModelInstallDisabled(modelId)) return;
+
     const { confirmLargeDownloadIfNotOnWifi } = await import('@/lib/nrmLargeDownloadGuard');
     if (!(await confirmLargeDownloadIfNotOnWifi())) return;
 

@@ -21,6 +21,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
   init {
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
     AlignModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
+    EspeakDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
 
   override fun getName(): String = "NrmWhisper"
@@ -528,7 +529,8 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             AlignModelCatalog.normalizeAlignPackId(
                 alignModelPreference ?: AlignModelCatalog.WAV2VEC2_KO_ID,
             )
-        val options = MelonSyncAlignOptions.fromReadable(syncOptions)
+        val options =
+            MelonSyncAlignOptions.fromReadable(syncOptions).copy(alignPackId = pref)
         val outcome =
             ForcedAlignEngine.alignToLrc(
                 reactApplicationContext,
@@ -557,5 +559,50 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     ok.putString("lrc", "")
     ok.putBoolean("alignFailed", alignFailed)
     promise.resolve(ok)
+  }
+
+  @ReactMethod
+  fun getEspeakNgStatus(promise: Promise) {
+    try {
+      val s = EspeakDownloader.status(reactApplicationContext)
+      val row = Arguments.createMap()
+      row.putBoolean("installed", s.installed)
+      row.putBoolean("downloading", s.downloading)
+      row.putInt("progress", s.progress)
+      promise.resolve(row)
+    } catch (e: Exception) {
+      promise.reject("E_ESPEAK_STATUS", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun startEspeakNgDownload(promise: Promise) {
+    try {
+      EspeakDownloader.startDownload(reactApplicationContext)
+      val ok = Arguments.createMap()
+      ok.putBoolean("started", true)
+      promise.resolve(ok)
+    } catch (e: Exception) {
+      promise.reject("E_ESPEAK_DL", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun transliteratePlainLinesForEspeak(lines: com.facebook.react.bridge.ReadableArray, promise: Promise) {
+    Thread {
+      try {
+        val input = mutableListOf<String>()
+        for (i in 0 until lines.size()) {
+          input.add(lines.getString(i)?.trim().orEmpty())
+        }
+        val out = EspeakLyricsPreprocessor.transliterateLines(reactApplicationContext, input)
+        val arr = Arguments.createArray()
+        for (s in out) arr.pushString(s)
+        promise.resolve(arr)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("espeak", "transliteratePlainLinesForEspeak 실패", t)
+        promise.reject("E_ESPEAK_TRANSLIT", t.message ?: t.toString(), t)
+      }
+    }.start()
   }
 }

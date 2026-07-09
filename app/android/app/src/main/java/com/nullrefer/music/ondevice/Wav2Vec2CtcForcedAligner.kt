@@ -212,7 +212,7 @@ object Wav2Vec2CtcForcedAligner {
         else VocalRange(0L, durationMs)
     val vocabFile = File(alignDir, "vocab.json")
     val vocab = loadVocab(vocabFile)
-    val blankId = vocab.charToId["<pad>"] ?: vocab.charToId["|"] ?: 0
+    val blankId = resolveBlankId(vocab)
     val vocalStartSample = msToSample(vocal.startMs, totalSamples)
     val vocalEndSample = msToSample(vocal.endMs, totalSamples).coerceAtLeast(vocalStartSample + 1)
     val vocalSamples = vocalEndSample - vocalStartSample
@@ -687,7 +687,7 @@ object Wav2Vec2CtcForcedAligner {
     }
     val vocabKind = options.vocabKind()
     val vocab = cachedVocab ?: loadVocab(File(alignDir, "vocab.json"))
-    val blankId = vocab.charToId["<pad>"] ?: vocab.charToId["|"] ?: 0
+    val blankId = resolveBlankId(vocab)
     val lineCharStarts = IntArray(melonLines.size)
     val full = StringBuilder()
     for (i in melonLines.indices) {
@@ -823,6 +823,13 @@ object Wav2Vec2CtcForcedAligner {
     }
     return Vocab(map)
   }
+  private fun resolveBlankId(vocab: Vocab): Int {
+    return vocab.charToId["<pad>"]
+        ?: vocab.charToId["[PAD]"]
+        ?: vocab.charToId["|"]
+        ?: 0
+  }
+
   private fun normalizeLine(text: String, vocabKind: MelonSyncVocabKind): String {
     val trimmed = text.trim().replace(Regex("""\s+"""), " ")
     return when (vocabKind) {
@@ -830,6 +837,8 @@ object Wav2Vec2CtcForcedAligner {
           HangulJamo.decompose(trimmed.lowercase(Locale.ROOT)).replace(" ", "|")
       MelonSyncVocabKind.EN ->
           trimmed.uppercase(Locale.ROOT).replace(" ", "|")
+      MelonSyncVocabKind.XLSR ->
+          trimmed.lowercase(Locale.ROOT).replace(" ", "|")
     }
   }
   private fun lineCharWeights(lines: List<String>, vocabKind: MelonSyncVocabKind): IntArray {
@@ -1239,7 +1248,12 @@ object Wav2Vec2CtcForcedAligner {
       vocabKind: MelonSyncVocabKind,
   ) {
     if (lines.size < 2 || frameMs <= 0.0) return
-    val collapseWindowMs = if (vocabKind == MelonSyncVocabKind.EN) 120 else 95
+    val collapseWindowMs =
+        when (vocabKind) {
+          MelonSyncVocabKind.EN -> 120
+          MelonSyncVocabKind.XLSR -> 110
+          MelonSyncVocabKind.KO -> 95
+        }
     var i = 0
     while (i < lines.size) {
       var j = i + 1
@@ -1294,7 +1308,12 @@ object Wav2Vec2CtcForcedAligner {
 
   private fun minGapForLine(line: String, vocabKind: MelonSyncVocabKind): Int {
     val chars = normalizeLine(line, vocabKind).length.coerceAtLeast(1)
-    val perChar = if (vocabKind == MelonSyncVocabKind.EN) 38 else 34
+    val perChar =
+        when (vocabKind) {
+          MelonSyncVocabKind.EN -> 38
+          MelonSyncVocabKind.XLSR -> 36
+          MelonSyncVocabKind.KO -> 34
+        }
     return max(52, min(480, chars * perChar))
   }
 

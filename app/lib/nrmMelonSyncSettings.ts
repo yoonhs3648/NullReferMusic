@@ -72,11 +72,13 @@ export async function saveMelonSyncSettings(settings: NrmMelonSyncSettings): Pro
 export function melonSyncSettingsToNativePayload(
   settings: NrmMelonSyncSettings,
   lyricsLang: 'ko' | 'en',
+  alignPackId?: string,
 ): Record<string, string | boolean> {
   return {
     quality: settings.quality,
     firstLineIntroCorrection: settings.firstLineIntroCorrection,
     vocalRangeAutoDetect: settings.vocalRangeAutoDetect,
     lyricsLang,
+    ...(alignPackId ? { alignPackId } : {}),
   };
 }

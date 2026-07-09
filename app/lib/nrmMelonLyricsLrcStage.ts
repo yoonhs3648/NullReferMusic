@@ -5,6 +5,13 @@ import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import type { NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 import { resolveMelonAlignLanguageForPlain } from '@/lib/nrmPickMelonAlignLanguage';
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
+import { loadAlignLyricsLangDetectionMode } from '@/lib/nrmAlignLyricsLangDetectionSettings';
+import {
+  preprocessPlainForEspeakAlign,
+  restoreLrcWithOriginalLyrics,
+  type EspeakLineMapping,
+} from '@/lib/nrmEspeakLyricsPreprocess';
+import { isEspeakNgInstalled } from '@/lib/nrmEspeakNative';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import type { NrmMelonSyncSettings } from '@/lib/nrmMelonSyncSettings';
@@ -47,12 +54,36 @@ export async function transcribeMelonLyricsLrc(
     return { lyricsRequested: true, lyricsEmbedded: false, lyricsMelonAlignFailed: true };
   }
 
+  const langDetectionMode = await loadAlignLyricsLangDetectionMode();
+  let faPlain = plain;
+  let espeakLineMappings: EspeakLineMapping[] | undefined;
+
+  if (langDetectionMode === 'espeak') {
+    if (!(await isEspeakNgInstalled())) {
+      logDownloadStage('whisperx-align', 'skip_espeak_not_installed', { mode, extension });
+      return {
+        lyricsRequested: true,
+        lyricsEmbedded: false,
+        lyricsMelonAlignFailed: true,
+      };
+    }
+    const pre = await preprocessPlainForEspeakAlign(plain);
+    faPlain = pre.phoneticPlain;
+    espeakLineMappings = pre.lineMappings;
+    logDownloadStage('whisperx-align', 'espeak_preprocess_done', {
+      mode,
+      extension,
+      lineCount: espeakLineMappings.length,
+    });
+  }
+
   logDownloadStage('whisperx-align', 'align_start', {
     mode,
     extension,
     plainChars: plain.length,
     plainLines: plain.split(/\r?\n/).filter((l) => l.trim()).length,
     alignLang,
+    espeakPreprocess: langDetectionMode === 'espeak',
     audioUri: fileUri.slice(0, 120),
   });
 
@@ -76,7 +107,7 @@ export async function transcribeMelonLyricsLrc(
       preload?.alignModelPreference ?? (await loadAlignModelPreference());
     const aligned = await alignMelonLyricsToLrcNative(
       fileUri,
-      plain,
+      faPlain,
       mode,
       alignPref,
       alignLang,
@@ -85,6 +116,9 @@ export async function transcribeMelonLyricsLrc(
         : undefined,
     );
     lrc = normalizeWhisperLrc(aligned.lrc);
+    if (espeakLineMappings?.length && lrc.trim()) {
+      lrc = restoreLrcWithOriginalLyrics(lrc, espeakLineMappings);
+    }
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
     lyricsMelonAlignFailed = aligned.alignFailed && !lyricsMelonMemoryInsufficient;
   } catch (e) {

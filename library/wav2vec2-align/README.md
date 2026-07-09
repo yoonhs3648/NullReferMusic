@@ -1,5 +1,30 @@
-# wav2vec2 CTC Forced Alignment (레거시)
+# wav2vec2 XLS-R CTC Forced Alignment
 
-**더 이상 사용하지 않습니다.** `align:wav2vec2-base-int8` 및 `aeneas:sync`를 사용하세요.
+`align:wav2vec2-xlsr` — kresnik/wav2vec2-large-xlsr-korean ONNX (~1.27GB).
 
-과거 large XLSR Korean (~1.2GB) 모델 문서는 Git 이력을 참고하세요.
+- **vocab/config/preprocessor**: Hugging Face `kresnik/wav2vec2-large-xlsr-korean`
+- **model.onnx**: Hugging Face `FinDIT-Studio/wav2vec2-large-xlsr-53-korean-onnx`
+
+## PC dev 수동 설치
+
+```text
+library/wav2vec2-align/wav2vec2-xlsr/
+  vocab.json
+  config.json
+  preprocessor_config.json
+  model.onnx
+```
+
+## ONNX export (1회)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Export-Wav2Vec2AlignOnnx.ps1
+```
+
+산출물 `library/wav2vec2-align/model.onnx` — Git 커밋 금지.
+
+## URL 검증
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Wav2Vec2XlsrAlignUrl.ps1
+```

@@ -5,6 +5,7 @@ import com.facebook.react.bridge.ReadableMap
 enum class MelonSyncVocabKind {
   KO,
   EN,
+  XLSR,
 }
 
 data class MelonSyncAlignOptions(
@@ -12,6 +13,7 @@ data class MelonSyncAlignOptions(
     val firstLineIntroCorrection: Boolean = true,
     val vocalRangeAutoDetect: Boolean = true,
     val lyricsLang: String = "ko",
+    val alignPackId: String = "",
 ) {
   val isAccurate: Boolean
     get() = quality == QUALITY_ACCURATE
@@ -19,8 +21,10 @@ data class MelonSyncAlignOptions(
   val isFast: Boolean
     get() = quality == QUALITY_FAST
 
-  fun vocabKind(): MelonSyncVocabKind =
-      if (lyricsLang.trim().lowercase() == "en") MelonSyncVocabKind.EN else MelonSyncVocabKind.KO
+  fun vocabKind(): MelonSyncVocabKind {
+    if (AlignModelCatalog.isXlsrId(alignPackId)) return MelonSyncVocabKind.XLSR
+    return if (lyricsLang.trim().lowercase() == "en") MelonSyncVocabKind.EN else MelonSyncVocabKind.KO
+  }
 
   fun trellisPlanMargin(): Double =
       when (quality) {
@@ -66,11 +70,13 @@ data class MelonSyncAlignOptions(
             true
           }
       val lang = map.getString("lyricsLang")?.trim()?.lowercase()?.takeIf { it == "en" || it == "ko" } ?: "ko"
+      val alignPackId = map.getString("alignPackId")?.trim().orEmpty()
       return MelonSyncAlignOptions(
           quality = quality,
           firstLineIntroCorrection = intro,
           vocalRangeAutoDetect = vocal,
           lyricsLang = lang,
+          alignPackId = alignPackId,
       )
     }
   }

@@ -28,12 +28,13 @@ object AlignModelCatalog {
   const val AENEAS_ID = "aeneas:sync"
   const val WAV2VEC2_KO_ID = "align:wav2vec2-ko"
   const val WAV2VEC2_EN_ID = "align:wav2vec2-en"
+  const val WAV2VEC2_XLSR_ID = "align:wav2vec2-xlsr"
   /** @deprecated → WAV2VEC2_KO_ID */
   const val WAV2VEC2_BASE_ID = "align:wav2vec2-base"
   /** @deprecated */
   const val WAV2VEC2_BASE_INT8_ID = WAV2VEC2_BASE_ID
 
-  /** 레거시 large wav2vec2 — 더 이상 사용하지 않음 */
+  /** 레거시 large wav2vec2 — whisperx:forced-align */
   const val LEGACY_WAV2VEC2_LARGE_ID = "whisperx:forced-align"
 
   private const val BASE_KOREAN =
@@ -46,6 +47,11 @@ object AlignModelCatalog {
       "https://huggingface.co/facebook/wav2vec2-base-960h/resolve/main/"
   private const val BASE_EN_ONNX =
       "https://github.com/yoonhs3648/NullReferMusic/releases/download/align-wav2vec2-en-v1/"
+
+  private const val XLSR_KOREAN =
+      "https://huggingface.co/kresnik/wav2vec2-large-xlsr-korean/resolve/main/"
+  private const val XLSR_ONNX =
+      "https://huggingface.co/FinDIT-Studio/wav2vec2-large-xlsr-53-korean-onnx/resolve/main/"
 
   val ENTRIES: List<Entry> =
       listOf(
@@ -98,6 +104,30 @@ object AlignModelCatalog {
                   ),
           ),
           Entry(
+              id = WAV2VEC2_XLSR_ID,
+              subDir = "wav2vec2-xlsr",
+              label = "wav2vec2/XLS-R",
+              engine = EngineKind.CTC_ONNX,
+              onnxReserveMb = 520L,
+              bundledAssetPaths =
+                  listOf(
+                      "nrm-align/wav2vec2-xlsr/vocab.json",
+                      "nrm-align/wav2vec2-xlsr/config.json",
+                      "nrm-align/wav2vec2-xlsr/preprocessor_config.json",
+                  ),
+              assets =
+                  listOf(
+                      AssetSpec("vocab.json", XLSR_KOREAN + "vocab.json", 1_000L),
+                      AssetSpec("config.json", XLSR_KOREAN + "config.json", 500L),
+                      AssetSpec(
+                          "preprocessor_config.json",
+                          XLSR_KOREAN + "preprocessor_config.json",
+                          100L,
+                      ),
+                      AssetSpec("model.onnx", XLSR_ONNX + "model.onnx", 1_000_000_000L),
+                  ),
+          ),
+          Entry(
               id = AENEAS_ID,
               subDir = "aeneas-sync",
               label = "aeneas",
@@ -113,12 +143,17 @@ object AlignModelCatalog {
 
   fun entryForPreference(preference: String?): Entry? {
     val pref = normalizePreference(preference)
-    if (pref == WAV2VEC2_BASE_ID) return null
+    if (pref == WAV2VEC2_BASE_ID || pref == WAV2VEC2_XLSR_ID) return null
     return BY_ID[pref] ?: BY_ID[AENEAS_ID]
   }
 
   fun isBundleId(modelId: String): Boolean {
     return normalizePreference(modelId) == WAV2VEC2_BASE_ID
+  }
+
+  fun isXlsrId(modelId: String): Boolean {
+    val pref = normalizePreference(modelId)
+    return pref == WAV2VEC2_XLSR_ID || modelId.trim() == WAV2VEC2_XLSR_ID
   }
 
   fun normalizePreference(preference: String?): String {
@@ -132,12 +167,13 @@ object AlignModelCatalog {
     }
   }
 
-  /** 싱크 추론용 — KO/EN 팩 ID 그대로 반환 */
+  /** 싱크 추론용 — KO/EN/XLS-R 팩 ID 그대로 반환 */
   fun normalizeAlignPackId(preference: String?): String {
     val pref = (preference ?: "").trim()
     return when (pref) {
       WAV2VEC2_KO_ID,
-      WAV2VEC2_EN_ID -> pref
+      WAV2VEC2_EN_ID,
+      WAV2VEC2_XLSR_ID -> pref
       LEGACY_WAV2VEC2_LARGE_ID,
       WAV2VEC2_BASE_ID,
       "align:wav2vec2-base-int8" -> WAV2VEC2_KO_ID
@@ -147,7 +183,7 @@ object AlignModelCatalog {
 
   fun isWav2Vec2Id(modelId: String): Boolean {
     val id = normalizeAlignPackId(modelId)
-    return id == WAV2VEC2_KO_ID || id == WAV2VEC2_EN_ID
+    return id == WAV2VEC2_KO_ID || id == WAV2VEC2_EN_ID || id == WAV2VEC2_XLSR_ID
   }
 
   fun displayLabel(modelId: String): String {

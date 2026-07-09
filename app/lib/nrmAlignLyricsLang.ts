@@ -1,6 +1,6 @@
 import {
   NRM_ALIGN_AENEAS_ID,
-  NRM_ALIGN_WAV2VEC2_BASE_ID,
+  NRM_ALIGN_WAV2VEC2_XLSR_ID,
   isNrmAlignModelId,
   isNrmWav2Vec2BundleId,
   migrateAlignModelPreference,
@@ -40,6 +40,7 @@ export function resolveAlignModelForMelonSync(
   const pref = migrateAlignModelPreference(preference);
   if (!isNrmAlignModelId(pref)) return NRM_ALIGN_AENEAS_ID;
   if (pref === NRM_ALIGN_AENEAS_ID) return pref;
+  if (pref === NRM_ALIGN_WAV2VEC2_XLSR_ID) return NRM_ALIGN_WAV2VEC2_XLSR_ID;
   if (isNrmWav2Vec2BundleId(pref)) {
     return wav2Vec2PackIdForLanguage(lyricsLang);
   }

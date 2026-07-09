@@ -1,8 +1,10 @@
-/** Forced Alignment 엔진 (aeneas / wav2vec2-base 번들) */
+/** Forced Alignment 엔진 (aeneas / wav2vec2-base 번들 / wav2vec2 XLS-R) */
 
 export const NRM_ALIGN_AENEAS_ID = 'aeneas:sync' as const;
 /** UI·설정용 — 한국어·영어 팩을 함께 설치 */
 export const NRM_ALIGN_WAV2VEC2_BASE_ID = 'align:wav2vec2-base' as const;
+/** UI·설정용 — large XLS-R 단일 다국어 팩 */
+export const NRM_ALIGN_WAV2VEC2_XLSR_ID = 'align:wav2vec2-xlsr' as const;
 /** 내부 팩 ID (다운로드·추론) */
 export const NRM_ALIGN_WAV2VEC2_KO_ID = 'align:wav2vec2-ko' as const;
 export const NRM_ALIGN_WAV2VEC2_EN_ID = 'align:wav2vec2-en' as const;
@@ -16,7 +18,8 @@ export type NrmAlignModelPackId = (typeof WAV2VEC2_PACK_IDS)[number];
 
 export type NrmAlignModelId =
   | typeof NRM_ALIGN_AENEAS_ID
-  | typeof NRM_ALIGN_WAV2VEC2_BASE_ID;
+  | typeof NRM_ALIGN_WAV2VEC2_BASE_ID
+  | typeof NRM_ALIGN_WAV2VEC2_XLSR_ID;
 
 export type NrmAlignModelAssetSpec = {
   fileName: string;
@@ -31,10 +34,15 @@ export type NrmAlignModelCatalogEntry = {
   qualityLabel: string;
   sizeLabel: string;
   assets: readonly NrmAlignModelAssetSpec[];
+  /** true — UI 표시만, 설치 버튼 비활성 (일시 중단용) */
+  installDisabled?: boolean;
 };
 
+/** wav2vec2/XLS-R 설치 — 일시 중단 (UI는 유지) */
+export const NRM_ALIGN_XLSR_INSTALL_DISABLED = true;
+
 export type NrmAlignModelPackEntry = {
-  id: NrmAlignModelPackId;
+  id: NrmAlignModelPackId | typeof NRM_ALIGN_WAV2VEC2_XLSR_ID;
   label: string;
   assets: readonly NrmAlignModelAssetSpec[];
 };
@@ -49,6 +57,11 @@ const BASE_ENGLISH =
   'https://huggingface.co/facebook/wav2vec2-base-960h/resolve/main/';
 const BASE_EN_ONNX =
   'https://github.com/yoonhs3648/NullReferMusic/releases/download/align-wav2vec2-en-v1/';
+
+const XLSR_KOREAN =
+  'https://huggingface.co/kresnik/wav2vec2-large-xlsr-korean/resolve/main/';
+const XLSR_ONNX =
+  'https://huggingface.co/FinDIT-Studio/wav2vec2-large-xlsr-53-korean-onnx/resolve/main/';
 
 const WAV2VEC2_KO_PACK: NrmAlignModelPackEntry = {
   id: NRM_ALIGN_WAV2VEC2_KO_ID,
@@ -80,9 +93,25 @@ const WAV2VEC2_EN_PACK: NrmAlignModelPackEntry = {
   ],
 };
 
+const WAV2VEC2_XLSR_PACK: NrmAlignModelPackEntry = {
+  id: NRM_ALIGN_WAV2VEC2_XLSR_ID,
+  label: 'wav2vec2/XLS-R',
+  assets: [
+    { fileName: 'vocab.json', url: `${XLSR_KOREAN}vocab.json`, minBytes: 1_000 },
+    { fileName: 'config.json', url: `${XLSR_KOREAN}config.json`, minBytes: 500 },
+    {
+      fileName: 'preprocessor_config.json',
+      url: `${XLSR_KOREAN}preprocessor_config.json`,
+      minBytes: 100,
+    },
+    { fileName: 'model.onnx', url: `${XLSR_ONNX}model.onnx`, minBytes: 1_000_000_000 },
+  ],
+};
+
 export const WAV2VEC2_PACK_ENTRIES: readonly NrmAlignModelPackEntry[] = [
   WAV2VEC2_KO_PACK,
   WAV2VEC2_EN_PACK,
+  WAV2VEC2_XLSR_PACK,
 ] as const;
 
 /** 설정 UI에 표시되는 FA 엔진 목록 */
@@ -90,10 +119,19 @@ export const NRM_ALIGN_MODEL_OPTIONS: readonly NrmAlignModelCatalogEntry[] = [
   {
     id: NRM_ALIGN_WAV2VEC2_BASE_ID,
     label: 'wav2vec2-base',
-    speedLabel: '보통',
+    speedLabel: '빠름',
     qualityLabel: '높음',
     sizeLabel: '~760 MB',
     assets: [],
+  },
+  {
+    id: NRM_ALIGN_WAV2VEC2_XLSR_ID,
+    label: 'wav2vec2/XLS-R',
+    speedLabel: '보통',
+    qualityLabel: '다국어처리 우수',
+    sizeLabel: '~1.27 GB',
+    assets: [],
+    installDisabled: NRM_ALIGN_XLSR_INSTALL_DISABLED,
   },
   {
     id: NRM_ALIGN_AENEAS_ID,
@@ -110,16 +148,24 @@ export const DEFAULT_ALIGN_MODEL_PREFERENCE: NrmAlignModelId = NRM_ALIGN_WAV2VEC
 const ALIGN_MODEL_IDS = new Set<string>([
   NRM_ALIGN_AENEAS_ID,
   NRM_ALIGN_WAV2VEC2_BASE_ID,
+  NRM_ALIGN_WAV2VEC2_XLSR_ID,
 ]);
 
-const ALIGN_PACK_IDS = new Set<string>([...WAV2VEC2_PACK_IDS]);
+const ALIGN_PACK_IDS = new Set<string>([
+  ...WAV2VEC2_PACK_IDS,
+  NRM_ALIGN_WAV2VEC2_XLSR_ID,
+]);
 
 export function isNrmAlignModelId(v: string): v is NrmAlignModelId {
   return ALIGN_MODEL_IDS.has(v);
 }
 
 export function isNrmAlignModelPackId(v: string): v is NrmAlignModelPackId {
-  return ALIGN_PACK_IDS.has(v);
+  return (WAV2VEC2_PACK_IDS as readonly string[]).includes(v);
+}
+
+export function isNrmWav2Vec2XlsrId(v: string): boolean {
+  return migrateAlignModelPreference(v) === NRM_ALIGN_WAV2VEC2_XLSR_ID;
 }
 
 export function isNrmWav2Vec2BundleId(v: string): boolean {
@@ -149,7 +195,12 @@ export function alignModelLabel(id: NrmAlignModelId): string {
   return NRM_ALIGN_MODEL_OPTIONS.find((o) => o.id === id)?.label ?? id;
 }
 
-export function alignPackLabel(id: NrmAlignModelPackId): string {
+export function alignPackLabel(
+  id: NrmAlignModelPackId | typeof NRM_ALIGN_WAV2VEC2_XLSR_ID,
+): string {
   return WAV2VEC2_PACK_ENTRIES.find((o) => o.id === id)?.label ?? id;
 }
 
+export function isAlignModelInstallDisabled(id: NrmAlignModelId): boolean {
+  return NRM_ALIGN_MODEL_OPTIONS.find((o) => o.id === id)?.installDisabled === true;
+}

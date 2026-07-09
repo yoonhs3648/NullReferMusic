@@ -7,6 +7,7 @@ import {
   migrateAlignModelPreference,
   NRM_ALIGN_MODEL_OPTIONS,
   NRM_ALIGN_WAV2VEC2_BASE_ID,
+  NRM_ALIGN_WAV2VEC2_XLSR_ID,
   NRM_ALIGN_WAV2VEC2_EN_ID,
   NRM_ALIGN_WAV2VEC2_KO_ID,
   WAV2VEC2_PACK_IDS,
@@ -14,6 +15,7 @@ import {
   type NrmAlignModelPackId,
   alignModelLabel,
   alignPackLabel,
+  isAlignModelInstallDisabled,
 } from '@/lib/nrmAlignModelCatalog';
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import {
@@ -146,6 +148,10 @@ export async function isAlignModelInstalled(modelId: NrmAlignModelId): Promise<b
     ]);
     return ko && en;
   }
+  if (modelId === NRM_ALIGN_WAV2VEC2_XLSR_ID) {
+    if (!mod?.isAlignModelInstalled) return false;
+    return mod.isAlignModelInstalled(NRM_ALIGN_WAV2VEC2_XLSR_ID);
+  }
   if (mod?.isAlignModelInstalled) {
     return mod.isAlignModelInstalled(modelId);
   }
@@ -197,9 +203,14 @@ export async function startAlignModelDownload(modelId: NrmAlignModelId): Promise
   }
   if (!isAlignModelNativeAvailable() || !mod?.startAlignModelDownload) return false;
   if (!isNrmAlignModelId(modelId)) return false;
+  if (isAlignModelInstallDisabled(modelId)) return false;
   try {
     if (modelId === NRM_ALIGN_WAV2VEC2_BASE_ID) {
       return await startWav2Vec2BundleDownload();
+    }
+    if (modelId === NRM_ALIGN_WAV2VEC2_XLSR_ID) {
+      const result = await mod.startAlignModelDownload(NRM_ALIGN_WAV2VEC2_XLSR_ID);
+      return result?.started !== false;
     }
     const result = await mod.startAlignModelDownload(modelId);
     return result?.started !== false;
@@ -300,7 +311,7 @@ export async function alignMelonLyricsToLrcNative(
   const fsPath = audioPath.startsWith('file://') ? audioPath.slice(7) : audioPath;
   try {
     const syncSettings = options?.syncSettings ?? (await loadMelonSyncSettings());
-    const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang);
+    const syncOptions = melonSyncSettingsToNativePayload(syncSettings, lyricsLang, pref);
     const result = await mod.alignMelonLyricsToLrc(
       fsPath,
       lyricsPlain,

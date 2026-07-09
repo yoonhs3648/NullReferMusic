@@ -14,6 +14,7 @@ import { nrmTokens } from '@/constants/nrmTokens';
 export type NrmDiscoverDropdownOption<T extends string | number> = {
   value: T;
   label: string;
+  disabled?: boolean;
 };
 
 type Props<T extends string | number> = {
@@ -82,25 +83,39 @@ export function NrmDiscoverFilterDropdown<T extends string | number>({
             <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
               {options.map((opt) => {
                 const selected = opt.value === value;
+                const disabled = opt.disabled === true;
                 return (
                   <Pressable
                     key={String(opt.value)}
-                    onPress={() => onPick(opt.value)}
+                    disabled={disabled}
+                    onPress={() => {
+                      if (disabled) return;
+                      onPick(opt.value);
+                    }}
                     style={({ pressed }) => [
                       styles.option,
-                      selected && { backgroundColor: chipBg },
-                      pressed && styles.optionPressed,
+                      selected && !disabled && { backgroundColor: chipBg },
+                      pressed && !disabled && styles.optionPressed,
+                      disabled && styles.optionDisabled,
                     ]}
                     accessibilityRole="menuitem"
-                    accessibilityState={{ selected }}>
+                    accessibilityState={{ selected, disabled }}>
                     <Text
                       style={[
                         styles.optionText,
-                        { color: selected ? titleColor : bodyColor, fontWeight: selected ? '600' : '500' },
+                        {
+                          color: disabled
+                            ? bodyColor
+                            : selected
+                              ? titleColor
+                              : bodyColor,
+                          fontWeight: selected && !disabled ? '600' : '500',
+                        },
+                        disabled && styles.optionTextDisabled,
                       ]}>
                       {opt.label}
                     </Text>
-                    {selected ? (
+                    {selected && !disabled ? (
                       <Ionicons name="checkmark" size={18} color={nrmTokens.color.primary} />
                     ) : null}
                   </Pressable>
@@ -166,8 +181,10 @@ const styles = StyleSheet.create({
     paddingVertical: nrmTokens.space.sm,
   },
   optionPressed: { opacity: 0.88 },
+  optionDisabled: { opacity: 0.42 },
   optionText: {
     flex: 1,
     fontSize: nrmTokens.font.body,
   },
+  optionTextDisabled: { opacity: 0.85 },
 });

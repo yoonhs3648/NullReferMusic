@@ -16,6 +16,7 @@ public class AlignModelStatusService {
   private static final String WAV2VEC2_BASE_ID = "align:wav2vec2-base";
   private static final String WAV2VEC2_KO_ID = "align:wav2vec2-ko";
   private static final String WAV2VEC2_EN_ID = "align:wav2vec2-en";
+  private static final String WAV2VEC2_XLSR_ID = "align:wav2vec2-xlsr";
 
   private final com.nullrefer.music.config.NrmPaths paths;
 
@@ -34,6 +35,7 @@ public class AlignModelStatusService {
     bundle.put("downloading", false);
     bundle.put("progress", koOk && enOk ? 100 : 0);
     out.add(bundle);
+    out.add(statusRow(WAV2VEC2_XLSR_ID, isPackInstalled(WAV2VEC2_XLSR_ID), false, isPackInstalled(WAV2VEC2_XLSR_ID) ? 100 : 0));
     out.add(statusRow(WAV2VEC2_KO_ID, koOk, false, koOk ? 100 : 0));
     out.add(statusRow(WAV2VEC2_EN_ID, enOk, false, enOk ? 100 : 0));
     return out;
@@ -50,6 +52,7 @@ public class AlignModelStatusService {
     if (WAV2VEC2_BASE_ID.equals(id)) {
       return isPackInstalled(WAV2VEC2_KO_ID) && isPackInstalled(WAV2VEC2_EN_ID);
     }
+    if (WAV2VEC2_XLSR_ID.equals(id)) return isPackInstalled(WAV2VEC2_XLSR_ID);
     if (WAV2VEC2_KO_ID.equals(id)) return isPackInstalled(WAV2VEC2_KO_ID);
     if (WAV2VEC2_EN_ID.equals(id)) return isPackInstalled(WAV2VEC2_EN_ID);
     return false;
@@ -66,7 +69,9 @@ public class AlignModelStatusService {
     String folder =
         WAV2VEC2_KO_ID.equals(packId)
             ? "wav2vec2-ko"
-            : WAV2VEC2_EN_ID.equals(packId) ? "wav2vec2-en" : packId;
+            : WAV2VEC2_EN_ID.equals(packId)
+                ? "wav2vec2-en"
+                : WAV2VEC2_XLSR_ID.equals(packId) ? "wav2vec2-xlsr" : packId;
     return paths.getRepoRoot().resolve("library/wav2vec2-align").resolve(folder);
   }
 

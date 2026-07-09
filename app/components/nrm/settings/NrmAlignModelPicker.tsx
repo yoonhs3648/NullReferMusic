@@ -28,6 +28,8 @@ import {
   NRM_ALIGN_MODEL_OPTIONS,
   NRM_ALIGN_AENEAS_ID,
   NRM_ALIGN_WAV2VEC2_BASE_ID,
+  NRM_ALIGN_WAV2VEC2_XLSR_ID,
+  isAlignModelInstallDisabled,
 } from '@/lib/nrmAlignModelCatalog';
 
 import { useAlignModelStatuses } from '@/lib/nrmAlignModelStore';
@@ -216,6 +218,10 @@ export function NrmAlignModelPicker({
           void trySelect(NRM_ALIGN_WAV2VEC2_BASE_ID);
           return;
         }
+        if (pending === NRM_ALIGN_WAV2VEC2_XLSR_ID) {
+          void trySelect(NRM_ALIGN_WAV2VEC2_XLSR_ID);
+          return;
+        }
         if (pending === NRM_ALIGN_AENEAS_ID) {
           void trySelect(NRM_ALIGN_AENEAS_ID);
         }
@@ -249,6 +255,8 @@ export function NrmAlignModelPicker({
         const bundle = status?.bundlePackProgress;
 
         const canSelect = installed && !downloading;
+
+        const installDisabled = isAlignModelInstallDisabled(opt.id);
 
         const selected = value === opt.id && canSelect;
 
@@ -433,6 +441,12 @@ export function NrmAlignModelPicker({
                     <Text style={[styles.downloadHint, { color: bodyColor }]}>설치 중…</Text>
 
                   </>
+
+                ) : installDisabled ? (
+
+                  <Text style={[styles.downloadHint, { color: bodyColor }]}>
+                    설치 준비 중 (일시 중단)
+                  </Text>
 
                 ) : (
 

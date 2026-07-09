@@ -1,9 +1,9 @@
 {
-    "displayName":  "재학\u0027s Music",
+    "displayName":  "NullReference Music",
     "storageFolderName":  "NullReferenceMusic",
     "versionInfoProductName":  "NullReference Music",
     "versionInfoCustomizing":  "",
-    "versionInfoAdminBuild":  false,
-    "serialNo":  "01064724632",
-    "userName":  "한재학"
+    "versionInfoAdminBuild":  true,
+    "serialNo":  "admin",
+    "userName":  "관리자"
 }
