@@ -144,7 +144,10 @@ object EspeakBootstrap {
       onProgress: ((Int) -> Unit)? = null,
   ): EspeakPaths? {
     prepareRuntimeArtifacts(paths)
-    val resolved = resolveInstalledBinary(context, paths, readMarkerBinary = false)
+    var resolved = resolveInstalledBinary(context, paths, readMarkerBinary = false)
+    if (resolved == null && tryRepairLibFromNativeLibraryDir(context, paths)) {
+      resolved = resolveInstalledBinary(context, paths, readMarkerBinary = false)
+    }
     if (resolved == null) {
       NrmFileLogger.warn("espeak", "기능 프로브 실패 — 설치 무효")
       wipeInstall(context, paths)
@@ -230,6 +233,44 @@ object EspeakBootstrap {
     if (!lib.isFile) return emptyList()
     val alias = File(lib.parentFile, LIB_SONAME)
     return if (alias.isFile) listOf(lib, alias) else listOf(lib)
+  }
+
+  /**
+   * 다운로드된 lib 조합이 현재 바이너리와 맞지 않을 때, APK 내 네이티브 라이브러리로 1회 복구 시도.
+   * 일부 기기에서 release asset의 ABI/심볼 불일치로 probe가 실패하는 케이스를 완화한다.
+   */
+  private fun tryRepairLibFromNativeLibraryDir(context: Context, paths: EspeakPaths): Boolean {
+    val nativeDirPath = context.applicationInfo?.nativeLibraryDir ?: return false
+    val nativeDir = File(nativeDirPath)
+    if (!nativeDir.isDirectory) return false
+
+    val candidates =
+        listOf(
+            File(nativeDir, LIB_NAME),
+            File(nativeDir, LIB_SONAME),
+        )
+
+    for (src in candidates) {
+      if (!src.isFile || src.length() < 200_000L) continue
+      try {
+        installCopiedFile(src, paths.libFile(), nativeLib = true)
+        prepareRuntimeArtifacts(paths)
+        EspeakNgExec.invalidateProbeCache()
+        if (EspeakNgExec.probePaths(paths)) {
+          NrmFileLogger.log(
+              "espeak",
+              "nativeLibraryDir 복구 성공 src=${src.name} dir=${nativeDir.absolutePath}",
+          )
+          return true
+        }
+      } catch (e: Exception) {
+        NrmFileLogger.warn(
+            "espeak",
+            "nativeLibraryDir 복구 실패 src=${src.name} err=${e.message?.take(120)}",
+        )
+      }
+    }
+    return false
   }
 
   private fun ensureSonameAlias(lib: File) {

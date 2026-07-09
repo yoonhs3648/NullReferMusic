@@ -71,7 +71,7 @@ function filterDecipherableStreamingData<
 }
 
 function shouldRetryInnertubeDownload(msg: string): boolean {
-  return /EXTRACT_TIMEOUT|No valid URL to decipher|Failed to decipher|No matching formats|Streaming data not available|STREAMING_DATA_MISSING|NO_DECIPHERABLE_FORMAT|status code 400|non 2xx|FETCH_FAILED|status code 403|read property 'as'|properties of null \(reading 'as'\)/i.test(
+  return /EXTRACT_TIMEOUT|No valid URL to decipher|Failed to decipher|No matching formats|Streaming data not available|STREAMING_DATA_MISSING|NO_DECIPHERABLE_FORMAT|status code 400|non 2xx|FETCH_FAILED|status code 403|read property 'as'|properties of null \(reading 'as'\)|Cannot cast SearchMobileHeader to one of SearchHeader/i.test(
     msg,
   );
 }
@@ -81,7 +81,7 @@ type InnertubeClientSpec = {
   create: () => Promise<Innertube>;
 };
 
-/** Android: android → ios → web (default 웹 클라이언트 제외 — NO_DECIPHERABLE 빈발) */
+/** Android: android → web */
 function buildExtractClientSpecs(fetchFn: typeof fetch): InnertubeClientSpec[] {
   const specs: InnertubeClientSpec[] = [];
   const push = (label: string, factory: () => Promise<Innertube>) => {
@@ -94,14 +94,6 @@ function buildExtractClientSpecs(fetchFn: typeof fetch): InnertubeClientSpec[] {
         lang: 'ko',
         location: 'KR',
         client_type: ClientType.ANDROID,
-        fetch: fetchFn,
-      }),
-    );
-    push('ios', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.IOS,
         fetch: fetchFn,
       }),
     );
@@ -240,6 +232,31 @@ function innertubeExtractClientSpecs(
 }
 
 function innertubeBrowseClientSpecs(): InnertubeClientSpec[] {
+  const specs: InnertubeClientSpec[] = [];
+  const push = (label: string, factory: () => Promise<Innertube>) => {
+    specs.push({ label, create: () => factory() });
+  };
+
+  if (Platform.OS === 'android') {
+    push('android', () =>
+      Innertube.create({
+        lang: 'ko',
+        location: 'KR',
+        client_type: ClientType.ANDROID,
+        fetch: nrmYoutubeFetch,
+      }),
+    );
+    push('web', () =>
+      Innertube.create({
+        lang: 'ko',
+        location: 'KR',
+        client_type: ClientType.WEB,
+        fetch: nrmYoutubeFetch,
+      }),
+    );
+    return specs;
+  }
+
   return buildExtractClientSpecs(nrmYoutubeFetch);
 }
 
@@ -357,10 +374,9 @@ export async function searchYoutubePageOnDevice(
           querySample: q.slice(0, 120),
           client: spec.label,
           attempt: i + 1,
-          willRetry:
-            i < specs.length - 1 && shouldRetryInnertubeDownload(msg),
+          willRetry: i < specs.length - 1,
         });
-        if (i < specs.length - 1 && shouldRetryInnertubeDownload(msg)) {
+        if (i < specs.length - 1) {
           continue;
         }
         throw e;
