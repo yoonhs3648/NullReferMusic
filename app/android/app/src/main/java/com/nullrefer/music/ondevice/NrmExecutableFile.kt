@@ -47,6 +47,16 @@ object NrmExecutableFile {
     }
   }
 
+  /** espeak-ng / whisper 등 exec 디렉터리 정리 시 남는 linker 마커 제거 */
+  fun clearLinkerMarkersInDir(dir: File) {
+    if (!dir.isDirectory) return
+    dir.listFiles()?.forEach { entry ->
+      if (entry.isFile && entry.name.endsWith(".use-linker")) {
+        entry.delete()
+      }
+    }
+  }
+
   fun prepareForExecution(file: File) {
     if (!file.isFile) return
     applyExecMode(file)
@@ -195,11 +205,26 @@ object NrmExecutableFile {
    * filesDir 등에서 exec가 막히면 codeCacheDir로 복사 후 chmod.
    * 성공 시 실행 가능한 파일 경로, 실패 시 null.
    */
-  fun mirrorToExecCache(context: android.content.Context, source: File, cacheSubdir: String): File? {
+  fun mirrorToExecCache(
+      context: android.content.Context,
+      source: File,
+      cacheSubdir: String,
+      companionFiles: List<File> = emptyList(),
+  ): File? {
     if (!source.isFile) return null
     val destDir = execBaseDir(context, cacheSubdir)
     val dest = File(destDir, source.name)
-    if (dest.isFile && dest.length() == source.length() && isExecReady(dest)) {
+    val companionsReady =
+        companionFiles.all { companion ->
+          !companion.isFile ||
+              mirrorCompanionFile(companion, File(destDir, companion.name))
+        }
+    if (
+        dest.isFile &&
+            dest.length() == source.length() &&
+            isExecReady(dest) &&
+            companionsReady
+    ) {
       return dest
     }
     prepareWritable(dest)
@@ -212,6 +237,11 @@ object NrmExecutableFile {
       }
       applyExecMode(dest)
       copyLinkerMarker(source, dest)
+      for (companion in companionFiles) {
+        if (companion.isFile) {
+          mirrorCompanionFile(companion, File(destDir, companion.name))
+        }
+      }
       if (isExecReady(dest)) {
         NrmFileLogger.log("exec", "codeCache 미러 OK path=${dest.absolutePath}")
         return dest
@@ -220,6 +250,33 @@ object NrmExecutableFile {
       NrmFileLogger.error("exec", "codeCache 미러 실패 src=${source.absolutePath}", e)
     }
     return null
+  }
+
+  private fun mirrorCompanionFile(source: File, dest: File): Boolean {
+    if (dest.isFile && dest.length() == source.length() && !dest.canWrite()) {
+      return true
+    }
+    prepareWritable(dest)
+    return try {
+      FileInputStream(source).use { input ->
+        FileOutputStream(dest).use { output ->
+          input.copyTo(output)
+          output.fd.sync()
+        }
+      }
+      if (source.name.endsWith(".so")) {
+        ensureNativeLibLoadable(dest)
+      } else {
+        applyExecMode(dest)
+      }
+      true
+    } catch (e: Exception) {
+      NrmFileLogger.warn(
+          "exec",
+          "companion 미러 실패 src=${source.absolutePath} err=${e.message?.take(80)}",
+      )
+      false
+    }
   }
 
   fun isExecReady(file: File): Boolean = file.isFile && file.canExecute() && !file.canWrite()

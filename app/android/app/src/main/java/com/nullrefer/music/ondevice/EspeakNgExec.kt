@@ -32,9 +32,8 @@ object EspeakNgExec {
    * 검증 없이 W^X fallback 마커를 쓰지 않는다.
    */
   fun ensureExecReady(paths: EspeakBootstrap.EspeakPaths) {
-    val lib = File(paths.libDir, "libespeak-ng.so")
-    NrmExecutableFile.ensureNativeLibLoadable(lib)
-    NrmExecutableFile.prepareForExecution(paths.binary)
+    EspeakBootstrap.prepareRuntimeArtifacts(paths)
+    NrmExecutableFile.clearLinkerMarker(paths.binary)
 
     if (probeArgv(paths, listOf(paths.binary.absolutePath) + PROBE_ARGS)) {
       NrmExecutableFile.clearLinkerMarker(paths.binary)
@@ -43,7 +42,6 @@ object EspeakNgExec {
 
     val linker = defaultLinkerPath()
     if (linker.isNotEmpty()) {
-      NrmExecutableFile.clearLinkerMarker(paths.binary)
       if (probeArgv(paths, listOf(linker, paths.binary.absolutePath) + PROBE_ARGS)) {
         NrmExecutableFile.writeLinkerMarker(paths.binary, linker)
         NrmFileLogger.log("espeak", "linker exec OK linker=$linker")
@@ -55,7 +53,7 @@ object EspeakNgExec {
   }
 
   fun probePaths(paths: EspeakBootstrap.EspeakPaths): Boolean {
-    val lib = File(paths.libDir, "libespeak-ng.so")
+    val lib = paths.libFile()
     val key =
         ProbeCacheKey(
             paths.binary.absolutePath,
@@ -78,6 +76,11 @@ object EspeakNgExec {
       synchronized(probeCacheLock) {
         lastSuccessfulProbe = key
       }
+      NrmFileLogger.log(
+          "espeak",
+          "probe_ok bin=${paths.binary.name} libDir=${paths.libDir.name} " +
+              "data=${paths.dataDir.name}",
+      )
       true
     } catch (e: Exception) {
       NrmFileLogger.warn(
@@ -92,6 +95,7 @@ object EspeakNgExec {
   fun transliterateLine(line: String, paths: EspeakBootstrap.EspeakPaths): String {
     val trimmed = line.trim()
     if (trimmed.isEmpty()) return line
+    EspeakBootstrap.prepareRuntimeArtifacts(paths)
     val (code, output) =
         runCapture(
             paths,
@@ -113,8 +117,17 @@ object EspeakNgExec {
   private fun probeArgv(paths: EspeakBootstrap.EspeakPaths, argv: List<String>): Boolean {
     return try {
       val (code, out) = runCaptureArgv(paths, argv, timeoutSec = 15)
-      code == 0 && out.lineSequence().any { it.isNotBlank() }
-    } catch (_: Exception) {
+      val ok = code == 0 && out.lineSequence().any { it.isNotBlank() }
+      if (!ok) {
+        NrmFileLogger.warn(
+            "espeak",
+            "probe_fail code=$code argvTail=${argv.takeLast(3).joinToString(" ")} " +
+                "out=${out.trim().take(200)}",
+        )
+      }
+      ok
+    } catch (e: Exception) {
+      NrmFileLogger.warn("espeak", "probe_fail err=${e.message?.take(200)}")
       false
     }
   }
@@ -149,9 +162,17 @@ object EspeakNgExec {
 
   private fun applyEspeakEnv(pb: ProcessBuilder, paths: EspeakBootstrap.EspeakPaths) {
     val env = pb.environment()
-    val libDir = paths.libDir.absolutePath
+    val libDirs = linkedSetOf<String>()
+    libDirs.add(paths.libDir.absolutePath)
+    paths.binary.parentFile?.absolutePath?.let { libDirs.add(it) }
     val prev = env["LD_LIBRARY_PATH"]?.trim().orEmpty()
-    env["LD_LIBRARY_PATH"] = if (prev.isBlank()) libDir else "$libDir:$prev"
+    val merged =
+        (libDirs + prev.split(':'))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .joinToString(":")
+    env["LD_LIBRARY_PATH"] = merged
     env["ESPEAK_DATA_PATH"] = paths.dataDir.absolutePath
   }
 

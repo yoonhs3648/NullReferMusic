@@ -39,8 +39,6 @@ object NrmFileLogger {
 
   private const val LOG_TAG = "NrmFileLogger"
   private const val LOG_FILE_BASE = "NullReferenceMusicLog.txt"
-  /** 레거시 파일 — 삭제·정리 시에만 참조 */
-  private const val LEGACY_LOG_FILE_PREFIX = "nrm-debug-"
   private val folderRelPath = "${NrmBrand.STORAGE_FOLDER_NAME}/logs"
   private const val FAILURE_PAD = "\n\n\n"
 
@@ -182,7 +180,7 @@ object NrmFileLogger {
     )
   }
 
-  /** logs 폴더 내 모든 로그 파일 삭제 (일별·레거시·중복 포함) */
+  /** logs 폴더 하위의 모든 파일 삭제 (파일명·구버전 형식 무관) */
   fun deleteAllLogFiles(): Int {
     val ctx = appContext ?: return 0
     var removed = 0
@@ -209,7 +207,7 @@ object NrmFileLogger {
           )
       if (dir.isDirectory) {
         dir.listFiles()?.forEach { f ->
-          if (f.isFile && isLogFileName(f.name) && f.delete()) {
+          if (f.isFile && f.delete()) {
             removed++
           }
         }
@@ -219,10 +217,20 @@ object NrmFileLogger {
     return removed
   }
 
-  private fun isLogFileName(name: String): Boolean {
-    val n = name.trim()
-    if (n.isEmpty()) return false
-    return n.contains("NullReferenceMusicLog") || n.startsWith(LEGACY_LOG_FILE_PREFIX)
+  private fun logsMediaStoreSelection(): Pair<String, Array<String>> {
+    val folder = folderRelPath.trim('/')
+    return Pair(
+        "(${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
+            "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? OR " +
+            "${MediaStore.MediaColumns.RELATIVE_PATH} = ? OR " +
+            "${MediaStore.MediaColumns.RELATIVE_PATH} = ?)",
+        arrayOf(
+            "%/$folder/%",
+            "%/$folder",
+            "${Environment.DIRECTORY_DOWNLOADS}/$folder/",
+            "${Environment.DIRECTORY_DOWNLOADS}/$folder",
+        ),
+    )
   }
 
   private fun logSessionHeader() {
@@ -435,7 +443,6 @@ object NrmFileLogger {
   fun listLogFolderFiles(context: Context): List<FolderFileRow> {
     init(context)
     val out = mutableListOf<FolderFileRow>()
-    val relativePath = mediaStoreRelativePath()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
       val projection =
@@ -444,8 +451,7 @@ object NrmFileLogger {
               MediaStore.MediaColumns.DISPLAY_NAME,
               MediaStore.MediaColumns.SIZE,
           )
-      val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-      val args = arrayOf("$relativePath%")
+      val (selection, args) = logsMediaStoreSelection()
       context.contentResolver.query(collection, projection, selection, args, null)?.use { cursor ->
         val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
         val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
