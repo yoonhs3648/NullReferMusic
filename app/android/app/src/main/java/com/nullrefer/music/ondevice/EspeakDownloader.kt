@@ -5,7 +5,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** eSpeak NG 다운로드·설치 (FA 전처리 전용) */
+/** eSpeak NG 다운로드·설치 — AlignModelDownloader / WhisperModelDownloader 와 동일 큐·이벤트 */
 object EspeakDownloader {
   data class Status(
       val installed: Boolean,
@@ -43,21 +43,27 @@ object EspeakDownloader {
     progress = 0
     emitProgress(0)
     val appContext = context.applicationContext
-    val jobId = "espeak-ng:install"
-    NrmBackgroundWorkCoordinator.acquire(appContext, jobId)
-    Thread {
-      var ok = false
-      try {
-        ok = EspeakBootstrap.ensure(appContext) != null
-      } catch (e: Exception) {
-        NrmFileLogger.error("espeak", "download 실패", e)
-      } finally {
-        downloading.set(false)
-        progress = 0
-        NrmBackgroundWorkCoordinator.release(appContext, jobId)
-        emitComplete(ok)
-      }
-    }.start()
+    val jobId = EspeakNgCatalog.ID
+    val queued =
+        NrmModelInstallQueue.enqueue(appContext, jobId, "eSpeak NG") {
+          NrmBackgroundWorkCoordinator.acquire(appContext, jobId)
+          var ok = false
+          try {
+            ok = EspeakBootstrap.ensure(appContext) { pct -> emitProgress(pct) } != null
+          } catch (e: Exception) {
+            NrmFileLogger.error("espeak", "download 실패", e)
+          } finally {
+            downloading.set(false)
+            progress = 0
+            NrmBackgroundWorkCoordinator.release(appContext, jobId)
+            emitComplete(ok)
+          }
+        }
+    if (!queued) {
+      downloading.set(false)
+      progress = 0
+      emitComplete(false)
+    }
   }
 
   private fun emitProgress(pct: Int) {

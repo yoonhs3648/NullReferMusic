@@ -51,6 +51,10 @@ library/.hf-token.local
 library/libretranslate/_vendor/
 library/libretranslate/_bin/
 
+# eSpeak NG Android 패키지 (GitHub Release 업로드 전 로컬 빌드)
+library/espeak-ng/_bin/
+library/espeak-ng/_src_espeak-ng/
+
 # Whisper APK assets — ggml 모델만 제외 (CLI·libomp.so는 형상관리)
 app/android/app/src/main/assets/whisper/ggml-*.bin
 

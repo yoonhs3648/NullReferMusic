@@ -27,8 +27,15 @@ LRC 생성 후 **원문 가사로 복원**합니다. FA 엔진(wav2vec2/Whisper)
 
 ## PC에서 1회 패키징 (개발자)
 
-NDK로 espeak-ng 1.52.x arm64 빌드 후 위 3개 파일을 Release에 업로드합니다.  
-(대용량 바이너리는 Git 커밋 금지 — `.gitignore` 준수)
+```powershell
+cd D:\AIProj\CsTool\NullReferMusic
+.\scripts\Setup-EspeakNg.ps1
+.\scripts\Publish-EspeakNgGithub.ps1
+.\scripts\Verify-EspeakNgReleaseUrl.ps1
+```
+
+공식 APK에서 data·lib 추출 + NDK로 `espeak-ng` CLI 빌드 후 Release `espeak-ng-v1`에 업로드합니다.  
+앱 다운로드는 wav2vec2-base와 동일하게 `NrmResilientHttpDownload` + `NrmModelInstallQueue`를 사용합니다.
 
 ## 코드 위치
 
