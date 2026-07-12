@@ -115,6 +115,35 @@ object NrmFileLogger {
     write("I", tag, message, null)
   }
 
+  /**
+   * 싱크 가사(LRC) 전문 — Whisper / wav2vec2 / eSpeak-align 결과 확인용.
+   * 줄바꿈을 유지한 블록으로 파일에 기록한다.
+   */
+  fun logLrcDump(tag: String, engine: String, kind: String, lrc: String) {
+    if (!userLoggingEnabled) return
+    val trimmed = lrc.trim()
+    if (trimmed.isEmpty()) return
+    val lineCount = trimmed.lineSequence().count { it.isNotBlank() }
+    write(
+        "I",
+        tag,
+        buildString {
+          append("===== sync-lyrics engine=")
+          append(engine)
+          append(" kind=")
+          append(kind)
+          append(" lines=")
+          append(lineCount)
+          append(" chars=")
+          append(trimmed.length)
+          append(" =====\n")
+          append(trimmed)
+          append("\n===== end sync-lyrics =====")
+        },
+        null,
+    )
+  }
+
   fun warn(tag: String, message: String) {
     if (!userLoggingEnabled) return
     write("W", tag, message, null)

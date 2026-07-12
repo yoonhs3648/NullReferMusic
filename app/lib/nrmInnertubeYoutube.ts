@@ -34,6 +34,16 @@ export async function getInnertube() {
   return m.getInnertube();
 }
 
+/** 네이티브: android/ios/web 기본 세션을 프로세스 생존 동안 미리 생성·재사용 */
+export async function warmInnertubeSessions(): Promise<void> {
+  if (Platform.OS === 'web') {
+    const m = await import('./nrmInnertubeYoutube.web');
+    return m.warmInnertubeSessions();
+  }
+  const m = await import('./nrmInnertubeYoutube.native');
+  return m.warmInnertubeSessions();
+}
+
 export async function downloadYoutubeAudioOnDevice(
   videoId: string,
   userSuggestedFileName: string,

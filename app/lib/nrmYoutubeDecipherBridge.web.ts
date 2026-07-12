@@ -38,6 +38,10 @@ export function cancelActiveStreamDownload(_reason?: string): void {}
 
 export function cancelActiveInnertubeExtractions(_reason?: string): void {}
 
+export function isYoutubeWebViewAllowed(): boolean {
+  return true;
+}
+
 export async function evalYoutubePlayerInWebView(
   _code: string,
 ): Promise<NrmDecipherResult> {

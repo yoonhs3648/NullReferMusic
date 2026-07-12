@@ -10,7 +10,7 @@ import {
 } from '@/lib/nrmMobileDownloadNotifications';
 import { nrmBackgroundWorkRelease, nrmDownloadBackgroundWorkToken } from '@/lib/nrmBackgroundWork';
 
-/** yt-dlp 5분 초과·추출 최종 실패 — 시스템 알림 + History */
+/** 추출 최종 실패 — 시스템 알림 + History */
 export async function reportNativeDownloadExtractFailure(
   videoId: string,
   displayLabel: string,

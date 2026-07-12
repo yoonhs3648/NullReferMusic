@@ -6,10 +6,10 @@
 .DESCRIPTION
   library/espeak-ng/_bin/android-arm64-v8a/ 의
   espeak-ng, libespeak-ng.so, espeak-data.zip 을
-  yoonhs3648/NullReferMusic 릴리스 espeak-ng-v1 에 올립니다.
+  yoonhs3648/NullReferMusic 릴리스 espeak-ng-v2 에 올립니다.
 #>
 param(
-    [string]$Tag = 'espeak-ng-v1',
+    [string]$Tag = 'espeak-ng-v2',
     [string]$Repo = 'yoonhs3648/NullReferMusic',
     [switch]$SkipBuild
 )
@@ -61,6 +61,7 @@ $headers = @{
 
 $releaseBodyText = @'
 NullReferMusic FA 전처리용 eSpeak NG (Android arm64-v8a, v1.52.0).
+CLI와 libespeak-ng.so 는 동일 NDK 빌드 산출물입니다 (v1의 APK lib 혼용 링크 오류 수정).
 앱 설정 > eSpeak NG 설치에서 다운로드합니다. 수동 삭제 금지.
 '@
 

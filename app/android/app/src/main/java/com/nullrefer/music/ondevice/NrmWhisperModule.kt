@@ -227,6 +227,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
             )
         val firstTs = lrc.lineSequence().firstOrNull { it.startsWith('[') }?.take(32) ?: "(none)"
         NrmFileLogger.log("whisper", "transcribeToLrc OK lrcLen=${lrc.length} firstLine=$firstTs")
+        NrmFileLogger.logLrcDump("whisper", "whisper", "sync_lrc", lrc)
         NrmStageLog.log(
             "whisper",
             "transcribe_ok",

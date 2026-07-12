@@ -1,10 +1,11 @@
 /**
  * 숨김 WebView: (1) 플레이어 복호화 new Function (2) googlevideo 미디어 fetch
  * — RN fetch/downloadAsync 와 다른 Chromium 스택이라 403 회피에 도움이 될 수 있음.
+ * 백그라운드(AppState !== active)에서는 WebView를 쓰지 않는다 — Activity 없으면 hang.
  */
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
-import { NativeModules } from 'react-native';
+import { AppState, NativeModules } from 'react-native';
 
 type NrmAudioMetaNative = {
   concatFiles?: (parts: string[], dest: string) => Promise<void>;
@@ -517,11 +518,27 @@ export async function waitForDecipherIdle(timeoutMs: number): Promise<void> {
   throw new Error('YouTube WebView 작업 대기 시간이 초과되었습니다.');
 }
 
+function assertWebViewAllowedInForeground(kind: 'decipher' | 'download'): void {
+  if (AppState.currentState === 'active') return;
+  throw new Error(
+    kind === 'decipher'
+      ? 'WEBVIEW_DECIPHER_BACKGROUND_FORBIDDEN'
+      : 'WEBVIEW_DOWNLOAD_BACKGROUND_FORBIDDEN',
+  );
+}
+
+/** 포그라운드에서만 WebView decipher/다운로드 허용 */
+export function isYoutubeWebViewAllowed(): boolean {
+  return AppState.currentState === 'active';
+}
+
 export async function evalYoutubePlayerInWebView(
   code: string,
 ): Promise<NrmDecipherResult> {
+  assertWebViewAllowedInForeground('decipher');
   requestDecipherMount();
   await waitForWebViewReady(12_000);
+  assertWebViewAllowedInForeground('decipher');
   return new Promise((resolve, reject) => {
     decipherQueue.push({ code, resolve, reject });
     drainDecipherQueue();
@@ -530,15 +547,18 @@ export async function evalYoutubePlayerInWebView(
 
 /**
  * Chromium `fetch`로 googlevideo(등) 바이너리를 받아 `destUri`에 저장. 백엔드 불필요.
+ * 백그라운드에서는 호출하지 말 것 (네이티브 downloadAsync 경로 사용).
  */
 export async function downloadMediaUrlViaWebView(
   fullUrl: string,
   destUri: string,
   options?: WebViewMediaDownloadOptions,
 ): Promise<void> {
+  assertWebViewAllowedInForeground('download');
   requestDecipherMount();
   await waitForWebViewReady(15_000);
   await waitForDecipherIdle(15_000);
+  assertWebViewAllowedInForeground('download');
   if (webView == null) {
     throw new Error('WebView 없음');
   }

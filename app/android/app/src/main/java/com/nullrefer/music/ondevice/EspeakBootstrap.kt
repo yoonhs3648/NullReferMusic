@@ -10,7 +10,8 @@ import java.util.zip.ZipInputStream
 
 /**
  * Android arm64-v8a eSpeak NG (오프라인 FA 전처리용).
- * wav2vec2-base / aeneas 와 동일하게 GitHub Release + [NrmResilientHttpDownload].
+ * wav2vec2-base / Whisper 모델처럼 설치 산출물은 filesDir 에 내구성 보관하고,
+ * 실행용 바이너리만 code_cache 에 둔다 (앱 업데이트 시 code_cache 유실 → filesDir 에서 복구).
  */
 object EspeakBootstrap {
   private const val LIB_NAME = "libespeak-ng.so"
@@ -43,15 +44,40 @@ object EspeakBootstrap {
   fun pathsIfReady(context: Context): EspeakPaths? {
     val paths = buildPaths(context)
     migrateLegacyArtifacts(context, paths)
-    if (!paths.isReady()) return null
+    // 앱 업데이트로 code_cache 가 비면 filesDir 내구성 복사본에서 복구 (whisper 모델과 동일)
+    if (!paths.hasInstalledFiles()) {
+      restoreExecFromDurable(context, paths)
+    } else {
+      syncDurableFromExec(context, paths)
+    }
+    if (!paths.hasInstalledFiles()) {
+      if (hasDataPayload(paths) && !hasDurableBinaries(context)) {
+        NrmFileLogger.log(
+            "espeak",
+            "data_ok_bin_missing — 앱 업데이트로 code_cache 유실, 바이너리만 재확보 필요",
+        )
+      }
+      return null
+    }
     val resolved =
         resolveInstalledBinary(context, paths, readMarkerBinary = true)
             ?: run {
-              paths.installMarker.delete()
-              EspeakNgExec.invalidateProbeCache()
+              if (restoreExecFromDurable(context, paths)) {
+                resolveInstalledBinary(context, paths, readMarkerBinary = false)?.let {
+                  syncDurableFromExec(context, it)
+                  if (!it.installMarker.isFile) {
+                    writeInstallMarker(it, it.binary.absolutePath)
+                  }
+                  return it
+                }
+              }
               NrmFileLogger.warn("espeak", "캐시 프로브 실패 — 재설치 필요")
               return null
             }
+    syncDurableFromExec(context, resolved)
+    if (!resolved.installMarker.isFile) {
+      writeInstallMarker(resolved, resolved.binary.absolutePath)
+    }
     return resolved
   }
 
@@ -68,6 +94,22 @@ object EspeakBootstrap {
       }
 
       val paths = buildPaths(context)
+
+      // 업데이트로 exec만 사라진 경우: 데이터 유지 + 바이너리만 재다운로드/복구
+      if (restoreExecFromDurable(context, paths)) {
+        finalizeInstall(context, paths, onProgress)?.let { return it }
+      }
+      if (hasDataPayload(paths)) {
+        NrmFileLogger.log("espeak", "기존 espeak-data 유지 — CLI/lib만 재설치")
+        wipeExecArtifacts(context, paths)
+        return try {
+          downloadBinariesOnly(context, paths, onProgress)
+        } catch (e: Exception) {
+          NrmFileLogger.error("espeak", "바이너리 재설치 실패", e)
+          null
+        }
+      }
+
       wipeInstall(context, paths)
 
       if (copyFromAssets(context, paths) && paths.hasInstalledFiles()) {
@@ -138,6 +180,65 @@ object EspeakBootstrap {
     return finalizeInstall(context, paths, onProgress)
   }
 
+  /** 앱 업데이트 후 code_cache 유실 시 — espeak-data 유지하고 CLI/lib만 다시 받는다 */
+  private fun downloadBinariesOnly(
+      context: Context,
+      paths: EspeakPaths,
+      onProgress: ((Int) -> Unit)?,
+  ): EspeakPaths? {
+    val staging = File(paths.installMarker.parentFile, "staging")
+    staging.mkdirs()
+    onProgress?.invoke(0)
+    val specs = EspeakNgCatalog.ASSETS.filter { !it.extractZip }
+    var totalBytes = 0L
+    val knownSizes = mutableMapOf<String, Long>()
+    for (spec in specs) {
+      val size = probeContentLength(spec.url)
+      if (size > 0) {
+        knownSizes[spec.fileName] = size
+        totalBytes += size
+      }
+    }
+    var doneBytes = 0L
+    for (spec in specs) {
+      val dest = File(staging, spec.fileName)
+      val fileTotal = knownSizes[spec.fileName] ?: 0L
+      val ok =
+          downloadAsset(
+              context = context,
+              spec = spec,
+              dest = dest,
+              doneBytes = doneBytes,
+              totalBytes = totalBytes,
+              fileTotalBytes = fileTotal,
+              onProgress = onProgress,
+          )
+      if (!ok) throw IllegalStateException("espeak 다운로드 실패: ${spec.fileName}")
+      doneBytes += knownSizes[spec.fileName] ?: dest.length()
+      when (spec.fileName) {
+        LIB_NAME -> installCopiedFile(dest, paths.libFile(), nativeLib = true)
+        BIN_NAME -> installCopiedFile(dest, paths.binary, nativeLib = false)
+      }
+    }
+    staging.deleteRecursively()
+    if (!paths.hasInstalledFiles()) {
+      throw IllegalStateException(
+          "espeak 바이너리 검증 실패 bin=${paths.binary.length()} lib=${paths.libFile().length()}",
+      )
+    }
+    return finalizeInstall(context, paths, onProgress)
+  }
+
+  private fun markInstalled(
+      paths: EspeakPaths,
+      onProgress: ((Int) -> Unit)?,
+  ): EspeakPaths {
+    writeInstallMarker(paths, paths.binary.absolutePath)
+    onProgress?.invoke(100)
+    NrmFileLogger.log("espeak", "부트스트랩 OK path=${paths.binary.absolutePath}")
+    return paths
+  }
+
   private fun finalizeInstall(
       context: Context,
       paths: EspeakPaths,
@@ -150,16 +251,83 @@ object EspeakBootstrap {
     }
     if (resolved == null) {
       NrmFileLogger.warn("espeak", "기능 프로브 실패 — 설치 무효")
-      wipeInstall(context, paths)
+      wipeExecArtifacts(context, paths)
       return null
     }
+    syncDurableFromExec(context, resolved)
     return markInstalled(resolved, onProgress)
   }
 
-  /**
-   * 직접 실행 → linker → codeCache 미러 순으로 동작하는 바이너리 경로를 고른다.
-   * fresh install 시에는 .installed 를 읽지 않는다.
-   */
+  private fun persistDir(context: Context): File {
+    val dir = File(NrmExecutableFile.stagingBaseDir(context, "espeak-ng"), "persist")
+    dir.mkdirs()
+    return dir
+  }
+
+  private fun durableBinary(context: Context): File = File(persistDir(context), BIN_NAME)
+
+  private fun durableLib(context: Context): File = File(persistDir(context), LIB_NAME)
+
+  private fun hasDataPayload(paths: EspeakPaths): Boolean {
+    return paths.dataDir.isDirectory && File(paths.dataDir, "phondata").isFile
+  }
+
+  private fun hasDurableBinaries(context: Context): Boolean {
+    val bin = durableBinary(context)
+    val lib = durableLib(context)
+    return bin.isFile &&
+        bin.length() >= 50_000L &&
+        lib.isFile &&
+        lib.length() >= 200_000L
+  }
+
+  /** 실행용 code_cache → filesDir 내구성 복사 (앱 업데이트 대비) */
+  private fun syncDurableFromExec(context: Context, paths: EspeakPaths) {
+    val lib = paths.libFile()
+    if (!paths.binary.isFile || !lib.isFile) return
+    try {
+      installCopiedFile(paths.binary, durableBinary(context), nativeLib = false)
+      installCopiedFile(lib, durableLib(context), nativeLib = true)
+      val alias = File(lib.parentFile, LIB_SONAME)
+      if (alias.isFile) {
+        installCopiedFile(alias, File(persistDir(context), LIB_SONAME), nativeLib = true)
+      }
+      NrmFileLogger.log(
+          "espeak",
+          "durable_sync_ok bin=${durableBinary(context).length()} lib=${durableLib(context).length()}",
+      )
+    } catch (e: Exception) {
+      NrmFileLogger.warn("espeak", "durable_sync_fail err=${e.message?.take(120)}")
+    }
+  }
+
+  /** 앱 업데이트 후 code_cache 유실 시 filesDir 복사본을 다시 올린다 */
+  private fun restoreExecFromDurable(context: Context, paths: EspeakPaths): Boolean {
+    if (!hasDurableBinaries(context)) return false
+    return try {
+      paths.libDir.mkdirs()
+      installCopiedFile(durableBinary(context), paths.binary, nativeLib = false)
+      installCopiedFile(durableLib(context), paths.libFile(), nativeLib = true)
+      val durableAlias = File(persistDir(context), LIB_SONAME)
+      if (durableAlias.isFile) {
+        installCopiedFile(durableAlias, File(paths.libDir, LIB_SONAME), nativeLib = true)
+      }
+      prepareRuntimeArtifacts(paths)
+      EspeakNgExec.invalidateProbeCache()
+      val ok = paths.hasInstalledFiles() && EspeakNgExec.probePaths(paths)
+      NrmFileLogger.log(
+          "espeak",
+          if (ok) "durable_restore_ok path=${paths.binary.absolutePath}"
+          else "durable_restore_probe_fail",
+      )
+      ok
+    } catch (e: Exception) {
+      NrmFileLogger.warn("espeak", "durable_restore_fail err=${e.message?.take(120)}")
+      false
+    }
+  }
+
+  /** 직접 실행 → linker → codeCache 미러 순으로 동작하는 바이너리 경로를 고른다. */
   private fun resolveInstalledBinary(
       context: Context,
       paths: EspeakPaths,
@@ -309,16 +477,6 @@ object EspeakBootstrap {
     }
   }
 
-  private fun markInstalled(
-      paths: EspeakPaths,
-      onProgress: ((Int) -> Unit)?,
-  ): EspeakPaths {
-    writeInstallMarker(paths, paths.binary.absolutePath)
-    onProgress?.invoke(100)
-    NrmFileLogger.log("espeak", "부트스트랩 OK path=${paths.binary.absolutePath}")
-    return paths
-  }
-
   private fun writeInstallMarker(paths: EspeakPaths, binaryPath: String) {
     val parent = paths.installMarker.parentFile ?: return
     parent.mkdirs()
@@ -420,15 +578,12 @@ object EspeakBootstrap {
     return EspeakPaths(File(execDir, BIN_NAME), execDir, dataDir, marker)
   }
 
-  private fun wipeInstall(context: Context, paths: EspeakPaths) {
+  private fun wipeExecArtifacts(context: Context, paths: EspeakPaths) {
     val execDir = NrmExecutableFile.execBaseDir(context, "espeak-ng")
     val mirrorDir = NrmExecutableFile.execBaseDir(context, "espeak-ng-exec")
-
     for (dir in listOf(execDir, mirrorDir, paths.libDir)) {
       NrmExecutableFile.clearLinkerMarkersInDir(dir)
     }
-
-    val legacyLibDir = File(NrmExecutableFile.stagingBaseDir(context, "espeak-ng"), "native")
     val deleteTargets =
         linkedSetOf(
             paths.binary,
@@ -436,10 +591,6 @@ object EspeakBootstrap {
             File(execDir, LIB_SONAME),
             File(execDir, "$BIN_NAME.use-linker"),
             paths.libFile(),
-            File(legacyLibDir, LIB_NAME),
-            File(legacyLibDir, LIB_SONAME),
-            paths.installMarker,
-            File(paths.installMarker.parentFile, ".installed.tmp"),
             File(mirrorDir, BIN_NAME),
             File(mirrorDir, LIB_NAME),
             File(mirrorDir, LIB_SONAME),
@@ -448,8 +599,31 @@ object EspeakBootstrap {
       NrmExecutableFile.prepareWritable(target)
       if (target.exists()) target.delete()
     }
+    EspeakNgExec.invalidateProbeCache()
+  }
+
+  private fun wipeInstall(context: Context, paths: EspeakPaths) {
+    wipeExecArtifacts(context, paths)
+
+    val legacyLibDir = File(NrmExecutableFile.stagingBaseDir(context, "espeak-ng"), "native")
+    val persist = persistDir(context)
+    val deleteTargets =
+        linkedSetOf(
+            File(legacyLibDir, LIB_NAME),
+            File(legacyLibDir, LIB_SONAME),
+            paths.installMarker,
+            File(paths.installMarker.parentFile, ".installed.tmp"),
+            File(persist, BIN_NAME),
+            File(persist, LIB_NAME),
+            File(persist, LIB_SONAME),
+        )
+    for (target in deleteTargets) {
+      NrmExecutableFile.prepareWritable(target)
+      if (target.exists()) target.delete()
+    }
 
     if (paths.dataDir.isDirectory) paths.dataDir.deleteRecursively()
+    if (persist.isDirectory) persist.deleteRecursively()
     File(paths.installMarker.parentFile, "staging").deleteRecursively()
     EspeakNgExec.invalidateProbeCache()
   }

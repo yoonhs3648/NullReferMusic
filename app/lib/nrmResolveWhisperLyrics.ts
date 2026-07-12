@@ -5,6 +5,7 @@ import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
+import { logSyncLyricsLrcDump } from '@/lib/nrmSyncLyricsLog';
 import {
   buildAutoWhisperLyricsSentinel,
   isAutoWhisperLyricsValue,
@@ -86,6 +87,14 @@ export async function resolveWhisperLyricsInMetadata(
       lrcChars: lrc.trim().length,
       mode,
     });
+    if (lrc.trim()) {
+      logSyncLyricsLrcDump({
+        engine: 'whisper',
+        kind: 'sync_lrc',
+        lrc,
+        extra: { mode, extension, via: 'resolveWhisperLyricsInMetadata' },
+      });
+    }
   } catch (e) {
     logNrmRunError('download.whisper', e, {
       event: 'resolve_transcribe_fail',

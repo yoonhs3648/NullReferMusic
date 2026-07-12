@@ -12,6 +12,7 @@ import {
   type EspeakLineMapping,
 } from '@/lib/nrmEspeakLyricsPreprocess';
 import { isEspeakNgInstalled, probeEspeakNgForAlign } from '@/lib/nrmEspeakNative';
+import { logSyncLyricsLrcDump } from '@/lib/nrmSyncLyricsLog';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 import type { NrmMelonSyncSettings } from '@/lib/nrmMelonSyncSettings';
@@ -133,8 +134,35 @@ export async function transcribeMelonLyricsLrc(
         : undefined,
     );
     lrc = normalizeWhisperLrc(aligned.lrc);
-    if (espeakLineMappings?.length && lrc.trim()) {
-      lrc = restoreLrcWithOriginalLyrics(lrc, espeakLineMappings);
+    const usedEspeak = !!(espeakLineMappings?.length && lrc.trim());
+    if (usedEspeak) {
+      // eSpeak 전처리(발음) 가사 + FA 타임스탬프 — 복원 전 전문
+      logSyncLyricsLrcDump({
+        engine: 'espeak-align',
+        kind: 'phonetic_timed',
+        lrc,
+        extra: {
+          mode,
+          extension,
+          alignLang,
+          alignModel: alignPref,
+          lineMappings: espeakLineMappings!.length,
+        },
+      });
+      lrc = restoreLrcWithOriginalLyrics(lrc, espeakLineMappings!);
+      logSyncLyricsLrcDump({
+        engine: alignPref,
+        kind: 'restored_lrc',
+        lrc,
+        extra: { mode, extension, alignLang },
+      });
+    } else if (lrc.trim()) {
+      logSyncLyricsLrcDump({
+        engine: alignPref,
+        kind: 'sync_lrc',
+        lrc,
+        extra: { mode, extension, alignLang, espeakPreprocess: false },
+      });
     }
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
     lyricsMelonAlignFailed = aligned.alignFailed && !lyricsMelonMemoryInsufficient;

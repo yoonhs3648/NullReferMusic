@@ -3,11 +3,14 @@
  * googlevideo URL만 요청합니다. `STREAM_HEADERS`에 User-Agent가 없어 RN에서 403이 자주 나므로
  * 보강하고, 실패 시 Android/iOS YouTube 앱 UA로 한 번씩 더 시도합니다.
  *
- * innertube 추출 중에는 [createExtractDeadlineYoutubeFetch] 로 API 요청에
- * 네이티브 HttpURLConnection readTimeout + wall-clock deadline 을 적용한다.
+ * 검색·추출 InnerTube API 는 Android에서 항상 네이티브 HttpURLConnection (readTimeout) 으로
+ * 보냅니다. JS fetch 가 백그라운드에서 멈추는 것을 막기 위함입니다.
  */
 import { Platform } from 'react-native';
 
+import {
+  NRM_YOUTUBE_INNERTUBE_HTTP_READ_MS,
+} from '@/lib/nrmDownloadTimeouts';
 import {
   isNativeYoutubeHttpFetchAvailable,
   isYoutubeHttpTimeoutError,
@@ -44,6 +47,27 @@ const STREAM_USER_AGENTS = [
   'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
 ] as const;
 
+type ProgressListener = () => void;
+const progressListeners = new Set<ProgressListener>();
+
+/** innertube HTTP/단계 진행 — 스톨 워치독이 타이머를 리셋할 때 구독 */
+export function subscribeInnertubeFetchProgress(listener: ProgressListener): () => void {
+  progressListeners.add(listener);
+  return () => {
+    progressListeners.delete(listener);
+  };
+}
+
+export function notifyInnertubeFetchProgress(): void {
+  for (const listener of progressListeners) {
+    try {
+      listener();
+    } catch {
+      /* ignore listener errors */
+    }
+  }
+}
+
 async function fetchStreamOnce(
   baseFetch: typeof fetch,
   input: RequestInfo | URL,
@@ -66,11 +90,44 @@ async function fetchStreamOnce(
   return baseFetch(input, { ...init, headers });
 }
 
+async function fetchInnertubeApiNative(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  readTimeoutMs: number,
+): Promise<Response> {
+  notifyInnertubeFetchProgress();
+  try {
+    const response = await youtubeHttpFetchNative(input, init, readTimeoutMs);
+    notifyInnertubeFetchProgress();
+    return response;
+  } catch (e) {
+    notifyInnertubeFetchProgress();
+    if (isYoutubeHttpTimeoutError(e)) {
+      throw new Error('EXTRACT_TIMEOUT');
+    }
+    throw e;
+  }
+}
+
+/**
+ * 검색·세션·추출 공통 fetch.
+ * - youtubei API → Android 네이티브 HttpURLConnection (항상, readTimeout 고정)
+ * - googlevideo → UA 보강 JS fetch
+ */
 export function createNrmYoutubeFetch(
   baseFetch: typeof fetch = globalThis.fetch.bind(globalThis),
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = requestUrlString(input);
+
+    if (
+      Platform.OS === 'android' &&
+      isYoutubeInnertubeApiUrl(url) &&
+      isNativeYoutubeHttpFetchAvailable()
+    ) {
+      return fetchInnertubeApiNative(input, init, NRM_YOUTUBE_INNERTUBE_HTTP_READ_MS);
+    }
+
     if (!isYoutubeStreamUrl(url)) {
       return baseFetch(input, init);
     }
@@ -102,9 +159,8 @@ function throwIfDeadline(options: ExtractDeadlineFetchOptions): void {
 }
 
 /**
- * innertube 추출 전용 fetch.
- * - youtubei API → Android 네이티브 HttpURLConnection (readTimeout)
- * - googlevideo → 기존 UA 보강 fetch + AbortSignal
+ * wall-clock deadline 이 있는 추출용 fetch (호환 유지).
+ * API 는 네이티브 HTTP, 요청당 readTimeout 은 deadline 잔여분으로 줄인다.
  */
 export function createExtractDeadlineYoutubeFetch(
   options: ExtractDeadlineFetchOptions,
@@ -115,16 +171,17 @@ export function createExtractDeadlineYoutubeFetch(
     throwIfDeadline(options);
     const url = requestUrlString(input);
     const left = remainingMs(options.deadlineMs);
-    const perReqTimeout = Math.max(1_000, Math.min(left, 30_000));
+    const perReqTimeout = Math.max(1_000, Math.min(left, NRM_YOUTUBE_INNERTUBE_HTTP_READ_MS));
 
-    if (Platform.OS === 'android' && isYoutubeInnertubeApiUrl(url) && isNativeYoutubeHttpFetchAvailable()) {
+    if (
+      Platform.OS === 'android' &&
+      isYoutubeInnertubeApiUrl(url) &&
+      isNativeYoutubeHttpFetchAvailable()
+    ) {
       try {
-        return await youtubeHttpFetchNative(input, init, perReqTimeout);
+        return await fetchInnertubeApiNative(input, init, perReqTimeout);
       } catch (e) {
         if (options.isAborted() || Date.now() >= options.deadlineMs) {
-          throw new Error('EXTRACT_TIMEOUT');
-        }
-        if (isYoutubeHttpTimeoutError(e)) {
           throw new Error('EXTRACT_TIMEOUT');
         }
         throw e;
@@ -160,5 +217,5 @@ export function createExtractDeadlineYoutubeFetch(
   };
 }
 
-/** 세션·검색·다운로드 재시도 전부 동일 래퍼를 씁니다. */
+/** 세션·검색·다운로드 전부 동일 래퍼 (InnerTube API = 네이티브 고정). */
 export const nrmYoutubeFetch = createNrmYoutubeFetch();

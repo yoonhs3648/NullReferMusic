@@ -11,19 +11,22 @@ LRC 생성 후 **원문 가사로 복원**합니다. FA 엔진(wav2vec2/Whisper)
 
 ## GitHub Release (arm64-v8a)
 
-태그: `espeak-ng-v1`
+태그: `espeak-ng-v2` (v1은 APK `libttsespeak.so` + NDK CLI 혼용으로 링크 실패)
 
 | 파일 | 설명 |
 |------|------|
-| `espeak-ng` | CLI 바이너리 |
-| `libespeak-ng.so` | 공유 라이브러리 |
-| `espeak-data.zip` | 음성/phoneme 데이터 (`ESPEAK_DATA_PATH`) |
+| `espeak-ng` | CLI 바이너리 (NDK) |
+| `libespeak-ng.so` | **동일 NDK 빌드**의 공유 라이브러리 (APK lib 사용 금지) |
+| `espeak-data.zip` | 음성/phoneme 데이터 (`ESPEAK_DATA_PATH`, 공식 APK에서 추출) |
 
 공개 URL 예:
 
-- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v1/espeak-ng`
-- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v1/libespeak-ng.so`
-- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v1/espeak-data.zip`
+- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v2/espeak-ng`
+- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v2/libespeak-ng.so`
+- `https://github.com/yoonhs3648/NullReferMusic/releases/download/espeak-ng-v2/espeak-data.zip`
+
+> **주의:** CLI와 `.so`는 반드시 같은 NDK 빌드 산출물이어야 합니다.  
+> APK의 `libttsespeak.so`를 `libespeak-ng.so`로 올리면 `espeak_ng_CompileIntonation` 심볼을 못 찾아 `CANNOT LINK EXECUTABLE` 이 납니다.
 
 ## PC에서 1회 패키징 (개발자)
 
@@ -34,7 +37,7 @@ cd D:\AIProj\CsTool\NullReferMusic
 .\scripts\Verify-EspeakNgReleaseUrl.ps1
 ```
 
-공식 APK에서 data·lib 추출 + NDK로 `espeak-ng` CLI 빌드 후 Release `espeak-ng-v1`에 업로드합니다.  
+공식 APK에서 **data만** 추출 + NDK로 `espeak-ng` CLI·`libespeak-ng.so`를 같은 빌드로 만든 뒤 Release `espeak-ng-v2`에 업로드합니다.  
 앱 다운로드는 wav2vec2-base와 동일하게 `NrmResilientHttpDownload` + `NrmModelInstallQueue`를 사용합니다.
 
 ## 코드 위치

@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
-$Tag = 'espeak-ng-v1'
+$Tag = 'espeak-ng-v2'
 $Repo = 'yoonhs3648/NullReferMusic'
 $Base = "https://github.com/$Repo/releases/download/$Tag"
 $files = @('espeak-ng', 'libespeak-ng.so', 'espeak-data.zip')

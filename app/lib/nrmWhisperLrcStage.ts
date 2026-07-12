@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
+import { logSyncLyricsLrcDump } from '@/lib/nrmSyncLyricsLog';
 import { normalizeWhisperLrc, type NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
 
@@ -86,6 +87,14 @@ export async function transcribeWhisperLrc(
     elapsedMs: Date.now() - t0,
     lrcChars: lrc.trim().length,
   });
+  if (lrc.trim()) {
+    logSyncLyricsLrcDump({
+      engine: 'whisper',
+      kind: 'sync_lrc',
+      lrc,
+      extra: { mode, extension },
+    });
+  }
 
   let lyricsTranslationFailed = false;
   let lyricsTranslationExhausted = false;

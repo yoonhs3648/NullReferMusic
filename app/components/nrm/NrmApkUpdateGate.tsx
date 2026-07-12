@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -9,7 +10,7 @@ import {
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
-import { logNrmRunError } from '@/lib/nrmDevLog';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { checkNrmApkUpdate } from '@/lib/nrmApkUpdate';
 import {
   canNrmInstallPackages,
@@ -35,6 +36,7 @@ type Props = {
 /**
  * Android 앱 시작 시 GitHub Releases 공개 APK 자동 업데이트 게이트.
  * apkVersion.json(PAT 불필요)과 로컬 버전을 비교해 구버전이면 다운로드·설치 안내.
+ * 버전 확인과 병렬로 android Innertube 세션을 워밍하고, 게이트 통과 전에 워밍을 끝낸다.
  */
 export function NrmApkUpdateGate({ onComplete }: Props) {
   const [phase, setPhase] = useState<Phase>('checking');
@@ -45,24 +47,48 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
   const runCheck = useCallback(() => {
     setPhase('checking');
     void (async () => {
-      if (!isNrmApkUpdateNativeAvailable()) {
+      // 콜드스타트: 버전 확인과 동시에 android Innertube만 워밍 (web은 폴백 시에만)
+      const warmPromise =
+        Platform.OS === 'android'
+          ? import('@/lib/nrmInnertubeYoutube')
+              .then((m) => m.warmInnertubeSessions())
+              .catch((e) => {
+                logNrmRunError('apk-update.innertube_warm', e);
+              })
+          : Promise.resolve();
+
+      const finishGate = async () => {
+        const warmStartedAt = Date.now();
+        await warmPromise;
+        logNrmDev('apk-update', {
+          event: 'gate_complete_after_warm',
+          warmWaitMs: Date.now() - warmStartedAt,
+        });
         onComplete();
+      };
+
+      if (!isNrmApkUpdateNativeAvailable()) {
+        await finishGate();
         return;
       }
 
       const result = await checkNrmApkUpdate();
       if (result.status === 'up_to_date') {
-        onComplete();
+        await finishGate();
         return;
       }
       if (result.status === 'error') {
+        // 업데이트 검사 실패 UI — 워밍은 백그라운드 계속
         setPhase({ kind: 'error', message: result.message });
+        void warmPromise;
         return;
       }
 
       downloadUrlRef.current = result.downloadUrl;
       setRequiredVersion(result.requiredVersion);
       setPhase('prompt');
+      // 업데이트 강제 화면 — 워밍은 백그라운드 계속
+      void warmPromise;
     })();
   }, [onComplete]);
 
@@ -110,7 +136,7 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
     return (
       <View style={styles.root}>
         <ActivityIndicator size="large" color="#ffffff" style={styles.spinner} />
-        <Text style={styles.loadingLabel}>버전 확인 중...</Text>
+        <Text style={styles.loadingLabel}>앱 준비중..</Text>
       </View>
     );
   }

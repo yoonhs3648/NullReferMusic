@@ -1352,11 +1352,26 @@ object Wav2Vec2CtcForcedAligner {
           parsed.size >= 28 -> 2_600L
           else -> 1_600L
         }
-    val targetEnd =
-        (vocal.endMs - outroPadMs).coerceIn(
-            (firstMs + 12_000).toLong(),
-            (durationMs - 400L).coerceAtLeast((firstMs + 1).toLong()),
-        )
+    // 첫 줄이 이미 곡 끝 근처면 (firstMs+12s) > (duration-400) → coerceIn 예외.
+    // stretch는 품질용 후처리이므로 불가능하면 원본 LRC 유지.
+    val clampMin = (firstMs + 12_000).toLong()
+    val clampMax = (durationMs - 400L).coerceAtLeast((firstMs + 1).toLong())
+    if (clampMin > clampMax) {
+      logStretchSkip(
+          segmentScoped,
+          "invalid_target_range",
+          parsed.size,
+          vocal,
+          durationMs,
+          drift = null,
+          ratio = null,
+          firstMs = firstMs,
+          lastMs = lastMs,
+          targetEnd = null,
+      )
+      return lrc
+    }
+    val targetEnd = (vocal.endMs - outroPadMs).coerceIn(clampMin, clampMax)
     val drift = targetEnd - lastMs
     if (abs(drift) < 900) {
       logStretchSkip(

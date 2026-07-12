@@ -4,7 +4,9 @@
  *
  * Hermes에서 컴파일/실행이 실패하는 경우가 있어, 마지막 수단으로 **시스템 WebView**의
  * JS 엔진에서 동일 코드를 실행합니다 (jintr는 플레이어의 `class` 등을 지원하지 않음).
+ * 백그라운드에서는 WebView 폴백을 쓰지 않는다 (hang 방지 → 상위가 yt-dlp 등으로 폴백).
  */
+import { AppState } from 'react-native';
 import { Platform } from 'youtubei.js';
 
 import { evalYoutubePlayerInWebView } from '@/lib/nrmYoutubeDecipherBridge';
@@ -32,7 +34,12 @@ Platform.shim.eval = async (data: { output: string }) => {
   } catch {
     try {
       return runWithNewFunctionIife(code);
-    } catch {
+    } catch (hermesErr) {
+      if (AppState.currentState !== 'active') {
+        throw hermesErr instanceof Error
+          ? hermesErr
+          : new Error('WEBVIEW_DECIPHER_BACKGROUND_FORBIDDEN');
+      }
       return await evalYoutubePlayerInWebView(code);
     }
   }

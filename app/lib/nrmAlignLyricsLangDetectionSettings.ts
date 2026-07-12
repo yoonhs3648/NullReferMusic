@@ -10,7 +10,12 @@ export const DEFAULT_ALIGN_LYRICS_LANG_DETECTION: NrmAlignLyricsLangDetectionMod
 export async function loadAlignLyricsLangDetectionMode(): Promise<NrmAlignLyricsLangDetectionMode> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw === 'auto' || raw === 'manual' || raw === 'espeak') return raw;
+    // eSpeak NG 모드는 UI에서 비활성 — 저장된 값도 무시하고 기본값으로 되돌림
+    if (raw === 'espeak') {
+      await AsyncStorage.setItem(STORAGE_KEY, DEFAULT_ALIGN_LYRICS_LANG_DETECTION);
+      return DEFAULT_ALIGN_LYRICS_LANG_DETECTION;
+    }
+    if (raw === 'auto' || raw === 'manual') return raw;
   } catch {
     /* ignore */
   }
@@ -20,7 +25,8 @@ export async function loadAlignLyricsLangDetectionMode(): Promise<NrmAlignLyrics
 export async function saveAlignLyricsLangDetectionMode(
   mode: NrmAlignLyricsLangDetectionMode,
 ): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, mode);
+  const next = mode === 'espeak' ? DEFAULT_ALIGN_LYRICS_LANG_DETECTION : mode;
+  await AsyncStorage.setItem(STORAGE_KEY, next);
 }
 
 export function isEspeakLangDetectionMode(

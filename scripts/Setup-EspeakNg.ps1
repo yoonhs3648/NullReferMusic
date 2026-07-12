@@ -1,13 +1,15 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  eSpeak NG Android arm64 패키지 준비 (공식 APK 데이터 + NDK CLI).
+  eSpeak NG Android arm64 package (official APK data + matching NDK CLI/lib).
 
 .DESCRIPTION
-  1. espeak-ng 1.52.0 공식 APK에서 libttsespeak.so · espeak-data 추출
-  2. NDK로 espeak-ng CLI (arm64) 빌드 — whisper-cli 와 동일 방식
-  3. library/espeak-ng/_bin/android-arm64-v8a/ 에 3개 파일 배치
-     → Publish-EspeakNgGithub.ps1 로 Release 업로드
+  1. Extract espeak-data only from espeak-ng 1.52.0 official APK
+  2. NDK-build espeak-ng CLI + libespeak-ng.so from the SAME build
+     Mixing APK libttsespeak.so with NDK CLI causes:
+     cannot locate symbol "espeak_ng_CompileIntonation"
+  3. Place files under library/espeak-ng/_bin/android-arm64-v8a/
+     then Publish-EspeakNgGithub.ps1 uploads Release
 #>
 param(
     [switch]$Force
@@ -55,6 +57,26 @@ function Test-Ready {
         -and (Get-Item $outDataZip).Length -ge 5000000
 }
 
+function Assert-LibHasCompileIntonationSymbol {
+    param([string]$LibPath, [string]$NdkRoot)
+    $prebuilt = Get-ChildItem (Join-Path $NdkRoot 'toolchains\llvm\prebuilt') -Directory |
+        Select-Object -First 1
+    if (-not $prebuilt) {
+        Write-Warning '[espeak-ng] llvm-nm missing; skip symbol check'
+        return
+    }
+    $nm = Join-Path $prebuilt.FullName 'bin\llvm-nm.exe'
+    if (-not (Test-Path $nm)) {
+        Write-Warning '[espeak-ng] llvm-nm.exe missing; skip symbol check'
+        return
+    }
+    $syms = & $nm -D $LibPath 2>$null | Out-String
+    if ($syms -notmatch 'espeak_ng_CompileIntonation') {
+        throw "libespeak-ng.so missing espeak_ng_CompileIntonation: $LibPath"
+    }
+    Write-Host '[espeak-ng] lib symbol OK: espeak_ng_CompileIntonation'
+}
+
 if ((Test-Ready) -and -not $Force) {
     Write-Host "[espeak-ng] OK existing package: $outRoot"
     exit 0
@@ -62,22 +84,17 @@ if ((Test-Ready) -and -not $Force) {
 
 New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
 
-# --- 1) 공식 APK에서 lib + data ---
+# --- 1) official APK: data only ---
 $work = Join-Path $env:TEMP ("nrm-espeak-pkg-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $apk = Join-Path $work 'espeak.apk'
 $zip = Join-Path $work 'espeak.zip'
 $unzip = Join-Path $work 'apk'
 
-Write-Host "[espeak-ng] download official APK ..."
+Write-Host '[espeak-ng] download official APK (data only) ...'
 Invoke-WebRequest -Uri $apkUrl -OutFile $apk -UseBasicParsing
 Copy-Item $apk $zip -Force
 Expand-Archive $zip $unzip -Force
-
-$libSrc = Join-Path $unzip 'lib\arm64-v8a\libttsespeak.so'
-if (-not (Test-Path $libSrc)) { throw "libttsespeak.so not found in APK" }
-Copy-Item $libSrc $outLib -Force
-Write-Host "[espeak-ng] lib -> $outLib ($((Get-Item $outLib).Length) bytes)"
 
 $dataZipSrc = Get-ChildItem -Path (Join-Path $unzip 'res') -Filter '*.zip' -ErrorAction SilentlyContinue |
     Sort-Object Length -Descending | Select-Object -First 1
@@ -104,7 +121,7 @@ try {
 }
 Write-Host "[espeak-ng] data zip -> $outDataZip ($((Get-Item $outDataZip).Length) bytes)"
 
-# --- 2) NDK espeak-ng CLI ---
+# --- 2) NDK: CLI + shared lib from same build ---
 if (-not (Test-Path (Join-Path $srcDir '.git'))) {
     if (Test-Path $srcDir) { Remove-Item $srcDir -Recurse -Force }
     Write-Host "[espeak-ng] clone source $tag ..."
@@ -119,7 +136,7 @@ $androidBuild = Join-Path $srcDir 'build-android-arm64'
 
 if ($Force -and (Test-Path $androidBuild)) { Remove-Item $androidBuild -Recurse -Force }
 
-Write-Host '[espeak-ng] NDK build espeak-ng CLI (arm64) ...'
+Write-Host '[espeak-ng] NDK build espeak-ng CLI + lib (arm64) ...'
 & $cmake -G Ninja -S $srcDir -B $androidBuild `
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
     "-DCMAKE_MAKE_PROGRAM=$ninja" `
@@ -144,6 +161,17 @@ if (-not (Test-Path $builtBin)) {
 if (-not $builtBin -or -not (Test-Path $builtBin)) { throw 'espeak-ng binary not found after NDK build' }
 Copy-Item $builtBin $outBin -Force
 Write-Host "[espeak-ng] bin -> $outBin ($((Get-Item $outBin).Length) bytes)"
+
+# Same-build shared lib only (never APK libttsespeak.so)
+$builtLib = Get-ChildItem -Path $androidBuild -Recurse -File -Filter 'libespeak-ng.so' -ErrorAction SilentlyContinue |
+    Sort-Object Length -Descending |
+    Select-Object -First 1
+if (-not $builtLib) {
+    throw 'libespeak-ng.so not found after NDK build (do not use APK libttsespeak.so)'
+}
+Copy-Item $builtLib.FullName $outLib -Force
+Write-Host "[espeak-ng] lib -> $outLib ($((Get-Item $outLib).Length) bytes) from NDK build"
+Assert-LibHasCompileIntonationSymbol -LibPath $outLib -NdkRoot $ndk
 
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 

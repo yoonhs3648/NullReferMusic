@@ -15,10 +15,23 @@ object EspeakLyricsPreprocessor {
       NrmFileLogger.warn("espeak", "skip_preprocess probe_fail lines=${lines.size}")
       return lines
     }
-    return lines.map { line ->
-      val trimmed = line.trim()
-      if (trimmed.isEmpty()) trimmed
-      else EspeakPhonemeToHangul.transliterateLineMixed(trimmed, paths)
-    }
+    var latinWords = 0
+    val out =
+        lines.map { line ->
+          val trimmed = line.trim()
+          if (trimmed.isEmpty()) {
+            trimmed
+          } else {
+            val converted = EspeakPhonemeToHangul.transliterateLineMixed(trimmed, paths)
+            if (converted != trimmed) latinWords += 1
+            converted
+          }
+        }
+    NrmFileLogger.log(
+        "espeak",
+        "preprocess_done lines=${lines.size} changedLines=$latinWords " +
+            "sample=${out.firstOrNull { it.any { ch -> ch.code in 0xAC00..0xD7A3 } }?.take(48) ?: ""}",
+    )
+    return out
   }
 }

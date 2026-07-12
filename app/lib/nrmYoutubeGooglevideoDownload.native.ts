@@ -7,7 +7,10 @@ import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
 import { NativeModules } from 'react-native';
 
-import { downloadMediaUrlViaWebView, NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS } from '@/lib/nrmYoutubeDecipherBridge';
+import {
+  downloadMediaUrlViaWebView,
+  isYoutubeWebViewAllowed,
+} from '@/lib/nrmYoutubeDecipherBridge';
 
 type NrmAudioMetaNative = {
   concatFiles?: (parts: string[], dest: string) => Promise<void>;
@@ -224,20 +227,24 @@ export async function downloadGooglevideoAudioToFileUri(
     rawLen != null && rawLen !== '' ? Number(rawLen) : 0;
 
   const urlWithCpn = `${formatUrl}&cpn=${encodeURIComponent(cpn)}`;
-  const webviewDeadline =
-    options.deadlineMs != null
-      ? Math.min(options.deadlineMs, Date.now() + NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS)
-      : Date.now() + NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS;
+  // deadline 이 없으면 타임아웃 없이 완료/실패까지 대기 (추출 폴백은 실패 시 즉시 다음 경로)
+  const webviewOptions: {
+    isCancelled: () => boolean;
+    deadlineMs?: number;
+  } = { isCancelled };
+  if (options.deadlineMs != null) {
+    webviewOptions.deadlineMs = options.deadlineMs;
+  }
 
-  try {
-    throwIfCancelled(isCancelled);
-    await downloadMediaUrlViaWebView(urlWithCpn, destUri, {
-      isCancelled,
-      deadlineMs: webviewDeadline,
-    });
-    return;
-  } catch {
-    await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+  // 포그라운드에서만 WebView 우선. 백그라운드는 네이티브 downloadAsync 로 바로 진행.
+  if (isYoutubeWebViewAllowed()) {
+    try {
+      throwIfCancelled(isCancelled);
+      await downloadMediaUrlViaWebView(urlWithCpn, destUri, webviewOptions);
+      return;
+    } catch {
+      await FileSystem.deleteAsync(destUri, { idempotent: true }).catch(() => {});
+    }
   }
 
   let lastErr: unknown;

@@ -9,7 +9,6 @@ import { displayLabelFromAudioFileName, sanitizeFileBase } from '@/lib/nrmYoutub
 import { downloadGooglevideoAudioToFileUri } from '@/lib/nrmYoutubeGooglevideoDownload.native';
 import {
   isOnDeviceDownloadAvailable,
-  cancelActiveYtdlpDownload,
   downloadOnDevice,
   transcodeAudioOnDevice,
 } from '@/lib/onDeviceDownload';
@@ -17,21 +16,17 @@ import type {
   YoutubeSearchItem,
   YoutubeSearchOutcome,
 } from '@/lib/youtubeSearchTypes';
-import { logNrmRunError } from '@/lib/nrmDevLog';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
 import {
   notifyInnertubeExtractFailed,
   notifyInnertubeExtractSucceeded,
 } from '@/lib/nrmInnertubeExtractSession';
-import {
-  NRM_INNERTUBE_EXTRACT_TOTAL_MS,
-  NRM_INNERTUBE_PER_CLIENT_TIMEOUT_MS,
-  NRM_YTDLP_EXTRACT_TIMEOUT_MS,
-} from '@/lib/nrmDownloadTimeouts';
+import { NRM_INNERTUBE_STALL_MS } from '@/lib/nrmDownloadTimeouts';
 import { cancelActiveInnertubeExtractions } from '@/lib/nrmYoutubeDecipherBridge';
 import {
-  createExtractDeadlineYoutubeFetch,
   nrmYoutubeFetch,
+  subscribeInnertubeFetchProgress,
 } from '@/lib/nrmYoutubeFetch.native';
 import { armWallClockTimeout, disarmWallClockTimeout } from '@/lib/nrmWallClockTimeout';
 import {
@@ -40,12 +35,75 @@ import {
 } from '@/lib/nrmYoutubeStrings';
 import * as FileSystem from 'expo-file-system/src/legacy/FileSystem';
 
-let innertubeSingleton: Promise<Innertube> | null = null;
+type InnertubeClientLabel = 'android' | 'web' | 'ios';
+
+/** 프로세스 생존 동안 클라이언트별 Innertube 세션 1개씩 재사용 (매 검색/추출 create 금지) */
+const innertubeByClient = new Map<InnertubeClientLabel, Promise<Innertube>>();
+
+/**
+ * Android 검색이 continuation 없이 끝나면 true.
+ * 이후 검색은 web을 우선해 무한스크롤을 살리고, 왕복(android+web)으로 1초를 넘기지 않게 한다.
+ * android 세션 자체는 계속 유지(다운로드·폴백용).
+ */
+let preferWebForSearchPagination = false;
 
 type WalkNode = {
   is: (...t: unknown[]) => boolean;
   as: (...t: unknown[]) => unknown;
 };
+
+function clientTypeForLabel(label: InnertubeClientLabel): ClientType {
+  if (label === 'android') return ClientType.ANDROID;
+  if (label === 'ios') return ClientType.IOS;
+  return ClientType.WEB;
+}
+
+function invalidateInnertubeClient(label: InnertubeClientLabel): void {
+  innertubeByClient.delete(label);
+}
+
+function getOrCreateInnertubeClient(label: InnertubeClientLabel): Promise<Innertube> {
+  const existing = innertubeByClient.get(label);
+  if (existing) return existing;
+  const created = Innertube.create({
+    lang: 'ko',
+    location: 'KR',
+    client_type: clientTypeForLabel(label),
+    fetch: nrmYoutubeFetch,
+  }).catch((err) => {
+    invalidateInnertubeClient(label);
+    throw err;
+  });
+  innertubeByClient.set(label, created);
+  return created;
+}
+
+/** 앱 콜드스타트 시 android(또는 iOS) 세션만 미리 만든다. web은 폴백 시점에만 생성. */
+export async function warmInnertubeSessions(): Promise<void> {
+  const label: InnertubeClientLabel =
+    Platform.OS === 'android'
+      ? 'android'
+      : isStandaloneIos()
+        ? 'ios'
+        : 'web';
+  const startedAt = Date.now();
+  const already = innertubeByClient.has(label);
+  try {
+    await getOrCreateInnertubeClient(label);
+    logNrmDev('innertube.session', {
+      event: 'warm_ok',
+      client: label,
+      elapsedMs: Date.now() - startedAt,
+      sessionCached: already,
+    });
+  } catch (e) {
+    logNrmRunError('innertube.session', e, {
+      event: 'warm_fail',
+      client: label,
+      elapsedMs: Date.now() - startedAt,
+    });
+  }
+}
 
 /** Player.decipher 에 넘길 URL·cipher 정보가 있는 포맷만 남깁니다. */
 type PlaybackFields = {
@@ -76,102 +134,69 @@ function shouldRetryInnertubeDownload(msg: string): boolean {
   );
 }
 
+/** innertube·yt-dlp 추출 중단 (사용자 취소·폴백 전환) */
+class ExtractAbortedError extends Error {
+  readonly reason: 'timeout' | 'cancelled';
+
+  constructor(reason: 'timeout' | 'cancelled') {
+    super(reason === 'timeout' ? 'EXTRACT_TIMEOUT' : 'EXTRACT_CANCELLED');
+    this.name = 'ExtractAbortedError';
+    this.reason = reason;
+  }
+}
+
+/** @deprecated 타임아웃 폴백 제거 — 호환용으로만 유지 */
+export class YtdlpExtractTimeoutError extends ExtractAbortedError {
+  constructor() {
+    super('timeout');
+    this.name = 'YtdlpExtractTimeoutError';
+  }
+}
+
+/** @deprecated ExtractAbortedError 사용 */
+class ExtractRaceCancelledError extends ExtractAbortedError {
+  constructor() {
+    super('cancelled');
+    this.name = 'ExtractRaceCancelledError';
+  }
+}
+
 type InnertubeClientSpec = {
-  label: string;
+  label: InnertubeClientLabel;
   create: () => Promise<Innertube>;
 };
 
-/** Android: android → web */
-function buildExtractClientSpecs(fetchFn: typeof fetch): InnertubeClientSpec[] {
+function pushClientSpec(
+  specs: InnertubeClientSpec[],
+  label: InnertubeClientLabel,
+): void {
+  specs.push({
+    label,
+    create: () => getOrCreateInnertubeClient(label),
+  });
+}
+
+/** 다운로드/추출: Android 기기에서는 android → web (세션은 클라이언트별 1회 생성 후 재사용) */
+function buildExtractClientSpecs(_fetchFn: typeof fetch): InnertubeClientSpec[] {
   const specs: InnertubeClientSpec[] = [];
-  const push = (label: string, factory: () => Promise<Innertube>) => {
-    specs.push({ label, create: () => factory() });
-  };
 
   if (Platform.OS === 'android') {
-    push('android', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.ANDROID,
-        fetch: fetchFn,
-      }),
-    );
-    push('web', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.WEB,
-        fetch: fetchFn,
-      }),
-    );
+    pushClientSpec(specs, 'android');
+    pushClientSpec(specs, 'web');
     return specs;
   }
 
   if (isStandaloneIos()) {
-    push('ios', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.IOS,
-        fetch: fetchFn,
-      }),
-    );
-    push('android', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.ANDROID,
-        fetch: fetchFn,
-      }),
-    );
-    push('web', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.WEB,
-        fetch: fetchFn,
-      }),
-    );
+    pushClientSpec(specs, 'ios');
+    pushClientSpec(specs, 'android');
+    pushClientSpec(specs, 'web');
     return specs;
   }
 
-  push('web', () =>
-    Innertube.create({
-      lang: 'ko',
-      location: 'KR',
-      client_type: ClientType.WEB,
-      fetch: fetchFn,
-    }),
-  );
-  push('android', () =>
-    Innertube.create({
-      lang: 'ko',
-      location: 'KR',
-      client_type: ClientType.ANDROID,
-      fetch: fetchFn,
-    }),
-  );
-  push('ios', () =>
-    Innertube.create({
-      lang: 'ko',
-      location: 'KR',
-      client_type: ClientType.IOS,
-      fetch: fetchFn,
-    }),
-  );
+  pushClientSpec(specs, 'web');
+  pushClientSpec(specs, 'android');
+  pushClientSpec(specs, 'ios');
   return specs;
-}
-
-function attemptDeadlineMs(wallDeadline: number): number {
-  return Math.min(
-    wallDeadline,
-    Date.now() + NRM_INNERTUBE_PER_CLIENT_TIMEOUT_MS,
-  );
-}
-
-function isInnertubeClientTimeout(e: unknown): boolean {
-  return e instanceof ExtractAbortedError && e.reason === 'timeout';
 }
 
 function isInnertubeUserCancelled(e: unknown): boolean {
@@ -181,50 +206,17 @@ function isInnertubeUserCancelled(e: unknown): boolean {
   );
 }
 
-let cancelWaitSeq = 0;
-
-function waitForCancelOrDeadline(
-  isCancelled: () => boolean,
-  deadlineMs: number,
-): Promise<never> {
-  return new Promise((_, reject) => {
-    const token = `innertube-cancel-${++cancelWaitSeq}`;
-    let disarm: (() => void) | undefined;
-    const tick = () => {
-      if (isCancelled()) {
-        disarm?.();
-        reject(new ExtractRaceCancelledError());
-        return;
-      }
-      if (Date.now() >= deadlineMs) {
-        disarm?.();
-        reject(new ExtractAbortedError('timeout'));
-        return;
-      }
-      disarm = armWallClockTimeout(token, 200, tick);
-    };
-    disarm = armWallClockTimeout(token, 200, tick);
-  });
-}
-
 async function bindCancellation<T>(
   promise: Promise<T>,
   isCancelled: () => boolean,
-  deadlineMs: number,
 ): Promise<T> {
   if (isCancelled()) {
     throw new ExtractRaceCancelledError();
   }
-  if (Date.now() >= deadlineMs) {
-    throw new ExtractAbortedError('timeout');
-  }
-  return Promise.race([
-    promise,
-    waitForCancelOrDeadline(isCancelled, deadlineMs),
-  ]);
+  return promise;
 }
 
-/** 추출 전용 — 플랫폼별 클라이언트 순서 (fetch 는 호출부에서 클라이언트별 주입) */
+/** 추출 전용 — 플랫폼별 클라이언트 순서 */
 function innertubeExtractClientSpecs(
   fetchFn: typeof fetch,
 ): InnertubeClientSpec[] {
@@ -233,27 +225,17 @@ function innertubeExtractClientSpecs(
 
 function innertubeBrowseClientSpecs(): InnertubeClientSpec[] {
   const specs: InnertubeClientSpec[] = [];
-  const push = (label: string, factory: () => Promise<Innertube>) => {
-    specs.push({ label, create: () => factory() });
-  };
 
+  // 검색: 기본 android → 실패 시 web.
+  // android가 continuation을 안 주면 preferWebForSearchPagination 으로 web 우선(세션은 둘 다 유지).
   if (Platform.OS === 'android') {
-    push('android', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.ANDROID,
-        fetch: nrmYoutubeFetch,
-      }),
-    );
-    push('web', () =>
-      Innertube.create({
-        lang: 'ko',
-        location: 'KR',
-        client_type: ClientType.WEB,
-        fetch: nrmYoutubeFetch,
-      }),
-    );
+    if (preferWebForSearchPagination) {
+      pushClientSpec(specs, 'web');
+      pushClientSpec(specs, 'android');
+    } else {
+      pushClientSpec(specs, 'android');
+      pushClientSpec(specs, 'web');
+    }
     return specs;
   }
 
@@ -261,27 +243,13 @@ function innertubeBrowseClientSpecs(): InnertubeClientSpec[] {
 }
 
 export function getInnertube(): Promise<Innertube> {
-  if (!innertubeSingleton) {
-    const base = {
-      lang: 'ko' as const,
-      location: 'KR' as const,
-      fetch: nrmYoutubeFetch,
-    };
-    if (Platform.OS === 'android') {
-      innertubeSingleton = Innertube.create({
-        ...base,
-        client_type: ClientType.ANDROID,
-      });
-    } else if (isStandaloneIos()) {
-      innertubeSingleton = Innertube.create({
-        ...base,
-        client_type: ClientType.IOS,
-      });
-    } else {
-      innertubeSingleton = Innertube.create(base);
-    }
+  if (Platform.OS === 'android') {
+    return getOrCreateInnertubeClient('android');
   }
-  return innertubeSingleton;
+  if (isStandaloneIos()) {
+    return getOrCreateInnertubeClient('ios');
+  }
+  return getOrCreateInnertubeClient('web');
 }
 
 function* walkNodes(nodes: Iterable<WalkNode>): Generator<WalkNode> {
@@ -306,16 +274,30 @@ function thumbnailUrl(thumbnails: { url?: string }[]): string {
 function extractVideosFromSearch(search: { results: Iterable<unknown> }): YoutubeSearchItem[] {
   const items: YoutubeSearchItem[] = [];
   for (const node of walkNodes(search.results as Iterable<WalkNode>)) {
-    if (!node.is(YTNodes.Video)) continue;
-    const v = node.as(YTNodes.Video) as InstanceType<typeof YTNodes.Video>;
-    const title = v.title?.text?.trim() ?? '';
-    if (!v.video_id || !title) continue;
-    items.push({
-      videoId: v.video_id,
-      title,
-      channelTitle: v.author?.name?.trim() ?? '',
-      thumbnailUrl: thumbnailUrl(v.thumbnails ?? []),
-    });
+    if (node.is(YTNodes.Video)) {
+      const v = node.as(YTNodes.Video) as InstanceType<typeof YTNodes.Video>;
+      const title = v.title?.text?.trim() ?? '';
+      if (!v.video_id || !title) continue;
+      items.push({
+        videoId: v.video_id,
+        title,
+        channelTitle: v.author?.name?.trim() ?? '',
+        thumbnailUrl: thumbnailUrl(v.thumbnails ?? []),
+      });
+      continue;
+    }
+    // Android 검색 결과는 CompactVideo 로 오는 경우가 있음
+    if (node.is(YTNodes.CompactVideo)) {
+      const v = node.as(YTNodes.CompactVideo) as InstanceType<typeof YTNodes.CompactVideo>;
+      const title = v.title?.text?.trim() ?? '';
+      if (!v.video_id || !title) continue;
+      items.push({
+        videoId: v.video_id,
+        title,
+        channelTitle: v.author?.name?.trim() ?? '',
+        thumbnailUrl: thumbnailUrl(v.thumbnails ?? []),
+      });
+    }
   }
   return items;
 }
@@ -347,6 +329,12 @@ export async function searchYoutubePageOnDevice(
           dev: { where: 'innertube.session_missing', cursor },
         };
       }
+      const contStartedAt = Date.now();
+      logNrmDev('innertube.search', {
+        event: 'continuation_start',
+        cursor,
+        querySample: q.slice(0, 120),
+      });
       const next = await session.getContinuation();
       innertubeSearchSessions.set(cursor, next);
       const items = extractVideosFromSearch(next);
@@ -354,29 +342,111 @@ export async function searchYoutubePageOnDevice(
       if (!hasMore) {
         innertubeSearchSessions.delete(cursor);
       }
+      logNrmDev('innertube.search', {
+        event: 'continuation_ok',
+        cursor,
+        itemCount: items.length,
+        hasMore,
+        elapsedMs: Date.now() - contStartedAt,
+      });
       return { ok: true, items, nextCursor: hasMore ? cursor : null };
     }
 
     innertubeSearchSessions.clear();
+    // 세션 풀 재사용: android → web (또는 pagination sticky 시 web → android)
     const specs = innertubeBrowseClientSpecs();
+    logNrmDev('innertube.search', {
+      event: 'start',
+      querySample: q.slice(0, 120),
+      clients: specs.map((s) => s.label),
+      preferWebForSearchPagination,
+    });
     let search: InnertubeSearchFeed | undefined;
+    let usedClient: InnertubeClientLabel | undefined;
     let lastSearchErr: unknown;
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i]!;
+      const attemptStartedAt = Date.now();
+      const hadCachedSession = innertubeByClient.has(spec.label);
+      logNrmDev('innertube.search', {
+        event: 'client_attempt',
+        querySample: q.slice(0, 120),
+        client: spec.label,
+        attempt: i + 1,
+        clientsTotal: specs.length,
+        sessionCached: hadCachedSession,
+      });
       try {
         const yt = await spec.create();
+        logNrmDev('innertube.search', {
+          event: 'session_ok',
+          client: spec.label,
+          attempt: i + 1,
+          elapsedMs: Date.now() - attemptStartedAt,
+          sessionCached: hadCachedSession,
+        });
         search = await yt.search(q, { type: 'video' });
+        usedClient = spec.label;
+        // android는 결과만 오고 continuation이 비는 경우가 많음 → web으로 페이지네이션 확보
+        if (
+          usedClient === 'android' &&
+          !search.has_continuation &&
+          specs.some((s) => s.label === 'web')
+        ) {
+          const webStartedAt = Date.now();
+          const webHadCache = innertubeByClient.has('web');
+          try {
+            const webYt = await getOrCreateInnertubeClient('web');
+            const webSearch = await webYt.search(q, { type: 'video' });
+            preferWebForSearchPagination = true;
+            search = webSearch;
+            usedClient = 'web';
+            logNrmDev('innertube.search', {
+              event: 'pagination_fallback_web',
+              querySample: q.slice(0, 120),
+              reason: 'android_no_continuation',
+              elapsedMs: Date.now() - webStartedAt,
+              sessionCached: webHadCache,
+              hasMore: webSearch.has_continuation,
+            });
+          } catch (webErr) {
+            logNrmRunError('innertube.search', webErr, {
+              event: 'pagination_fallback_web_fail',
+              querySample: q.slice(0, 120),
+              elapsedMs: Date.now() - webStartedAt,
+            });
+            // android 결과 유지 (무한스크롤만 없음)
+          }
+        }
+        logNrmDev('innertube.search', {
+          event: 'search_ok',
+          querySample: q.slice(0, 120),
+          client: usedClient,
+          attempt: i + 1,
+          elapsedMs: Date.now() - attemptStartedAt,
+          fellBack: i > 0 || usedClient !== spec.label,
+          hasContinuation: !!search.has_continuation,
+        });
         break;
       } catch (e) {
         lastSearchErr = e;
-        const msg = e instanceof Error ? e.message : String(e);
+        const hasNext = i < specs.length - 1;
         logNrmRunError('innertube.search', e, {
+          event: 'client_fail',
           querySample: q.slice(0, 120),
           client: spec.label,
           attempt: i + 1,
-          willRetry: i < specs.length - 1,
+          elapsedMs: Date.now() - attemptStartedAt,
+          willRetry: hasNext,
+          fallbackTo: hasNext ? specs[i + 1]!.label : null,
         });
-        if (i < specs.length - 1) {
+        if (hasNext) {
+          logNrmDev('innertube.search', {
+            event: 'fallback',
+            from: spec.label,
+            to: specs[i + 1]!.label,
+            querySample: q.slice(0, 120),
+          });
           continue;
         }
         throw e;
@@ -395,10 +465,19 @@ export async function searchYoutubePageOnDevice(
       innertubeSearchSessions.set(id, search);
       nextCursor = id;
     }
+    logNrmDev('innertube.search', {
+      event: 'ok',
+      querySample: q.slice(0, 120),
+      client: usedClient ?? null,
+      itemCount: items.length,
+      hasMore: nextCursor != null,
+      nextCursor,
+    });
     return { ok: true, items, nextCursor };
   } catch (e) {
     const cause = e instanceof Error ? e.message : String(e);
     logNrmRunError('innertube.search', e, {
+      event: 'fail',
       querySample: q.slice(0, 120),
       cursor: cursor ?? null,
     });
@@ -584,70 +663,74 @@ async function extractWithYtDlp(videoId: string): Promise<string> {
   return rawPath.startsWith('file://') ? rawPath : `file://${rawPath}`;
 }
 
-/** innertube·yt-dlp 추출 중단 (타임아웃·폴백 전환) */
-class ExtractAbortedError extends Error {
-  readonly reason: 'timeout' | 'cancelled';
-
-  constructor(reason: 'timeout' | 'cancelled') {
-    super(reason === 'timeout' ? 'EXTRACT_TIMEOUT' : 'EXTRACT_CANCELLED');
-    this.name = 'ExtractAbortedError';
-    this.reason = reason;
-  }
-}
-
-/** yt-dlp 5분 초과 — 다운로드 요청 전체 취소 대상 */
-export class YtdlpExtractTimeoutError extends ExtractAbortedError {
-  constructor() {
-    super('timeout');
-    this.name = 'YtdlpExtractTimeoutError';
-  }
-}
-
-/** @deprecated ExtractAbortedError 사용 */
-class ExtractRaceCancelledError extends ExtractAbortedError {
-  constructor() {
-    super('cancelled');
-    this.name = 'ExtractRaceCancelledError';
-  }
-}
-
-async function withExtractTimeout<T>(
-  run: (isAborted: () => boolean, deadlineMs: number) => Promise<T>,
-  timeoutMs: number,
-  onTimeout: () => void,
-): Promise<T> {
+/**
+ * InnerTube 추출 중 HTTP/단계 진행이 멈추면 네이티브 wall-clock 로 즉시 abort → yt-dlp.
+ * 긴 “전체 추출 타임아웃”이 아니라 스톨(무진행) 감지이다.
+ * googlevideo 미디어 다운로드 구간은 스톨을 잠시 끈다 (수 분 소요 가능).
+ */
+function runInnertubeExtractWithStallWatchdog(
+  videoId: string,
+): Promise<string> {
   let aborted = false;
-  const isAborted = () => aborted;
-  const deadlineMs = Date.now() + timeoutMs;
-  const timeoutId = `extract-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  let disarmWall: (() => void) | undefined;
+  let settled = false;
+  let stallPaused = false;
+  let rejectStall: ((e: Error) => void) | null = null;
+  const stallId = `innertube-stall:${videoId}:${Date.now()}`;
 
-  const fireTimeout = () => {
-    if (aborted) return;
-    aborted = true;
-    onTimeout();
+  const stallPromise = new Promise<string>((_, reject) => {
+    rejectStall = reject;
+  });
+
+  const armStall = () => {
+    if (settled || stallPaused) return;
+    disarmWallClockTimeout(stallId);
+    armWallClockTimeout(stallId, NRM_INNERTUBE_STALL_MS, () => {
+      if (settled || stallPaused) return;
+      aborted = true;
+      void cancelActiveInnertubeExtractions('stall');
+      logDownloadStage('pipeline', 'innertube_stall', {
+        videoId,
+        stallMs: NRM_INNERTUBE_STALL_MS,
+        fallback: 'ytdlp',
+      });
+      rejectStall?.(new ExtractAbortedError('timeout'));
+    });
   };
 
-  try {
-    return await Promise.race([
-      run(isAborted, deadlineMs),
-      new Promise<never>((_, reject) => {
-        const left = Math.max(0, deadlineMs - Date.now());
-        disarmWall = armWallClockTimeout(timeoutId, left, () => {
-          fireTimeout();
-          reject(new ExtractAbortedError('timeout'));
-        });
-      }),
-    ]);
-  } finally {
-    disarmWall?.();
-    disarmWallClockTimeout(timeoutId);
-  }
+  const onProgress = () => {
+    if (settled || aborted || stallPaused) return;
+    armStall();
+  };
+
+  const pauseStallForMediaDownload = () => {
+    stallPaused = true;
+    disarmWallClockTimeout(stallId);
+  };
+
+  armStall();
+  const unsubHttp = subscribeInnertubeFetchProgress(onProgress);
+
+  const work = extractWithInnertube(
+    videoId,
+    () => aborted,
+    onProgress,
+    pauseStallForMediaDownload,
+  );
+
+  return Promise.race([work, stallPromise]).finally(() => {
+    settled = true;
+    aborted = true;
+    disarmWallClockTimeout(stallId);
+    unsubHttp();
+    // race 패배 쪽 미처리 rejection 방지
+    void work.catch(() => {});
+    void stallPromise.catch(() => {});
+  });
 }
 
 /**
- * Android: innertube 우선 (클라이언트별 28초 × android→ios→web, 합산 90초) → yt-dlp 폴백.
- * yt-dlp는 5분 내 완료되지 않으면 YtdlpExtractTimeoutError.
+ * Android: innertube(android → web) → 스톨/실패 시 yt-dlp.
+ * 큐 항목마다 동일 순서로 처음부터 시도.
  */
 async function extractAudioSequentialFallback(videoId: string): Promise<string> {
   const ytDlpAvailable =
@@ -660,20 +743,7 @@ async function extractAudioSequentialFallback(videoId: string): Promise<string> 
   let innertubeErr: unknown;
   const extractStartedAt = Date.now();
   try {
-    const uri = await withExtractTimeout(
-      (isAborted, deadlineMs) =>
-        extractWithInnertube(videoId, isAborted, deadlineMs),
-      NRM_INNERTUBE_EXTRACT_TOTAL_MS,
-      () => {
-        innertubeSingleton = null;
-        void cancelActiveInnertubeExtractions('timeout');
-        logDownloadStage('innertube', 'extract_timeout', {
-          videoId,
-          timeoutMs: NRM_INNERTUBE_EXTRACT_TOTAL_MS,
-          elapsedMs: Date.now() - extractStartedAt,
-        });
-      },
-    );
+    const uri = await runInnertubeExtractWithStallWatchdog(videoId);
     logDownloadStage('pipeline', 'extract_innertube_ok', {
       videoId,
       elapsedMs: Date.now() - extractStartedAt,
@@ -682,49 +752,44 @@ async function extractAudioSequentialFallback(videoId: string): Promise<string> 
     return uri;
   } catch (e) {
     innertubeErr = e;
-    if (e instanceof YtdlpExtractTimeoutError) throw e;
-    const timedOut = e instanceof ExtractAbortedError && e.reason === 'timeout';
-    notifyInnertubeExtractFailed(
-      videoId,
-      timedOut ? 'timeout' : 'error',
-    );
+    if (isInnertubeUserCancelled(e)) throw e;
+    const stalled =
+      e instanceof ExtractAbortedError && e.reason === 'timeout';
+    notifyInnertubeExtractFailed(videoId, stalled ? 'timeout' : 'error');
     logNrmRunError('download.innertube', e, {
+      event: stalled ? 'stall_fallback' : 'all_clients_fail',
       videoId,
       fallback: 'ytdlp',
-      timedOut,
+      elapsedMs: Date.now() - extractStartedAt,
+    });
+    logDownloadStage('pipeline', 'fallback_to_ytdlp', {
+      videoId,
+      reason: stalled ? 'stall' : 'error',
       elapsedMs: Date.now() - extractStartedAt,
     });
   }
 
   try {
-    const uri = await withExtractTimeout(
-      (_isAborted, _deadlineMs) => extractWithYtDlp(videoId),
-      NRM_YTDLP_EXTRACT_TIMEOUT_MS,
-      () => {
-        void cancelActiveYtdlpDownload();
-        logDownloadStage('ytdlp', 'extract_timeout', {
-          videoId,
-          timeoutMs: NRM_YTDLP_EXTRACT_TIMEOUT_MS,
-        });
-      },
-    );
+    logDownloadStage('ytdlp', 'extract_start', { videoId });
+    const uri = await extractWithYtDlp(videoId);
     logDownloadStage('pipeline', 'extract_ytdlp_ok', {
       videoId,
       afterInnertubeFail: true,
+      elapsedMs: Date.now() - extractStartedAt,
     });
     return uri;
   } catch (ytdlpErr) {
-    if (
-      ytdlpErr instanceof ExtractAbortedError &&
-      ytdlpErr.reason === 'timeout'
-    ) {
-      throw new YtdlpExtractTimeoutError();
-    }
-    logNrmRunError('download.ytdlp', ytdlpErr, { videoId });
+    logNrmRunError('download.ytdlp', ytdlpErr, {
+      event: 'fail',
+      videoId,
+      elapsedMs: Date.now() - extractStartedAt,
+    });
     const second =
       ytdlpErr instanceof Error ? ytdlpErr : new Error(String(ytdlpErr));
     const first =
-      innertubeErr instanceof Error ? innertubeErr : new Error(String(innertubeErr));
+      innertubeErr instanceof Error
+        ? innertubeErr
+        : new Error(String(innertubeErr));
     throw second.message ? second : first;
   }
 }
@@ -734,56 +799,81 @@ async function extractAudioSequentialFallback(videoId: string): Promise<string> 
 async function extractWithInnertube(
   videoId: string,
   isCancelled: () => boolean = () => false,
-  deadlineMs?: number,
+  onProgress: () => void = () => {},
+  pauseStallForMediaDownload: () => void = () => {},
 ): Promise<string> {
   const cacheRoot = FileSystem.cacheDirectory;
   if (!cacheRoot) {
     throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
   }
 
-  const wallDeadline =
-    deadlineMs ?? Date.now() + NRM_INNERTUBE_EXTRACT_TOTAL_MS;
-  const probeFetch = createExtractDeadlineYoutubeFetch({
-    deadlineMs: wallDeadline,
-    isAborted: isCancelled,
-  });
-  const clientCount = innertubeExtractClientSpecs(probeFetch).length;
-
+  const specs = innertubeExtractClientSpecs(nrmYoutubeFetch);
   let lastError: unknown;
   const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
   const encode = await loadDownloadEncodeSettings();
   const extractStartedAt = Date.now();
+  const ping = () => {
+    onProgress();
+  };
 
-  for (let i = 0; i < clientCount; i++) {
-    if (isCancelled() || Date.now() >= wallDeadline) {
-      throw new ExtractAbortedError('timeout');
+  logDownloadStage('innertube', 'extract_start', {
+    videoId,
+    clients: specs.map((s) => s.label),
+  });
+  ping();
+
+  for (let i = 0; i < specs.length; i++) {
+    if (isCancelled()) {
+      throw new ExtractRaceCancelledError();
     }
-    const clientDeadline = attemptDeadlineMs(wallDeadline);
-    const clientFetch = createExtractDeadlineYoutubeFetch({
-      deadlineMs: clientDeadline,
-      isAborted: isCancelled,
-    });
-    const spec = innertubeExtractClientSpecs(clientFetch)[i]!;
+    const spec = specs[i]!;
     let tempUriForCleanup: string | undefined;
     const clientLabel = spec.label;
     const attemptStartedAt = Date.now();
     try {
+      const hadCachedSession = innertubeByClient.has(clientLabel);
       logDownloadStage('innertube', 'client_attempt', {
         videoId,
         attempt: i + 1,
         client: clientLabel,
+        clientsTotal: specs.length,
         elapsedMs: Date.now() - extractStartedAt,
-        clientDeadlineMs: Math.max(0, clientDeadline - Date.now()),
+        sessionCached: hadCachedSession,
       });
-      const yt = await bindCancellation(spec.create(), isCancelled, clientDeadline);
+      ping();
+      const yt = await bindCancellation(spec.create(), isCancelled);
+      logDownloadStage('innertube', 'session_ok', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+        attemptMs: Date.now() - attemptStartedAt,
+        sessionCached: hadCachedSession,
+      });
+      ping();
       if (isCancelled()) {
         throw new ExtractRaceCancelledError();
       }
+      logDownloadStage('innertube', 'basic_info_start', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+      });
+      ping();
       const info = await bindCancellation(
         yt.getBasicInfo(videoId),
         isCancelled,
-        clientDeadline,
       );
+      logDownloadStage('innertube', 'basic_info_ok', {
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        elapsedMs: Date.now() - extractStartedAt,
+        attemptMs: Date.now() - attemptStartedAt,
+        hasStreamingData: !!info.streaming_data,
+      });
+      ping();
       if (!info.streaming_data) {
         throw new Error('STREAMING_DATA_MISSING');
       }
@@ -816,10 +906,10 @@ async function extractWithInnertube(
         client: clientLabel,
         elapsedMs: Date.now() - extractStartedAt,
       });
+      ping();
       const formatUrl = await bindCancellation(
         format.decipher(info.actions.session.player),
         isCancelled,
-        clientDeadline,
       );
       if (!formatUrl) {
         throw new Error('NO_STREAM_URL');
@@ -833,25 +923,27 @@ async function extractWithInnertube(
         client: clientLabel,
         elapsedMs: Date.now() - extractStartedAt,
       });
+      ping();
+      // 미디어 다운로드는 수분 걸릴 수 있음 — 스톨 워치독 일시 중지
+      pauseStallForMediaDownload();
       await downloadGooglevideoAudioToFileUri(
         formatUrl,
         info.cpn,
         tempUri,
         format,
-        {
-          isCancelled,
-          deadlineMs: clientDeadline,
-        },
+        { isCancelled },
       );
       if (isCancelled()) {
         throw new ExtractRaceCancelledError();
       }
+      ping();
 
       logDownloadStage('innertube', 'download_ok', {
         videoId,
         attempt: i + 1,
         client: clientLabel,
         mime,
+        fellBack: i > 0,
         attemptMs: Date.now() - attemptStartedAt,
         elapsedMs: Date.now() - extractStartedAt,
         uri: tempUri.slice(0, 96),
@@ -873,33 +965,27 @@ async function extractWithInnertube(
         }).catch(() => {});
       }
       lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      const clientTimedOut = isInnertubeClientTimeout(e);
-      const hasNextClient = i < clientCount - 1;
-      const willRetry =
-        hasNextClient && (clientTimedOut || shouldRetryInnertubeDownload(msg));
-      if (clientTimedOut) {
-        logDownloadStage('innertube', 'client_timeout', {
+      const hasNextClient = i < specs.length - 1;
+      logNrmRunError('innertube.download', e, {
+        event: 'client_fail',
+        videoId,
+        attempt: i + 1,
+        client: clientLabel,
+        attemptMs: Date.now() - attemptStartedAt,
+        elapsedMs: Date.now() - extractStartedAt,
+        willRetry: hasNextClient,
+        fallbackTo: hasNextClient ? specs[i + 1]!.label : 'ytdlp_or_fail',
+      });
+      // 어떤 실패든 즉시 다음 클라이언트 (타임아웃 대기 없음)
+      if (hasNextClient) {
+        logDownloadStage('innertube', 'fallback', {
           videoId,
-          attempt: i + 1,
-          client: clientLabel,
+          from: clientLabel,
+          to: specs[i + 1]!.label,
           attemptMs: Date.now() - attemptStartedAt,
-          willRetry: hasNextClient,
         });
-      } else {
-        logNrmRunError('innertube.download', e, {
-          videoId,
-          attempt: i + 1,
-          client: clientLabel,
-          attemptMs: Date.now() - attemptStartedAt,
-          elapsedMs: Date.now() - extractStartedAt,
-          willRetry,
-        });
-      }
-      if (willRetry) {
-        void cancelActiveInnertubeExtractions(
-          clientTimedOut ? 'client_timeout' : 'client_fail',
-        );
+        ping();
+        void cancelActiveInnertubeExtractions('client_fail');
         continue;
       }
       throw e;
@@ -941,10 +1027,22 @@ export async function getAudioStreamUrlWithInnertube(
   videoId: string,
 ): Promise<string> {
   const specs = innertubeBrowseClientSpecs();
+  logNrmDev('innertube.stream', {
+    event: 'start',
+    videoId,
+    clients: specs.map((s) => s.label),
+  });
 
   let lastError: unknown;
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i]!;
+    const attemptStartedAt = Date.now();
+    logNrmDev('innertube.stream', {
+      event: 'client_attempt',
+      videoId,
+      client: spec.label,
+      attempt: i + 1,
+    });
     try {
       const yt = await spec.create();
       const info = await yt.getBasicInfo(videoId);
@@ -958,11 +1056,37 @@ export async function getAudioStreamUrlWithInnertube(
       );
       const formatUrl = await format.decipher(info.actions.session.player);
       if (!formatUrl) throw new Error('NO_STREAM_URL');
+      logNrmDev('innertube.stream', {
+        event: 'ok',
+        videoId,
+        client: spec.label,
+        attempt: i + 1,
+        fellBack: i > 0,
+        elapsedMs: Date.now() - attemptStartedAt,
+      });
       return formatUrl;
     } catch (e) {
       lastError = e;
+      const hasNext = i < specs.length - 1;
       const msg = e instanceof Error ? e.message : String(e);
-      if (i < specs.length - 1 && shouldRetryInnertubeDownload(msg)) continue;
+      logNrmRunError('innertube.stream', e, {
+        event: 'client_fail',
+        videoId,
+        client: spec.label,
+        attempt: i + 1,
+        willRetry: hasNext && shouldRetryInnertubeDownload(msg),
+        fallbackTo: hasNext ? specs[i + 1]!.label : null,
+        elapsedMs: Date.now() - attemptStartedAt,
+      });
+      if (hasNext && shouldRetryInnertubeDownload(msg)) {
+        logNrmDev('innertube.stream', {
+          event: 'fallback',
+          videoId,
+          from: spec.label,
+          to: specs[i + 1]!.label,
+        });
+        continue;
+      }
       throw e;
     }
   }
@@ -973,7 +1097,9 @@ export async function getAudioStreamUrlWithInnertube(
 /**
  * 모바일 오디오 다운로드 진입점.
  *
- * Android: innertube 우선 (android 1순위, 곡마다 재시도) → 실패·90초 초과 시 yt-dlp.
+ * Android: innertube android → web → (스톨/실패 시) yt-dlp.
+ * InnerTube HTTP 는 네이티브 고정, 백그라운드 WebView 금지, 무진행 시 스톨 워치독.
+ * 가사/병렬 파이프라인은 그대로.
  * iOS: youtubei.js 경로 (yt-dlp 바이너리 실행 불가).
  */
 export async function downloadYoutubeAudioOnDevice(
@@ -984,7 +1110,7 @@ export async function downloadYoutubeAudioOnDevice(
   const ytDlpAvailable =
     Platform.OS === 'android' && isOnDeviceDownloadAvailable();
 
-  logNrmRunError('download.route', null, {
+  logNrmDev('download.route', {
     platform: Platform.OS,
     ytDlpAvailable,
     videoId,

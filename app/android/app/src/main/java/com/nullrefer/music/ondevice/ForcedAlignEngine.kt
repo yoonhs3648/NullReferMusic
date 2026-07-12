@@ -139,6 +139,8 @@ object ForcedAlignEngine {
               "totalLines" to result.totalLines,
           ),
       )
+      // FA 입력 plain(eSpeak 전처리본 포함)에 타임스탬프를 붙인 LRC 전문
+      NrmFileLogger.logLrcDump("forced-align", entry.id, "sync_lrc", result.lrc)
       return AlignOutcome(lrc = result.lrc)
     } catch (t: Throwable) {
       NrmStageLog.log(

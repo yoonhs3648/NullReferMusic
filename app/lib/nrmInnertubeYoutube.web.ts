@@ -16,6 +16,10 @@ export function getInnertube(): Promise<never> {
   );
 }
 
+export async function warmInnertubeSessions(): Promise<void> {
+  /* web stub — no-op */
+}
+
 export async function searchYoutubePageOnDevice(
   _query: string,
   _cursor: string | null,

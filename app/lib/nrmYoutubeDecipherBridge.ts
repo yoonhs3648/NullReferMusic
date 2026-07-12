@@ -14,5 +14,6 @@ export {
   registerDecipherWebViewCallbacks,
   cancelActiveStreamDownload,
   cancelActiveInnertubeExtractions,
+  isYoutubeWebViewAllowed,
   NRM_GOOGLEVIDEO_WEBVIEW_TIMEOUT_MS,
 } from './nrmYoutubeDecipherBridge.web';

@@ -1,0 +1,110 @@
+diff --git a/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.d.ts b/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.d.ts
+new file mode 100644
+index 0000000..026ceb1
+--- /dev/null
++++ b/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.d.ts
+@@ -0,0 +1,9 @@
++import { YTNode } from '../helpers.js';
++import type Button from './Button.js';
++import type ChipCloud from './ChipCloud.js';
++export default class SearchMobileHeader extends YTNode {
++    static type: string;
++    chip_bar: ChipCloud | null;
++    search_filter_button: Button | null;
++    constructor(data: any);
++}
+diff --git a/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.js b/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.js
+new file mode 100644
+index 0000000..a098337
+--- /dev/null
++++ b/node_modules/youtubei.js/dist/src/parser/classes/SearchMobileHeader.js
+@@ -0,0 +1,16 @@
++import { YTNode } from '../helpers.js';
++import { Parser } from '../index.js';
++import Button from './Button.js';
++import ChipCloud from './ChipCloud.js';
++/** Android InnerTube search header (`searchMobileHeaderRenderer`). */
++export default class SearchMobileHeader extends YTNode {
++    static type = 'SearchMobileHeader';
++    chip_bar;
++    search_filter_button;
++    constructor(data) {
++        super();
++        this.chip_bar = Parser.parseItem(data.chipBar, ChipCloud);
++        this.search_filter_button = Parser.parseItem(data.searchFilterButton, Button);
++    }
++}
++//# sourceMappingURL=SearchMobileHeader.js.map
+diff --git a/node_modules/youtubei.js/dist/src/parser/nodes.d.ts b/node_modules/youtubei.js/dist/src/parser/nodes.d.ts
+index 2b78c02..86f0a65 100644
+--- a/node_modules/youtubei.js/dist/src/parser/nodes.d.ts
++++ b/node_modules/youtubei.js/dist/src/parser/nodes.d.ts
+@@ -420,6 +420,7 @@ export { default as SearchFilter } from './classes/SearchFilter.js';
+ export { default as SearchFilterGroup } from './classes/SearchFilterGroup.js';
+ export { default as SearchFilterOptionsDialog } from './classes/SearchFilterOptionsDialog.js';
+ export { default as SearchHeader } from './classes/SearchHeader.js';
++export { default as SearchMobileHeader } from './classes/SearchMobileHeader.js';
+ export { default as SearchRefinementCard } from './classes/SearchRefinementCard.js';
+ export { default as SearchSubMenu } from './classes/SearchSubMenu.js';
+ export { default as SearchSuggestion } from './classes/SearchSuggestion.js';
+diff --git a/node_modules/youtubei.js/dist/src/parser/nodes.js b/node_modules/youtubei.js/dist/src/parser/nodes.js
+index 9b42edf..7907443 100644
+--- a/node_modules/youtubei.js/dist/src/parser/nodes.js
++++ b/node_modules/youtubei.js/dist/src/parser/nodes.js
+@@ -422,6 +422,7 @@ export { default as SearchFilter } from './classes/SearchFilter.js';
+ export { default as SearchFilterGroup } from './classes/SearchFilterGroup.js';
+ export { default as SearchFilterOptionsDialog } from './classes/SearchFilterOptionsDialog.js';
+ export { default as SearchHeader } from './classes/SearchHeader.js';
++export { default as SearchMobileHeader } from './classes/SearchMobileHeader.js';
+ export { default as SearchRefinementCard } from './classes/SearchRefinementCard.js';
+ export { default as SearchSubMenu } from './classes/SearchSubMenu.js';
+ export { default as SearchSuggestion } from './classes/SearchSuggestion.js';
+diff --git a/node_modules/youtubei.js/dist/src/parser/youtube/Search.d.ts b/node_modules/youtubei.js/dist/src/parser/youtube/Search.d.ts
+index 7b8c9d7..815a1ed 100644
+--- a/node_modules/youtubei.js/dist/src/parser/youtube/Search.d.ts
++++ b/node_modules/youtubei.js/dist/src/parser/youtube/Search.d.ts
+@@ -1,6 +1,7 @@
+ import Feed from '../../core/mixins/Feed.js';
+ import HorizontalCardList from '../classes/HorizontalCardList.js';
+ import SearchHeader from '../classes/SearchHeader.js';
++import SearchMobileHeader from '../classes/SearchMobileHeader.js';
+ import SearchRefinementCard from '../classes/SearchRefinementCard.js';
+ import SearchSubMenu from '../classes/SearchSubMenu.js';
+ import UniversalWatchCard from '../classes/UniversalWatchCard.js';
+@@ -8,7 +9,7 @@ import type { ApiResponse, Actions } from '../../core/index.js';
+ import type { ObservedArray, YTNode } from '../helpers.js';
+ import type { ISearchResponse } from '../types/index.js';
+ export default class Search extends Feed<ISearchResponse> {
+-    header?: SearchHeader;
++    header?: SearchHeader | SearchMobileHeader;
+     results: ObservedArray<YTNode>;
+     refinements: string[];
+     estimated_results: number;
+diff --git a/node_modules/youtubei.js/dist/src/parser/youtube/Search.js b/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
+index f7fd94d..1646a65 100644
+--- a/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
++++ b/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
+@@ -3,6 +3,7 @@ import { InnertubeError } from '../../utils/Utils.js';
+ import HorizontalCardList from '../classes/HorizontalCardList.js';
+ import ItemSection from '../classes/ItemSection.js';
+ import SearchHeader from '../classes/SearchHeader.js';
++import SearchMobileHeader from '../classes/SearchMobileHeader.js';
+ import SearchRefinementCard from '../classes/SearchRefinementCard.js';
+ import SearchSubMenu from '../classes/SearchSubMenu.js';
+ import SectionList from '../classes/SectionList.js';
+@@ -24,8 +25,13 @@ export default class Search extends Feed {
+             this.page.on_response_received_commands?.[0].as(AppendContinuationItemsAction, ReloadContinuationItemsCommand).contents;
+         if (!contents)
+             throw new InnertubeError('No contents found in search response');
+-        if (this.page.header)
+-            this.header = this.page.header.item().as(SearchHeader);
++        // WEB: SearchHeader / ANDROID: SearchMobileHeader
++        if (this.page.header) {
++            const headerItem = this.page.header.item();
++            if (headerItem.is(SearchHeader, SearchMobileHeader)) {
++                this.header = headerItem.as(SearchHeader, SearchMobileHeader);
++            }
++        }
+         this.results = observe(contents.filterType(ItemSection).flatMap((section) => section.contents));
+         this.refinements = this.page.refinements || [];
+         this.estimated_results = this.page.estimated_results || 0;

@@ -60,6 +60,7 @@
 | `ctc_fa_spread_run` | 뭉친 줄 펼침 (windowMs 너무 작으면 초반 압축) |
 | `ctc_fa_stretch_applied` / `ctc_fa_stretch_skip` | 후반 drift 보정 성공/스킵 |
 | `ctc_fa_stretch_clamp` | ratio 상한 초과 시 1.28로 제한 적용 |
+| `sync-lyrics` / `===== sync-lyrics` | Whisper·wav2vec2·eSpeak-align LRC 전문 덤프 (`phonetic_timed` / `sync_lrc` / `restored_lrc`) |
 | `ctc_fa_boundary_close` | 세그먼트 경계 gap 당김 |
 | `ctc_fa_stitch` | 다패스 합침 + globalStretch 여부 |
 | `onnx_chunk` | ONNX 패스 진행 (idx, offset, availMb) |
@@ -75,6 +76,7 @@
 | **전체적으로 빠름/느림** | `stretch_skip ratio_out_of_range` | stretch 미적용 → CTC 누적 drift 그대로 |
 | **가사가 한꺼번에 몰림** | `ctc_fa_spread_run` + 작은 `windowMs` | CTC 동일 프레임 collapse |
 | **OOM/실패** | `ctc_fa_oom`, `ctc_fa_low_mem` | 청크·trellis 한도; 품질 tier 하향은 이미 있음 |
+| **align_fail empty_lrc (stretch)** | `Cannot coerce value to an empty range` / `invalid_target_range` | 첫 줄이 이미 곡 끝 근처 → stretch clamp min>max (2026-07-12: 스킵으로 예외 제거) |
 
 ---
 
@@ -113,6 +115,29 @@ ctc_fa_stitch segments=2 globalStretch=false
 ## 5. 개선 히스토리 (날짜순)
 
 에이전트는 **새 개선마다 이 섹션 맨 위에 항목 추가**.
+
+### 2026-07-12 — 싱크 LRC 전문 로그 (eSpeak / Whisper / wav2vec2)
+
+**배경:** 정렬·전사 결과 텍스트를 로그에서 바로 확인하기 어려움.
+
+| 변경 | 내용 |
+|------|------|
+| `logSyncLyricsLrcDump` / `NrmFileLogger.logLrcDump` | LRC 전문을 `===== sync-lyrics ... =====` 블록으로 기록 |
+| eSpeak | FA 직후 `kind=phonetic_timed` (전처리 가사+타임스탬프), 복원 후 `kind=restored_lrc` |
+| wav2vec2/aeneas | `ForcedAlignEngine.align_ok` + JS `sync_lrc` |
+| Whisper | 네이티브 `transcribeToLrc` + JS `transcribe_done` 직후 `sync_lrc` |
+
+**로그 키워드:** `sync-lyrics`, `phonetic_timed`, `restored_lrc`, `sync_lrc`.
+
+### 2026-07-12 — stretch `coerceIn` 범위 역전 예외 방지 (Wav2Vec2CtcForcedAligner.kt)
+
+**배경:** aespa LEMONADE 등에서 CTC FA는 성공했으나 `stretchLrcTimestampsToVocalEnd`가 `firstMs+12s` > `durationMs-400` 인 입력에 `coerceIn` → `IllegalArgumentException` → empty LRC / `melon_align_failed`.
+
+| 변경 | 내용 | 기대 효과 |
+|------|------|-----------|
+| stretch 가드 | clampMin > clampMax 이면 **원본 LRC 반환** (`ctc_fa_stretch_skip reason=invalid_target_range`) | 품질용 후처리 실패로 정렬 전체가 죽지 않음 |
+
+**검증:** `compileDebugKotlin`. 로그 키워드: `invalid_target_range`.
 
 ### 2026-06-19 — CTC 후처리 완화 (ChatGPT 검토 반영, Wav2Vec2CtcForcedAligner.kt)
 
