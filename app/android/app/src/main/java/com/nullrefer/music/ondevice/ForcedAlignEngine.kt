@@ -152,9 +152,7 @@ object ForcedAlignEngine {
       return AlignOutcome(lrc = "")
     } finally {
       wav.delete()
-      if (entry.engine == AlignModelCatalog.EngineKind.CTC_ONNX) {
-        Wav2Vec2CtcForcedAligner.releaseOnnxSession()
-      }
+      // ONNX Session은 ForcedAlignWorkQueue가 idle일 때만 release (곡마다 close 금지)
     }
   }
 

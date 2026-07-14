@@ -97,10 +97,11 @@ object NrmMemoryGuard {
     return when (quality) {
       "accurate" ->
           when (base.tier) {
-            "high" -> base.copy(chunkSamples = 96_000)
-            "high_mid" -> base.copy(chunkSamples = 80_000)
-            "mid" -> base.copy(chunkSamples = 64_000)
-            "mid_low" -> base.copy(chunkSamples = 48_000)
+            // ~4s @16kHz — 5초+ chunk는 GC/취소 포인트가 늦어 kill 리스크↑
+            "high" -> base.copy(chunkSamples = 64_000)
+            "high_mid" -> base.copy(chunkSamples = 56_000)
+            "mid" -> base.copy(chunkSamples = 48_000)
+            "mid_low" -> base.copy(chunkSamples = 40_000)
             "low" -> base.copy(chunkSamples = 32_000)
             "min" -> base.copy(chunkSamples = 16_000)
             "ultra" -> base.copy(chunkSamples = 8_000)
@@ -119,11 +120,11 @@ object NrmMemoryGuard {
   private fun profileForAvail(avail: Long): CtcInferenceProfile {
     return when {
       avail >= 1_800 ->
-          CtcInferenceProfile(tier = "high", chunkSamples = 80_000)
+          CtcInferenceProfile(tier = "high", chunkSamples = 64_000)
       avail >= 1_600 ->
-          CtcInferenceProfile(tier = "high_mid", chunkSamples = 72_000)
+          CtcInferenceProfile(tier = "high_mid", chunkSamples = 56_000)
       avail >= 1_400 ->
-          CtcInferenceProfile(tier = "high_mid", chunkSamples = 64_000)
+          CtcInferenceProfile(tier = "high_mid", chunkSamples = 48_000)
       avail >= 1_100 ->
           CtcInferenceProfile(tier = "mid", chunkSamples = 48_000)
       avail >= 850 ->
@@ -176,7 +177,8 @@ object NrmMemoryGuard {
           avail >= MIN_CHUNK_AVAIL_MB -> min(baseChunkSamples, 2_000)
           else -> min(baseChunkSamples, 1_600)
         }
-    return max(floor, cap)
+    val scaled = (max(floor, cap) * NrmThermalGuard.chunkSampleScale(context)).toInt()
+    return max(floor, scaled)
   }
 
   fun requiresEphemeralOnnxSession(profile: CtcInferenceProfile): Boolean = true

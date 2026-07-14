@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
 
-import { prefetchFfmpegOnDevice } from '@/lib/nrmFfmpegPrefetch';
 import { appendNrmFileLog, getNrmLogFilePath } from '@/lib/nrmFileLog';
 import { initNrmFileLoggingRuntime, isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
 import { reconcileStaleArtifactsOnColdStart } from '@/lib/nrmStartupArtifactCleanup';
@@ -39,11 +38,5 @@ void (async () => {
   }
 
   void reconcileStaleArtifactsOnColdStart();
-  void prefetchFfmpegOnDevice();
-  // 콜드스타트 즉시 android Innertube 워밍 시작 (버전 확인 게이트와 병렬, web은 폴백 시에만)
-  void import('@/lib/nrmInnertubeYoutube')
-    .then((m) => m.warmInnertubeSessions())
-    .catch(() => {
-      /* optional warmup */
-    });
+  // ffmpeg / Innertube 네트워크는 APK 업데이트 게이트 통과 후 (NrmApkUpdateGate).
 })();

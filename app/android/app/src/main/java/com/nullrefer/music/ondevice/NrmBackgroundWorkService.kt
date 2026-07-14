@@ -10,7 +10,11 @@ import android.os.Build
 import android.os.IBinder
 import com.nullrefer.music.R
 
-/** 장시간 다운로드·Whisper — Foreground Service로 백그라운드 kill 완화 */
+/** 장시간 다운로드·Whisper·Forced Alignment — Foreground Service로 백그라운드 kill 완화.
+ *
+ * Alignment 본체는 [ForcedAlignWorkQueue]에서 실행되며, 이 Service는 START_STICKY +
+ * dataSync FGS + Notification으로 프로세스 생존성을 높인다.
+ */
 class NrmBackgroundWorkService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 

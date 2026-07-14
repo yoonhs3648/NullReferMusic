@@ -22,6 +22,7 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
     WhisperModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
     AlignModelDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
     EspeakDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
+    EnKoTransliteratorDownloader.setEventEmitter { event, body -> sendEvent(event, body) }
   }
 
   override fun getName(): String = "NrmWhisper"
@@ -516,15 +517,14 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       syncOptions: ReadableMap?,
       promise: Promise,
   ) {
-    Thread {
-      val token = "forced-align:${System.currentTimeMillis()}"
-      NrmBackgroundWorkCoordinator.acquire(reactApplicationContext, token)
+    val label = File(audioPath.trim()).name
+    ForcedAlignWorkQueue.submit(reactApplicationContext, label) {
       try {
         NrmMemoryGuard.prepareForHeavyInference(reactApplicationContext, "forced-align")
         val inFile = File(audioPath.trim())
         if (!inFile.isFile) {
           promise.reject("E_ARG", "오디오 파일이 없습니다.")
-          return@Thread
+          return@submit
         }
         val pref =
             AlignModelCatalog.normalizeAlignPackId(
@@ -549,10 +549,8 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       } catch (t: Throwable) {
         NrmFileLogger.error("forced-align", "alignMelonLyricsToLrc 실패 audio=$audioPath", t)
         resolveEmptyLrc(promise, alignFailed = true)
-      } finally {
-        NrmBackgroundWorkCoordinator.release(reactApplicationContext, token)
       }
-    }.start()
+    }
   }
 
   private fun resolveEmptyLrc(promise: Promise, alignFailed: Boolean = false) {
@@ -616,6 +614,65 @@ class NrmWhisperModule(reactContext: ReactApplicationContext) :
       } catch (t: Throwable) {
         NrmFileLogger.error("espeak", "transliteratePlainLinesForEspeak 실패", t)
         promise.reject("E_ESPEAK_TRANSLIT", t.message ?: t.toString(), t)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun getEnKoTransliteratorStatus(promise: Promise) {
+    try {
+      val s = EnKoTransliteratorDownloader.status(reactApplicationContext)
+      val row = Arguments.createMap()
+      row.putBoolean("installed", s.installed)
+      row.putBoolean("downloading", s.downloading)
+      row.putInt("progress", s.progress)
+      promise.resolve(row)
+    } catch (e: Exception) {
+      promise.reject("E_ENKO_STATUS", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun startEnKoTransliteratorDownload(promise: Promise) {
+    try {
+      EnKoTransliteratorDownloader.startDownload(reactApplicationContext)
+      val ok = Arguments.createMap()
+      ok.putBoolean("started", true)
+      promise.resolve(ok)
+    } catch (e: Exception) {
+      promise.reject("E_ENKO_DL", e.message ?: e.toString(), e)
+    }
+  }
+
+  @ReactMethod
+  fun probeEnKoTransliteratorForAlign(promise: Promise) {
+    Thread {
+      try {
+        val paths = EnKoTransliteratorBootstrap.pathsIfReady(reactApplicationContext)
+        val ok = paths != null && EnKoTransliteratorInfer.probe(paths)
+        promise.resolve(ok)
+      } catch (t: Throwable) {
+        NrmFileLogger.warn("en-ko-transliterator", "probeEnKoTransliteratorForAlign 실패 err=${t.message}")
+        promise.resolve(false)
+      }
+    }.start()
+  }
+
+  @ReactMethod
+  fun transliteratePlainLinesForEnKo(lines: com.facebook.react.bridge.ReadableArray, promise: Promise) {
+    Thread {
+      try {
+        val input = mutableListOf<String>()
+        for (i in 0 until lines.size()) {
+          input.add(lines.getString(i)?.trim().orEmpty())
+        }
+        val out = EnKoLyricsPreprocessor.transliterateLines(reactApplicationContext, input)
+        val arr = Arguments.createArray()
+        for (s in out) arr.pushString(s)
+        promise.resolve(arr)
+      } catch (t: Throwable) {
+        NrmFileLogger.error("en-ko-transliterator", "transliteratePlainLinesForEnKo 실패", t)
+        promise.reject("E_ENKO_TRANSLIT", t.message ?: t.toString(), t)
       }
     }.start()
   }

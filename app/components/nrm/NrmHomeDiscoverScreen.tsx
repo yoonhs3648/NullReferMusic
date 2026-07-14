@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Pressable,
   StyleSheet,
@@ -33,7 +34,7 @@ type Props = {
   onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
 };
 
-type DiscoverSubView = 'list' | 'ai-lab' | 'track-search';
+type DiscoverSubView = 'ai-lab' | 'list' | 'track-search';
 
 export function NrmHomeDiscoverScreen({
   isDark,
@@ -42,10 +43,8 @@ export function NrmHomeDiscoverScreen({
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
-  const aiBtnBg = isDark ? 'rgba(0, 102, 204, 0.28)' : 'rgba(0, 102, 204, 0.12)';
-  const aiBtnBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
 
-  const [subView, setSubView] = useState<DiscoverSubView>('list');
+  const [subView, setSubView] = useState<DiscoverSubView>('ai-lab');
   const [trackSearchQuery, setTrackSearchQuery] = useState('');
   const [yearFilter, setYearFilter] = useState<NrmDiscoverYearFilter>(NRM_DISCOVER_YEAR_DEFAULT);
   const [genreFilter, setGenreFilter] = useState(NRM_DISCOVER_GENRE_DEFAULT);
@@ -138,6 +137,19 @@ export function NrmHomeDiscoverScreen({
     setSubView('list');
   }, []);
 
+  const closeDiscoverList = useCallback(() => {
+    setSubView('ai-lab');
+  }, []);
+
+  useEffect(() => {
+    if (subView !== 'list') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeDiscoverList();
+      return true;
+    });
+    return () => sub.remove();
+  }, [closeDiscoverList, subView]);
+
   const keyExtractor = useCallback((item: NrmMusicListItem) => String(item.id), []);
 
   const renderItem = useCallback(
@@ -156,6 +168,13 @@ export function NrmHomeDiscoverScreen({
   const listHeader = (
     <View style={styles.header}>
       <View style={styles.titleRow}>
+        <Pressable
+          onPress={closeDiscoverList}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="AI Lab으로 돌아가기">
+          <Ionicons name="chevron-back" size={24} color={nrmTokens.color.primary} />
+        </Pressable>
         <View style={styles.titleBlock}>
           <Ionicons
             name="compass"
@@ -164,21 +183,7 @@ export function NrmHomeDiscoverScreen({
           />
           <Text style={[styles.title, { color: titleColor }]}>Discover</Text>
         </View>
-        <Pressable
-          onPress={() => setSubView('ai-lab')}
-          style={({ pressed }) => [
-            styles.aiBtn,
-            { backgroundColor: aiBtnBg, borderColor: aiBtnBorder },
-            pressed && styles.aiBtnPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="AI 실험실">
-          <Ionicons
-            name="sparkles"
-            size={22}
-            color={isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary}
-          />
-        </Pressable>
+        <View style={styles.backSpacer} />
       </View>
 
       <View style={styles.filters}>
@@ -220,43 +225,53 @@ export function NrmHomeDiscoverScreen({
   return (
     <View style={styles.root}>
       <View
-        style={[styles.listLayer, subView !== 'list' && styles.listLayerHidden]}
-        pointerEvents={subView === 'list' ? 'auto' : 'none'}>
-        <FlatList
-          ref={listRef}
-          data={loading || error ? [] : items}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          ListHeaderComponent={listHeader}
-          ListFooterComponent={listFooter}
-          onEndReached={() => void loadMore()}
-          onEndReachedThreshold={0.35}
-          onScroll={(e) => {
-            setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
-          }}
-          scrollEventThrottle={200}
-          keyboardShouldPersistTaps="handled"
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          initialNumToRender={20}
-          maxToRenderPerBatch={15}
-          windowSize={10}
-        />
-        <NrmScrollToTopFab
-          visible={showScrollTop && subView === 'list'}
-          onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-          isDark={isDark}
-        />
+        style={[styles.aiLabLayer, subView !== 'ai-lab' && styles.aiLabLayerHidden]}
+        pointerEvents={subView === 'ai-lab' ? 'auto' : 'none'}>
+        <NrmDiscoverAiLabScreen isDark={isDark} onOpenDiscover={() => setSubView('list')} />
       </View>
 
-      {subView === 'ai-lab' ? (
-        <View style={styles.overlayLayer}>
-          <NrmDiscoverAiLabScreen isDark={isDark} onBack={() => setSubView('list')} />
+      {subView === 'list' || subView === 'track-search' ? (
+        <View
+          style={[
+            styles.overlayLayer,
+            { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas },
+            subView === 'track-search' && styles.listLayerHidden,
+          ]}
+          pointerEvents={subView === 'list' ? 'auto' : 'none'}>
+          <FlatList
+            ref={listRef}
+            data={loading || error ? [] : items}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            ListHeaderComponent={listHeader}
+            ListFooterComponent={listFooter}
+            onEndReached={() => void loadMore()}
+            onEndReachedThreshold={0.35}
+            onScroll={(e) => {
+              setShowScrollTop(e.nativeEvent.contentOffset.y > NRM_SEARCH_SCROLL_TOP_THRESHOLD);
+            }}
+            scrollEventThrottle={200}
+            keyboardShouldPersistTaps="handled"
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            initialNumToRender={20}
+            maxToRenderPerBatch={15}
+            windowSize={10}
+          />
+          <NrmScrollToTopFab
+            visible={showScrollTop && subView === 'list'}
+            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            isDark={isDark}
+          />
         </View>
       ) : null}
 
       {subView === 'track-search' ? (
-        <View style={[styles.overlayLayer, { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas }]}>
+        <View
+          style={[
+            styles.overlayLayer,
+            { backgroundColor: isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas },
+          ]}>
           <NrmDiscoverAlbumSearchLayer
             isDark={isDark}
             paddingHorizontal={paddingHorizontal}
@@ -272,7 +287,10 @@ export function NrmHomeDiscoverScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  listLayer: { flex: 1 },
+  aiLabLayer: { flex: 1 },
+  aiLabLayerHidden: {
+    opacity: 0,
+  },
   listLayerHidden: {
     opacity: 0,
   },
@@ -292,9 +310,18 @@ const styles = StyleSheet.create({
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: nrmTokens.space.md,
     gap: nrmTokens.space.sm,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnPressed: { opacity: 0.72 },
+  backSpacer: {
+    width: 40,
   },
   titleBlock: {
     flexDirection: 'row',
@@ -307,15 +334,6 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.lead,
     fontWeight: '700',
   },
-  aiBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  aiBtnPressed: { opacity: 0.88, transform: [{ scale: 0.96 }] },
   filters: {
     flexDirection: 'row',
     gap: nrmTokens.space.sm,

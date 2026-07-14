@@ -56,6 +56,12 @@
 | `ctc_fa_profile` | 메모리 tier, chunkSamples, quality |
 | `ctc_fa_vocal` / `ctc_fa_singing_onset` | 보컬 시작·끝 (ms) |
 | `ctc_fa_plan segments=N` | N>1 이면 2패스 분할 |
+| `ctc_fa_plan anchors=` | Silence/Time Anchor 분할 (`silenceSplits` / `timeSplits`) |
+| `ctc_fa_blank_adapt` | Adaptive Blank early/late bias |
+| `ctc_fa_line_conf` / `ctc_fa_local_realign` | 줄 confidence·±4s 국소 재정렬 |
+| `ctc_fa_realign_abort` / `ctc_fa_mem_probe` | 저신뢰 세그먼트 realign 중단 · Native/VmRSS 계측 |
+| `ctc_fa_chunk_adapt` | 밀도 기반 chunk/overlap |
+| `ctc_fa_onnx_opts` | ORT threads / memPattern |
 | `ctc_fa_first_line_bump` | 첫 줄 인트로 보정 (과하면 초반 싱크 붕괴) |
 | `ctc_fa_spread_run` | 뭉친 줄 펼침 (windowMs 너무 작으면 초반 압축) |
 | `ctc_fa_stretch_applied` / `ctc_fa_stretch_skip` | 후반 drift 보정 성공/스킵 |
@@ -115,6 +121,62 @@ ctc_fa_stitch segments=2 globalStretch=false
 ## 5. 개선 히스토리 (날짜순)
 
 에이전트는 **새 개선마다 이 섹션 맨 위에 항목 추가**.
+
+### 2026-07-14 — Native Memory Audit + Local Realign 제한 (LMKD 대응)
+
+**배경:** SM-G781N에서 FA 중 silent kill. Java OOM/Fatal signal 없음 → Samsung LMKD + Native RSS + 장시간 CPU 유력. `availMb`만으로는 프로세스 RSS를 알 수 없음.
+
+| 변경 | 내용 |
+|------|------|
+| Native Audit | `OnnxTensor`/`OrtSession.Result` `use{}` + logits deep-copy; `SessionOptions.close()` 누락 수정 |
+| Telemetry | `ctc_fa_mem_probe` — nativeAlloc/Heap/Free + javaUsed + VmRSS/VmSize |
+| Local Realign | trigger conf&lt;0.15, 세그먼트당 최대 2회, 저신뢰 비율≥45%면 1회로 abort 후 수용 |
+| Overlap | 상한 4800 samples(~300ms) |
+| Low-conf chunk | realign 경로 chunk ×0.5 |
+| Session | singleton 유지 + create/release 시 mem_probe |
+
+**로그 키워드:** `ctc_fa_mem_probe`, `ctc_fa_realign_abort`, `ctc_fa_local_realign … acceptBelow=`, `ctc_fa_onnx_session reuse|create|released`
+
+### 2026-07-14 — 가사 생성 프로세스 생존성 (FGS / WakeLock / Align Queue)
+
+**배경:** 가사(LRC) Forced Alignment 중 Activity/임시 Thread에서 ONNX를 돌리면, 앱이 포그라운드에서 이탈·발열·메모리 압박으로 kill 되기 쉬움. “큐 복구”가 아니라 **가능한 한 오래 살아남기**가 목표 (절대 불사는 불가).
+
+| 변경 | 내용 |
+|------|------|
+| `ForcedAlignWorkQueue` | FA는 `newSingleThreadExecutor` 순차 실행 + `THREAD_PRIORITY_FOREGROUND` |
+| FGS 토큰 | `align-run:` — `START_STICKY` Service + progress Notification 갱신 |
+| FGS type | align/다운로드 모두 `dataSync` (Manifest도 dataSync 단일) |
+| WakeLock / WifiLock | PARTIAL 유지; 모델·오디오 DL 중 WifiLock |
+| ONNX Session | 큐 idle까지 singleton 재사용 (곡마다 create/close 금지) |
+| Thermal | `NrmThermalGuard` — 과열 시 thread↓·chunk↓ |
+| Chunk | 상한 ~4s (64k samples)로 GC/취소 포인트 확보 |
+
+**로그 키워드:** `forced-align-queue`, `ctc_fa_onnx_session`, `ctc_fa_onnx_opts … thermal=`, `WifiLock`, `WakeLock`
+
+### 2026-07-14 — wav2vec2 CTC FA 알고리즘 (Anchor / Adaptive Blank / Conf Re-align / Chunk)
+
+**배경:** 고RAM에서 곡 전체를 한 trellis로 넣으면 후반 누적 drift가 남고, blank 고정값·품질 분기는 체감 이득이 적음.
+
+| 변경 | 내용 | 기대 효과 |
+|------|------|-----------|
+| Silence + Time Line Anchor | `planLyricSegments` — 무음≥800ms·~25s 스냅 → 줄 경계 분할 후 trellis 한도 | 고RAM에서도 다중 trellis로 drift 리셋 |
+| Adaptive Blank | CTC emit 시 blank logit ±0.05~0.15 (시간·에너지) | 초반 blank 과다 / 후반 어휘 유지 |
+| Confidence Local Re-align | 줄 conf&lt;0.35만 ±4s 국소 FA 재실행 | 저신뢰 줄만 보정, 실패 시 원본 |
+| Dynamic Chunk + Adaptive Overlap | 보컬 밀도로 chunk/overlap(1500~6400) | 전주 희박↑·랩 밀도↓ chunk |
+| ONNX 속도 | memPattern on, threads 1~3, FloatArray pool (Java ORT에 IOBinding 없음) | 청크 할당·추론 오버헤드↓ |
+| 상수 단순화 | onset 3.0 고정, collapse KO100/EN120, perChar KO35/EN38, trellis 상한 12e6 | 품질 분기 노이즈↓ |
+
+**가드:** Anchor 세그먼트도 `applyIntro`는 **첫 세그먼트만** (`idx==0 && weightStart&lt;0.02`). mid-song bump 금지.
+
+**로그 키워드:** `ctc_fa_plan anchors=`, `ctc_fa_blank_adapt`, `ctc_fa_line_conf`, `ctc_fa_local_realign`, `ctc_fa_chunk_adapt`, `ctc_fa_onnx_opts`
+
+### 2026-07-14 — eSpeak NG → en-ko-transliterator (EN→KO 발음)
+
+- **원인:** eSpeak NG는 CLI 실행파일·W^X·lib 심볼 불일치로 실기기 설치/프로브가 자주 실패해 UI에서 비활성 상태였음.
+- **변경:** `eunsour/en-ko-transliterator`(mT5)를 ONNX로 변환해 **데이터만** `filesDir`에 설치. 추론은 APK의 onnxruntime. 모드 id `transliterator`.
+- **계약 유지:** plain 전처리 → FA → LRC 원문 복원 + `phonetic_timed`/`restored_lrc` 로그.
+- **배포:** GitHub Release `en-ko-transliterator-v1` (HF 직접 수신은 Xet 401 등 회피).
+- **키워드:** `en-ko-transliterator`, `transliterator_preprocess_done`, `skip_transliterator_not_installed`
 
 ### 2026-07-12 — 싱크 LRC 전문 로그 (eSpeak / Whisper / wav2vec2)
 

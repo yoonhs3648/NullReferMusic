@@ -29,9 +29,9 @@ object Wav2Vec2CtcForcedAligner {
   private const val MAX_AUDIO_SAMPLES = SAMPLE_RATE * 60 * 20
   private const val MAX_TRELLIS_CELLS = 8_000_000L
   private const val MAX_TRELLIS_CELLS_HIGH = 12_000_000L
-  /** trellis 異붿젙 ?ъ쑀 (?ㅼ젣 ?좏겙쨌?꾨젅?꾩씠 異붿젙蹂대떎 ?????덉쓬) */
+  /** trellis 추정 여유 (레거시 — 실제 분할은 options.trellisPlanMargin 사용) */
   private const val TRELLIS_PLAN_MARGIN = 0.85
-  /** wav2vec2 CNN stride ??320 samples/frame @16kHz */
+  /** wav2vec2 CNN stride ≈ 320 samples/frame @16kHz */
   private const val FRAME_STRIDE_SAMPLES = 320
   private const val VOCAL_FRAME_SIZE = 512
   private const val VOCAL_FRAME_HOP = 160
@@ -45,6 +45,35 @@ object Wav2Vec2CtcForcedAligner {
   private const val ONSET_PROBE_MAX_MS = 60_000
   private const val ONSET_PROBE_VOCAL_FRACTION = 0.35
   private const val ONSET_SUSTAIN_FRAMES = 10
+  /** Line/Silence Anchor — 시간 기반 재앵커링 (ms) */
+  private const val ANCHOR_TIME_MS = 25_000L
+  /** Silence Anchor — 최소 무음 길이 (ms) */
+  private const val SILENCE_GAP_MIN_MS = 800L
+  /** Confidence: trigger realign only when quite low (로그상 0.35면 너무 많은 재정렬) */
+  private const val LINE_CONF_LOW = 0.15f
+  /** After one realign, accept even if still below this (재시도 금지) */
+  private const val LINE_CONF_ACCEPT = 0.10f
+  private const val LOCAL_REALIGN_WINDOW_MS = 4_000
+  /** Per segment: max lines to local-realign (was 8 — LMKD/CPU 폭주 원인) */
+  private const val MAX_LOCAL_REALIGN_PER_SEGMENT = 2
+  /** Low-confidence line ratio above this → skip remaining realigns for segment */
+  private const val LOW_CONF_RATIO_ABORT = 0.45f
+  /** Adaptive blank bias (log-prob) */
+  private const val BLANK_BIAS_EARLY = 0.12f
+  private const val BLANK_BIAS_LATE = -0.10f
+  private const val BLANK_BIAS_CLAMP = 0.15f
+  /** Adaptive overlap samples @16kHz — max ~300ms (was 6400≈400ms) */
+  private const val OVERLAP_MIN_SAMPLES = 1_500
+  private const val OVERLAP_MAX_SAMPLES = 4_800
+  /** Chunk shrink when confidence very low */
+  private const val CONF_CHUNK_SHRINK = 0.15f
+  /** Chunk input pool (reuse FloatArray across ONNX chunks) */
+  private val chunkAudioPool = ThreadLocal<FloatArray?>()
+  /** Service/큐 수명 동안 재사용하는 ONNX Session (곡마다 create/close 금지) */
+  private val sessionLock = Any()
+  @Volatile private var sharedSession: OrtSession? = null
+  @Volatile private var sharedModelPath: String? = null
+
   data class AlignResult(
       val lrc: String,
       val alignedLines: Int,
@@ -182,7 +211,17 @@ object Wav2Vec2CtcForcedAligner {
     }
   }
   fun releaseOnnxSession() {
-    // ephemeral ONNX ?몄뀡留??ъ슜 ??罹먯떆 ?놁쓬
+    synchronized(sessionLock) {
+      try {
+        sharedSession?.close()
+      } catch (_: Exception) {
+        // ignore
+      }
+      sharedSession = null
+      sharedModelPath = null
+      NrmFileLogger.log("whisperx-align", "ctc_fa_onnx_session released")
+      NrmNativeMemoryProbe.log("whisperx-align", "session_released")
+    }
   }
   private fun alignFailed(melonLines: List<String>): AlignResult {
     return AlignResult(lrc = "", alignedLines = 0, totalLines = melonLines.size)
@@ -217,12 +256,23 @@ object Wav2Vec2CtcForcedAligner {
     val vocalEndSample = msToSample(vocal.endMs, totalSamples).coerceAtLeast(vocalStartSample + 1)
     val vocalSamples = vocalEndSample - vocalStartSample
     val vocalFrames = estimateFrameCount(vocalSamples)
-    var segments = planLyricSegments(melonLines, vocab, blankId, vocalFrames, context, options)
+    var segments =
+        planLyricSegments(
+            melonLines,
+            vocab,
+            blankId,
+            vocalFrames,
+            context,
+            options,
+            pcm,
+            vocalStartSample,
+            vocalEndSample,
+        )
     NrmFileLogger.log(
         "whisperx-align",
         "ctc_fa_plan segments=${segments.size} vocalMs=${vocal.startMs}-${vocal.endMs} frames=$vocalFrames lines=${melonLines.size}",
     )
-    val session = env.createSession(modelFile.absolutePath, buildSessionOptions(NrmMemoryGuard.availMemMb(context)))
+    val session = obtainOrCreateSession(context, modelFile)
     return try {
       try {
         alignPlannedSegments(
@@ -275,12 +325,45 @@ object Wav2Vec2CtcForcedAligner {
         }
       }
     } finally {
+      // shared session — ForcedAlignWorkQueue idle 시에만 releaseOnnxSession()
+      NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
+    }
+  }
+
+  private fun obtainOrCreateSession(context: Context, modelFile: File): OrtSession {
+    val path = modelFile.absolutePath
+    synchronized(sessionLock) {
+      val existing = sharedSession
+      if (existing != null && sharedModelPath == path) {
+        NrmFileLogger.log("whisperx-align", "ctc_fa_onnx_session reuse path=${modelFile.name}")
+        return existing
+      }
       try {
-        session.close()
+        existing?.close()
       } catch (_: Exception) {
         // ignore
       }
-      NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align", force = true)
+      sharedSession = null
+      sharedModelPath = null
+      val created =
+          OrtSession.SessionOptions().let { raw ->
+            // SessionOptions는 createSession 이후 반드시 close — native leak 방지
+            configureSessionOptions(raw, context, NrmMemoryGuard.availMemMb(context))
+            try {
+              env.createSession(path, raw)
+            } finally {
+              try {
+                raw.close()
+              } catch (_: Exception) {
+                // ignore
+              }
+            }
+          }
+      sharedSession = created
+      sharedModelPath = path
+      NrmNativeMemoryProbe.log("whisperx-align", "session_create")
+      NrmFileLogger.log("whisperx-align", "ctc_fa_onnx_session create path=${modelFile.name}")
+      return created
     }
   }
   private fun alignPlannedSegments(
@@ -303,6 +386,12 @@ object Wav2Vec2CtcForcedAligner {
     var aligned = 0
     var totalLines = 0
     for ((idx, segment) in segments.withIndex()) {
+      val pct = ((idx + 1) * 100) / segments.size.coerceAtLeast(1)
+      NrmForegroundNotificationBinder.onLyricsProgressShown(
+          "가사 생성 중",
+          "Forced Alignment · 세그먼트 ${idx + 1}/${segments.size} ($pct%)",
+      )
+      NrmBackgroundWorkService.refreshNotification(context)
       if (!NrmMemoryGuard.waitForChunkMemory(context, "whisperx-align")) {
         NrmFileLogger.warn(
             "whisperx-align",
@@ -427,6 +516,7 @@ object Wav2Vec2CtcForcedAligner {
           "whisperx-align",
           "ctc_fa_segment idx=$idx lines=${segment.lines.size} startMs=$startMs endMs=$endMs samples=${segAudio.size}",
       )
+      NrmNativeMemoryProbe.log("whisperx-align", "segment_$idx")
       NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align")
     }
     val stitched = sb.toString().trim()
@@ -446,7 +536,7 @@ object Wav2Vec2CtcForcedAligner {
         totalLines = totalLines,
     )
   }
-  /** trellis ?쒕룄 ??1-pass ?곗꽑, 珥덇낵 ??媛??湲몄씠 鍮꾩쑉濡??ш? 遺꾪븷 */
+  /** trellis 한도 — accurate도 12e6 상한 (18e6는 거의 미사용·메모리만 소모) */
   private fun maxTrellisCells(context: Context, options: MelonSyncAlignOptions): Long {
     val avail = NrmMemoryGuard.availMemMb(context)
     return when (options.quality) {
@@ -463,7 +553,6 @@ object Wav2Vec2CtcForcedAligner {
           }
       else ->
           when {
-            avail >= 2_000 -> 18_000_000L
             avail >= 1_800 -> MAX_TRELLIS_CELLS_HIGH
             avail >= 1_400 -> 10_000_000L
             else -> MAX_TRELLIS_CELLS
@@ -471,6 +560,10 @@ object Wav2Vec2CtcForcedAligner {
     }
   }
 
+  /**
+   * Silence + Time Anchor로 먼저 분할한 뒤, trellis cell 한도로 재귀 분할.
+   * 고RAM에서도 25초/무음마다 새 trellis → 후반 누적 drift 완화.
+   */
   private fun planLyricSegments(
       lines: List<String>,
       vocab: Vocab,
@@ -478,17 +571,162 @@ object Wav2Vec2CtcForcedAligner {
       frameCount: Int,
       context: Context,
       options: MelonSyncAlignOptions,
+      pcm: ShortArray,
+      vocalStartSample: Int,
+      vocalEndSample: Int,
   ): List<PlannedSegment> {
-    return planRecursive(
-        lines,
-        0.0,
-        1.0,
-        frameCount.coerceAtLeast(1),
-        vocab,
-        blankId,
-        maxTrellisCells(context, options),
-        options,
+    val limit = maxTrellisCells(context, options)
+    val anchored =
+        planByAnchors(
+            lines,
+            options,
+            pcm,
+            vocalStartSample,
+            vocalEndSample.coerceAtLeast(vocalStartSample + 1),
+        )
+    val out = ArrayList<PlannedSegment>()
+    for (seg in anchored) {
+      val segFrames =
+          max(1, (frameCount * (seg.weightEnd - seg.weightStart)).toInt().coerceAtLeast(1))
+      out.addAll(
+          planRecursive(
+              seg.lines,
+              seg.weightStart,
+              seg.weightEnd,
+              segFrames,
+              vocab,
+              blankId,
+              limit,
+              options,
+          ),
+      )
+    }
+    return out
+  }
+
+  /** 무음 갭·시간(25s) 앵커 → 줄 경계에 스냅한 PlannedSegment 목록 */
+  private fun planByAnchors(
+      lines: List<String>,
+      options: MelonSyncAlignOptions,
+      pcm: ShortArray,
+      vocalStartSample: Int,
+      vocalEndSample: Int,
+  ): List<PlannedSegment> {
+    if (lines.isEmpty()) return emptyList()
+    if (lines.size == 1) return listOf(PlannedSegment(lines, 0.0, 1.0))
+    val vocalSamples = (vocalEndSample - vocalStartSample).coerceAtLeast(1)
+    val vocalMs = (vocalSamples.toLong() * 1000L) / SAMPLE_RATE
+    val weights = lineCharWeights(lines, options.vocabKind())
+    val totalW = weights.sum().coerceAtLeast(1).toDouble()
+    val cumW = DoubleArray(lines.size + 1)
+    for (i in lines.indices) {
+      cumW[i + 1] = cumW[i] + weights[i] / totalW
+    }
+
+    val splitWeights = sortedSetOf<Double>()
+    var silenceSplits = 0
+    var timeSplits = 0
+
+    // Silence anchors
+    val silenceMids = findSilenceGapMidsMs(pcm, vocalStartSample, vocalEndSample)
+    for (midMs in silenceMids) {
+      val w = (midMs.toDouble() / vocalMs.toDouble()).coerceIn(0.05, 0.95)
+      // 너무 가장자리(초반/후반 5%) 제외
+      if (w in 0.08..0.92) {
+        splitWeights.add(w)
+        silenceSplits += 1
+      }
+    }
+
+    // Time anchors every ~25s
+    var t = ANCHOR_TIME_MS
+    while (t < vocalMs - ANCHOR_TIME_MS / 2) {
+      val w = (t.toDouble() / vocalMs.toDouble()).coerceIn(0.05, 0.95)
+      if (w in 0.08..0.92) {
+        val before = splitWeights.size
+        splitWeights.add(w)
+        if (splitWeights.size > before) timeSplits += 1
+      }
+      t += ANCHOR_TIME_MS
+    }
+
+    // Snap to line boundaries (avoid splitting mid-line): pick nearest cumW index
+    val lineSplitIdx = linkedSetOf<Int>()
+    for (w in splitWeights) {
+      var bestI = 1
+      var bestD = Double.MAX_VALUE
+      for (i in 1 until lines.size) {
+        val d = abs(cumW[i] - w)
+        if (d < bestD) {
+          bestD = d
+          bestI = i
+        }
+      }
+      // 최소 2줄씩 유지
+      if (bestI in 1 until lines.size) lineSplitIdx.add(bestI)
+    }
+
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_plan anchors=${lineSplitIdx.size + 1} silenceSplits=$silenceSplits timeSplits=$timeSplits vocalMs=$vocalMs lines=${lines.size}",
     )
+
+    if (lineSplitIdx.isEmpty()) {
+      return listOf(PlannedSegment(lines, 0.0, 1.0))
+    }
+
+    val cuts = (listOf(0) + lineSplitIdx.sorted() + listOf(lines.size)).distinct().sorted()
+    val segs = ArrayList<PlannedSegment>()
+    for (c in 0 until cuts.size - 1) {
+      val a = cuts[c]
+      val b = cuts[c + 1]
+      if (b <= a) continue
+      segs.add(PlannedSegment(lines.subList(a, b), cumW[a], cumW[b]))
+    }
+    return if (segs.isEmpty()) listOf(PlannedSegment(lines, 0.0, 1.0)) else segs
+  }
+
+  /** 보컬 구간 내 무음 갭 중심 (보컬 상대 ms) */
+  private fun findSilenceGapMidsMs(
+      pcm: ShortArray,
+      vocalStartSample: Int,
+      vocalEndSample: Int,
+  ): List<Long> {
+    if (pcm.isEmpty() || vocalEndSample <= vocalStartSample + SAMPLE_RATE) return emptyList()
+    val start = vocalStartSample.coerceIn(0, pcm.size)
+    val end = vocalEndSample.coerceIn(start, pcm.size)
+    if (end - start < SAMPLE_RATE) return emptyList()
+    val energies = computeFrameLogEnergies(pcm.copyOfRange(start, end))
+    if (energies.size < 16) return emptyList()
+    val sorted = energies.copyOf().apply { sort() }
+    val median = sorted[sorted.size / 2]
+    val silenceThresh = median - 0.8f
+    val minSilentFrames =
+        ((SILENCE_GAP_MIN_MS * SAMPLE_RATE) / (VOCAL_FRAME_HOP * 1000L)).toInt().coerceAtLeast(4)
+    val mids = ArrayList<Long>()
+    var runStart = -1
+    for (f in energies.indices) {
+      val silent = energies[f] < silenceThresh
+      if (silent) {
+        if (runStart < 0) runStart = f
+      } else if (runStart >= 0) {
+        val len = f - runStart
+        if (len >= minSilentFrames) {
+          val midFrame = runStart + len / 2
+          val midMs = (midFrame.toLong() * VOCAL_FRAME_HOP * 1000L) / SAMPLE_RATE
+          mids.add(midMs)
+        }
+        runStart = -1
+      }
+    }
+    if (runStart >= 0) {
+      val len = energies.size - runStart
+      if (len >= minSilentFrames) {
+        val midFrame = runStart + len / 2
+        mids.add((midFrame.toLong() * VOCAL_FRAME_HOP * 1000L) / SAMPLE_RATE)
+      }
+    }
+    return mids
   }
   private fun planRecursive(
       lines: List<String>,
@@ -681,6 +919,7 @@ object Wav2Vec2CtcForcedAligner {
       cachedVocab: Vocab? = null,
       options: MelonSyncAlignOptions,
       applyFirstLineIntroCorrection: Boolean = options.firstLineIntroCorrection,
+      allowLocalRealign: Boolean = true,
   ): AlignResult {
     if (audio.isEmpty() || melonLines.isEmpty()) {
       return AlignResult(lrc = "", alignedLines = 0, totalLines = melonLines.size)
@@ -712,13 +951,21 @@ object Wav2Vec2CtcForcedAligner {
     if (estimatedTrellisCells > trellisLimit) {
       throw IllegalStateException("trellis_too_large cells=$estimatedTrellisCells")
     }
+    val (adaptedChunk, adaptedOverlap) =
+        adaptChunkAndOverlap(
+            audio,
+            chunkSamples,
+            melonLines,
+            options,
+            shrinkForLowConf = !allowLocalRealign,
+        )
     val logProbs =
         inferLogProbsForAudio(
             context,
             session,
             audio,
-            chunkSamples,
-            options.chunkOverlapSamples(),
+            adaptedChunk,
+            adaptedOverlap,
         )
     if (logProbs.isEmpty()) {
       throw IllegalStateException("empty_logits")
@@ -734,7 +981,9 @@ object Wav2Vec2CtcForcedAligner {
       throw IllegalStateException("trellis_too_large cells=$trellisCells")
     }
     val charToToken = charToTokenIndex.charToToken
-    val tokenStartFrames = forcedAlignTokenStarts(logProbs, tokens, blankId, trellisLimit)
+    val frameEnergies = frameLogEnergiesFromAudio(audio, logProbs.size)
+    val tokenStartFrames =
+        forcedAlignTokenStarts(logProbs, tokens, blankId, trellisLimit, frameEnergies)
     val firstLineOnsetMs =
         if (applyFirstLineIntroCorrection && options.firstLineIntroCorrection) {
           estimateFirstLineOnsetMs(
@@ -800,6 +1049,37 @@ object Wav2Vec2CtcForcedAligner {
         options.vocabKind(),
     )
     enforceMonotonicAdaptive(rawMs, melonLines, options.vocabKind())
+    val lineConf =
+        estimateLineConfidences(
+            logProbs,
+            tokens,
+            blankId,
+            tokenStartFrames,
+            lineCharStarts,
+            charToToken,
+            melonLines.size,
+        )
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_line_conf avg=${"%.3f".format(Locale.US, lineConf.average())} low=${lineConf.count { it < LINE_CONF_LOW }}/${lineConf.size}",
+    )
+    if (allowLocalRealign) {
+      applyLocalRealignIfNeeded(
+          context,
+          alignDir,
+          modelFile,
+          audio,
+          melonLines,
+          rawMs,
+          lineConf,
+          audioDurationMs,
+          timeOffsetMs,
+          adaptedChunk,
+          session,
+          vocab,
+          options,
+      )
+    }
     val sb = StringBuilder()
     for (i in melonLines.indices) {
       sb.append(formatLrcTimestamp(rawMs[i])).append(melonLines[i]).append('\n')
@@ -814,6 +1094,265 @@ object Wav2Vec2CtcForcedAligner {
         totalLines = melonLines.size,
     )
   }
+
+  /** 보컬 밀도(상위 에너지 프레임 비율)로 chunk/overlap 보정 */
+  private fun adaptChunkAndOverlap(
+      audio: FloatArray,
+      baseChunkSamples: Int,
+      lines: List<String>,
+      options: MelonSyncAlignOptions,
+      shrinkForLowConf: Boolean = false,
+  ): Pair<Int, Int> {
+    val density = vocalDensity(audio)
+    val chunkScale =
+        when {
+          shrinkForLowConf -> 0.50f
+          density < 0.22f -> 1.20f
+          density > 0.55f -> 0.72f
+          density > 0.40f -> 0.88f
+          else -> 1.0f
+        }
+    val adaptedChunk =
+        (baseChunkSamples * chunkScale)
+            .toInt()
+            .coerceIn(SAMPLE_RATE * 2, max(baseChunkSamples, SAMPLE_RATE * 20))
+    val qualityOverlap = options.chunkOverlapSamples()
+    val shortLineRatio =
+        if (lines.isEmpty()) 0f
+        else {
+          val short =
+              lines.count { it.trim().length in 1..12 }.toFloat() / lines.size.toFloat()
+          short
+        }
+    val densityOverlap =
+        when {
+          density > 0.55f || shortLineRatio > 0.45f -> OVERLAP_MAX_SAMPLES
+          density < 0.22f -> OVERLAP_MIN_SAMPLES
+          else -> (OVERLAP_MIN_SAMPLES + OVERLAP_MAX_SAMPLES) / 2
+        }
+    val adaptedOverlap =
+        when {
+          qualityOverlap <= 0 ->
+              densityOverlap.coerceIn(OVERLAP_MIN_SAMPLES, (OVERLAP_MIN_SAMPLES + OVERLAP_MAX_SAMPLES) / 2)
+          else ->
+              ((qualityOverlap * 0.35f) + (densityOverlap * 0.65f))
+                  .toInt()
+                  .coerceIn(OVERLAP_MIN_SAMPLES, OVERLAP_MAX_SAMPLES)
+        }
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_chunk_adapt density=${"%.3f".format(Locale.US, density)} chunk=$adaptedChunk overlap=$adaptedOverlap shortLine=${"%.2f".format(Locale.US, shortLineRatio)} shrinkLowConf=$shrinkForLowConf",
+    )
+    return adaptedChunk to adaptedOverlap
+  }
+
+  private fun vocalDensity(audio: FloatArray): Float {
+    if (audio.size < FRAME_STRIDE_SAMPLES * 8) return 0.35f
+    val frames = max(1, audio.size / FRAME_STRIDE_SAMPLES)
+    val energies = FloatArray(frames)
+    for (t in 0 until frames) {
+      val start = t * FRAME_STRIDE_SAMPLES
+      val end = min(audio.size, start + FRAME_STRIDE_SAMPLES)
+      var sum = 0.0
+      for (i in start until end) {
+        val v = audio[i].toDouble()
+        sum += v * v
+      }
+      energies[t] = ln((sum / (end - start).coerceAtLeast(1)) + 1e-12).toFloat()
+    }
+    val sorted = energies.copyOf().apply { sort() }
+    val median = sorted[sorted.size / 2]
+    val thresh = median + 0.35f
+    var hot = 0
+    for (e in energies) if (e >= thresh) hot++
+    return hot.toFloat() / frames.toFloat()
+  }
+
+  private fun frameLogEnergiesFromAudio(audio: FloatArray, frameCount: Int): FloatArray {
+    if (frameCount <= 0) return FloatArray(0)
+    val out = FloatArray(frameCount)
+    for (t in 0 until frameCount) {
+      val start = (t.toLong() * FRAME_STRIDE_SAMPLES).toInt().coerceIn(0, audio.size)
+      val end = min(audio.size, start + FRAME_STRIDE_SAMPLES)
+      if (end <= start) {
+        out[t] = -10f
+        continue
+      }
+      var sum = 0.0
+      for (i in start until end) {
+        val v = audio[i].toDouble()
+        sum += v * v
+      }
+      out[t] = ln((sum / (end - start)) + 1e-12).toFloat()
+    }
+    return out
+  }
+
+  private fun estimateLineConfidences(
+      logProbs: Array<FloatArray>,
+      tokens: IntArray,
+      blankId: Int,
+      tokenStartFrames: IntArray,
+      lineCharStarts: IntArray,
+      charToToken: IntArray,
+      lineCount: Int,
+  ): FloatArray {
+    val conf = FloatArray(lineCount) { 0.5f }
+    if (logProbs.isEmpty() || tokens.isEmpty() || lineCount <= 0) return conf
+    for (i in 0 until lineCount) {
+      val c0 = lineCharStarts[i].coerceIn(0, charToToken.size)
+      val c1 =
+          if (i + 1 < lineCount) lineCharStarts[i + 1].coerceIn(0, charToToken.size)
+          else charToToken.size
+      val t0 =
+          if (c0 in charToToken.indices) charToToken[c0]
+          else 0
+      val t1 =
+          if (c1 > c0 && (c1 - 1) in charToToken.indices) charToToken[c1 - 1]
+          else t0
+      var sum = 0.0
+      var n = 0
+      for (ti in t0..t1.coerceAtMost(tokens.lastIndex)) {
+        val frame = tokenStartFrames.getOrElse(ti) { 0 }.coerceIn(0, logProbs.lastIndex)
+        val tok = tokens[ti]
+        val frameLp = logProbs[frame]
+        if (tok in frameLp.indices && blankId in frameLp.indices) {
+          sum += (frameLp[tok] - frameLp[blankId]).toDouble()
+          n++
+        }
+      }
+      val avg = if (n > 0) (sum / n).toFloat() else 0f
+      conf[i] = (1.0 / (1.0 + kotlin.math.exp(-avg.toDouble()))).toFloat()
+    }
+    return conf
+  }
+
+  private fun applyLocalRealignIfNeeded(
+      context: Context,
+      alignDir: File,
+      modelFile: File,
+      audio: FloatArray,
+      melonLines: List<String>,
+      rawMs: IntArray,
+      confidences: FloatArray,
+      audioDurationMs: Long,
+      timeOffsetMs: Int,
+      chunkSamples: Int,
+      session: OrtSession,
+      vocab: Vocab,
+      options: MelonSyncAlignOptions,
+  ) {
+    if (confidences.isEmpty()) return
+    val lowCount = confidences.count { it < LINE_CONF_LOW }
+    val lowRatio = lowCount.toFloat() / confidences.size.toFloat()
+    // 줄당 최대 1회, 세그먼트당 상한. 저신뢰 비율이 높으면 조기 중단.
+    val maxRealign =
+        when {
+          lowRatio >= LOW_CONF_RATIO_ABORT -> 1
+          else -> min(MAX_LOCAL_REALIGN_PER_SEGMENT, melonLines.size)
+        }
+    if (lowRatio >= LOW_CONF_RATIO_ABORT) {
+      NrmFileLogger.log(
+          "whisperx-align",
+          "ctc_fa_realign_abort reason=low_conf_ratio ratio=${"%.2f".format(Locale.US, lowRatio)} low=$lowCount/${confidences.size} maxRealign=$maxRealign",
+      )
+    }
+    // 가장 낮은 confidence 줄부터 (폭주 방지)
+    val candidates =
+        confidences.indices
+            .filter { confidences[it] < LINE_CONF_LOW }
+            .sortedBy { confidences[it] }
+    var done = 0
+    val visited = HashSet<Int>()
+    for (i in candidates) {
+      if (done >= maxRealign) break
+      if (!visited.add(i)) continue
+      val centerRel = (rawMs[i] - timeOffsetMs).coerceIn(0, audioDurationMs.toInt())
+      val winStartMs = max(0, centerRel - LOCAL_REALIGN_WINDOW_MS)
+      val winEndMs = min(audioDurationMs.toInt(), centerRel + LOCAL_REALIGN_WINDOW_MS)
+      if (winEndMs - winStartMs < 800) continue
+      val from = max(0, i - 1)
+      val to = min(melonLines.lastIndex, i + 1)
+      // 인접 줄도 visit 처리 — 같은 윈도우 재추론 중복 방지
+      for (j in from..to) visited.add(j)
+      val subLines = melonLines.subList(from, to + 1)
+      val s0 = ((winStartMs.toLong() * SAMPLE_RATE) / 1000L).toInt().coerceIn(0, audio.size)
+      val s1 =
+          ((winEndMs.toLong() * SAMPLE_RATE) / 1000L).toInt().coerceIn(s0 + SAMPLE_RATE / 4, audio.size)
+      val subAudio = audio.copyOfRange(s0, s1)
+      val subDur = ((s1 - s0).toLong() * 1000L) / SAMPLE_RATE
+      val before = rawMs[i]
+      val shrinkChunk =
+          if (confidences[i] < CONF_CHUNK_SHRINK) {
+            (chunkSamples / 2).coerceAtLeast(SAMPLE_RATE * 2)
+          } else {
+            chunkSamples
+          }
+      try {
+        val local =
+            alignAudioToLines(
+                context,
+                alignDir,
+                modelFile,
+                subAudio,
+                subLines,
+                subDur,
+                timeOffsetMs = timeOffsetMs + winStartMs,
+                chunkSamples = shrinkChunk,
+                session = session,
+                cachedVocab = vocab,
+                options = options,
+                applyFirstLineIntroCorrection = false,
+                allowLocalRealign = false, // 줄당 1회 — 재귀/연쇄 realign 금지
+            )
+        val parsed = parseLrcTimestampLines(local.lrc)
+        if (parsed.size != subLines.size) {
+          done += 1
+          NrmFileLogger.log(
+              "whisperx-align",
+              "ctc_fa_local_realign_accept idx=$i before=$before after=$before conf=${"%.3f".format(Locale.US, confidences[i])} reason=parse_mismatch",
+          )
+          continue
+        }
+        val candidate = rawMs.copyOf()
+        for (k in parsed.indices) {
+          candidate[from + k] = parsed[k].ms
+        }
+        val after = candidate[i]
+        val absWinStart = timeOffsetMs + winStartMs
+        val absWinEnd = timeOffsetMs + winEndMs
+        if (after in absWinStart..absWinEnd) {
+          var monoOk = true
+          for (j in 1 until candidate.size) {
+            if (candidate[j] < candidate[j - 1]) {
+              monoOk = false
+              break
+            }
+          }
+          if (monoOk) {
+            for (k in from..to) {
+              rawMs[k] = candidate[k]
+            }
+            enforceMonotonicAdaptive(rawMs, melonLines, options.vocabKind())
+          }
+        }
+        // 1회 realign 후 confidence가 여전히 낮아도 재시도하지 않고 수용
+        done += 1
+        NrmFileLogger.log(
+            "whisperx-align",
+            "ctc_fa_local_realign idx=$i before=$before after=${rawMs[i]} conf=${"%.3f".format(Locale.US, confidences[i])} acceptBelow=${LINE_CONF_ACCEPT}",
+        )
+        NrmNativeMemoryProbe.log("whisperx-align", "after_realign_$i")
+      } catch (t: Throwable) {
+        done += 1
+        NrmFileLogger.log(
+            "whisperx-align",
+            "ctc_fa_local_realign_skip idx=$i reason=${t.message ?: t.javaClass.simpleName}",
+        )
+      }
+    }
+  }
+
   private data class Vocab(val charToId: Map<String, Int>)
   private fun loadVocab(file: File): Vocab {
     val json = JSONObject(file.readText(Charsets.UTF_8))
@@ -1014,13 +1553,20 @@ object Wav2Vec2CtcForcedAligner {
       throw IllegalStateException("audio_too_long samples=$sampleCount")
     }
   }
-  private fun buildSessionOptions(availMb: Long = 0): OrtSession.SessionOptions {
-    val opts = OrtSession.SessionOptions()
-    val threads = if (availMb >= 1_500) 2 else 1
+  private fun configureSessionOptions(
+      opts: OrtSession.SessionOptions,
+      context: Context,
+      availMb: Long,
+  ) {
+    val threads = NrmThermalGuard.onnxIntraOpThreads(context, availMb)
     opts.setIntraOpNumThreads(threads)
     opts.setInterOpNumThreads(1)
-    opts.setMemoryPatternOptimization(false)
-    return opts
+    opts.setMemoryPatternOptimization(true)
+    val thermal = NrmThermalGuard.thermalStatus(context)
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_onnx_opts threads=$threads availMb=$availMb cores=${Runtime.getRuntime().availableProcessors()} bigCores=${NrmThermalGuard.estimatedBigCoreCount()} thermal=${NrmThermalGuard.thermalLabel(thermal)} memPattern=true",
+    )
   }
   private fun readPcmSegment(pcm: ShortArray, startSample: Int, endSample: Int): FloatArray {
     if (pcm.isEmpty()) return FloatArray(0)
@@ -1043,7 +1589,7 @@ object Wav2Vec2CtcForcedAligner {
     }
     val effectiveChunk = NrmMemoryGuard.effectiveChunkSamples(context, chunkSamples)
     if (audio.size <= effectiveChunk) {
-      return inferLogProbsChunk(session, audio, effectiveChunk, offsetSamples = 0)
+      return inferLogProbsChunk(session, audio, audio.size, effectiveChunk, offsetSamples = 0)
     }
     val overlap = chunkOverlapSamples.coerceIn(0, effectiveChunk / 4)
     val discardFrames = if (overlap > 0) max(1, overlap / FRAME_STRIDE_SAMPLES) else 0
@@ -1057,9 +1603,10 @@ object Wav2Vec2CtcForcedAligner {
       val liveChunk = NrmMemoryGuard.effectiveChunkSamples(context, effectiveChunk)
       val end = min(offset + liveChunk, audio.size)
       val chunkLen = end - offset
-      val chunk = FloatArray(chunkLen)
-      System.arraycopy(audio, offset, chunk, 0, chunkLen)
-      val chunkProbs = inferLogProbsChunk(session, chunk, liveChunk, offsetSamples = offset)
+      val pooled = obtainChunkAudioBuffer(chunkLen)
+      System.arraycopy(audio, offset, pooled, 0, chunkLen)
+      val chunkProbs =
+          inferLogProbsChunk(session, pooled, chunkLen, liveChunk, offsetSamples = offset)
       if (chunkIndex == 0) {
         allFrames.addAll(chunkProbs.toList())
       } else {
@@ -1071,6 +1618,9 @@ object Wav2Vec2CtcForcedAligner {
             "whisperx-align",
             "onnx_chunk idx=$chunkIndex offset=$offset end=$end frames=${chunkProbs.size} overlap=$overlap chunkSamples=$liveChunk availMb=${NrmMemoryGuard.availMemMb(context)}",
         )
+        if (chunkIndex == 0 || chunkIndex % 8 == 0 || end >= audio.size) {
+          NrmNativeMemoryProbe.log("whisperx-align", "onnx_chunk_$chunkIndex")
+        }
       }
       if (end >= audio.size) break
       offset = max(offset + 1, end - overlap)
@@ -1080,6 +1630,14 @@ object Wav2Vec2CtcForcedAligner {
       }
     }
     return allFrames.toTypedArray()
+  }
+
+  private fun obtainChunkAudioBuffer(minLen: Int): FloatArray {
+    val cached = chunkAudioPool.get()
+    if (cached != null && cached.size >= minLen) return cached
+    val grown = FloatArray(max(minLen, SAMPLE_RATE * 4))
+    chunkAudioPool.set(grown)
+    return grown
   }
 
   private fun inferLogProbsEphemeral(
@@ -1093,15 +1651,10 @@ object Wav2Vec2CtcForcedAligner {
     if (!NrmMemoryGuard.waitForChunkMemory(context, "whisperx-align")) {
       throw IllegalStateException("low_memory_before_onnx")
     }
-    val session = env.createSession(modelFile.absolutePath, buildSessionOptions(NrmMemoryGuard.availMemMb(context)))
+    val session = obtainOrCreateSession(context, modelFile)
     try {
       return inferLogProbsForAudio(context, session, audio, chunkSamples, chunkOverlapSamples)
     } finally {
-      try {
-        session.close()
-      } catch (_: Exception) {
-        // ignore
-      }
       NrmMemoryGuard.trimBetweenInferenceSteps(context, "whisperx-align", force = true)
     }
   }
@@ -1109,31 +1662,37 @@ object Wav2Vec2CtcForcedAligner {
   private fun inferLogProbsChunk(
       session: OrtSession,
       audio: FloatArray,
+      sampleCount: Int,
       chunkLimit: Int,
       offsetSamples: Int,
   ): Array<FloatArray> {
-    if (audio.size > chunkLimit) {
-      throw IllegalStateException("chunk_too_large samples=${audio.size} limit=$chunkLimit")
+    val n = sampleCount.coerceIn(0, audio.size)
+    if (n > chunkLimit) {
+      throw IllegalStateException("chunk_too_large samples=$n limit=$chunkLimit")
     }
     val inputName = session.inputNames.first()
-    val shape = longArrayOf(1, audio.size.toLong())
+    val shape = longArrayOf(1, n.toLong())
     try {
-      OnnxTensor.createTensor(env, FloatBuffer.wrap(audio), shape).use { inputTensor ->
+      // FloatBuffer.wrap(heap) — allocateDirect 금지. Tensor/Result는 use로 반드시 close.
+      // Result.close 전에 float 값을 Java 힙으로 완전 복사 (native view 참조 잔존 방지).
+      OnnxTensor.createTensor(env, FloatBuffer.wrap(audio, 0, n), shape).use { inputTensor ->
         session.run(mapOf(inputName to inputTensor)).use { result ->
           val value = result[0].value
+          @Suppress("UNCHECKED_CAST")
           val logits3d =
               when (value) {
                 is Array<*> -> value as Array<Array<FloatArray>>
                 else -> throw IllegalStateException("unexpected_onnx_output")
               }
           val logits = logits3d[0]
-          return logits.map { frame -> logSoftmax(frame) }.toTypedArray()
+          val copied = Array(logits.size) { t -> logits[t].copyOf() }
+          return Array(copied.size) { t -> logSoftmax(copied[t]) }
         }
       }
     } catch (t: Throwable) {
       NrmFileLogger.error(
           "whisperx-align",
-          "onnx_infer_fail offsetSamples=$offsetSamples chunkSamples=${audio.size}",
+          "onnx_infer_fail offsetSamples=$offsetSamples chunkSamples=$n",
           t,
       )
       throw IllegalStateException("onnx_infer_failed: ${t.message ?: t.javaClass.simpleName}", t)
@@ -1158,6 +1717,7 @@ object Wav2Vec2CtcForcedAligner {
       tokens: IntArray,
       blankId: Int,
       trellisLimit: Long,
+      frameEnergies: FloatArray? = null,
   ): IntArray {
     val labels = mutableListOf<Int>()
     labels.add(blankId)
@@ -1177,12 +1737,41 @@ object Wav2Vec2CtcForcedAligner {
     val negInf = -1e20f
     val dp = Array(T) { FloatArray(S) { negInf } }
     val back = Array(T) { IntArray(S) { -1 } }
-    dp[0][0] = logProbs[0][labels[0]]
-    if (S > 1) dp[0][1] = logProbs[0][labels[1]]
+    fun blankBias(t: Int): Float {
+      val progress = t.toFloat() / max(1, T - 1).toFloat()
+      val timeBias = BLANK_BIAS_EARLY * (1f - progress) + BLANK_BIAS_LATE * progress
+      val e =
+          if (frameEnergies != null && t in frameEnergies.indices) frameEnergies[t]
+          else 0f
+      val energyAdj =
+          when {
+            e < -1.2f -> 0.04f
+            e > 0.8f -> -0.04f
+            else -> 0f
+          }
+      return (timeBias + energyAdj).coerceIn(-BLANK_BIAS_CLAMP, BLANK_BIAS_CLAMP)
+    }
+    fun emitAt(t: Int, label: Int): Float {
+      var emit = logProbs[t][label]
+      if (label == blankId) emit += blankBias(t)
+      return emit
+    }
+    dp[0][0] = emitAt(0, labels[0])
+    if (S > 1) dp[0][1] = emitAt(0, labels[1])
+    var biasEarlySum = 0.0
+    var biasLateSum = 0.0
+    var biasN = 0
     for (t in 1 until T) {
+      val b = blankBias(t)
+      if (t < T / 4) {
+        biasEarlySum += b
+        biasN += 1
+      } else if (t >= (T * 3) / 4) {
+        biasLateSum += b
+      }
       for (s in 0 until S) {
         val label = labels[s]
-        val emit = logProbs[t][label]
+        val emit = emitAt(t, label)
         var best = negInf
         var from = s
         val stay = dp[t - 1][s] + emit
@@ -1208,6 +1797,13 @@ object Wav2Vec2CtcForcedAligner {
         back[t][s] = from
       }
     }
+    val earlyAvg = if (biasN > 0) biasEarlySum / biasN else blankBias(0).toDouble()
+    val lateN = max(1, T / 4)
+    val lateAvg = biasLateSum / lateN
+    NrmFileLogger.log(
+        "whisperx-align",
+        "ctc_fa_blank_adapt early=${"%.3f".format(Locale.US, earlyAvg)} late=${"%.3f".format(Locale.US, lateAvg)} T=$T",
+    )
     var s = if (dp[T - 1][S - 1] >= dp[T - 1][S - 2]) S - 1 else S - 2
     val stateAtFrame = IntArray(T)
     for (t in T - 1 downTo 0) {
@@ -1250,9 +1846,8 @@ object Wav2Vec2CtcForcedAligner {
     if (lines.size < 2 || frameMs <= 0.0) return
     val collapseWindowMs =
         when (vocabKind) {
-          MelonSyncVocabKind.EN -> 120
-          MelonSyncVocabKind.XLSR -> 110
-          MelonSyncVocabKind.KO -> 95
+          MelonSyncVocabKind.KO -> 100
+          MelonSyncVocabKind.EN, MelonSyncVocabKind.XLSR -> 120
         }
     var i = 0
     while (i < lines.size) {
@@ -1310,9 +1905,8 @@ object Wav2Vec2CtcForcedAligner {
     val chars = normalizeLine(line, vocabKind).length.coerceAtLeast(1)
     val perChar =
         when (vocabKind) {
-          MelonSyncVocabKind.EN -> 38
-          MelonSyncVocabKind.XLSR -> 36
-          MelonSyncVocabKind.KO -> 34
+          MelonSyncVocabKind.KO -> 35
+          MelonSyncVocabKind.EN, MelonSyncVocabKind.XLSR -> 38
         }
     return max(52, min(480, chars * perChar))
   }

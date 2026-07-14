@@ -34,7 +34,7 @@ function pickMelonAlignLanguageManual(plain: string): Promise<MelonAlignLyricsLa
 /**
  * wav2vec2-base + 수동 설정이면 KO/EN 팝업.
  * 자동이면 plain 비율로 추론.
- * eSpeak NG이면 팝업 없이 한국어 팩(발음 전처리용).
+ * EN→KO 발음(transliterator)이면 팝업 없이 한국어 팩(발음 전처리용).
  * aeneas 등 다른 엔진은 추론만 사용.
  */
 export async function resolveMelonAlignLanguageForPlain(
@@ -49,9 +49,11 @@ export async function resolveMelonAlignLanguageForPlain(
     return inferMelonAlignLyricsLanguage(plain);
   }
   const mode = await loadAlignLyricsLangDetectionMode();
-  if (mode === 'espeak') {
-    const { isEspeakNgInstalled } = await import('@/lib/nrmEspeakNative');
-    if (await isEspeakNgInstalled()) {
+  if (mode === 'transliterator') {
+    const { isEnKoTransliteratorInstalled } = await import(
+      '@/lib/nrmEnKoTransliteratorNative'
+    );
+    if (await isEnKoTransliteratorInstalled()) {
       return 'ko';
     }
     return inferMelonAlignLyricsLanguage(plain);

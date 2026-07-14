@@ -1,4 +1,4 @@
-/** eSpeak NG — FA 전처리(영어→한국어 발음) 및 LRC 원문 복원. FA 엔진 코드는 건드리지 않음. */
+/** EN→KO transliterator — FA 전처리(영어→한국어 발음) 및 LRC 원문 복원. FA 엔진 코드는 건드리지 않음. */
 
 export type EspeakLineMapping = {
   originalLine: string;
@@ -9,6 +9,12 @@ export type EspeakPreprocessResult = {
   phoneticPlain: string;
   lineMappings: EspeakLineMapping[];
 };
+
+/** @deprecated Use EspeakLineMapping — 동일 매핑 구조 */
+export type EnKoLineMapping = EspeakLineMapping;
+
+/** @deprecated Use EspeakPreprocessResult — 동일 결과 구조 */
+export type EnKoPreprocessResult = EspeakPreprocessResult;
 
 const LRC_LINE_RE = /^\[([^\]]+)\]\s*(.*)$/;
 
@@ -35,18 +41,20 @@ export function parseLrcTimedLines(lrc: string): { ts: string; text: string }[] 
  * FA에 넣기 전 plain → 한국어 발음 plain (라인 1:1 유지).
  * 네이티브 미가용 시 원문 그대로 반환.
  */
-export async function preprocessPlainForEspeakAlign(
+export async function preprocessPlainForEnKoAlign(
   plain: string,
-): Promise<EspeakPreprocessResult> {
+): Promise<EnKoPreprocessResult> {
   const lines = splitPlainLyricLines(plain);
   if (lines.length === 0) {
     return { phoneticPlain: '', lineMappings: [] };
   }
 
-  const { transliteratePlainLinesForEspeak } = await import('@/lib/nrmEspeakNative');
-  const phoneticLines = await transliteratePlainLinesForEspeak(lines);
+  const { transliteratePlainLinesForEnKo } = await import(
+    '@/lib/nrmEnKoTransliteratorNative'
+  );
+  const phoneticLines = await transliteratePlainLinesForEnKo(lines);
 
-  const lineMappings: EspeakLineMapping[] = lines.map((originalLine, i) => ({
+  const lineMappings: EnKoLineMapping[] = lines.map((originalLine, i) => ({
     originalLine,
     phoneticLine: phoneticLines[i] ?? originalLine,
   }));
@@ -55,6 +63,13 @@ export async function preprocessPlainForEspeakAlign(
     phoneticPlain: lineMappings.map((m) => m.phoneticLine).join('\n'),
     lineMappings,
   };
+}
+
+/** @deprecated Use preprocessPlainForEnKoAlign */
+export async function preprocessPlainForEspeakAlign(
+  plain: string,
+): Promise<EspeakPreprocessResult> {
+  return preprocessPlainForEnKoAlign(plain);
 }
 
 /** LRC 타임스탬프 유지, 가사 텍스트만 원문으로 복원 (라인 순서 1:1). */

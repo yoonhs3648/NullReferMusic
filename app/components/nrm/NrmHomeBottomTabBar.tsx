@@ -16,7 +16,7 @@ const TABS: TabSpec[] = [
   { id: 'library', label: 'Storage', icon: 'albums-outline' },
   { id: 'search', label: 'Search', icon: 'search-outline' },
   { id: 'home', label: 'Home', icon: 'home-outline' },
-  { id: 'discover', label: 'Discover', icon: 'compass-outline' },
+  { id: 'discover', label: 'AI Lab', icon: 'sparkles-outline' },
   { id: 'history', label: 'History', icon: 'time-outline' },
 ];
 
@@ -31,7 +31,7 @@ type Props = {
   backgroundColor?: string;
 };
 
-/** 메인 홈 하단 탭 — Storage · Search · Home · Discover · History */
+/** 메인 홈 하단 탭 — Storage · Search · Home · AI Lab · History */
 export function NrmHomeBottomTabBar({ isDark, active, onChange, backgroundColor }: Props) {
   const insets = useSafeAreaInsets();
   const inactive = isDark ? TAB_INACTIVE_DARK : TAB_INACTIVE_LIGHT;

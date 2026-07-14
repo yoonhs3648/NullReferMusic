@@ -53,6 +53,9 @@ library/libretranslate/_bin/
 
 # eSpeak NG Android 패키지 (GitHub Release 업로드 전 로컬 빌드)
 library/espeak-ng/_bin/
+library/en-ko-transliterator/_bin/
+library/en-ko-transliterator/_hf/
+library/en-ko-transliterator/_tools/
 library/espeak-ng/_src_espeak-ng/
 
 # Whisper APK assets — ggml 모델만 제외 (CLI·libomp.so는 형상관리)
@@ -62,3 +65,5 @@ app/android/app/src/main/assets/libretranslate/nrm-argos-translate
 app/android/app/src/main/assets/libretranslate/**/*.so
 app/android/app/src/main/assets/libretranslate/**/nrm-argos-translate
 app/android/.gradle-home/
+
+scripts/__pycache__/

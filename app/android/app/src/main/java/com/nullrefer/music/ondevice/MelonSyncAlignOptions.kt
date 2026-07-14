@@ -42,7 +42,8 @@ data class MelonSyncAlignOptions(
 
   fun minIntroMs(): Int = if (firstLineIntroCorrection) 800 else 0
 
-  fun onsetProbeThreshold(): Float = if (isAccurate) 2.8f else 3.2f
+  /** quality 분기 제거 — 단일 값으로도 체감 차이 거의 없음 */
+  fun onsetProbeThreshold(): Float = 3.0f
 
   companion object {
     const val QUALITY_ACCURATE = "accurate"

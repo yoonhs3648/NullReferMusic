@@ -3,6 +3,7 @@ package com.nullrefer.music.ondevice
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -11,10 +12,12 @@ import com.nullrefer.music.NrmBrand
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 다운로드·Whisper 등 장시간 작업 중 프로세스가 OS에 의해 kill 되지 않도록
- * Foreground Service + (선택) WakeLock 참조 카운트를 관리합니다.
+ * 다운로드·Whisper·Forced Alignment 등 장시간 작업 중 프로세스가 OS에 의해 kill 되지 않도록
+ * Foreground Service + WakeLock(+다운로드 시 WifiLock) 참조 카운트를 관리합니다.
  *
  * 작업 토큰이 활성인 동안 최근 앱 스와이프로도 FGS를 유지합니다.
+ *
+ * 참고: Android에서 "절대 안 죽음"은 불가능하다. 목표는 생존 가능성 최대화.
  */
 object NrmBackgroundWorkCoordinator {
   private val tokens = ConcurrentHashMap.newKeySet<String>()
@@ -23,6 +26,7 @@ object NrmBackgroundWorkCoordinator {
   private val stopHandler = Handler(Looper.getMainLooper())
   @Volatile private var pendingStopRunnable: Runnable? = null
   @Volatile private var wakeLock: PowerManager.WakeLock? = null
+  @Volatile private var wifiLock: WifiManager.WifiLock? = null
   @Volatile private var stopRequested: Boolean = false
   @Volatile private var pendingServiceRestart: Boolean = false
 
@@ -31,7 +35,15 @@ object NrmBackgroundWorkCoordinator {
 
   fun activeTokenCount(): Int = tokens.size
 
-  fun hasDownloadTokens(): Boolean = tokens.any { it.startsWith("dl:") }
+  fun hasDownloadTokens(): Boolean =
+      tokens.any {
+        it.startsWith("dl:") ||
+            it.startsWith("whisper-model:") ||
+            it.startsWith("forced-align:") ||
+            it == "whisperx-align-model" ||
+            it.startsWith("en-ko-transliterator") ||
+            it.startsWith("espeak")
+      }
 
   fun hasActiveAudioExtractJobs(): Boolean = activeAudioExtractJobs.isNotEmpty()
 
@@ -51,7 +63,11 @@ object NrmBackgroundWorkCoordinator {
   }
 
   fun hasLyricsTokens(): Boolean =
-      tokens.any { it.startsWith("lyrics:") || it.startsWith("whisper-lrc:") }
+      tokens.any {
+        it.startsWith("lyrics:") ||
+            it.startsWith("whisper-lrc:") ||
+            it.startsWith("align-run:")
+      }
 
   fun hasBlockingExitWork(): Boolean =
       hasDownloadTokens() || hasLyricsTokens() || hasModelInstallTokens()
@@ -65,23 +81,13 @@ object NrmBackgroundWorkCoordinator {
 
   fun hasModelTokens(): Boolean = hasModelInstallTokens()
 
-  /** FGS startForeground type — 다운로드(dataSync) vs 가사·align(mediaProcessing, API 34+) */
+  /**
+   * FGS type: wav2vec2/모델 DL/오디오 DL 모두 **dataSync** 우선.
+   * (mediaProcessing은 제조사/정책에 따라 더 공격적으로 잘릴 수 있어 align에도 쓰지 않음)
+   */
   fun resolveForegroundServiceType(): Int {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
-    var type = 0
-    if (hasDownloadTokens()) {
-      type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-    }
-    val mediaWork =
-        hasLyricsTokens() ||
-            tokens.any { it.startsWith("forced-align:") || it.startsWith("whisper-lrc:") }
-    if (mediaWork && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-      type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
-    }
-    if (type == 0) {
-      type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-    }
-    return type
+    return ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
   }
 
   fun acquire(context: Context, token: String) {
@@ -99,6 +105,7 @@ object NrmBackgroundWorkCoordinator {
       stopService(context.applicationContext)
     }
     acquireWakeLock(context.applicationContext)
+    refreshWifiLock(context.applicationContext)
     NrmFileLogger.log("bg-work", "acquire token=$trimmed active=${tokens.size}")
     if (shouldRunForegroundService()) {
       NrmBackgroundWorkService.refreshNotification(context.applicationContext)
@@ -110,6 +117,7 @@ object NrmBackgroundWorkCoordinator {
     if (trimmed.isEmpty()) return
     tokens.remove(trimmed)
     NrmFileLogger.log("bg-work", "release token=$trimmed active=${tokens.size}")
+    refreshWifiLock(context.applicationContext)
     if (tokens.isEmpty()) {
       scheduleStopIfIdle(context.applicationContext)
     } else {
@@ -129,6 +137,7 @@ object NrmBackgroundWorkCoordinator {
     tokens.clear()
     stopRequested = true
     releaseWakeLock()
+    releaseWifiLock()
     NrmStaleWorkNotificationCleanup.markWorkActive(appContext, false)
     NrmStaleWorkNotificationCleanup.forceClearOngoingWorkNotifications(appContext, reason)
     NrmFileLogger.log("bg-work", "Force clear reason=$reason tokens=$hadTokens")
@@ -200,14 +209,17 @@ object NrmBackgroundWorkCoordinator {
 
     val lyricsJs = tokens.count { it.startsWith("lyrics:") }
     val whisperLrc = tokens.count { it.startsWith("whisper-lrc:") }
-    val forcedAlign = tokens.count { it.startsWith("forced-align:") }
-    val lyricsBusy = lyricsJs + whisperLrc + forcedAlign
+    val alignRun = tokens.count { it.startsWith("align-run:") }
+    val lyricsBusy = lyricsJs + whisperLrc + alignRun
     if (lyricsBusy > 0) {
+      val queueDepth = ForcedAlignWorkQueue.pendingCount().coerceAtLeast(alignRun)
       lines.add(
-          if (lyricsBusy == 1) {
-            "가사(LRC) 생성 중"
-          } else {
-            "가사(LRC) 생성 중 (${lyricsBusy}곡 대기)"
+          when {
+            alignRun > 0 && queueDepth > 1 ->
+                "가사(LRC) 생성 중 · Forced Alignment (${queueDepth}곡 큐)"
+            alignRun > 0 -> "가사(LRC) 생성 중 · Forced Alignment"
+            lyricsBusy == 1 -> "가사(LRC) 생성 중"
+            else -> "가사(LRC) 생성 중 (${lyricsBusy}곡 대기)"
           },
       )
     }
@@ -314,6 +326,47 @@ object NrmBackgroundWorkCoordinator {
     NrmFileLogger.log("bg-work", "WakeLock release")
   }
 
+  /** 모델·오디오 다운로드 중 Wi-Fi radio sleep 완화 */
+  private fun refreshWifiLock(context: Context) {
+    if (hasDownloadTokens()) {
+      acquireWifiLock(context)
+    } else {
+      releaseWifiLock()
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun acquireWifiLock(context: Context) {
+    if (wifiLock?.isHeld == true) return
+    try {
+      val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+      val lock =
+          wm.createWifiLock(
+                  WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                  "${NrmBrand.STORAGE_FOLDER_NAME}:nrm-wifi",
+              )
+              .apply { setReferenceCounted(false) }
+      lock.acquire()
+      wifiLock = lock
+      NrmFileLogger.log("bg-work", "WifiLock acquire tokens=${tokens.size}")
+    } catch (t: Throwable) {
+      NrmFileLogger.warn("bg-work", "WifiLock acquire failed err=${t.message}")
+    }
+  }
+
+  private fun releaseWifiLock() {
+    val lock = wifiLock ?: return
+    if (lock.isHeld) {
+      try {
+        lock.release()
+      } catch (_: RuntimeException) {
+        /* already released */
+      }
+    }
+    wifiLock = null
+    NrmFileLogger.log("bg-work", "WifiLock release")
+  }
+
   private fun cancelPendingStop() {
     pendingStopRunnable?.let { stopHandler.removeCallbacks(it) }
     pendingStopRunnable = null
@@ -328,6 +381,7 @@ object NrmBackgroundWorkCoordinator {
           if (tokens.isNotEmpty()) return@Runnable
           stopRequested = true
           releaseWakeLock()
+          releaseWifiLock()
           NrmStaleWorkNotificationCleanup.markWorkActive(context, false)
           stopService(context)
           NrmFileLogger.log("bg-work", "Deferred stop complete active=0")

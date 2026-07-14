@@ -7,11 +7,14 @@ import { resolveMelonAlignLanguageForPlain } from '@/lib/nrmPickMelonAlignLangua
 import type { MelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import { loadAlignLyricsLangDetectionMode } from '@/lib/nrmAlignLyricsLangDetectionSettings';
 import {
-  preprocessPlainForEspeakAlign,
+  preprocessPlainForEnKoAlign,
   restoreLrcWithOriginalLyrics,
   type EspeakLineMapping,
 } from '@/lib/nrmEspeakLyricsPreprocess';
-import { isEspeakNgInstalled, probeEspeakNgForAlign } from '@/lib/nrmEspeakNative';
+import {
+  isEnKoTransliteratorInstalled,
+  probeEnKoTransliteratorForAlign,
+} from '@/lib/nrmEnKoTransliteratorNative';
 import { logSyncLyricsLrcDump } from '@/lib/nrmSyncLyricsLog';
 import { normalizeWhisperLrc } from '@/lib/nrmWhisperLyrics';
 import { usesPcBackendInDev } from '@/lib/nrmDevRuntime';
@@ -25,7 +28,7 @@ export type MelonLyricsLrcPreload = {
   translationClient?: typeof import('@/lib/nrmTranslationClient');
 };
 
-/** eSpeak NG — Kotlin [EspeakPhonemeToHangul.LATIN_WORD] 와 동일 (줄 안 라틴 단어만 변환) */
+/** EN→KO transliterator — 줄 안 라틴 단어가 있을 때만 전처리 */
 const LATIN_WORD_IN_PLAIN = /[A-Za-z][A-Za-z0-9'’,.\-]*/;
 
 function plainHasLatinWords(plain: string): boolean {
@@ -64,35 +67,46 @@ export async function transcribeMelonLyricsLrc(
 
   const langDetectionMode = await loadAlignLyricsLangDetectionMode();
   let faPlain = plain;
-  let espeakLineMappings: EspeakLineMapping[] | undefined;
+  let transliteratorLineMappings: EspeakLineMapping[] | undefined;
 
-  // eSpeak 모드: 곡 전체 ko/en 판정 없음 — 라틴(영문) 단어가 있는 줄만 네이티브에서 한글 발음으로 치환
-  const needsEspeakPreprocess =
-    langDetectionMode === 'espeak' && plainHasLatinWords(plain);
+  // transliterator 모드: 곡 전체 ko/en 판정 없음 — 라틴(영문) 단어가 있는 줄만 EN→KO 발음으로 치환
+  const needsTransliteratorPreprocess =
+    langDetectionMode === 'transliterator' && plainHasLatinWords(plain);
 
-  if (needsEspeakPreprocess) {
-    if (!(await isEspeakNgInstalled())) {
-      logDownloadStage('whisperx-align', 'skip_espeak_not_installed', { mode, extension });
+  if (needsTransliteratorPreprocess) {
+    if (!(await isEnKoTransliteratorInstalled())) {
+      logDownloadStage('whisperx-align', 'skip_transliterator_not_installed', {
+        mode,
+        extension,
+      });
       return {
         lyricsRequested: true,
         lyricsEmbedded: false,
         lyricsMelonAlignFailed: true,
       };
     }
-    if (!(await probeEspeakNgForAlign())) {
-      logDownloadStage('whisperx-align', 'skip_espeak_probe_fail', { mode, extension, alignLang });
-    } else {
-      const pre = await preprocessPlainForEspeakAlign(plain);
-      faPlain = pre.phoneticPlain;
-      espeakLineMappings = pre.lineMappings;
-      logDownloadStage('whisperx-align', 'espeak_preprocess_done', {
+    if (!(await probeEnKoTransliteratorForAlign())) {
+      logDownloadStage('whisperx-align', 'skip_transliterator_probe_fail', {
         mode,
         extension,
-        lineCount: espeakLineMappings.length,
+        alignLang,
+      });
+    } else {
+      const pre = await preprocessPlainForEnKoAlign(plain);
+      faPlain = pre.phoneticPlain;
+      transliteratorLineMappings = pre.lineMappings;
+      logDownloadStage('whisperx-align', 'transliterator_preprocess_done', {
+        mode,
+        extension,
+        lineCount: transliteratorLineMappings.length,
       });
     }
-  } else if (langDetectionMode === 'espeak') {
-    logDownloadStage('whisperx-align', 'skip_espeak_no_latin', { mode, extension, alignLang });
+  } else if (langDetectionMode === 'transliterator') {
+    logDownloadStage('whisperx-align', 'skip_transliterator_no_latin', {
+      mode,
+      extension,
+      alignLang,
+    });
   }
 
   logDownloadStage('whisperx-align', 'align_start', {
@@ -101,7 +115,7 @@ export async function transcribeMelonLyricsLrc(
     plainChars: plain.length,
     plainLines: plain.split(/\r?\n/).filter((l) => l.trim()).length,
     alignLang,
-    espeakPreprocess: needsEspeakPreprocess,
+    transliteratorPreprocess: needsTransliteratorPreprocess,
     audioUri: fileUri.slice(0, 120),
   });
 
@@ -134,11 +148,11 @@ export async function transcribeMelonLyricsLrc(
         : undefined,
     );
     lrc = normalizeWhisperLrc(aligned.lrc);
-    const usedEspeak = !!(espeakLineMappings?.length && lrc.trim());
-    if (usedEspeak) {
-      // eSpeak 전처리(발음) 가사 + FA 타임스탬프 — 복원 전 전문
+    const usedTransliterator = !!(transliteratorLineMappings?.length && lrc.trim());
+    if (usedTransliterator) {
+      // EN→KO 전처리(발음) 가사 + FA 타임스탬프 — 복원 전 전문
       logSyncLyricsLrcDump({
-        engine: 'espeak-align',
+        engine: 'en-ko-transliterator',
         kind: 'phonetic_timed',
         lrc,
         extra: {
@@ -146,10 +160,10 @@ export async function transcribeMelonLyricsLrc(
           extension,
           alignLang,
           alignModel: alignPref,
-          lineMappings: espeakLineMappings!.length,
+          lineMappings: transliteratorLineMappings!.length,
         },
       });
-      lrc = restoreLrcWithOriginalLyrics(lrc, espeakLineMappings!);
+      lrc = restoreLrcWithOriginalLyrics(lrc, transliteratorLineMappings!);
       logSyncLyricsLrcDump({
         engine: alignPref,
         kind: 'restored_lrc',
@@ -161,7 +175,7 @@ export async function transcribeMelonLyricsLrc(
         engine: alignPref,
         kind: 'sync_lrc',
         lrc,
-        extra: { mode, extension, alignLang, espeakPreprocess: false },
+        extra: { mode, extension, alignLang, transliteratorPreprocess: false },
       });
     }
     lyricsMelonMemoryInsufficient = aligned.alignMemoryInsufficient;
