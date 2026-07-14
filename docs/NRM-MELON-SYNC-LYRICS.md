@@ -122,6 +122,19 @@ ctc_fa_stitch segments=2 globalStretch=false
 
 에이전트는 **새 개선마다 이 섹션 맨 위에 항목 추가**.
 
+### 2026-07-14 — Probe 1회 캐시 / Session 앱수명 / Segment ≤30s·Frame·Token 한도
+
+**배경:** 로그상 transliterator `probe hello`가 곡당 2~3회, wav2vec2 Session이 곡마다 create/destroy, 토큰 밀집 세그먼트가 100s급 처리로 전체 FA가 수 배 느려짐. arena/memPattern OFF·PeakRSS↓는 유지.
+
+| 변경 | 내용 |
+|------|------|
+| Probe 캐시 | `EnKoTransliteratorInfer.probe` — 동일 root면 프로세스당 `hello` 1회만, 이후 cache hit. FA 직전 `invalidate()`는 엔진만 해제(probe 캐시 유지) |
+| Session 수명 | `ForcedAlignWorkQueue` idle 시 `releaseOnnxSession` 제거. `MainApplication` onLowMemory / onTrimMemory(COMPLETE·RUNNING_CRITICAL)에서만 destroy |
+| Segment 한도 | `MAX_SEGMENT_MS=30s`, `MAX_SEGMENT_FRAMES=2500`, `MAX_SEGMENT_PLAIN_TOKENS=180` — 하나라도 초과 시 `planRecursive` 강제 분할 |
+| 유지 | `localRealignCount=1`, arena OFF / memPattern OFF, Chunk·vocal detect 변경 없음 |
+
+**로그 키워드:** `probe cache hit`, `ctc_fa_plan_force_split`, `ctc_fa_plan … maxSegMs=`, `release_onnx_sessions`, `ctc_fa_onnx_session create|reuse` (곡마다 destroy 없어야 함)
+
 ### 2026-07-14 — Native Memory Audit + Local Realign 제한 (LMKD 대응)
 
 **배경:** SM-G781N에서 FA 중 silent kill. Java OOM/Fatal signal 없음 → Samsung LMKD + Native RSS + 장시간 CPU 유력. `availMb`만으로는 프로세스 RSS를 알 수 없음.

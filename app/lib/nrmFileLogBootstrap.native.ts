@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { appendNrmFileLog, getNrmLogFilePath } from '@/lib/nrmFileLog';
 import { initNrmFileLoggingRuntime, isNrmFileLoggingActive } from '@/lib/nrmFileLoggingRuntime';
+import { runAfterNrmApkUpdateGate } from '@/lib/nrmApkUpdateStartup';
 import { reconcileStaleArtifactsOnColdStart } from '@/lib/nrmStartupArtifactCleanup';
 
 void (async () => {
@@ -37,6 +38,8 @@ void (async () => {
     );
   }
 
-  void reconcileStaleArtifactsOnColdStart();
-  // ffmpeg / Innertube 네트워크는 APK 업데이트 게이트 통과 후 (NrmApkUpdateGate).
+  // 캐시 정리·ffmpeg·Innertube는 APK 게이트 통과 후에만 (업데이트 창/다운로드와 경쟁 금지)
+  runAfterNrmApkUpdateGate(() => {
+    void reconcileStaleArtifactsOnColdStart();
+  });
 })();

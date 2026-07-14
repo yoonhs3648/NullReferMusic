@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - Activity/RN Thread에서 직접 ONNX를 돌리지 않고, 이 Executor에서만 실행한다.
  * - FGS 토큰(`align-run:`) + PARTIAL_WAKE_LOCK은 잡 단위로 acquire/release.
  * - 스레드는 [Process.THREAD_PRIORITY_FOREGROUND]로 CPU 스케줄링을 높인다.
- * - ONNX Session은 큐가 빌 때만 close (곡마다 재생성 금지).
+ * - wav2vec2 ONNX Session은 앱 수명 동안 유지 (큐 idle 시 close 금지).
+ *   해제: [Wav2Vec2CtcForcedAligner.releaseOnnxSession] — MainApplication onTrimMemory/onLowMemory.
  */
 object ForcedAlignWorkQueue {
   private val pending = AtomicInteger(0)
@@ -58,7 +59,7 @@ object ForcedAlignWorkQueue {
             "done remaining=$remaining label=${label.ifBlank { "(none)" }}",
         )
         if (remaining <= 0) {
-          Wav2Vec2CtcForcedAligner.releaseOnnxSession()
+          // Session은 앱 수명 재사용 — idle destroy 하지 않음 (곡마다 create 비용 제거)
           NrmForegroundNotificationBinder.onLyricsProgressDismissed()
           NrmBackgroundWorkService.refreshNotification(appContext)
         } else {

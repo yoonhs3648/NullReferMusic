@@ -15,6 +15,11 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { checkNrmApkUpdate } from '@/lib/nrmApkUpdate';
 import {
+  markNrmApkUpdateGateBlocking,
+  markNrmApkUpdateGatePassed,
+  runAfterNrmApkUpdateGate,
+} from '@/lib/nrmApkUpdateStartup';
+import {
   canNrmInstallPackages,
   downloadNrmApkUpdate,
   installNrmApkUpdate,
@@ -23,6 +28,32 @@ import {
   subscribeNrmApkDownloadProgress,
 } from '@/lib/nrmApkUpdateNative';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
+import { nrmDeferUiWork } from '@/lib/nrmDeferUiWork';
+
+/**
+ * UI copy as ASCII \u escapes only.
+ * Do not put raw Hangul literals in this file. Windows PowerShell Set-Content
+ * has corrupted UTF-8 Korean into "??" and that text shipped to devices.
+ */
+const COPY = {
+  checking: '\uC571 \uC900\uBE44\uC911..',
+  awaitingPermission:
+    '\uC124\uCE58 \uAD8C\uD55C \uC124\uC815 \uD6C4 \uB3CC\uC544\uC624\uBA74 \uC774\uC5B4\uC9D1\uB2C8\uB2E4...',
+  installPermissionError:
+    '\uC54C \uC218 \uC5C6\uB294 \uC571 \uC124\uCE58 \uAD8C\uD55C\uC744 \uD5C8\uC6A9\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.',
+  promptTitle: '\uC5C5\uB370\uC774\uD2B8 \uD544\uC694',
+  promptBody: (current: string, required: string) =>
+    `\uD604\uC7AC v${current} \u2192 \uCD5C\uC2E0 v${required}\n\uC0C8 APK\uB97C \uB2E4\uC6B4\uB85C\uB4DC\uD574 \uC124\uCE58\uD569\uB2C8\uB2E4.`,
+  update: '\uC5C5\uB370\uC774\uD2B8',
+  exitApp: '\uC571 \uC885\uB8CC',
+  downloading: (progress: number) => `APK \uB2E4\uC6B4\uB85C\uB4DC \uC911... ${progress}%`,
+  downloadPreparing: '\uB2E4\uC6B4\uB85C\uB4DC \uC900\uBE44 \uC911...',
+  installTitle: '\uC124\uCE58 \uC548\uB0B4',
+  installBody:
+    '\uC2DC\uC2A4\uD15C \uC124\uCE58 \uD654\uBA74\uC5D0\uC11C \uC5C5\uB370\uC774\uD2B8\uB97C \uC644\uB8CC\uD558\uC138\uC694.\n\uC124\uCE58 \uD6C4 \uC571\uC744 \uB2E4\uC2DC \uC2E4\uD589\uD569\uB2C8\uB2E4.',
+  errorTitle: '\uC5C5\uB370\uC774\uD2B8 \uC624\uB958',
+  retry: '\uB2E4\uC2DC \uC2DC\uB3C4',
+} as const;
 
 type Phase =
   | 'checking'
@@ -40,10 +71,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * 알 수 없는 앱 설치 설정 화면에서 돌아온 뒤 권한 재확인.
- * (콜드스타트에서 설정→복귀 타이밍이 어긋나 버튼이 먹통처럼 느껴지는 문제 완화)
- */
 async function waitForInstallPermission(maxMs = 180_000): Promise<boolean> {
   const started = Date.now();
   let sawNonActive = AppState.currentState !== 'active';
@@ -67,64 +94,71 @@ async function waitForInstallPermission(maxMs = 180_000): Promise<boolean> {
   return canNrmInstallPackages();
 }
 
-async function warmAfterGatePass(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  try {
-    const [yt, ff] = await Promise.all([
-      import('@/lib/nrmInnertubeYoutube'),
-      import('@/lib/nrmFfmpegPrefetch'),
-    ]);
-    await Promise.all([
-      yt.warmInnertubeSessions().catch((e) => {
-        logNrmRunError('apk-update.innertube_warm', e);
-      }),
-      ff.prefetchFfmpegOnDevice().catch(() => {
-        /* optional */
-      }),
-    ]);
-  } catch (e) {
-    logNrmRunError('apk-update.post_gate_warm', e);
-  }
+function schedulePostGateWarm(): void {
+  runAfterNrmApkUpdateGate(() => {
+    if (Platform.OS !== 'android') return;
+    setTimeout(() => {
+      void (async () => {
+        const warmStartedAt = Date.now();
+        try {
+          const [yt, ff] = await Promise.all([
+            import('@/lib/nrmInnertubeYoutube'),
+            import('@/lib/nrmFfmpegPrefetch'),
+          ]);
+          await Promise.all([
+            yt.warmInnertubeSessions().catch((e) => {
+              logNrmRunError('apk-update.innertube_warm', e);
+            }),
+            ff.prefetchFfmpegOnDevice().catch(() => {}),
+          ]);
+        } catch (e) {
+          logNrmRunError('apk-update.post_gate_warm', e);
+        } finally {
+          logNrmDev('apk-update', {
+            event: 'post_gate_warm_done',
+            warmWaitMs: Date.now() - warmStartedAt,
+          });
+        }
+      })();
+    }, 2500);
+  });
 }
 
-/**
- * Android 앱 시작 시 GitHub Releases 공개 APK 자동 업데이트 게이트.
- * apkVersion.json(PAT 불필요)과 로컬 버전을 비교해 구버전이면 다운로드·설치 안내.
- * 업데이트가 필요할 때는 Innertube 워밍을 하지 않아 APK 대역폭을 독점한다.
- */
 export function NrmApkUpdateGate({ onComplete }: Props) {
   const [phase, setPhase] = useState<Phase>('checking');
   const [progress, setProgress] = useState(0);
   const [requiredVersion, setRequiredVersion] = useState('');
-  const [busy, setBusy] = useState(false);
   const downloadUrlRef = useRef('');
   const peakProgressRef = useRef(0);
   const updateInFlightRef = useRef(false);
+  const canInstallPrefetchRef = useRef<Promise<boolean> | null>(null);
+
+  useEffect(() => {
+    markNrmApkUpdateGateBlocking();
+  }, []);
+
+  const finishGateWithoutBlockingWarm = useCallback(() => {
+    onComplete();
+    setTimeout(() => {
+      markNrmApkUpdateGatePassed();
+      schedulePostGateWarm();
+    }, 0);
+  }, [onComplete]);
 
   const runCheck = useCallback(() => {
     setPhase('checking');
-    setBusy(false);
     updateInFlightRef.current = false;
+    canInstallPrefetchRef.current = null;
+    markNrmApkUpdateGateBlocking();
     void (async () => {
-      const finishGate = async () => {
-        const warmStartedAt = Date.now();
-        // 업데이트 불필요일 때만 워밍 — APK 다운로드와 대역폭 경쟁 방지
-        await warmAfterGatePass();
-        logNrmDev('apk-update', {
-          event: 'gate_complete_after_warm',
-          warmWaitMs: Date.now() - warmStartedAt,
-        });
-        onComplete();
-      };
-
       if (!isNrmApkUpdateNativeAvailable()) {
-        await finishGate();
+        finishGateWithoutBlockingWarm();
         return;
       }
 
       const result = await checkNrmApkUpdate();
       if (result.status === 'up_to_date') {
-        await finishGate();
+        finishGateWithoutBlockingWarm();
         return;
       }
       if (result.status === 'error') {
@@ -135,15 +169,15 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
       downloadUrlRef.current = result.downloadUrl;
       setRequiredVersion(result.requiredVersion);
       setPhase('prompt');
+      canInstallPrefetchRef.current = canNrmInstallPackages().catch(() => false);
     })();
-  }, [onComplete]);
+  }, [finishGateWithoutBlockingWarm]);
 
   useEffect(() => {
     runCheck();
   }, [runCheck]);
 
   const runDownloadAndInstall = useCallback(async () => {
-    setPhase('downloading');
     peakProgressRef.current = 0;
     setProgress(0);
     const fileName = `NullReferenceMusic-v${requiredVersion}.apk`;
@@ -164,12 +198,21 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
   }, [requiredVersion]);
 
   const startUpdate = useCallback(() => {
-    if (updateInFlightRef.current || busy) return;
+    if (updateInFlightRef.current) return;
     updateInFlightRef.current = true;
-    setBusy(true);
+
+    setPhase('downloading');
+    setProgress(0);
+    peakProgressRef.current = 0;
+
     void (async () => {
       try {
-        const canInstall = await canNrmInstallPackages();
+        await nrmDeferUiWork();
+
+        const canInstall = await (canInstallPrefetchRef.current ??
+          canNrmInstallPackages().catch(() => false));
+        canInstallPrefetchRef.current = null;
+
         if (!canInstall) {
           setPhase('awaiting_install_permission');
           await openNrmInstallUnknownAppsSettings();
@@ -177,10 +220,13 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
           if (!granted) {
             setPhase({
               kind: 'error',
-              message: '알 수 없는 앱 설치 권한을 허용한 뒤 다시 시도하세요.',
+              message: COPY.installPermissionError,
             });
             return;
           }
+          setPhase('downloading');
+          setProgress(0);
+          await nrmDeferUiWork();
         }
 
         await runDownloadAndInstall();
@@ -190,19 +236,16 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
         setPhase({ kind: 'error', message: msg });
       } finally {
         updateInFlightRef.current = false;
-        setBusy(false);
       }
     })();
-  }, [busy, runDownloadAndInstall]);
+  }, [runDownloadAndInstall]);
 
   if (phase === 'checking' || phase === 'awaiting_install_permission') {
     return (
       <View style={styles.root}>
         <ActivityIndicator size="large" color="#ffffff" style={styles.spinner} />
         <Text style={styles.loadingLabel}>
-          {phase === 'awaiting_install_permission'
-            ? '설치 권한 설정 후 돌아오면 이어집니다...'
-            : '앱 준비중..'}
+          {phase === 'awaiting_install_permission' ? COPY.awaitingPermission : COPY.checking}
         </Text>
       </View>
     );
@@ -213,33 +256,21 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
     return (
       <View style={styles.root}>
         <View style={styles.dialog}>
-          <Text style={styles.dialogTitle}>업데이트 필요</Text>
-          <Text style={styles.dialogBody}>
-            {`현재 v${current} → 최신 v${requiredVersion}\n새 APK를 다운로드해 설치합니다.`}
-          </Text>
+          <Text style={styles.dialogTitle}>{COPY.promptTitle}</Text>
+          <Text style={styles.dialogBody}>{COPY.promptBody(current, requiredVersion)}</Text>
           <Pressable
             accessibilityRole="button"
-            disabled={busy}
-            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-            android_disableSound={false}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              (pressed || busy) && { opacity: 0.85 },
-            ]}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.85 }]}
             onPress={startUpdate}>
-            {busy ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>업데이트</Text>
-            )}
+            <Text style={styles.primaryBtnText}>{COPY.update}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            disabled={busy}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={({ pressed }) => [styles.exitBtn, pressed && { opacity: 0.8 }]}
             onPress={() => BackHandler.exitApp()}>
-            <Text style={styles.exitBtnText}>앱 종료</Text>
+            <Text style={styles.exitBtnText}>{COPY.exitApp}</Text>
           </Pressable>
         </View>
       </View>
@@ -250,9 +281,11 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
     return (
       <View style={styles.root}>
         <ActivityIndicator size="large" color="#ffffff" style={styles.spinner} />
-        <Text style={styles.loadingLabel}>APK 다운로드 중... {progress}%</Text>
+        <Text style={styles.loadingLabel}>
+          {progress > 0 ? COPY.downloading(progress) : COPY.downloadPreparing}
+        </Text>
         <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          <View style={[styles.progressFill, { width: `${Math.max(progress, 2)}%` }]} />
         </View>
       </View>
     );
@@ -262,16 +295,14 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
     return (
       <View style={styles.root}>
         <View style={styles.dialog}>
-          <Text style={styles.dialogTitle}>설치 안내</Text>
-          <Text style={styles.dialogBody}>
-            시스템 설치 화면에서 업데이트를 완료하세요.{'\n'}설치 후 앱을 다시 실행합니다.
-          </Text>
+          <Text style={styles.dialogTitle}>{COPY.installTitle}</Text>
+          <Text style={styles.dialogBody}>{COPY.installBody}</Text>
           <Pressable
             accessibilityRole="button"
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={({ pressed }) => [styles.exitBtn, pressed && { opacity: 0.8 }]}
             onPress={() => BackHandler.exitApp()}>
-            <Text style={styles.exitBtnText}>앱 종료</Text>
+            <Text style={styles.exitBtnText}>{COPY.exitApp}</Text>
           </Pressable>
         </View>
       </View>
@@ -281,21 +312,21 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
   return (
     <View style={styles.root}>
       <View style={styles.dialog}>
-        <Text style={styles.dialogTitle}>업데이트 오류</Text>
+        <Text style={styles.dialogTitle}>{COPY.errorTitle}</Text>
         <Text style={styles.dialogBody}>{phase.message}</Text>
         <Pressable
           accessibilityRole="button"
           hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
           style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.85 }]}
           onPress={runCheck}>
-          <Text style={styles.primaryBtnText}>다시 시도</Text>
+          <Text style={styles.primaryBtnText}>{COPY.retry}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           style={({ pressed }) => [styles.exitBtn, pressed && { opacity: 0.8 }]}
           onPress={() => BackHandler.exitApp()}>
-          <Text style={styles.exitBtnText}>앱 종료</Text>
+          <Text style={styles.exitBtnText}>{COPY.exitApp}</Text>
         </Pressable>
       </View>
     </View>

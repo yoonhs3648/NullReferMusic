@@ -18,6 +18,9 @@ object EnKoTransliteratorInfer {
   private const val MAX_SRC_TOKENS = 48
 
   private val cache = AtomicReference<Engine?>(null)
+  /** 프로세스 수명 동안 `hello` probe 1회만 — 성공/실패 결과 캐시 */
+  @Volatile private var cachedProbeOk: Boolean? = null
+  @Volatile private var cachedProbeRoot: String? = null
 
   private data class Engine(
       val paths: EnKoTransliteratorBootstrap.Paths,
@@ -30,23 +33,41 @@ object EnKoTransliteratorInfer {
       val decoderStartId: Long,
   )
 
-  fun invalidate() {
+  /**
+   * encoder/decoder OrtSession 해제.
+   * [clearProbe]=true 는 설치 wipe 시에만 — FA 직전 메모리 해제로는 probe 캐시를 유지한다.
+   */
+  fun invalidate(clearProbe: Boolean = false) {
     val old = cache.getAndSet(null)
     old?.let {
       runCatching { it.encoder.close() }
       runCatching { it.decoder.close() }
     }
+    if (clearProbe) {
+      cachedProbeOk = null
+      cachedProbeRoot = null
+    }
   }
 
-  /** 설치 판정용 — `hello` → 한글 포함 결과 */
+  /** 설치·게이트용 — `hello` → 한글 포함 여부. 동일 root면 프로세스당 1회만 추론. */
   fun probe(paths: EnKoTransliteratorBootstrap.Paths): Boolean {
+    val root = paths.root.absolutePath
+    cachedProbeOk?.let { cached ->
+      if (cachedProbeRoot == root) {
+        NrmFileLogger.log(TAG, "probe cache hit ok=$cached")
+        return cached
+      }
+    }
     return try {
-      invalidate() // 이전 깨진 엔진 캐시 제거
       val out = transliterateWord("hello", paths)
       val ok = out.any { it.code in 0xAC00..0xD7A3 }
-      NrmFileLogger.log(TAG, "probe word=hello out=${out.take(32)} ok=$ok")
+      cachedProbeOk = ok
+      cachedProbeRoot = root
+      NrmFileLogger.log(TAG, "probe word=hello out=${out.take(32)} ok=$ok (cached)")
       ok
     } catch (t: Throwable) {
+      cachedProbeOk = false
+      cachedProbeRoot = root
       NrmFileLogger.warn(TAG, "probe_fail err=${t.message?.take(120)}")
       false
     }
@@ -95,8 +116,10 @@ object EnKoTransliteratorInfer {
     val env = OrtEnvironment.getEnvironment()
     val opts = OrtSession.SessionOptions()
     try {
-      opts.setIntraOpNumThreads(2)
+      opts.setIntraOpNumThreads(1)
       opts.setInterOpNumThreads(1)
+      opts.setMemoryPatternOptimization(false)
+      opts.setCPUArenaAllocator(false)
       val encoder = env.createSession(paths.encoder.absolutePath, opts)
       val decoder = env.createSession(paths.decoder.absolutePath, opts)
       return Engine(

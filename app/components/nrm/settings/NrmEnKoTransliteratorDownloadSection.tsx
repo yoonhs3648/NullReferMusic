@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -23,25 +23,36 @@ const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
 type Props = {
   titleColor: string;
   bodyColor: string;
+  /** 설치 상태가 바뀔 때 (패널 옵션 활성/비활성 동기화) */
+  onInstalledChange?: (installed: boolean) => void;
 };
 
-export function NrmEnKoTransliteratorDownloadSection({ titleColor, bodyColor }: Props) {
+export function NrmEnKoTransliteratorDownloadSection({
+  titleColor,
+  bodyColor,
+  onInstalledChange,
+}: Props) {
   const show = isEnKoTransliteratorNativeAvailable();
   const [installed, setInstalled] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(!show);
+  const onInstalledChangeRef = useRef(onInstalledChange);
+  onInstalledChangeRef.current = onInstalledChange;
 
   const refresh = useCallback(async () => {
     if (!show) {
       setReady(true);
+      onInstalledChangeRef.current?.(false);
       return;
     }
     const s = await fetchEnKoTransliteratorStatus();
+    const isInstalled = s.installed && !s.downloading;
     setInstalled(s.installed);
     setDownloading(s.downloading);
     setProgress(s.progress);
     setReady(true);
+    onInstalledChangeRef.current?.(isInstalled);
   }, [show]);
 
   useEffect(() => {

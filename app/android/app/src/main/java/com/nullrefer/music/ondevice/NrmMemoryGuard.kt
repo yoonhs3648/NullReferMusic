@@ -181,7 +181,8 @@ object NrmMemoryGuard {
     return max(floor, scaled)
   }
 
-  fun requiresEphemeralOnnxSession(profile: CtcInferenceProfile): Boolean = true
+  /** wav2vec2 ONNX — 앱 수명 재사용 (곡마다 ephemeral create 아님). 해제는 MainApplication trim/lowMem. */
+  fun requiresEphemeralOnnxSession(profile: CtcInferenceProfile): Boolean = false
 
   fun shouldDeferForActiveDownload(context: Context): Boolean {
     val avail = availMemMb(context)

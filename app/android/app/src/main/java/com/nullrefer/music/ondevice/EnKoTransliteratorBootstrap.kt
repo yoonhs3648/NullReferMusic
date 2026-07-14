@@ -132,7 +132,7 @@ object EnKoTransliteratorBootstrap {
         return null
       }
     }
-    EnKoTransliteratorInfer.invalidate()
+    EnKoTransliteratorInfer.invalidate(clearProbe = true)
     if (!EnKoTransliteratorInfer.probe(paths)) {
       NrmFileLogger.warn("en-ko-transliterator", "기능 프로브 실패 — 설치 무효")
       wipeInstall(paths)
@@ -150,7 +150,7 @@ object EnKoTransliteratorBootstrap {
   }
 
   fun wipeInstall(paths: Paths) {
-    EnKoTransliteratorInfer.invalidate()
+    EnKoTransliteratorInfer.invalidate(clearProbe = true)
     try {
       if (paths.root.isDirectory) {
         paths.root.listFiles()?.forEach { child ->

@@ -1,6 +1,7 @@
 package com.nullrefer.music
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 
 import com.facebook.react.PackageList
@@ -13,12 +14,15 @@ import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactNativeHost
 
+import com.nullrefer.music.ondevice.EnKoTransliteratorInfer
 import com.nullrefer.music.ondevice.FfmpegBootstrap
+import com.nullrefer.music.ondevice.ForcedAlignWorkQueue
 import com.nullrefer.music.ondevice.NrmFileLogger
 import com.nullrefer.music.ondevice.NrmStaleArtifactCleanup
 import com.nullrefer.music.ondevice.NrmStaleWorkNotificationCleanup
 import com.nullrefer.music.ondevice.NrmUncaughtExceptionHandler
 import com.nullrefer.music.ondevice.OnDeviceDownloadPackage
+import com.nullrefer.music.ondevice.Wav2Vec2CtcForcedAligner
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
@@ -63,5 +67,32 @@ class MainApplication : Application(), ReactApplication {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
+  }
+
+  override fun onLowMemory() {
+    super.onLowMemory()
+    releaseHeavyOnnxSessions("onLowMemory")
+  }
+
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    // 프로세스 종료 직전·백그라운드 메모리 압박 시에만 Session 해제
+    if (level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
+        level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+      releaseHeavyOnnxSessions("onTrimMemory level=$level")
+    }
+  }
+
+  private fun releaseHeavyOnnxSessions(reason: String) {
+    if (ForcedAlignWorkQueue.pendingCount() > 0) {
+      NrmFileLogger.log(
+          "MainApplication",
+          "release_onnx_sessions skipped (fa_busy) reason=$reason",
+      )
+      return
+    }
+    NrmFileLogger.log("MainApplication", "release_onnx_sessions reason=$reason")
+    runCatching { Wav2Vec2CtcForcedAligner.releaseOnnxSession() }
+    runCatching { EnKoTransliteratorInfer.invalidate() }
   }
 }
