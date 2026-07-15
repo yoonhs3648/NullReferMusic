@@ -8,4 +8,4 @@ alwaysApply: true
 
 `docs/BUILD-VERIFY-RULE.md`와 동일한 의무를 따른다.
 
-**요약:** `app`을 건드렸으면 `cd app && npx tsc --noEmit`. `backend`를 건드렸으면 `cd backend && mvn -DskipTests compile`. 실패 시 사용자에게 묻지 말고 수정 후 같은 명령을 에러가 없을 때까지 반복한다.
+**요약:** `app`을 건드렸으면 `cd app && npx tsc --noEmit`. APK 업데이트 UI(`nrmApkUpdateCopy` / `NrmApkUpdateGate`)를 건드렸으면 `npm run check:apk-update-copy`도. `backend`를 건드렸으면 `cd backend && mvn -DskipTests compile`. 실패 시 사용자에게 묻지 말고 수정 후 같은 명령을 에러가 없을 때까지 반복한다.

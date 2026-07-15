@@ -1,3 +1,4 @@
+import { NRM_APK_UPDATE_COPY } from '@/lib/nrmApkUpdateCopy';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { getNrmApkReleaseDownloadUrl } from '@/lib/nrmRemoteDataConfig';
@@ -41,12 +42,12 @@ export async function checkNrmApkUpdate(): Promise<NrmApkUpdateCheckResult> {
           .maybeSingle(),
     );
     if (!data) {
-      return { status: 'error', message: '원격 APK 버전 정보가 없습니다.' };
+      return { status: 'error', message: NRM_APK_UPDATE_COPY.remoteVersionMissing };
     }
     const mapped = mapApkVersionRow(data as NrmSupabaseApkVersionRow);
     const requiredVersion = mapped.version;
     if (!requiredVersion) {
-      return { status: 'error', message: '원격 APK version이 비어 있습니다.' };
+      return { status: 'error', message: NRM_APK_UPDATE_COPY.remoteVersionEmpty };
     }
 
     logNrmDev(tag, { currentVersion, requiredVersion, createdDate: mapped.createdDate });

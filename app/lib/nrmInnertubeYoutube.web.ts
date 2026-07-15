@@ -20,6 +20,14 @@ export async function warmInnertubeSessions(): Promise<void> {
   /* web stub — no-op */
 }
 
+export function isInnertubeWarmSettled(): boolean {
+  return true;
+}
+
+export function ensureInnertubeWarmedOnFirstSearch(): Promise<void> {
+  return Promise.resolve();
+}
+
 export async function searchYoutubePageOnDevice(
   _query: string,
   _cursor: string | null,

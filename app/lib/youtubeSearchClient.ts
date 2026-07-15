@@ -10,6 +10,7 @@ import {
 } from '@/lib/apiBaseUrl';
 import { buildYoutubeSearchQuery } from '@/lib/nrmYoutubeSearchQuery';
 import { getYoutubeSearchSuffixMode } from '@/lib/nrmYoutubeSearchSettings';
+import { rerankYoutubeSearchItems } from '@/lib/nrmYoutubeSearchRerank';
 import {
   nrmYoutubeSearchApiKeyMissingMessage,
   nrmYoutubeSearchBackendConnectionMessage,
@@ -163,16 +164,30 @@ async function resolveQueryForApi(q: string): Promise<string> {
   return buildYoutubeSearchQuery(q, suffixMode);
 }
 
+function applySearchRerank(
+  out: YoutubeSearchOutcome,
+  userQuery: string,
+  mode: Awaited<ReturnType<typeof getYoutubeSearchSuffixMode>>,
+): YoutubeSearchOutcome {
+  if (!out.ok || out.items.length <= 1) return out;
+  return {
+    ...out,
+    items: rerankYoutubeSearchItems(out.items, userQuery, mode),
+  };
+}
+
 export async function searchYoutubePage(
   q: string,
   cursor: string | null = null,
   limit = YOUTUBE_SEARCH_PAGE_SIZE,
 ): Promise<YoutubeSearchOutcome> {
-  const queryForApi = await resolveQueryForApi(q);
+  const suffixMode = await getYoutubeSearchSuffixMode();
+  const queryForApi = buildYoutubeSearchQuery(q, suffixMode);
 
   if (Platform.OS !== 'web' && !usesPcBackendInDev()) {
     const { searchYoutubePageOnDevice } = await import('@/lib/nrmInnertubeYoutube');
-    return searchYoutubePageOnDevice(queryForApi, cursor);
+    const out = await searchYoutubePageOnDevice(queryForApi, cursor);
+    return applySearchRerank(out, q, suffixMode);
   }
 
   const resolved = await getResolvedApiBaseUrl();
@@ -195,7 +210,7 @@ export async function searchYoutubePage(
     }
   }
 
-  return out;
+  return applySearchRerank(out, q, suffixMode);
 }
 
 /** 첫 페이지만 (호환) */

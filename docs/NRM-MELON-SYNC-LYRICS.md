@@ -35,14 +35,17 @@
 `Wav2Vec2CtcForcedAligner.kt` 처리 순서:
 
 1. **보컬 구간** `detectVocalRange` — 에너지·`detectSingingOnsetMs` (긴 인트로 곡)
-2. **세그먼트 분할** `planLyricSegments` — trellis 셀 한도 초과 시 가사 줄 기준 2패스+
-3. **ONNX 청크** `inferLogProbsForAudio` — 저메모리 시 32k~80k samples/chunk, overlap 2.4k(accurate)
+2. **세그먼트 분할** `planLyricSegments` — Silence/Time/Density Anchor → coalesce(목표 ~25s, 밀집 병합 금지) → trellis·시간·토큰·density 한도 재귀 분할
+3. **ONNX 청크** `inferLogProbsForAudio` — chunk/overlap 밀도 적응 + **긴 줄 adaptive overlap** (+250/+500ms)
 4. **CTC trellis** `forcedAlignTokenStarts` — 줄별 시작 프레임
-5. **first_line_bump** — CTC가 0초에 붙을 때 onset 프로브로 첫 줄만 뒤로 (인트로 보정)
+5. **start_offset / first_line_bump** — 첫 세그먼트: blank 밀도+에너지로 전역 Start Offset, 아니면 첫 줄만 bump
 6. **spreadCollapsedLineTimestamps** — 동일 프레임에 뭉친 줄을 글자 수 비율로 펼침
-7. **enforceMonotonicAdaptive** — 줄 간 최소 간격
-8. **stretchLrcTimestampsToVocalEnd** — 마지막 줄을 보컬 끝에 맞춰 선형 스케일 (첫 줄 고정)
-9. **다세그먼트** — 패스별 stretch 후 stitch, 경계 gap 보정, 전역 stretch
+7. **enforceMonotonicAdaptive** — 발음 토큰 수 기반 줄 간 최소 간격
+8. **세그먼트 local realign** — conf&lt;0.15 줄 ±4s (세그먼트당 최대 1회)
+9. **refine** — chorus anchor 재사용 + low-conf boundary ±40ms smoothing
+10. **다세그먼트** — 패스별 stretch 후 stitch, 경계 gap 보정
+11. **post-merge realign** — 경계 ±300ms + conf&lt;0.10 줄 ±600ms → refine 재적용
+12. **global affine drift** — 예상 vocal end 기준 Affine Time Warp
 
 ---
 
@@ -56,19 +59,25 @@
 | `ctc_fa_profile` | 메모리 tier, chunkSamples, quality |
 | `ctc_fa_vocal` / `ctc_fa_singing_onset` | 보컬 시작·끝 (ms) |
 | `ctc_fa_plan segments=N` | N>1 이면 2패스 분할 |
-| `ctc_fa_plan anchors=` | Silence/Time Anchor 분할 (`silenceSplits` / `timeSplits`) |
+| `ctc_fa_plan anchors=` / `ctc_fa_plan coalesce` | Silence/Time Anchor·짧은 세그먼트 병합 |
 | `ctc_fa_blank_adapt` | Adaptive Blank early/late bias |
 | `ctc_fa_line_conf` / `ctc_fa_local_realign` | 줄 confidence·±4s 국소 재정렬 |
+| `ctc_fa_post_merge` / `ctc_fa_post_merge_realign` | Merge 후 저신뢰·경계 재정렬 |
+| `ctc_fa_start_offset` | 전역 Start Offset (blank+energy) |
+| `ctc_fa_affine_applied` / `ctc_fa_affine_skip` | 전역 Affine Drift |
 | `ctc_fa_realign_abort` / `ctc_fa_mem_probe` | 저신뢰 세그먼트 realign 중단 · Native/VmRSS 계측 |
-| `ctc_fa_chunk_adapt` | 밀도 기반 chunk/overlap |
+| `ctc_fa_chunk_adapt` | 밀도·줄길이 기반 chunk/overlap (`lineExtraMs`) |
+| `ctc_fa_plan_density_cut` / `densityScore=` | 밀집 분할 이유 |
+| `ctc_fa_refine` | `chorusCandidates/Accepted/Rejected`, `boundaryCandidates/Smooth` |
+| `ctc_fa_plan_summary` | `densitySplits=` `forceSplits=` |
 | `ctc_fa_onnx_opts` | ORT threads / memPattern |
 | `ctc_fa_first_line_bump` | 첫 줄 인트로 보정 (과하면 초반 싱크 붕괴) |
 | `ctc_fa_spread_run` | 뭉친 줄 펼침 (windowMs 너무 작으면 초반 압축) |
-| `ctc_fa_stretch_applied` / `ctc_fa_stretch_skip` | 후반 drift 보정 성공/스킵 |
+| `ctc_fa_stretch_applied` / `ctc_fa_stretch_skip` | 세그먼트/레거시 stretch |
 | `ctc_fa_stretch_clamp` | ratio 상한 초과 시 1.28로 제한 적용 |
 | `sync-lyrics` / `===== sync-lyrics` | Whisper·wav2vec2·eSpeak-align LRC 전문 덤프 (`phonetic_timed` / `sync_lrc` / `restored_lrc`) |
 | `ctc_fa_boundary_close` | 세그먼트 경계 gap 당김 |
-| `ctc_fa_stitch` | 다패스 합침 + globalStretch 여부 |
+| `ctc_fa_stitch` | 다패스 합침 + globalAffine 여부 |
 | `onnx_chunk` | ONNX 패스 진행 (idx, offset, availMb) |
 | `fa_audio_probe` | 소스 vs WAV 길이 deltaMs (수십 ms 이내 정상) |
 | `download.lyrics` / `whisperx-align` align_start/done | TS 측 총 소요 |
@@ -121,6 +130,66 @@ ctc_fa_stitch segments=2 globalStretch=false
 ## 5. 개선 히스토리 (날짜순)
 
 에이전트는 **새 개선마다 이 섹션 맨 위에 항목 추가**.
+
+### 2026-07-15 — Sync 안정화 5종 보완 (density score / chorus Jaccard / boundary gap)
+
+| 변경 | 내용 |
+|------|------|
+| Density | `score = token/s×0.8 + line/s×0.2`, threshold 8.0 (≈ token/s 10). 로그 `densityScore=` `tokenDensity=` `lineDensity=` |
+| Chorus | Dice 95% → **Jaccard≥0.92 AND editDist≤0.08** + 구두점 normalize (`Love Attack!!!` 매칭) |
+| Boundary | conf&lt;0.2 **그리고** prev/next gap 둘 다 &lt;150ms 일 때만 ±40ms |
+| 유지 | Adaptive overlap, Dictionary(+apostrophe), drift 80~2500ms |
+
+### 2026-07-15 — Sync 안정화 5종 (overlap / density / chorus / dict / boundary)
+
+**배경:** 5곡 FA 전부 성공. 남은 오차는 CTC 한계(혼용·후렴·애드립) 쪽이라 chunk/beam/realign2 대신 **후처리·안정화**만 추가.
+
+| 변경 | 내용 |
+|------|------|
+| Adaptive overlap | 최장 줄 >45자 +250ms, >70자 +500ms 추가 (`ctc_fa_chunk_adapt … longestLine= lineExtraMs=`). 전역 overlap 확대 아님 |
+| Density segment | plan 앵커에 `densitySplits`, coalesce 시 밀집 병합 금지, `planRecursive` `overDense` 강제 분할 |
+| Chorus anchor | 유사 줄의 첫 (prev→curr) gap을 drift 80~2500ms일 때만 재사용 (`ctc_fa_refine chorusAnchors=`) |
+| EnKo dictionary | `it's/i'm/don't/you're/…` → 한글 발음 선적용 후 ONNX (`dictHits=`). 중의성 키는 아포스트로피 있을 때만 |
+| Boundary smooth | low-conf boundary ±40ms (`ctc_fa_refine boundarySmooth=`) — 추가 ONNX 없음 |
+| 비권장 유지 | chunk 축소 / 전역 overlap↑ / beam / trellis↓ / realign 2회 — 미적용 |
+
+**로그 키워드:** `lineExtraMs=`, `densitySplits=`, `densityScore=`, `overDense=`, `ctc_fa_refine`, `dictHits=`
+
+### 2026-07-15 — EnKo Transliterator: unique-word + LRU + trim busy 가드
+
+**배경:** REDRED 로그에서 FA `align_start` 전 en-ko `encode word=` 중 PeakRSS~966MiB·Native~951MB 후 silent kill. wav2vec2 FA는 이전 2곡 정상 완료.
+
+| 변경 | 내용 |
+|------|------|
+| 추론 단위 확인 | **단어마다** encoder+decoder (문장 1회/ONNX batch 아님) — 혼합 가사 설계 |
+| Unique warm | 곡당 유니크 라틴 단어만 선추론 후 줄 치환 (반복 yeah/red-red ONNX 제거) |
+| Normalize key | lowercase+trim+구두점/아포스트로피 제거 (`Don't,`→`dont`); hyphen split (`red-red`→`red`×2) |
+| Top words | `song_run_top_words yeah 132 \| oh 88 \| …` (가사 출현 Top10) |
+| Segment 통계 | `ctc_fa_segment … segmentDurationMs=… lineCount=… tokenCount=… elapsed=…s onnxRuns=… trellisFrames=… realign=…` |
+| LRU | 단어→한글·encode ids 캐시 (max 2048) |
+| Session 로그 | `session_create`/`session_destroy` + `song_run_end` (elapsed/avgEncoderMs/avgDecoderMs/cacheHitRate…) |
+| Trim | EnKo busy 시 invalidate 금지 → `low_mem_mode` (maxNewTokens 24→12, cache trim) |
+| 유지 | FA 직전 EnKo invalidate, threads=1, memPattern/arena OFF; phrase-level 추론은 보류 |
+
+**검증 로그:** `uniqueWords≈encoderRuns`, `cacheHits`≫`cacheMisses`. `encoderRuns>uniqueWords`면 `song_run_dup_infer` 경고.
+
+**로그 키워드:** `song_run_start`, `song_run_end`, `session_create`, `session_destroy`, `low_mem_mode`, `release_onnx_sessions enko_busy→low_mem`
+
+### 2026-07-15 — Segment 20~30s / Token Gap / Post-merge Realign / Start Offset·Affine
+
+**배경:** 181초 곡이 `segments=15`(평균 ~12s)로 과도 분할되어 CTC→Stretch 후처리 오차가 누적·속도 저하. 한 줄씩 전반적으로 빠르/느림은 Audio Onset·Gap(문자 수) 왜곡 가능. 음역(EN→KO) 후 plainChars 감소로 문자 기반 Gap이 발화량과 불일치.
+
+| 변경 | 내용 |
+|------|------|
+| Segment 정책 | Anchor ~28s, `TARGET=25s`/`MIN=18s`/`MAX=32s`, 짧은 세그먼트 coalesce, 분할 최소 간격 유지. Frames≤2800·Tokens≤220 |
+| 분할 가중치 | 줄 수 60%→ **Token 45% + Duration proxy 35% + 줄 20%** |
+| Gap | `chars×perChar` → **발음 토큰 수 × perToken** (KO 42 / EN 40) |
+| Post-merge | conf&lt;0.10 줄 ±600ms 재정렬 + 경계 ±300ms (최대 10회) |
+| Start Offset | 첫 세그먼트 blank 밀도≥0.55 + 에너지 저조 시 **전 줄 shift** (`ctc_fa_start_offset`) |
+| Global Drift | stitch 후 `applyGlobalAffineDriftCorrection` (vocal end·소폭 start) |
+| 유지 | ONNX Session 재사용, memPattern/arena OFF, Chunk·Overlap, 세그먼트당 localRealign 1회 |
+
+**로그 키워드:** `ctc_fa_plan coalesce`, `ctc_fa_start_offset`, `ctc_fa_post_merge`, `ctc_fa_affine_applied`
 
 ### 2026-07-14 — Probe 1회 캐시 / Session 앱수명 / Segment ≤30s·Frame·Token 한도
 
@@ -275,13 +344,20 @@ ctc_fa_stitch segments=2 globalStretch=false
 | `MIN_INTRO_MS` | 800 | 첫 줄 최소 |
 | `MAX_INTRO_BUMP_MS` | 15000 | 초과 시 bump 생략 (2026-06-19) |
 | onset probe window | min(35%×dur, 60s) | 첫 threshold crossing (2026-06-19) |
-| bump skip | segStart<6s & delta>10s | 2026-06-18 |
+| bump skip | segStart&lt;6s & delta&gt;10s | 2026-06-18 |
+| `ANCHOR_TIME_MS` | 28000 | Time Anchor 간격 (2026-07-15: 25s→28s) |
+| `TARGET` / `MIN` / `MAX_SEGMENT_MS` | 25s / 18s / 32s | coalesce·강제 분할 (2026-07-15) |
+| `MAX_SEGMENT_FRAMES` / `TOKENS` | 2800 / 220 | 2026-07-15 |
+| Gap | tokens×42(KO)/40(EN), clamp 52~480 | 발음 토큰 수 (2026-07-15) |
+| Post-merge | conf&lt;0.10 ±600ms; boundary ±300ms; max 10 | 2026-07-15 |
 | boundary close | gap≥3000ms | stitch 시 (2026-06-19: 6000→3000) |
-| stretch drift threshold | 900ms | 미만이면 skip |
-| stretch ratio | 0.90~1.25 적용; 1.25~1.40 soft; >1.40 skip | 2026-06-19 |
+| stretch/affine drift | 900ms | 미만이면 skip |
+| stretch/affine ratio | ~0.88~1.28 적용; soft clamp | 2026-07-15 affine |
 | `FRAME_STRIDE_SAMPLES` | 320 | @16kHz |
-| accurate chunk overlap | 4000 samples (~250ms) | 2026-06-19: 2400→4000 |
-| 2패스 weight | 60% 줄 수 + 40% 글자 수 | 2026-06-19 |
+| accurate chunk overlap | 4000 samples (~250ms) + 줄길이 adaptive | 2026-07-15: >45자+250ms, >70자+500ms |
+| Density split | score=token/s×0.8+line/s×0.2 &gt; 8.0 | 2026-07-15 |
+| Chorus / boundary | Jaccard≥0.92+edit≤0.08; conf&lt;0.2 &amp; gap&lt;150ms ±40ms | 2026-07-15 |
+| 분할 weight | Token 45% + Duration proxy 35% + 줄 20% | 2026-07-15 (구: 줄60+글자40) |
 
 옵션 UI: `app/components/nrm/settings/NrmMelonSyncSettingsPanel.tsx` (`firstLineIntroCorrection`, quality 등).
 

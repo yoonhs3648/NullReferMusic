@@ -25,10 +25,15 @@ import { logNrmRunError } from '@/lib/nrmDevLog';
 import { nrmDeferUiWork } from '@/lib/nrmDeferUiWork';
 import {
   nrmYoutubeDownloadYtDlpFailedMessage,
+  nrmYoutubeInnertubeWarmingMessage,
   nrmYoutubeSearchBackendConnectionMessage,
   nrmYoutubeSearchOnDeviceErrorMessage,
   nrmYoutubeSearchPlaceholder,
 } from '@/lib/nrmYoutubeStrings';
+import {
+  ensureInnertubeWarmedOnFirstSearch,
+  isInnertubeWarmSettled,
+} from '@/lib/nrmInnertubeYoutube';
 import {
   nrmNotifyDownloadFinished,
   nrmNotifyDownloadQueued,
@@ -217,6 +222,7 @@ export function NrmYoutubeHome({
   const [query, setQuery] = useState(initialQuery ?? '');
   const [committedQuery, setCommittedQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initializingInnertube, setInitializingInnertube] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -271,13 +277,26 @@ export function NrmYoutubeHome({
 
   const runSearchWithQuery = useCallback(
     async (q: string, token: number) => {
-      setLoading(true);
       setLoadingMore(false);
       setPlayingId(null);
       setNextCursor(null);
       setHasMore(false);
       setShowScrollTop(false);
+      setResults([]);
       try {
+        if (Platform.OS !== 'web' && !(await isInnertubeWarmSettled())) {
+          setInitializingInnertube(true);
+          setLoading(false);
+          try {
+            await ensureInnertubeWarmedOnFirstSearch();
+          } finally {
+            if (token === latestSearchTokenRef.current) {
+              setInitializingInnertube(false);
+            }
+          }
+          if (token !== latestSearchTokenRef.current) return;
+        }
+        setLoading(true);
         const out = await searchYoutubePage(q, null, YOUTUBE_SEARCH_PAGE_SIZE);
         if (token !== latestSearchTokenRef.current) return;
         if (!out.ok) {
@@ -298,6 +317,7 @@ export function NrmYoutubeHome({
         setResults([]);
       } finally {
         if (token !== latestSearchTokenRef.current) return;
+        setInitializingInnertube(false);
         setLoading(false);
       }
     },
@@ -883,9 +903,11 @@ export function NrmYoutubeHome({
     fillHeight ||
     committedQuery.length > 0 ||
     loading ||
+    initializingInnertube ||
     loadingMore ||
     results.length > 0;
   const resultListMaxHeight = Math.min(windowHeight * 0.55, 520);
+  const searchBusy = loading || initializingInnertube;
 
   const searchHeader = (
     <View style={styles.searchHeaderCol}>
@@ -903,18 +925,18 @@ export function NrmYoutubeHome({
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          editable
+          editable={!searchBusy}
           style={[styles.input, inputColors]}
         />
         <Pressable
           onPress={runSearch}
-          disabled={query.trim().length === 0}
+          disabled={query.trim().length === 0 || searchBusy}
           style={({ pressed }) => [
             styles.searchBtn,
-            query.trim().length === 0 && styles.searchBtnDisabled,
-            pressed && !loading && styles.searchBtnPressed,
+            (query.trim().length === 0 || searchBusy) && styles.searchBtnDisabled,
+            pressed && !searchBusy && styles.searchBtnPressed,
           ]}>
-          {loading ? (
+          {searchBusy ? (
             <ActivityIndicator color={nrmTokens.color.onPrimary} />
           ) : (
             <Text style={styles.searchBtnLabel}>검색</Text>
@@ -924,6 +946,15 @@ export function NrmYoutubeHome({
       </View>
     </View>
   );
+
+  const listEmptyWarming = initializingInnertube ? (
+    <View style={styles.warmingBox} accessibilityRole="progressbar">
+      <ActivityIndicator color={nrmTokens.color.primary} size="large" />
+      <Text style={[styles.warmingLabel, { color: bodyColor }]}>
+        {nrmYoutubeInnertubeWarmingMessage}
+      </Text>
+    </View>
+  ) : null;
 
   const renderResultItem = useCallback(({ item }: ListRenderItemInfo<YoutubeSearchItem>) => {
     const active = item.videoId === playingId;
@@ -1103,6 +1134,7 @@ export function NrmYoutubeHome({
             keyExtractor={keyExtractorYoutube}
             renderItem={renderResultItem}
             ListHeaderComponent={searchHeader}
+            ListEmptyComponent={listEmptyWarming}
             ListFooterComponent={
               loadingMore ? (
                 <ActivityIndicator
@@ -1155,6 +1187,18 @@ const styles = StyleSheet.create({
   },
   footerLoader: {
     marginVertical: nrmTokens.space.md,
+  },
+  warmingBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: nrmTokens.space.xl * 2,
+    gap: nrmTokens.space.md,
+    minHeight: 160,
+  },
+  warmingLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '500',
+    letterSpacing: -0.2,
   },
   block: {
     width: '100%',

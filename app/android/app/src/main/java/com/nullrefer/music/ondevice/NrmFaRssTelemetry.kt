@@ -161,16 +161,33 @@ object NrmFaRssTelemetry {
     )
   }
 
-  fun logSegmentEnd(segmentIndex: Int, segmentCount: Int, elapsedMs: Long, localRealignCount: Int) {
+  fun logSegmentEnd(
+      segmentIndex: Int,
+      segmentCount: Int,
+      elapsedMs: Long,
+      localRealignCount: Int,
+      onnxRuns: Int = 0,
+      trellisFrames: Int = 0,
+      segmentDurationMs: Long = 0L,
+      lineCount: Int = 0,
+      tokenCount: Int = 0,
+  ) {
     val s = snap()
     NrmFileLogger.log(
         TAG,
         String.format(
             Locale.US,
-            "ctc_fa_segment_end segment=%d/%d elapsedMs=%d localRealignCount=%d PeakRSS_MiB=%.1f %s",
+            "ctc_fa_segment_end segment=%d/%d segmentDurationMs=%d lineCount=%d tokenCount=%d " +
+                "elapsedMs=%d elapsed=%.1fs onnxRuns=%d trellisFrames=%d realign=%d PeakRSS_MiB=%.1f %s",
             segmentIndex + 1,
             segmentCount,
+            segmentDurationMs,
+            lineCount,
+            tokenCount,
             elapsedMs,
+            elapsedMs / 1000.0,
+            onnxRuns,
+            trellisFrames,
             localRealignCount,
             peakRssMiB(),
             s.compact(),

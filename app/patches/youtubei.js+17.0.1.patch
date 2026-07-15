@@ -81,7 +81,7 @@ index 7b8c9d7..815a1ed 100644
      refinements: string[];
      estimated_results: number;
 diff --git a/node_modules/youtubei.js/dist/src/parser/youtube/Search.js b/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
-index f7fd94d..1646a65 100644
+index f7fd94d..644ce79 100644
 --- a/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
 +++ b/node_modules/youtubei.js/dist/src/parser/youtube/Search.js
 @@ -3,6 +3,7 @@ import { InnertubeError } from '../../utils/Utils.js';
@@ -92,17 +92,23 @@ index f7fd94d..1646a65 100644
  import SearchRefinementCard from '../classes/SearchRefinementCard.js';
  import SearchSubMenu from '../classes/SearchSubMenu.js';
  import SectionList from '../classes/SectionList.js';
-@@ -24,8 +25,13 @@ export default class Search extends Feed {
+@@ -24,8 +25,19 @@ export default class Search extends Feed {
              this.page.on_response_received_commands?.[0].as(AppendContinuationItemsAction, ReloadContinuationItemsCommand).contents;
          if (!contents)
              throw new InnertubeError('No contents found in search response');
 -        if (this.page.header)
 -            this.header = this.page.header.item().as(SearchHeader);
 +        // WEB: SearchHeader / ANDROID: SearchMobileHeader
++        // Header is optional for results; never fail the whole search on header cast.
 +        if (this.page.header) {
-+            const headerItem = this.page.header.item();
-+            if (headerItem.is(SearchHeader, SearchMobileHeader)) {
-+                this.header = headerItem.as(SearchHeader, SearchMobileHeader);
++            try {
++                const headerItem = this.page.header.item();
++                if (headerItem.is(SearchHeader, SearchMobileHeader)) {
++                    this.header = headerItem.as(SearchHeader, SearchMobileHeader);
++                }
++            }
++            catch {
++                /* ignore */
 +            }
 +        }
          this.results = observe(contents.filterType(ItemSection).flatMap((section) => section.contents));

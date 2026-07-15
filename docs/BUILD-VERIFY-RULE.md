@@ -9,6 +9,7 @@
 | 변경 영역 | 확인 명령 (예시) |
 |-----------|------------------|
 | `app/` TypeScript·TSX | `cd app && npx tsc --noEmit` |
+| `app/` APK 업데이트 게이트 문구 | `cd app && npm run check:apk-update-copy` (한글 `\uXXXX` 전용 — `docs/NRM-UTF8-HANGUL-RULE.md`) |
 | `backend/` Java | `cd backend && mvn -DskipTests compile` (또는 동등한 Maven 컴파일) |
 | `data/` GitHub JSON 필드·연동 로직 (`docs/NRM-GITHUB-DATA.md`) | 구조 변경 시 `cd app && npm run generate:github-data-fields` 로 `data/nrm-github-data-fields.xlsx` 재생성 후 함께 커밋 |
 | 네이티브·번들까지 필요 시 | 프로젝트에 정의된 스크립트·CI와 동일한 빌드 |
@@ -16,6 +17,8 @@
 프로젝트에 `npm run build`, `expo export` 등 **표준 빌드 스크립트**가 있으면, 변경 범위에 맞게 그것도 실행한다.
 
 **네이티브 플러그인·권한·알림·미디어 저장·릴리스 APK/IPA 동등성**에 손댄 경우 **`docs/RELEASE-APK-IPA-RULE.md`** 의 검증·원칙도 함께 따른다.
+
+**APK 업데이트 UI 한글**을 건드리거나 `NrmApkUpdateGate` / `nrmApkUpdateCopy` 를 수정한 경우 **`docs/NRM-UTF8-HANGUL-RULE.md`** 와 `npm run check:apk-update-copy` 를 반드시 따른다.
 
 ## 2. 에러 발생 시
 

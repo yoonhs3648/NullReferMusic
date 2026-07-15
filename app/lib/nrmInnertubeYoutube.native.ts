@@ -78,7 +78,10 @@ function getOrCreateInnertubeClient(label: InnertubeClientLabel): Promise<Innert
   return created;
 }
 
-/** 앱 콜드스타트 시 android(또는 iOS) 세션만 미리 만든다. web은 폴백 시점에만 생성. */
+/**
+ * android(또는 iOS) 세션만 미리 만든다. web은 폴백 시점에만 생성.
+ * 호출 시점: 프로세스당 최초 YouTube 검색(콜드스타트 워밍 금지).
+ */
 export async function warmInnertubeSessions(): Promise<void> {
   const label: InnertubeClientLabel =
     Platform.OS === 'android'
@@ -103,6 +106,24 @@ export async function warmInnertubeSessions(): Promise<void> {
       elapsedMs: Date.now() - startedAt,
     });
   }
+}
+
+/** 프로세스당 최초 YouTube 검색에서만 InnerTube 세션 워밍 */
+let firstSearchInnertubeWarmPromise: Promise<void> | null = null;
+let firstSearchInnertubeWarmSettled = false;
+
+/** UI: InnerTube 최초 워밍이 끝났으면 true (미완료 시 검색 화면에 '초기화 중...' 표시) */
+export function isInnertubeWarmSettled(): boolean {
+  return firstSearchInnertubeWarmSettled;
+}
+
+export function ensureInnertubeWarmedOnFirstSearch(): Promise<void> {
+  if (!firstSearchInnertubeWarmPromise) {
+    firstSearchInnertubeWarmPromise = warmInnertubeSessions().finally(() => {
+      firstSearchInnertubeWarmSettled = true;
+    });
+  }
+  return firstSearchInnertubeWarmPromise;
 }
 
 /** Player.decipher 에 넘길 URL·cipher 정보가 있는 포맷만 남깁니다. */
@@ -320,6 +341,10 @@ export async function searchYoutubePageOnDevice(
     };
   }
   try {
+    // 페이지네이션(continuation)이 아닌 최초/신규 검색에서만 세션 워밍
+    if (!cursor) {
+      await ensureInnertubeWarmedOnFirstSearch();
+    }
     if (cursor) {
       const session = innertubeSearchSessions.get(cursor);
       if (!session) {

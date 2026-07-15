@@ -34,7 +34,7 @@ export async function getInnertube() {
   return m.getInnertube();
 }
 
-/** 네이티브: android/ios/web 기본 세션을 프로세스 생존 동안 미리 생성·재사용 */
+/** 네이티브: 최초 YouTube 검색 시 android/ios 기본 세션을 생성·재사용 */
 export async function warmInnertubeSessions(): Promise<void> {
   if (Platform.OS === 'web') {
     const m = await import('./nrmInnertubeYoutube.web');
@@ -42,6 +42,25 @@ export async function warmInnertubeSessions(): Promise<void> {
   }
   const m = await import('./nrmInnertubeYoutube.native');
   return m.warmInnertubeSessions();
+}
+
+/** UI: InnerTube 워밍 완료 여부 (웹은 항상 true) */
+export async function isInnertubeWarmSettled(): Promise<boolean> {
+  if (Platform.OS === 'web') {
+    const m = await import('./nrmInnertubeYoutube.web');
+    return m.isInnertubeWarmSettled();
+  }
+  const m = await import('./nrmInnertubeYoutube.native');
+  return m.isInnertubeWarmSettled();
+}
+
+export async function ensureInnertubeWarmedOnFirstSearch(): Promise<void> {
+  if (Platform.OS === 'web') {
+    const m = await import('./nrmInnertubeYoutube.web');
+    return m.ensureInnertubeWarmedOnFirstSearch();
+  }
+  const m = await import('./nrmInnertubeYoutube.native');
+  return m.ensureInnertubeWarmedOnFirstSearch();
 }
 
 export async function downloadYoutubeAudioOnDevice(

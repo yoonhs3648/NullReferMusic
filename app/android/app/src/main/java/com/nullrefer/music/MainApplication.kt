@@ -91,6 +91,18 @@ class MainApplication : Application(), ReactApplication {
       )
       return
     }
+    // EnKo 음역 중이면 Session을 강제로 닫지 않는다 (닫으면 다음 create 폭주·중도 kill).
+    // CRITICAL trim → 저메모리 모드만 켠다.
+    if (EnKoTransliteratorInfer.isBusy()) {
+      NrmFileLogger.log(
+          "MainApplication",
+          "release_onnx_sessions enko_busy→low_mem reason=$reason",
+      )
+      runCatching { EnKoTransliteratorInfer.enterLowMemoryMode(reason) }
+      // FA session 은 비어 있을 수 있어도 압박 시 해제 시도
+      runCatching { Wav2Vec2CtcForcedAligner.releaseOnnxSession() }
+      return
+    }
     NrmFileLogger.log("MainApplication", "release_onnx_sessions reason=$reason")
     runCatching { Wav2Vec2CtcForcedAligner.releaseOnnxSession() }
     runCatching { EnKoTransliteratorInfer.invalidate() }

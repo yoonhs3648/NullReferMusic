@@ -15,6 +15,10 @@ import { nrmTokens } from '@/constants/nrmTokens';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { checkNrmApkUpdate } from '@/lib/nrmApkUpdate';
 import {
+  mapNrmApkUpdateErrorMessage,
+  NRM_APK_UPDATE_COPY as COPY,
+} from '@/lib/nrmApkUpdateCopy';
+import {
   markNrmApkUpdateGateBlocking,
   markNrmApkUpdateGatePassed,
   runAfterNrmApkUpdateGate,
@@ -31,29 +35,10 @@ import { getNrmAppVersion } from '@/lib/nrmAppInfo';
 import { nrmDeferUiWork } from '@/lib/nrmDeferUiWork';
 
 /**
- * UI copy as ASCII \u escapes only.
- * Do not put raw Hangul literals in this file. Windows PowerShell Set-Content
- * has corrupted UTF-8 Korean into "??" and that text shipped to devices.
+ * APK update gate UI.
+ * All user-visible Korean MUST live in `nrmApkUpdateCopy.ts` as `\uXXXX` escapes.
+ * Do not add Hangul literals here — see docs/NRM-UTF8-HANGUL-RULE.md.
  */
-const COPY = {
-  checking: '\uC571 \uC900\uBE44\uC911..',
-  awaitingPermission:
-    '\uC124\uCE58 \uAD8C\uD55C \uC124\uC815 \uD6C4 \uB3CC\uC544\uC624\uBA74 \uC774\uC5B4\uC9D1\uB2C8\uB2E4...',
-  installPermissionError:
-    '\uC54C \uC218 \uC5C6\uB294 \uC571 \uC124\uCE58 \uAD8C\uD55C\uC744 \uD5C8\uC6A9\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uC138\uC694.',
-  promptTitle: '\uC5C5\uB370\uC774\uD2B8 \uD544\uC694',
-  promptBody: (current: string, required: string) =>
-    `\uD604\uC7AC v${current} \u2192 \uCD5C\uC2E0 v${required}\n\uC0C8 APK\uB97C \uB2E4\uC6B4\uB85C\uB4DC\uD574 \uC124\uCE58\uD569\uB2C8\uB2E4.`,
-  update: '\uC5C5\uB370\uC774\uD2B8',
-  exitApp: '\uC571 \uC885\uB8CC',
-  downloading: (progress: number) => `APK \uB2E4\uC6B4\uB85C\uB4DC \uC911... ${progress}%`,
-  downloadPreparing: '\uB2E4\uC6B4\uB85C\uB4DC \uC900\uBE44 \uC911...',
-  installTitle: '\uC124\uCE58 \uC548\uB0B4',
-  installBody:
-    '\uC2DC\uC2A4\uD15C \uC124\uCE58 \uD654\uBA74\uC5D0\uC11C \uC5C5\uB370\uC774\uD2B8\uB97C \uC644\uB8CC\uD558\uC138\uC694.\n\uC124\uCE58 \uD6C4 \uC571\uC744 \uB2E4\uC2DC \uC2E4\uD589\uD569\uB2C8\uB2E4.',
-  errorTitle: '\uC5C5\uB370\uC774\uD2B8 \uC624\uB958',
-  retry: '\uB2E4\uC2DC \uC2DC\uB3C4',
-} as const;
 
 type Phase =
   | 'checking'
@@ -94,6 +79,7 @@ async function waitForInstallPermission(maxMs = 180_000): Promise<boolean> {
   return canNrmInstallPackages();
 }
 
+/** After APK gate: prefetch ffmpeg only. Innertube warms on first YouTube search. */
 function schedulePostGateWarm(): void {
   runAfterNrmApkUpdateGate(() => {
     if (Platform.OS !== 'android') return;
@@ -101,16 +87,8 @@ function schedulePostGateWarm(): void {
       void (async () => {
         const warmStartedAt = Date.now();
         try {
-          const [yt, ff] = await Promise.all([
-            import('@/lib/nrmInnertubeYoutube'),
-            import('@/lib/nrmFfmpegPrefetch'),
-          ]);
-          await Promise.all([
-            yt.warmInnertubeSessions().catch((e) => {
-              logNrmRunError('apk-update.innertube_warm', e);
-            }),
-            ff.prefetchFfmpegOnDevice().catch(() => {}),
-          ]);
+          const ff = await import('@/lib/nrmFfmpegPrefetch');
+          await ff.prefetchFfmpegOnDevice().catch(() => {});
         } catch (e) {
           logNrmRunError('apk-update.post_gate_warm', e);
         } finally {
@@ -162,7 +140,7 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
         return;
       }
       if (result.status === 'error') {
-        setPhase({ kind: 'error', message: result.message });
+        setPhase({ kind: 'error', message: mapNrmApkUpdateErrorMessage(result.message) });
         return;
       }
 
@@ -232,8 +210,7 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
         await runDownloadAndInstall();
       } catch (e) {
         logNrmRunError('apk-update.gate', e);
-        const msg = e instanceof Error ? e.message : String(e);
-        setPhase({ kind: 'error', message: msg });
+        setPhase({ kind: 'error', message: mapNrmApkUpdateErrorMessage(e) });
       } finally {
         updateInFlightRef.current = false;
       }

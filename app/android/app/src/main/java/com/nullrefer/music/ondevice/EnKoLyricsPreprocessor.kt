@@ -18,23 +18,46 @@ object EnKoLyricsPreprocessor {
       NrmFileLogger.warn("en-ko-transliterator", "skip_preprocess probe_fail lines=${lines.size}")
       return lines
     }
-    var changed = 0
-    val out =
-        lines.map { line ->
-          val trimmed = line.trim()
-          if (trimmed.isEmpty()) {
-            trimmed
-          } else {
-            val converted = EnKoTransliteratorInfer.transliterateLineMixed(trimmed, paths)
-            if (converted != trimmed) changed += 1
-            converted
-          }
+
+    // normalize(소문자·구두점 제거) + hyphen split 후 유니크 키만 선추론
+    val uniqueKeys = LinkedHashSet<String>()
+    for (line in lines) {
+      for (m in LATIN_WORD.findAll(line)) {
+        val w = m.value
+        if (w.none { it.isLetter() }) continue
+        for (part in EnKoTransliteratorInfer.splitHyphenatedParts(w)) {
+          val key = EnKoTransliteratorInfer.normalizeWordKey(part)
+          if (key.isNotEmpty()) uniqueKeys.add(key)
         }
-    NrmFileLogger.log(
-        "en-ko-transliterator",
-        "preprocess_done lines=${lines.size} changedLines=$changed " +
-            "sample=${out.firstOrNull { it.any { ch -> ch.code in 0xAC00..0xD7A3 } }?.take(48) ?: ""}",
+      }
+    }
+
+    EnKoTransliteratorInfer.beginSongRun(
+        uniqueWords = uniqueKeys.size,
+        lineCount = lines.size,
     )
-    return out
+    return try {
+      EnKoTransliteratorInfer.warmUniqueWords(uniqueKeys, paths)
+      var changed = 0
+      val out =
+          lines.map { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) {
+              trimmed
+            } else {
+              val converted = EnKoTransliteratorInfer.transliterateLineMixed(trimmed, paths)
+              if (converted != trimmed) changed += 1
+              converted
+            }
+          }
+      NrmFileLogger.log(
+          "en-ko-transliterator",
+          "preprocess_done lines=${lines.size} uniqueWords=${uniqueKeys.size} changedLines=$changed " +
+              "sample=${out.firstOrNull { it.any { ch -> ch.code in 0xAC00..0xD7A3 } }?.take(48) ?: ""}",
+      )
+      out
+    } finally {
+      EnKoTransliteratorInfer.endSongRun()
+    }
   }
 }

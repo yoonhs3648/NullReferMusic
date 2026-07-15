@@ -1,5 +1,8 @@
 export const nrmYoutubeSearchPlaceholder = '가수, 곡 제목';
 
+/** 최초 Android/iOS InnerTube 세션 워밍 중 — 검색 결과 영역 표시 */
+export const nrmYoutubeInnertubeWarmingMessage = '초기화 중...';
+
 export const nrmYoutubeSearchEmptyQueryMessage = '검색어를 입력하세요.';
 
 /** 웹 전용: `/api/youtube/search` 등 백엔드 HTTP 검색 fetch 실패 */
