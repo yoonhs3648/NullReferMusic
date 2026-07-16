@@ -401,33 +401,7 @@ export function filterTracksByQuery(
 
 
 
-/** 인덱스 탭 시 이동할 섹션 인덱스 (없으면 다음 점프 라벨 탐색) */
-
-export function resolveSectionIndexForIndexLabel(
-
-  label: TrackListIndexLabel,
-
-  sections: TrackListSection[],
-
-): number {
-
-  const start = TRACK_LIST_INDEX_LABELS.indexOf(label);
-
-  if (start < 0) return -1;
-
-  for (let i = start; i < TRACK_LIST_INDEX_LABELS.length; i += 1) {
-
-    const candidate = TRACK_LIST_INDEX_LABELS[i];
-
-    const idx = sections.findIndex((s) => s.jumpLabel === candidate);
-
-    if (idx >= 0) return idx;
-
-  }
-
-  return -1;
-
-}
+// (함수 삭제됨) 인덱스 점프 로직은 sectionIndex가 아니라 sortedTracks/track bucket 기준으로 계산합니다.
 
 
 

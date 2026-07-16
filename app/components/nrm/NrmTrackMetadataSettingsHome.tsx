@@ -25,7 +25,8 @@ import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import {
   buildTrackListSections,
   filterTracksByQuery,
-  resolveSectionIndexForIndexLabel,
+  getTrackListJumpBucket,
+  TRACK_LIST_INDEX_LABELS,
   sortTracksForList,
   type TrackListIndexLabel,
   type TrackListSection,
@@ -243,6 +244,42 @@ export function NrmTrackMetadataSettingsHome({
     [filteredTracks],
   );
 
+  /** 빠른 점프 대상 계산용 — 실제 섹션 렌더용 data는 sections, 점프 타겟은 sortedTracks 기준 */
+  const jumpTargetSortedIndexByRank = useMemo(() => {
+    // selectedRank 이상인 버킷들 중 "리스트에서 가장 먼저 등장하는" 인덱스를 찾기 위해
+    // firstByRank의 suffix minimum을 사용합니다. (요청하신 앞에서부터 스캔 결과와 동일)
+    const firstByRank = new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1);
+    if (searchFlatData.length === 0) {
+      return { suffixMinByRank: new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1) };
+    }
+
+    for (let i = 0; i < searchFlatData.length; i += 1) {
+      const bucket = getTrackListJumpBucket(searchFlatData[i]?.displayLabel ?? '');
+      const rank = TRACK_LIST_INDEX_LABELS.indexOf(bucket);
+      if (rank >= 0 && firstByRank[rank] === -1) firstByRank[rank] = i;
+    }
+
+    let minPos = Number.POSITIVE_INFINITY;
+    const suffixMinByRank = new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1);
+    for (let r = TRACK_LIST_INDEX_LABELS.length - 1; r >= 0; r -= 1) {
+      if (firstByRank[r] !== -1) minPos = Math.min(minPos, firstByRank[r]!);
+      suffixMinByRank[r] = minPos === Number.POSITIVE_INFINITY ? -1 : minPos;
+    }
+
+    return { suffixMinByRank };
+  }, [searchFlatData]);
+
+  /** SectionList의 (sectionIndex, itemIndex) 위치 역참조 — 실제 리스트 기준으로 스크롤 */
+  const trackLocationByAudioUri = useMemo(() => {
+    const out = new Map<string, { sectionIndex: number; itemIndex: number }>();
+    sections.forEach((sec, sectionIndex) => {
+      sec.data.forEach((t, itemIndex) => {
+        out.set(t.audioUri, { sectionIndex, itemIndex });
+      });
+    });
+    return out;
+  }, [sections]);
+
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 15,
     minimumViewTime: 80,
@@ -288,23 +325,49 @@ export function NrmTrackMetadataSettingsHome({
     setSearchQuery('');
   }, []);
 
-  const scrollToSectionStart = useCallback((sectionIndex: number, animated: boolean) => {
-    pendingScrollTargetRef.current = { sectionIndex, itemIndex: 0, animated, retryCount: 0 };
-    sectionListRef.current?.scrollToLocation({
-      sectionIndex,
-      itemIndex: 0,
-      animated,
-      viewPosition: 0,
-    });
-  }, []);
+  const scrollToIndexLabel = useCallback(
+    (label: TrackListIndexLabel, animated: boolean) => {
+      if (searchFlatData.length === 0 || sections.length === 0) return;
+
+      const selectedBucket = getTrackListJumpBucket(label);
+      const selectedRank = TRACK_LIST_INDEX_LABELS.indexOf(selectedBucket);
+      const fallbackSortedIndex = searchFlatData.length - 1;
+
+      const sortedIndexCandidate =
+        selectedRank >= 0 ? jumpTargetSortedIndexByRank.suffixMinByRank[selectedRank]! : -1;
+      const targetSortedIndex =
+        sortedIndexCandidate >= 0 ? sortedIndexCandidate : fallbackSortedIndex;
+
+      const targetTrack = searchFlatData[targetSortedIndex];
+      const loc = trackLocationByAudioUri.get(targetTrack.audioUri);
+      if (!loc) return;
+
+      pendingScrollTargetRef.current = {
+        sectionIndex: loc.sectionIndex,
+        itemIndex: loc.itemIndex,
+        animated,
+        retryCount: 0,
+      };
+      sectionListRef.current?.scrollToLocation({
+        sectionIndex: loc.sectionIndex,
+        itemIndex: loc.itemIndex,
+        animated,
+        viewPosition: 0,
+      });
+    },
+    [
+      jumpTargetSortedIndexByRank.suffixMinByRank,
+      sections.length,
+      searchFlatData,
+      trackLocationByAudioUri,
+    ],
+  );
 
   const onSelectIndexLabel = useCallback(
     (label: TrackListIndexLabel, animated = true) => {
-      const sectionIndex = resolveSectionIndexForIndexLabel(label, sections);
-      if (sectionIndex < 0) return;
-      scrollToSectionStart(sectionIndex, animated);
+      scrollToIndexLabel(label, animated);
     },
-    [scrollToSectionStart, sections],
+    [scrollToIndexLabel],
   );
 
   const openEditor = useCallback(async (track: NrmDownloadTrackItem) => {
