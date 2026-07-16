@@ -227,7 +227,7 @@ export function NrmHomeDiscoverScreen({
       <View
         style={[styles.aiLabLayer, subView !== 'ai-lab' && styles.aiLabLayerHidden]}
         pointerEvents={subView === 'ai-lab' ? 'auto' : 'none'}>
-        <NrmDiscoverAiLabScreen isDark={isDark} onOpenDiscover={() => setSubView('list')} />
+        <NrmDiscoverAiLabScreen isDark={isDark} />
       </View>
 
       {subView === 'list' || subView === 'track-search' ? (

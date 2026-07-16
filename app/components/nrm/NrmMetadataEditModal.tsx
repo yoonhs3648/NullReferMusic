@@ -1103,7 +1103,16 @@ export function NrmMetadataEditModal({
               borderColor: isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline,
             },
           ]}>
-          <Text style={[styles.heading, { color: titleColor }]}>트랙 정보</Text>
+          <View style={styles.headingBlock}>
+            <Text style={[styles.heading, { color: titleColor }]}>트랙 정보</Text>
+            {purpose === 'download' && item?.title?.trim() ? (
+              <Text
+                style={[styles.youtubeSourceTitle, { color: bodyColor }]}
+                numberOfLines={3}>
+                {item.title.trim()}
+              </Text>
+            ) : null}
+          </View>
 
           {busy ? (
             <View style={styles.busyRow}>
@@ -1551,10 +1560,19 @@ const styles = StyleSheet.create({
     zIndex: 1,
     overflow: 'hidden',
   },
+  headingBlock: {
+    marginBottom: nrmTokens.space.md,
+    gap: nrmTokens.space.xs,
+  },
   heading: {
     fontSize: nrmTokens.font.tagline,
     fontWeight: '600',
-    marginBottom: nrmTokens.space.md,
+  },
+  youtubeSourceTitle: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '400',
+    lineHeight: Math.round(nrmTokens.font.caption * 1.35),
+    letterSpacing: -0.1,
   },
   busyRow: {
     flexDirection: 'row',

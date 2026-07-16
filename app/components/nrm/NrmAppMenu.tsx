@@ -12,7 +12,6 @@ import {
 import {
   Animated,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -27,6 +26,7 @@ import { NrmMenuChartPanels } from '@/components/nrm/charts/NrmMenuChartPanels';
 import { NrmMenuPeriodChartPanels } from '@/components/nrm/charts/NrmMenuPeriodChartPanels';
 import { NrmMenuSearchPanels } from '@/components/nrm/search/NrmMenuSearchPanels';
 import { NrmAppDrawerShell } from '@/components/nrm/NrmAppDrawerShell';
+import { NrmEdgeSwipeOpenLayer } from '@/components/nrm/NrmEdgeSwipeOpenLayer';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { NrmDownloadSettingsPanel } from '@/components/nrm/settings/NrmDownloadSettingsPanel';
 import {
@@ -137,6 +137,8 @@ type Props = {
   leftEdgeSwipeReserve?: number;
   /** 상단 바에서 메뉴 버튼을 렌더할 때 내장 FAB 숨김 */
   hideMenuFab?: boolean;
+  /** false면 좌측 가장자리 스와이프로 앱 메뉴를 열지 않음 (AI Lab 등) */
+  edgeSwipeEnabled?: boolean;
   /** 메뉴 상단 로고 탭 — 메인 홈 복귀 */
   onLogoPressHome?: () => void;
 };
@@ -148,10 +150,6 @@ export type NrmAppMenuHandle = {
   openSpotifyTokenSettings: () => void;
 };
 
-const EDGE_HIT_WIDTH = 32;
-/** 좌측 가장자리 스와이프 인식 폭 — 넓으면 차트 필터(일간·Korea) 탭이 막힘 */
-const MOBILE_SWIPE_EDGE_WIDTH = 24;
-const EDGE_SWIPE_OPEN_PX = 44;
 const IS_NATIVE_MOBILE = Platform.OS === 'ios' || Platform.OS === 'android';
 
 type Panel =
@@ -223,6 +221,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     onShowLastfmAuthInvalid,
     leftEdgeSwipeReserve,
     hideMenuFab = false,
+    edgeSwipeEnabled = true,
     onLogoPressHome,
   },
   ref,
@@ -693,52 +692,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const rowHover = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
 
-  const openMenuRef = useRef(openMenu);
-  openMenuRef.current = openMenu;
-
-  const requestDrawerDismissRef = useRef(requestDrawerDismiss);
-  requestDrawerDismissRef.current = requestDrawerDismiss;
-
-  const edgePanHandlers = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gesture) =>
-        gesture.dx > 6 && Math.abs(gesture.dy) < Math.abs(gesture.dx) * 1.8,
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx >= EDGE_SWIPE_OPEN_PX) {
-          openMenuRef.current();
-        }
-      },
-    }),
-  ).current;
-
-  const mobileSwipeEdgeWidth = MOBILE_SWIPE_EDGE_WIDTH + insets.left;
-  /** 차트 네비 버튼과 겹치지 않는 좁은 물리 가장자리 스와이프 */
-  const mobileEdgeStripWidth = 16;
-
-  const mobileEdgePanHandlers = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          gesture.dx > 8 && Math.abs(gesture.dy) < Math.abs(gesture.dx) * 1.5,
-        onPanResponderTerminationRequest: () => true,
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx >= EDGE_SWIPE_OPEN_PX) {
-            openMenuRef.current();
-          }
-        },
-      }),
-    [],
-  );
-
-  const handleAccent = isDark
-    ? nrmTokens.color.primaryOnDark
-    : nrmTokens.color.primary;
-  const edgeRailColor = isDark
-    ? 'rgba(255, 255, 255, 0.14)'
-    : 'rgba(0, 0, 0, 0.08)';
-
   const nativeHalfPad = paddingHorizontal / 2;
   const webMenuInset = Math.round(
     (nrmTokens.space.lg + nrmTokens.space.xs) / 2,
@@ -775,56 +728,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         </Pressable>
       ) : null}
 
-      {Platform.OS === 'web' && !open ? (
-        <View
-          style={[
-            styles.edgeZone,
-            {
-              width: EDGE_HIT_WIDTH + insets.left,
-              paddingLeft: insets.left,
-            },
-          ]}
-          pointerEvents="box-none"
-          {...edgePanHandlers.panHandlers}>
-          {Platform.OS === 'web' ? (
-            <Pressable
-              onPress={openMenu}
-              accessibilityRole="button"
-              accessibilityLabel="메뉴 열기"
-              style={({ pressed }) => [
-                styles.edgePress,
-                pressed && styles.edgePressPressed,
-                styles.edgePressWeb,
-              ]}>
-              <View
-                style={[
-                  styles.edgeRail,
-                  { backgroundColor: edgeRailColor },
-                ]}
-              />
-              <View
-                style={[
-                  styles.edgeHandle,
-                  {
-                    borderColor: isDark
-                      ? nrmTokens.color.borderOnDark
-                      : nrmTokens.color.hairline,
-                    backgroundColor: isDark
-                      ? 'rgba(255, 255, 255, 0.06)'
-                      : 'rgba(255, 255, 255, 0.72)',
-                  },
-                ]}>
-                <View
-                  style={[styles.edgeGrip, { backgroundColor: handleAccent }]}
-                />
-                <View
-                  style={[styles.edgeGrip, { backgroundColor: handleAccent }]}
-                />
-              </View>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+      <NrmEdgeSwipeOpenLayer
+        enabled={!open && edgeSwipeEnabled}
+        onOpen={openMenu}
+        leftEdgeSwipeReserve={leftEdgeSwipeReserve}
+      />
 
       <Modal
         visible={open}
@@ -2383,35 +2291,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
         </View>
       </Modal>
 
-      {IS_NATIVE_MOBILE && !open ? (
-        <View
-          style={styles.mobileSwipeLayer}
-          pointerEvents="box-none"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants">
-          {leftEdgeSwipeReserve != null && leftEdgeSwipeReserve > 0 ? (
-            <View
-              style={[
-                styles.mobileSwipeEdge,
-                { left: 0, width: mobileEdgeStripWidth },
-              ]}
-              collapsable={false}
-              pointerEvents="auto"
-              {...mobileEdgePanHandlers.panHandlers}
-            />
-          ) : (
-            <View
-              style={[
-                styles.mobileSwipeEdge,
-                { width: mobileSwipeEdgeWidth },
-              ]}
-              collapsable={false}
-              pointerEvents="auto"
-              {...mobileEdgePanHandlers.panHandlers}
-            />
-          )}
-        </View>
-      ) : null}
     </>
   );
 });

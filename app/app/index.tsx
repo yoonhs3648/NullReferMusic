@@ -1084,7 +1084,7 @@ export default function HomeScreen() {
           !youtubeBrowsing && styles.youtubeWelcomeRoot,
         ]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        enabled>
+        enabled={homeTab !== 'discover'}>
         <View
           style={[
             styles.centerColumn,
@@ -1093,7 +1093,7 @@ export default function HomeScreen() {
               : useCenteredSearchWelcome
                 ? styles.youtubeWelcomeColumnCentered
                 : styles.youtubeWelcomeColumn,
-            { paddingHorizontal: pad },
+            { paddingHorizontal: homeTab === 'discover' ? 0 : pad },
           ]}>
           <View
             style={
@@ -1184,6 +1184,7 @@ export default function HomeScreen() {
           isDark={isDark}
           paddingHorizontal={pad}
           hideMenuFab
+          edgeSwipeEnabled={homeTab !== 'discover'}
           onLogoPressHome={resetToYoutubeHome}
           leftEdgeSwipeReserve={showHomeWelcomeChart ? homeChartLeftNavRight : undefined}
 

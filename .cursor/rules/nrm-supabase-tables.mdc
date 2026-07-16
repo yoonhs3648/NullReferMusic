@@ -1,0 +1,24 @@
+---
+description: Supabase 테이블 스키마·컬럼 의미는 docs/supabase-tables MD를 SSOT로 사용한다.
+alwaysApply: true
+---
+
+# Supabase 테이블 정의서 활용 (필수)
+
+Supabase Dashboard는 컬럼 주석을 UI에서 잘 보여주지 않는다.  
+**테이블·컬럼 의미의 단일 출처**는 `docs/supabase-tables/` 다.
+
+## 의무
+
+1. DB 테이블을 읽거나 쓰는 코드·SQL·설계를 할 때 **관련 MD를 먼저 확인**한다.
+   - LLM: `docs/supabase-tables/llm.md`
+   - Chat: `docs/supabase-tables/chat.md`
+   - 기존 NRM: `docs/supabase-tables/nrm-core.md`
+   - 목록: `docs/supabase-tables/README.md`
+2. 테이블 **추가·컬럼 변경·의미 변경** 시 **같은 작업 안에서** 해당 MD를 갱신한다.
+3. DDL과 MD가 다르면 **원격 DB 실스키마에 맞게 MD를 맞춘다.**
+
+## 금지
+
+- MD에 없는 컬럼 의미를 추측해 문서화하지 않은 채 하드코딩하지 않는다.
+- `ApiKey` 등 비밀값을 앱(APK) 클라이언트에 넣는 설계를 임의로 하지 않는다. (설계 확인 후 진행)

@@ -10,7 +10,19 @@ GitHub `data/*.json` 5종을 Supabase Postgres + Storage로 이전하기 위한 
 | Publishable Key | `app/lib/nrmSupabaseConfig.ts` (APK 클라이언트용) |
 | Storage 버킷 | `inquiry-attachments` (문의 첨부, 공개 읽기) |
 
-## 테이블 매핑
+## 테이블 정의서 (컬럼 주석 SSOT)
+
+Supabase UI에 컬럼 주석이 잘 안 보이므로, **의미·DDL·제약은 MD에 둔다.**
+
+→ [`docs/supabase-tables/README.md`](./supabase-tables/README.md)
+
+| 그룹 | MD |
+|------|-----|
+| LLM (`LLMProvider`, `LLMUserPermission`, `LLMUserQuota`, `LLMTokenHistory`) | [`supabase-tables/llm.md`](./supabase-tables/llm.md) |
+| Chat (`ChatSession`, `ChatMessage`) | [`supabase-tables/chat.md`](./supabase-tables/chat.md) |
+| 기존 NRM 코어 | [`supabase-tables/nrm-core.md`](./supabase-tables/nrm-core.md) |
+
+## 테이블 매핑 (GitHub JSON → NRM)
 
 | GitHub JSON | Supabase 테이블 | 비고 |
 |-------------|-----------------|------|
@@ -20,7 +32,7 @@ GitHub `data/*.json` 5종을 Supabase Postgres + Storage로 이전하기 위한 
 | `data/inquiry.json` | `nrm_inquiry` | `attachedFile` → Storage path |
 | `data/custom-apk/userList.json` | `nrm_user_list` | 디바이스 바인딩 |
 
-컬럼명은 Postgres 관례(`snake_case`)를 사용합니다. 앱 타입 매핑은 `app/lib/nrmSupabaseDatabase.types.ts` 참고.
+기존 NRM 컬럼명은 Postgres 관례(`snake_case`). LLM 테이블은 PascalCase quoted 식별자. 앱 타입 매핑은 `app/lib/nrmSupabaseDatabase.types.ts` 참고.
 
 ## 파일
 
@@ -29,6 +41,9 @@ GitHub `data/*.json` 5종을 Supabase Postgres + Storage로 이전하기 위한 
 | `supabase/migrations/20260629120000_nrm_initial_schema.sql` | 테이블·RLS·Storage 버킷 |
 | `supabase/migrations/20260629130000_drop_nrm_apk_version_latest_view.sql` | (이미 스키마 적용한 DB) 뷰 제거 |
 | `supabase/migrations/20260629140000_nrm_rls_rpc.sql` | RLS 강화: anon 직접 쓰기 제거, SECURITY DEFINER RPC |
+| `supabase/migrations/20260716100000_llm_tables.sql` | LLM 제공자·쿼터·호출 이력 (원격 수동 생성 시 스킵) |
+| `supabase/migrations/20260716110000_llm_user_permission.sql` | LLM 사용자 권한·할당 토큰 (원격 수동 생성 시 스킵) |
+| `supabase/migrations/20260716120000_chat_session_message.sql` | Chat 세션·메시지 (원격 수동 생성 시 스킵) |
 | `supabase/seed.sql` | GitHub JSON 기존 데이터 (재생성: 아래 명령) |
 | `scripts/generate-supabase-seed.mjs` | JSON → seed.sql 생성 |
 | `scripts/Sync-NrmGithubUserListToSupabase.ps1` | GitHub userList → Supabase 정합성 동기화 |
