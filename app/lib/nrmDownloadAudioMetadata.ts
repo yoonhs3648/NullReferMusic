@@ -51,6 +51,11 @@ export type NrmAudioFileMetadata = {
   producer?: string;
   /** ffmpeg: remixer (일부 컨테이너) */
   remixer?: string;
+  /**
+   * 다운로드 파이프라인 전용 — TrackHistory.Platform 기록용(YouTube/Melon/Spotify/AppleMusic/LastFm).
+   * ffmpeg/파일 태그에는 기록하지 않는다.
+   */
+  downloadPlatform?: string;
 };
 
 export type NrmDownloadMetadataSource =
@@ -92,6 +97,7 @@ export function normalizeDownloadMetadata(
     website: trimOpt(meta.website),
     producer: trimOpt(meta.producer),
     remixer: trimOpt(meta.remixer),
+    downloadPlatform: trimOpt(meta.downloadPlatform),
   };
   const out: NrmAudioFileMetadata = { ...base };
   for (const k of [
@@ -108,6 +114,7 @@ export function normalizeDownloadMetadata(
     'website',
     'producer',
     'remixer',
+    'downloadPlatform',
   ] as const) {
     if (!out[k]) delete out[k];
   }
@@ -133,6 +140,14 @@ export function metadataForAudioExtension(
   return normalizeDownloadMetadata(rest);
 }
 
+/** 차트 트랙의 외부 URL로 Spotify/Apple Music을 구분 (History 기록용, 실패해도 'Chart'로 폴백) */
+function inferChartDownloadPlatform(track: ChartTrackItem): string {
+  const url = (track.externalUrl ?? '').toLowerCase();
+  if (url.includes('spotify')) return 'Spotify';
+  if (url.includes('apple.com') || url.includes('music.apple')) return 'AppleMusic';
+  return 'Chart';
+}
+
 /** 메인 검색: 가수·곡 제목만 사용자 입력 */
 export function buildMainSearchAudioMetadata(
   userArtist: string,
@@ -145,6 +160,7 @@ export function buildMainSearchAudioMetadata(
     genre: '',
     releaseDate: '',
     coverUrl: '',
+    downloadPlatform: 'YouTube',
   });
 }
 
@@ -162,6 +178,7 @@ export function buildChartAudioMetadata(
     platformGenreRaw: (track.genre ?? '').trim(),
     releaseDate: track.releaseDate ?? '',
     coverUrl: track.imageUrl ?? '',
+    downloadPlatform: inferChartDownloadPlatform(track),
   });
 }
 
@@ -183,6 +200,7 @@ export function buildLastfmSeedAudioMetadata(
     genre: fields.genre ?? '',
     releaseDate: fields.releaseDate ?? '',
     coverUrl: fields.imageUrl ?? '',
+    downloadPlatform: 'LastFm',
   });
 }
 

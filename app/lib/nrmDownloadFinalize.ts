@@ -22,14 +22,22 @@ import {
   applyDownloadExtension,
   extensionFromLocalPath,
   extensionToYtDlpFormat,
+  loadAlignModelPreference,
   loadDownloadEncodeSettings,
   loadLyricsOutputMode,
+  loadWhisperModelPreference,
 } from '@/lib/nrmDownloadSettings';
 import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { appendActivityHistory, type NrmActivityHistoryKind } from '@/lib/nrmActivityHistory';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { logDownloadStage } from '@/lib/nrmDownloadStageLog';
+import { extractPlainLyricsFromLrcText } from '@/lib/nrmMelonLyrics';
+import {
+  logDownloadTrackHistory,
+  logLyricsTrackHistory,
+} from '@/lib/nrmTrackHistoryRemote';
+import type { NrmTrackHistoryKind } from '@/lib/nrmTrackHistoryTypes';
 import {
   startLyricsPipelinePreload,
   type LyricsPipelinePreloadBundle,
@@ -74,6 +82,20 @@ function lyricsFailureHistoryKind(
     return 'lyrics_translation_failed';
   }
   return 'lyrics_fail';
+}
+
+/** TrackHistory.Platform용 — 실제 가사생성에 쓴 모델 ID (whisper:base / align:wav2vec2-ko 등) */
+async function resolveLyricsHistoryPlatform(
+  whisperMode: NrmWhisperLyricsMode | null,
+  melonMode: NrmMelonLyricsMode | null,
+): Promise<string | undefined> {
+  try {
+    if (melonMode) return await loadAlignModelPreference();
+    if (whisperMode) return await loadWhisperModelPreference();
+  } catch {
+    /* ignore — Platform은 참고용, 실패해도 기록 자체는 계속 */
+  }
+  return undefined;
 }
 
 function whisperWarningFromResult(
@@ -326,6 +348,12 @@ export async function finalizeNativeAudioStage(
     audioUri: audioSaved.location.audioUri,
     kind: 'download',
   });
+  void logDownloadTrackHistory({
+    metadata: embedMetadata,
+    fileName: safeName,
+    audioUri: audioSaved.location.audioUri,
+    isSuccess: true,
+  });
 
   logDownloadStage('pipeline', 'finalize_audio_ok', { fileName: safeName, extension });
 
@@ -515,6 +543,7 @@ export async function finalizeNativeLyricsStage(
   }
 
   if (lyricsStageStarted) {
+    const lyricsHistoryPlatform = await resolveLyricsHistoryPlatform(whisperMode, melonMode);
     if (lyricsPersistedOk && whisperRef.result) {
       const translationRequested =
         persistedLyricsMode === 'translation' || persistedLyricsMode === 'melon_translation';
@@ -530,12 +559,39 @@ export async function finalizeNativeLyricsStage(
         audioUri: audioSaved.location.audioUri,
         kind: lyricsHistoryKind,
       });
+      const remoteKind: NrmTrackHistoryKind = translationRequested
+        ? translationFailed
+          ? 'transdLyricsFail'
+          : 'transdLyrics'
+        : 'lyrics';
+      void logLyricsTrackHistory({
+        kind: remoteKind,
+        metadata: embedMetadata,
+        fileName: safeName,
+        audioUri: audioSaved.location.audioUri,
+        isSuccess: !translationFailed,
+        failReason: translationFailed ? 'translation_failed' : undefined,
+        platform: lyricsHistoryPlatform,
+        lyricsMode: persistedLyricsMode ?? undefined,
+        plainLyrics: extractPlainLyricsFromLrcText(whisperRef.result.lrcFull ?? ''),
+      });
     } else if (whisperRef.result?.lyricsRequested) {
       const warning = whisperWarningFromResult(whisperRef.result);
+      const localFailKind = lyricsFailureHistoryKind(whisperRef.result, persistedLyricsMode);
       void appendActivityHistory({
         fileName: displayLabelFromAudioFileName(safeName),
         audioUri: audioSaved.location.audioUri,
-        kind: lyricsFailureHistoryKind(whisperRef.result, persistedLyricsMode),
+        kind: localFailKind,
+      });
+      void logLyricsTrackHistory({
+        kind: localFailKind === 'lyrics_translation_failed' ? 'transdLyricsFail' : 'lyricsFail',
+        metadata: embedMetadata,
+        fileName: safeName,
+        audioUri: audioSaved.location.audioUri,
+        isSuccess: false,
+        failReason: warning ?? 'lyrics_generation_failed',
+        platform: lyricsHistoryPlatform,
+        lyricsMode: persistedLyricsMode ?? undefined,
       });
       if (warning) {
         options?.onLyricsStageFailed?.(warning);

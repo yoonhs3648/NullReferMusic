@@ -14,17 +14,11 @@ import {
 import { NrmMetadataEditModal } from '@/components/nrm/NrmMetadataEditModal';
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  activityHistoryEntryOpensTrack,
   formatActivityHistoryDateTitle,
-  formatActivityHistoryLabel,
-  formatActivityHistoryTime,
-  groupActivityHistoryByDate,
-  invalidateActivityHistoryCache,
-  peekActivityHistoryForDisplay,
   registerActivityHistoryRevisionListener,
-  type NrmActivityHistoryEntry,
 } from '@/lib/nrmActivityHistory';
 import {
+  loadActivityHistoryDisplayDays,
   registerActivityHistoryDisplayListener,
   DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS,
   type NrmActivityHistoryDisplayDays,
@@ -39,6 +33,14 @@ import {
   logStorageMetadataHistory,
   logStorageTrackRemoveHistory,
 } from '@/lib/nrmStorageActivityHistory';
+import { fetchTrackHistoryForDisplay } from '@/lib/nrmTrackHistoryClient';
+import {
+  formatTrackHistoryLabel,
+  formatTrackHistoryTime,
+  groupTrackHistoryByDate,
+  trackHistoryEntryOpensTrack,
+} from '@/lib/nrmTrackHistoryFormat';
+import type { NrmTrackHistoryRow } from '@/lib/nrmTrackHistoryTypes';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
 import { deleteDownloadTrack } from '@/lib/nrmDeleteDownloadTrack';
 import { invalidateListCoverDiskCache, trackListCoverKey } from '@/lib/nrmTrackListCoverLoader';
@@ -62,7 +64,7 @@ type HistorySection = {
   dateKey: string;
   title: string;
   entryCount: number;
-  data: NrmActivityHistoryEntry[];
+  data: NrmTrackHistoryRow[];
 };
 
 function stemOf(fileName: string): string {
@@ -79,9 +81,9 @@ function fakeYoutubeItem(track: NrmDownloadTrackItem): YoutubeSearchItem {
   };
 }
 
-/** 설정된 기간의 활동 기록 — 탭 시 Storage와 동일한 메타데이터 편집 */
+/** 설정된 기간의 활동 기록(Supabase TrackHistory 조회) — 탭 시 Storage와 동일한 메타데이터 편집 */
 export function NrmHomeHistoryScreen({ isDark }: Props) {
-  const [items, setItems] = useState<NrmActivityHistoryEntry[]>([]);
+  const [items, setItems] = useState<NrmTrackHistoryRow[]>([]);
   const [displayDays, setDisplayDays] = useState<NrmActivityHistoryDisplayDays>(
     DEFAULT_ACTIVITY_HISTORY_DISPLAY_DAYS,
   );
@@ -109,7 +111,7 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   const dateColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
 
   const sections = useMemo((): HistorySection[] => {
-    return groupActivityHistoryByDate(items).map((section) => ({
+    return groupTrackHistoryByDate(items).map((section) => ({
       dateKey: section.title,
       title: formatActivityHistoryDateTitle(section.title),
       entryCount: section.data.length,
@@ -118,7 +120,7 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   }, [collapsedDateKeys, items]);
 
   const applySnapshot = useCallback(
-    (days: NrmActivityHistoryDisplayDays, rows: NrmActivityHistoryEntry[]) => {
+    (days: NrmActivityHistoryDisplayDays, rows: NrmTrackHistoryRow[]) => {
       setDisplayDays(days);
       setItems(rows);
     },
@@ -126,8 +128,9 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   );
 
   const reloadHistory = useCallback(async () => {
-    const peek = await peekActivityHistoryForDisplay();
-    applySnapshot(peek.displayDays, peek.items);
+    const days = await loadActivityHistoryDisplayDays();
+    const rows = await fetchTrackHistoryForDisplay(days);
+    applySnapshot(days, rows);
   }, [applySnapshot]);
 
   useEffect(() => {
@@ -140,10 +143,8 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
 
   useEffect(() => {
     registerActivityHistoryDisplayListener((days) => {
-      void peekActivityHistoryForDisplay().then((peek) => {
-        if (peek.displayDays === days) {
-          applySnapshot(days, peek.items);
-        }
+      void fetchTrackHistoryForDisplay(days).then((rows) => {
+        applySnapshot(days, rows);
       });
     });
     return () => registerActivityHistoryDisplayListener(null);
@@ -158,7 +159,6 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    invalidateActivityHistoryCache();
     await reloadHistory();
     setRefreshing(false);
   }, [reloadHistory]);
@@ -198,15 +198,18 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   }, []);
 
   const onPressEntry = useCallback(
-    async (entry: NrmActivityHistoryEntry) => {
-      if (!activityHistoryEntryOpensTrack(entry)) return;
+    async (entry: NrmTrackHistoryRow) => {
+      if (!trackHistoryEntryOpensTrack(entry)) return;
       if (Platform.OS === 'web') {
         void notifyUser('트랙 편집은 Android·iOS 앱에서만 사용할 수 있습니다.');
         return;
       }
       try {
         const tracks = await listDownloadAudioTracks();
-        const track = findDownloadTrackForHistory(tracks, entry);
+        const track = findDownloadTrackForHistory(tracks, {
+          fileName: entry.FileName ?? '',
+          audioUri: entry.AudioUri ?? undefined,
+        });
         if (!track) {
           void notifyUser('존재하지 않는 파일입니다.');
           return;
@@ -356,18 +359,18 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: NrmActivityHistoryEntry }) => {
-      const pressable = activityHistoryEntryOpensTrack(item);
+    ({ item }: { item: NrmTrackHistoryRow }) => {
+      const pressable = trackHistoryEntryOpensTrack(item);
       const labelStyle = [styles.rowLabel, { color: pressable ? titleColor : bodyColor }];
 
       if (!pressable) {
         return (
           <View style={[styles.row, { borderBottomColor: hairline }]}>
             <Text style={labelStyle} numberOfLines={2}>
-              {formatActivityHistoryLabel(item)}
+              {formatTrackHistoryLabel(item)}
             </Text>
             <Text style={[styles.rowWhen, { color: bodyColor }]}>
-              {formatActivityHistoryTime(item.createdAt)}
+              {formatTrackHistoryTime(item.DownloadDate)}
             </Text>
           </View>
         );
@@ -383,10 +386,10 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
           ]}
           accessibilityRole="button">
           <Text style={labelStyle} numberOfLines={2}>
-            {formatActivityHistoryLabel(item)}
+            {formatTrackHistoryLabel(item)}
           </Text>
           <Text style={[styles.rowWhen, { color: bodyColor }]}>
-            {formatActivityHistoryTime(item.createdAt)}
+            {formatTrackHistoryTime(item.DownloadDate)}
           </Text>
         </Pressable>
       );
@@ -401,7 +404,7 @@ export function NrmHomeHistoryScreen({ isDark }: Props) {
       ) : (
         <SectionList
           sections={sections}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => String(item.ID)}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }

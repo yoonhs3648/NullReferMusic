@@ -77,6 +77,7 @@ export function buildMelonSeedAudioMetadata(
     website: seed.songId
       ? `https://www.melon.com/song/detail.htm?songId=${seed.songId.trim()}`
       : '',
+    downloadPlatform: 'Melon',
   };
 }
 

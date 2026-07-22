@@ -46,7 +46,9 @@ Supabase UI에 컬럼 주석이 잘 안 보이므로, **의미·DDL·제약은 M
 | `supabase/migrations/20260716120000_chat_session_message.sql` | Chat 세션·메시지 (원격 수동 생성 시 스킵) |
 | `supabase/migrations/20260721120000_llm_chat_security_harden.sql` | LLM/Chat 6개 테이블 RLS 켜기(SELECT만) + `LLMProvider.ApiKey` 컬럼 차단 |
 | `supabase/migrations/20260721130000_chat_send_rpc.sql` | AI Lab 채팅 RPC: `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`/`nrm_rpc_increment_llm_user_quota`(service_role 전용) + `nrm_rpc_chat_delete_session`(anon) |
-| `supabase/functions/llm-chat-send/index.ts` | AI Lab 채팅 Edge Function — ApiKey를 서버사이드(service_role)에서만 사용해 LLM 호출. 배포: `supabase functions deploy llm-chat-send --project-ref bwkiaapffroyveqqjhom` |
+| `supabase/migrations/20260722100000_llm_token_history_is_success_rename.sql` | `LLMTokenHistory."isSucess"`(오타) → `"isSuccess"` 컬럼명 정정(`RENAME COLUMN`) + `nrm_rpc_chat_finalize_turn` 갱신 |
+| `supabase/migrations/20260722110000_chat_update_session_title_rpc.sql` | `nrm_rpc_chat_update_session_title`(service_role 전용) — LLM이 생성한 대화 제목으로 `ChatSession.Title` 갱신 |
+| `supabase/functions/llm-chat-send/index.ts` | AI Lab 채팅 Edge Function — ApiKey를 서버사이드(service_role)에서만 사용해 LLM 호출(NDJSON 스트리밍 응답 + 신규 세션 대화 제목 백그라운드 생성). 배포: `supabase functions deploy llm-chat-send --project-ref bwkiaapffroyveqqjhom` |
 | `supabase/seed.sql` | GitHub JSON 기존 데이터 (재생성: 아래 명령) |
 | `scripts/generate-supabase-seed.mjs` | JSON → seed.sql 생성 |
 | `scripts/Sync-NrmGithubUserListToSupabase.ps1` | GitHub userList → Supabase 정합성 동기화 |
@@ -158,6 +160,9 @@ npx supabase functions deploy llm-chat-send --project-ref bwkiaapffroyveqqjhom
 ```
 
 Edge Function 안에서는 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`가 **자동으로 주입**되므로
-별도 시크릿 설정이 필요 없다. 앱은 `getNrmSupabase().functions.invoke('llm-chat-send', { body })`
-(publishable key)로만 호출한다 — `app/lib/nrmLlmChatSend.ts`.
+별도 시크릿 설정이 필요 없다. 앱은 이 함수를 **NDJSON 스트리밍 응답**(타이핑 효과)으로 받는데,
+`@supabase/supabase-js`의 `functions.invoke()`는 RN 기본 fetch로 응답을 통째로 버퍼링해
+스트리밍이 안 되므로, 대신 `expo/fetch`(Expo SDK 50+ 네이티브 스트리밍 fetch)로 Edge Function
+URL을 직접 호출한다(publishable key를 `Authorization`/`apikey` 헤더로) — `app/lib/nrmLlmChatSend.ts`.
+프로토콜 상세: [`supabase-tables/llm.md` §스트리밍 응답](./supabase-tables/llm.md#스트리밍-응답타이핑-효과--ndjson-2026-07-22).
 

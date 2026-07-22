@@ -66,6 +66,7 @@ export function splitMetadataForDownloadStages(meta: NrmAudioFileMetadata): {
   delete ffmpegMetadata.melonLyricsPlain;
   delete ffmpegMetadata.melonAlignLang;
   delete ffmpegMetadata.platformGenreRaw;
+  delete ffmpegMetadata.downloadPlatform;
   const plain = (meta.melonLyricsPlain ?? '').trim();
   const melonAlignLang: 'ko' | 'en' =
     meta.melonAlignLang === 'en' || meta.melonAlignLang === 'ko'

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { appendActivityHistory } from '@/lib/nrmActivityHistory';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { logDownloadTrackHistory } from '@/lib/nrmTrackHistoryRemote';
 import {
   nrmNotifyDownloadFailed,
   nrmNotifyDownloadFinished,
@@ -29,5 +30,14 @@ export async function reportNativeDownloadExtractFailure(
   await appendActivityHistory({
     fileName: displayLabelFromAudioFileName(label),
     kind: 'download_fail',
+  });
+
+  const causeMessage = cause instanceof Error ? cause.message : String(cause ?? '');
+  void logDownloadTrackHistory({
+    metadata: undefined,
+    fileName: displayLabelFromAudioFileName(label),
+    audioUri: '',
+    isSuccess: false,
+    failReason: causeMessage.slice(0, 200) || 'extract_failed',
   });
 }

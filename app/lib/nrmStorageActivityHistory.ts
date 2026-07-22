@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import {
@@ -6,6 +8,17 @@ import {
   type NrmActivityHistoryKind,
 } from '@/lib/nrmActivityHistory';
 import type { NrmLyricsUiMode } from '@/lib/nrmMelonLyrics';
+import { extractPlainLyricsFromLrcText } from '@/lib/nrmMelonLyrics';
+import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
+import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
+import { loadAlignModelPreference, loadWhisperModelPreference } from '@/lib/nrmDownloadSettings';
+import { logNrmRunError } from '@/lib/nrmDevLog';
+import {
+  logLyricsTrackHistory,
+  logMetadataEditTrackHistory,
+  logTrackRemoveHistory,
+} from '@/lib/nrmTrackHistoryRemote';
+import type { NrmTrackHistoryKind } from '@/lib/nrmTrackHistoryTypes';
 
 function hasLyrics(mode: NrmLyricsUiMode): boolean {
   return mode !== 'unset';
@@ -43,6 +56,61 @@ export function classifyLyricsHistoryKind(
     if (hadTrans && !wantTranslation) return 'lyrics_remove_translation';
   }
   return null;
+}
+
+/** 로컬 활동기록 kind → 원격 TrackHistory.Kind */
+function trackHistoryKindForLyrics(
+  kind: NrmActivityHistoryKind,
+): NrmTrackHistoryKind | null {
+  switch (kind) {
+    case 'lyrics':
+      return 'lyrics';
+    case 'lyrics_translation':
+    case 'lyrics_add_translation':
+      return 'transdLyrics';
+    case 'lyrics_translation_failed':
+      return 'transdLyricsFail';
+    case 'lyrics_remove':
+      return 'delLyrics';
+    case 'lyrics_remove_translation':
+      return 'delTransdLyrics';
+    default:
+      return null;
+  }
+}
+
+/** 현재(수정 이후) 저장된 가사를 원문(plain, 타임스탬프 제거) 텍스트로 읽어온다. 실패 시 빈 문자열. */
+async function resolveCurrentPlainLyricsText(
+  audioUri: string,
+  fileName: string,
+): Promise<string> {
+  if (Platform.OS === 'web') return '';
+  try {
+    const FileSystem = await import('expo-file-system/src/legacy/FileSystem');
+    try {
+      const sidecar = await FileSystem.readAsStringAsync(siblingLrcUri(audioUri));
+      if (sidecar.trim()) return extractPlainLyricsFromLrcText(sidecar).trim();
+    } catch {
+      /* 사이드카 없음 → 내장 가사 시도 */
+    }
+    const meta = await readAudioFileMetadata(audioUri, fileName);
+    const embedded = (meta.lyrics ?? '').trim();
+    if (embedded) return extractPlainLyricsFromLrcText(embedded).trim();
+  } catch (e) {
+    logNrmRunError('trackHistory.remote', e, { event: 'resolve-plain-lyrics-failed' });
+  }
+  return '';
+}
+
+/** 현재(수정 이후) 가사모드에 맞는 모델 ID(TrackHistory.Platform) 조회 */
+async function resolveLyricsPlatformForMode(mode: NrmLyricsUiMode): Promise<string | undefined> {
+  try {
+    if (mode === 'melon' || mode === 'melon_translation') return await loadAlignModelPreference();
+    if (mode === 'configured' || mode === 'translation') return await loadWhisperModelPreference();
+  } catch {
+    /* ignore */
+  }
+  return undefined;
 }
 
 const METADATA_COMPARE_KEYS: (keyof Omit<NrmAudioFileMetadata, 'artist' | 'title' | 'lyrics'>)[] = [
@@ -121,6 +189,34 @@ export async function logStorageMetadataHistory(params: {
   if (lyricsKind) toWrite.push({ ...base, kind: lyricsKind });
   if (metaChanged) toWrite.push({ ...base, kind: 'metadata_edit' });
   await appendActivityHistoryBatch(toWrite);
+
+  if (lyricsKind) {
+    const remoteKind = trackHistoryKindForLyrics(lyricsKind);
+    if (remoteKind) {
+      const [plainLyrics, platform] = await Promise.all([
+        resolveCurrentPlainLyricsText(params.audioUriAfter, params.fileNameAfter),
+        resolveLyricsPlatformForMode(params.lyricsModeAfter),
+      ]);
+      void logLyricsTrackHistory({
+        kind: remoteKind,
+        metadata: params.metadataAfter,
+        fileName: params.fileNameAfter,
+        audioUri: params.audioUriAfter,
+        isSuccess: remoteKind !== 'transdLyricsFail',
+        failReason: remoteKind === 'transdLyricsFail' ? 'translation_failed' : undefined,
+        platform,
+        lyricsMode: params.lyricsModeAfter,
+        plainLyrics,
+      });
+    }
+  }
+  if (metaChanged) {
+    void logMetadataEditTrackHistory({
+      metadata: params.metadataAfter,
+      fileName: params.fileNameAfter,
+      audioUri: params.audioUriAfter,
+    });
+  }
 }
 
 export async function logStorageTrackRemoveHistory(track: NrmDownloadTrackItem): Promise<void> {
@@ -129,6 +225,23 @@ export async function logStorageTrackRemoveHistory(track: NrmDownloadTrackItem):
     audioUri: track.audioUri,
     kind: 'track_remove',
   });
+
+  try {
+    const [metadata, plainLyrics] = await Promise.all([
+      readAudioFileMetadata(track.audioUri, track.fileName).catch(
+        () => undefined as NrmAudioFileMetadata | undefined,
+      ),
+      resolveCurrentPlainLyricsText(track.audioUri, track.fileName),
+    ]);
+    void logTrackRemoveHistory({
+      metadata,
+      fileName: track.fileName,
+      audioUri: track.audioUri,
+      plainLyrics,
+    });
+  } catch (e) {
+    logNrmRunError('trackHistory.remote', e, { event: 'log-track-remove-failed' });
+  }
 }
 
 export function findDownloadTrackForHistory(

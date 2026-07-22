@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { NrmAiLabModelPicker } from '@/components/nrm/discover/NrmAiLabModelPicker';
+import { NrmAiLabUsagePanel } from '@/components/nrm/discover/NrmAiLabUsagePanel';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
@@ -27,12 +28,20 @@ type Props = {
   isDark: boolean;
   conversations: NrmAiLabSidebarConversation[];
   activeId: string | null;
-  llmProviderId: number | null;
-  onLlmProviderChange: (providerId: number) => void;
+  /** LLM 관련 테이블(LLMUserPermission/LLMUserQuota) 조회용 앱 SerialNo — 사용량 조회 화면에서 사용. */
+  serialNo: string | null;
+  llmModelId: number | null;
+  onLlmModelChange: (modelId: number) => void;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDelete: (id: string) => void;
   onDismiss: () => void;
+  /**
+   * 하드웨어 뒤로가기(Android)를 이 사이드바가 먼저 처리할 수 있게 등록한다.
+   * 서브패널('usage' 등)에서 true(처리함)를 반환해 루트로만 돌아가고,
+   * 루트에서는 false를 반환해 부모(드로어 Modal)가 실제로 닫히게 한다.
+   */
+  registerBackHandler?: (handler: (() => boolean) | null) => void;
 };
 
 /** AI Lab 좌측 메뉴 — 앱 메뉴와 동일한 행·폰트·하단 닫기 패턴. */
@@ -40,17 +49,31 @@ export function NrmAiLabSidebar({
   isDark,
   conversations,
   activeId,
-  llmProviderId,
-  onLlmProviderChange,
+  serialNo,
+  llmModelId,
+  onLlmModelChange,
   onSelect,
   onNewChat,
   onDelete,
   onDismiss,
+  registerBackHandler,
 }: Props) {
   const [panel, setPanel] = useState<DrawerPanel>('root');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [menuForId, setMenuForId] = useState<string | null>(null);
+
+  // Android 하드웨어 뒤로: 서브패널이면 루트로 pop(처리함=true), 루트면 부모가 닫도록 false.
+  useEffect(() => {
+    registerBackHandler?.(() => {
+      if (panel !== 'root') {
+        setPanel('root');
+        return true;
+      }
+      return false;
+    });
+    return () => registerBackHandler?.(null);
+  }, [panel, registerBackHandler]);
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -93,6 +116,8 @@ export function NrmAiLabSidebar({
             <Text style={[styles.backLabel, { color: nrmTokens.color.primary }]}>뒤로</Text>
           </Pressable>
           <Text style={[styles.panelTitle, { color: titleColor }]}>사용량 조회</Text>
+          {/* UsagePanel이 modelId→providerId 해석 */}
+          <NrmAiLabUsagePanel isDark={isDark} serialNo={serialNo} preferredModelId={llmModelId} />
         </NrmMenuDrawerScroll>
         {footerClose}
       </View>
@@ -105,8 +130,8 @@ export function NrmAiLabSidebar({
         <View style={styles.modelRow}>
           <NrmAiLabModelPicker
             isDark={isDark}
-            value={llmProviderId}
-            onChange={onLlmProviderChange}
+            value={llmModelId}
+            onChange={onLlmModelChange}
             presentation="menuRow"
           />
         </View>

@@ -15,5 +15,5 @@ export function resolveLlmSerialNo(appSerialNo: string): string | null {
   return trimmed || null;
 }
 
-/** LLMUserPermission AllocatedToken = 0 → 할당 한도 없음(무제한). LLMProvider DailyLimit/MonthlyLimit 과 동일 규칙. */
+/** LLMUserPermission AllocatedToken = 0 → 할당 한도 없음(무제한). */
 export const NRM_LLM_UNLIMITED_ALLOCATED_TOKEN = 0;

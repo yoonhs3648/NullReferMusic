@@ -9,6 +9,8 @@ export type NrmAiLabMessage = {
   content: string;
   /** 전송 중(로컬 낙관적 메시지, 서버 확정 전) */
   pending?: boolean;
+  /** 어시스턴트가 아직 답변을 만드는 중(첫 delta 도착 전) — 타이핑 인디케이터 표시용 */
+  typing?: boolean;
 };
 
 export type NrmAiLabConversation = {
@@ -18,7 +20,7 @@ export type NrmAiLabConversation = {
   updatedAtLabel: string;
   /** 정렬용 원본 시각 (최근 대화순 정렬) */
   updatedAtIso: string;
-  providerId: number;
+  modelId: number;
   /** 메시지는 대화 진입 시 지연 로딩 — 목록 단계에서는 빈 배열일 수 있음 */
   messages: NrmAiLabMessage[];
   messagesLoaded: boolean;

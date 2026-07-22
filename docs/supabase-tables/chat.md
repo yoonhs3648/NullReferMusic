@@ -5,7 +5,9 @@
 관계 개요:
 
 ```
-LLMProvider (1) ──< ChatSession (N) ──< ChatMessage (N)
+LLMProvider (1) ──< LLMModel (N)
+                └──< ChatSession (N) ──< ChatMessage (N)
+                     (ChatSession은 ProviderID + ModelID를 함께 저장 — 세션 고정 모델)
                          │
                     SerialNo (사용자)
 ```
@@ -25,6 +27,7 @@ LLMProvider (1) ──< ChatSession (N) ──< ChatMessage (N)
 | `SessionID` | `bigint` IDENTITY | — | NO | 대화 세션 고유번호 **(복합 PK)** |
 | `SerialNo` | `varchar` | — | NO | 사용자 일련번호 (앱 `getNrmAppSerialNo()` 원문, 예: `"admin"`, `"1092452918"`) **(복합 PK)** |
 | `ProviderID` | `bigint` | — | NO | LLM 제공자 고유번호 (`LLMProvider.ProviderID`) |
+| `ModelID` | `bigint` | — | NO | 이 세션이 사용하는 LLM 모델 (`LLMModel.ModelID`) — 생성 시 고정 |
 | `Title` | `varchar` | — | NO | 대화 제목 |
 | `IsDeleted` | `boolean` | `false` | NO | 삭제 여부 (소프트 삭제) |
 | `RegDate` | `timestamptz` | `now()` | NO | 생성 일시 |
@@ -61,7 +64,10 @@ COMMENT ON COLUMN public."ChatSession"."SerialNo"
 IS '사용자 일련번호 (앱 SerialNo 원문, 예: admin, 1092452918)';
 
 COMMENT ON COLUMN public."ChatSession"."ProviderID"
-IS 'LLM 제공자 고유번호';
+IS 'LLM 제공자 고유번호 (LLMProvider.ProviderID)';
+
+COMMENT ON COLUMN public."ChatSession"."ModelID"
+IS '이 세션이 사용하는 LLM 모델 고유번호 (LLMModel.ModelID) — 세션 생성 시 고정';
 
 COMMENT ON COLUMN public."ChatSession"."Title"
 IS '대화 제목';
@@ -163,6 +169,7 @@ ON public."ChatMessage" ("RegDate");
 
 - `ChatSession`/`ChatMessage`는 RLS `SELECT`만 anon/authenticated에 열려 있다(`20260721120000_llm_chat_security_harden.sql`). **직접 INSERT/UPDATE 불가.**
 - 메시지 저장·세션 생성·`UpdateDate` 갱신은 전부 Edge Function(`llm-chat-send`, service_role)이 `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`을 통해서만 수행한다. 상세: [`llm.md`](./llm.md#ai-lab-채팅-전송--edge-function--rpc-실제-구현).
+- `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM이 생성한 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-자동-생성-2026-07-22).
 - 세션 삭제(소프트 삭제, `IsDeleted=true`)는 앱이 `nrm_rpc_chat_delete_session(p_serial_no, p_session_id)`을 직접 호출한다(anon/authenticated에 GRANT). 본인 `SerialNo` 소유 세션만 삭제 가능.
 
 ## 구현 시 참고

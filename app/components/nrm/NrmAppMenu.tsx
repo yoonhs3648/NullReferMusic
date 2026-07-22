@@ -47,6 +47,8 @@ import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUser
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
 import { NrmAdminDiscoverEditPanel } from '@/components/nrm/settings/NrmAdminDiscoverEditPanel';
+import { NrmAdminLlmTokenLookupPanel } from '@/components/nrm/settings/NrmAdminLlmTokenLookupPanel';
+import { NrmAdminLlmTokenAllocationPanel } from '@/components/nrm/settings/NrmAdminLlmTokenAllocationPanel';
 import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDeviceResetPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
@@ -191,6 +193,8 @@ type Panel =
   | 'adminInquiryList'
   | 'adminUserList'
   | 'adminDiscoverEdit'
+  | 'adminLlmTokenLookup'
+  | 'adminLlmTokenAllocation'
   | 'adminDeviceReset'
   | ChartMenuPanel
   | 'periodCharts'
@@ -1679,6 +1683,36 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => pushPanel('adminLlmTokenLookup')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    AI토큰 조회
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminLlmTokenAllocation')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    AI토큰 할당
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => pushPanel('adminDeviceReset')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1772,6 +1806,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminDiscoverEditPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminLlmTokenLookup' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminLlmTokenLookupPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminLlmTokenAllocation' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminLlmTokenAllocationPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

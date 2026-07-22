@@ -18,7 +18,7 @@ function mapSessionRow(row: NrmSupabaseChatSessionRow): NrmAiLabConversation {
     title: String(row.Title ?? '').trim() || '새 대화',
     updatedAtLabel: nrmAiLabRelativeTimeLabel(updatedAtIso),
     updatedAtIso,
-    providerId: Number(row.ProviderID),
+    modelId: Number(row.ModelID),
     messages: [],
     messagesLoaded: false,
   };
@@ -40,7 +40,7 @@ export async function fetchChatSessions(serialNo: string): Promise<NrmAiLabConve
     NRM_SUPABASE_TABLES.chatSession,
     (q) =>
       q
-        .select('SessionID,SerialNo,ProviderID,Title,IsDeleted,RegDate,UpdateDate')
+        .select('SessionID,SerialNo,ProviderID,ModelID,Title,IsDeleted,RegDate,UpdateDate')
         .eq('SerialNo', serialNo)
         .eq('IsDeleted', false)
         .order('UpdateDate', { ascending: false })

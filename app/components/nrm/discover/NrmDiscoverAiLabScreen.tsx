@@ -17,8 +17,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmAiLabComposer } from '@/components/nrm/discover/NrmAiLabComposer';
+import { NrmAiLabMarkdown } from '@/components/nrm/discover/NrmAiLabMarkdown';
 import { NrmAiLabMessageEnter } from '@/components/nrm/discover/NrmAiLabMessageEnter';
 import { NrmAiLabSidebar } from '@/components/nrm/discover/NrmAiLabSidebar';
+import { NrmAiLabTypingDots } from '@/components/nrm/discover/NrmAiLabTypingDots';
 import { NrmEdgeSwipeOpenLayer } from '@/components/nrm/NrmEdgeSwipeOpenLayer';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
@@ -31,10 +33,14 @@ import {
   type NrmAiLabConversation,
   type NrmAiLabMessage,
 } from '@/lib/nrmAiLabChatUi';
+import {
+  loadAiLabSelectedModelId,
+  saveAiLabSelectedModelId,
+} from '@/lib/nrmAiLabModelPreference';
 import { deleteChatSession, fetchChatMessages, fetchChatSessions } from '@/lib/nrmChatClient';
 import { logNrmRunError } from '@/lib/nrmDevLog';
 import { resolveLlmSerialNo } from '@/lib/nrmLlmSerialNo';
-import { sendLlmChatMessage } from '@/lib/nrmLlmChatSend';
+import { NrmLlmChatSendError, sendLlmChatMessageStream } from '@/lib/nrmLlmChatSend';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
@@ -44,6 +50,28 @@ type Props = {
 
 const ICON_HIT = 44;
 const NETWORK_PROBLEM_TEXT = '네트워크 문제로 요청할 수 없어요. 나중에 다시 시도해 주세요.';
+
+/**
+ * 예전엔 전송 실패 원인과 무관하게 항상 NETWORK_PROBLEM_TEXT 하나로 뭉뚱그려
+ * 보여줬다 — 진짜 네트워크 단절/서버 오류/스트리밍 중 연결 끊김이 다 같은
+ * 문구로 나와서 사용자도 원인을 알 수 없고 로그를 뒤져야만 구분됐다.
+ * sendLlmChatMessageStream이 던지는 에러 code로 상황에 맞는 문구를 보여준다.
+ */
+function aiLabSendErrorText(e: unknown): string {
+  if (e instanceof NrmLlmChatSendError) {
+    switch (e.code) {
+      case 'fetch_error':
+        return '네트워크 연결이 원활하지 않아 요청을 보내지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.';
+      case 'http_error':
+        return '서버에 일시적인 문제가 있어 요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.';
+      case 'no_final':
+        return '응답을 받는 중 연결이 끊어졌어요. 다시 시도해 주세요.';
+      case 'stream_error':
+        return '응답을 처리하는 중 문제가 발생했어요. 다시 시도해 주세요.';
+    }
+  }
+  return NETWORK_PROBLEM_TEXT;
+}
 
 function nextTempId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -56,6 +84,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const drawerW = Math.max(280, Math.min(380, Math.round(windowWidth * 0.88) || 320));
   const drawerWRef = useRef(drawerW);
   drawerWRef.current = drawerW;
+  const sidebarBackHandlerRef = useRef<(() => boolean) | null>(null);
   const translateX = useRef(new Animated.Value(-drawerW)).current;
   /** 메인 NrmAppTopBar 와 동일 — 기종별 반응형 가로 여백 */
   const padH = Math.max(nrmTokens.space.md, Math.round(windowWidth * 0.04));
@@ -76,7 +105,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [llmProviderId, setLlmProviderId] = useState<number | null>(null);
+  const [llmModelId, setLlmModelId] = useState<number | null>(null);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
   /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
@@ -95,6 +124,23 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 사용자가 마지막으로 직접 고른 모델을 기기에서 복원 — 없으면 모델 선택
+  // 컴포넌트가 자체적으로 기본 모델을 고른다(pickDefaultLlmModelId).
+  useEffect(() => {
+    let cancelled = false;
+    void loadAiLabSelectedModelId().then((id) => {
+      if (!cancelled && id != null) setLlmModelId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLlmModelChange = useCallback((modelId: number) => {
+    setLlmModelId(modelId);
+    void saveAiLabSelectedModelId(modelId);
   }, []);
 
   const refreshSessions = useCallback(async () => {
@@ -171,6 +217,16 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     });
   }, [translateX]);
 
+  const registerSidebarBackHandler = useCallback((handler: (() => boolean) | null) => {
+    sidebarBackHandlerRef.current = handler;
+  }, []);
+
+  /** Android 하드웨어 뒤로: 사이드바 서브패널이 먼저 처리하면 드로어는 안 닫는다. */
+  const onDrawerRequestClose = useCallback(() => {
+    if (sidebarBackHandlerRef.current?.()) return;
+    closeMenu();
+  }, [closeMenu]);
+
   // false→true 전환 시 슬라이드 인 (햄버거·좌측 스와이프 공통)
   useEffect(() => {
     if (!menuOpen) return;
@@ -202,7 +258,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
       const target = conversations.find((c) => c.id === id);
       if (target) {
         // 세션은 생성 시점 모델에 고정 — 이어서 보내는 요청도 동일 모델을 쓰도록 동기화.
-        setLlmProviderId(target.providerId);
+        setLlmModelId(target.modelId);
         if (!target.messagesLoaded) {
           setMessagesLoading(true);
           void fetchChatMessages(id)
@@ -235,9 +291,10 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
-    if (!text || sending || !serialNo || llmProviderId == null) return;
+    if (!text || sending || !serialNo || llmModelId == null) return;
 
     const tempUserId = nextTempId('u');
+    const tempAssistantId = nextTempId('a');
     const userMsg: NrmAiLabMessage = { id: tempUserId, role: 'user', content: text, pending: true };
     const targetId = activeId;
     const sourceConvId = targetId ?? nextTempId('c');
@@ -251,7 +308,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         title: nrmAiLabTitleFromPrompt(text),
         updatedAtLabel: '지금',
         updatedAtIso: new Date().toISOString(),
-        providerId: llmProviderId,
+        modelId: llmModelId,
         messages: [userMsg],
         messagesLoaded: true,
       };
@@ -264,51 +321,103 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
       );
     }
 
-    void sendLlmChatMessage({
-      serialNo,
-      providerId: llmProviderId,
-      sessionId: targetId,
-      message: text,
-    })
-      .then((result) => {
-        pendingLocalConversationRef.current = null;
-        setConversations((prev) => {
-          const sourceConv = prev.find((c) => c.id === sourceConvId);
-          const finalizedMessages = (sourceConv?.messages ?? [])
-            .filter((m) => m.id !== tempUserId)
-            .concat([result.userMessage, result.replyMessage]);
-          const finalizedConv: NrmAiLabConversation = {
-            id: result.sessionId,
-            title: result.title || sourceConv?.title || nrmAiLabTitleFromPrompt(text),
-            updatedAtLabel: '지금',
-            updatedAtIso: new Date().toISOString(),
-            providerId: llmProviderId,
-            messages: finalizedMessages,
-            messagesLoaded: true,
-          };
-          const rest = prev.filter((c) => c.id !== sourceConvId && c.id !== result.sessionId);
-          return [finalizedConv, ...rest];
-        });
-        setActiveId(result.sessionId);
-      })
+    // 스트리밍 이벤트 클로저 상태 — meta 도착 시 임시 대화 id가 서버 sessionId로 바뀐다.
+    let currentConvId = sourceConvId;
+    let gotFirstDelta = false;
+
+    // 모델의 내부 추론(thinking) 때문에 첫 delta가 오기까지 몇 초 걸릴 수 있어, 전송 즉시
+    // "타이핑 중" 표시가 있는 빈 어시스턴트 버블을 먼저 붙여둔다 — 아무 반응 없이 멈춘
+    // 것처럼 보이지 않게.
+    const typingPlaceholder: NrmAiLabMessage = {
+      id: tempAssistantId,
+      role: 'assistant',
+      content: '',
+      typing: true,
+    };
+    setConversations((prev) =>
+      prev.map((c) => (c.id === currentConvId ? { ...c, messages: [...c.messages, typingPlaceholder] } : c)),
+    );
+
+    void sendLlmChatMessageStream(
+      { serialNo, modelId: llmModelId, sessionId: targetId, message: text },
+      {
+        onMeta: (meta) => {
+          const newConvId = meta.sessionId;
+          setConversations((prev) => {
+            const idx = prev.findIndex((c) => c.id === currentConvId);
+            if (idx === -1) return prev;
+            const conv = prev[idx];
+            const finalizedMessages = conv.messages.map((m) =>
+              m.id === tempUserId ? meta.userMessage : m,
+            );
+            const updatedConv: NrmAiLabConversation = {
+              ...conv,
+              id: newConvId,
+              title: meta.title || conv.title,
+              modelId: llmModelId,
+              messages: finalizedMessages,
+            };
+            const rest = prev.filter((_, i) => i !== idx).filter((c) => c.id !== newConvId);
+            return [updatedConv, ...rest];
+          });
+          if (currentConvId !== newConvId) {
+            pendingLocalConversationRef.current = null;
+            currentConvId = newConvId;
+            setActiveId(newConvId);
+          }
+        },
+        onDelta: (chunk) => {
+          gotFirstDelta = true;
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === currentConvId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === tempAssistantId ? { ...m, content: m.content + chunk, typing: false } : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+        },
+        onFinal: (final) => {
+          setConversations((prev) =>
+            prev.map((c) => {
+              if (c.id !== currentConvId) return c;
+              const messages = c.messages.map((m) => (m.id === tempAssistantId ? final.message : m));
+              return {
+                ...c,
+                updatedAtLabel: '지금',
+                updatedAtIso: new Date().toISOString(),
+                messages,
+              };
+            }),
+          );
+        },
+      },
+    )
       .catch((e) => {
         logNrmRunError('ailab.send', e, {
           sourceConvId,
           isNewConversation: !targetId,
-          providerId: llmProviderId,
+          modelId: llmModelId,
           messageLength: text.length,
+          gotFirstDelta,
         });
         const sysMsg: NrmAiLabMessage = {
           id: nextTempId('s'),
           role: 'system',
-          content: NETWORK_PROBLEM_TEXT,
+          content: aiLabSendErrorText(e),
         };
         setConversations((prev) =>
           prev.map((c) =>
-            c.id === sourceConvId
+            c.id === currentConvId
               ? {
                   ...c,
+                  // 완성되지 못한 "타이핑 중" 어시스턴트 버블은 지우고 오류 안내만 남긴다.
                   messages: c.messages
+                    .filter((m) => m.id !== tempAssistantId)
                     .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
                     .concat(sysMsg),
                 }
@@ -317,7 +426,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         );
       })
       .finally(() => setSending(false));
-  }, [activeId, draft, llmProviderId, sending, serialNo]);
+  }, [activeId, draft, llmModelId, sending, serialNo]);
 
   const renderMessage = useCallback(
     ({ item }: ListRenderItemInfo<NrmAiLabMessage>) => {
@@ -348,12 +457,18 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                 : styles.bubbleAssistant,
               item.pending && styles.bubblePending,
             ]}>
-            <Text style={[styles.msgText, { color: titleColor }]}>{item.content}</Text>
+            {item.typing && !item.content ? (
+              <NrmAiLabTypingDots color={systemTextColor} />
+            ) : isUser ? (
+              <Text style={[styles.msgText, { color: titleColor }]}>{item.content}</Text>
+            ) : (
+              <NrmAiLabMarkdown content={item.content} color={titleColor} isDark={isDark} />
+            )}
           </View>
         </NrmAiLabMessageEnter>
       );
     },
-    [hairline, systemBubbleBg, systemTextColor, titleColor, userBubbleBg],
+    [hairline, isDark, systemBubbleBg, systemTextColor, titleColor, userBubbleBg],
   );
 
   const emptyChat = (
@@ -428,7 +543,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         visible={menuOpen}
         transparent
         animationType="none"
-        onRequestClose={closeMenu}
+        onRequestClose={onDrawerRequestClose}
         statusBarTranslucent
         hardwareAccelerated>
         <View style={[styles.modalWrap, { backgroundColor: rootBg }]}>
@@ -459,12 +574,14 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                 updatedAtLabel: nrmAiLabRelativeTimeLabel(c.updatedAtIso) || c.updatedAtLabel,
               }))}
               activeId={activeId}
-              llmProviderId={llmProviderId}
-              onLlmProviderChange={setLlmProviderId}
+              serialNo={serialNo}
+              llmModelId={llmModelId}
+              onLlmModelChange={handleLlmModelChange}
               onSelect={handleSelect}
               onNewChat={handleNewChat}
               onDelete={handleDelete}
               onDismiss={closeMenu}
+              registerBackHandler={registerSidebarBackHandler}
             />
           </Animated.View>
         </View>

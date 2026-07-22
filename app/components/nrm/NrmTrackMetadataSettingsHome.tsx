@@ -39,9 +39,12 @@ import {
   buildTrackListFlatItemLayout,
   computeSectionStartOffsets,
   findSectionIndexForJumpLabel,
-  scrollSectionListToSection,
+  recordMeasuredSectionOffset,
+  resolveSectionScrollOffset,
+  scrollSectionListToOffset,
   TRACK_LIST_ROW_HEIGHT,
   TRACK_LIST_SECTION_HEADER_HEIGHT,
+  type TrackListMeasuredOffsets,
 } from '@/lib/nrmTrackListSectionScroll';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
 import { deleteDownloadTrack } from '@/lib/nrmDeleteDownloadTrack';
@@ -179,6 +182,56 @@ const TrackListItem = memo(function TrackListItem({
   );
 });
 
+/**
+ * 섹션 헤더 — onLayout마다 자신의 실제 화면상 위치(pageY)를 측정해 부모로 알려준다.
+ * 퀵 네비게이션이 고정 높이 추정 대신 이 실측값으로 스크롤 오차를 보정하는 데 쓰인다.
+ */
+const SectionHeaderRow = memo(function SectionHeaderRow({
+  label,
+  bodyColor,
+  backgroundColor,
+  onMeasured,
+}: {
+  label: TrackListIndexLabel;
+  bodyColor: string;
+  backgroundColor: string;
+  onMeasured: (label: TrackListIndexLabel, pageY: number) => void;
+}) {
+  const headerRef = useRef<View>(null);
+  return (
+    <View
+      ref={headerRef}
+      style={[
+        headerStyles.sectionHeader,
+        headerStyles.sectionHeaderFixed,
+        { backgroundColor },
+      ]}
+      onLayout={() => {
+        headerRef.current?.measureInWindow((_x, y) => onMeasured(label, y));
+      }}>
+      <Text style={[headerStyles.sectionHeaderLabel, { color: bodyColor }]}>{label}</Text>
+    </View>
+  );
+});
+
+const headerStyles = StyleSheet.create({
+  sectionHeader: {
+    paddingHorizontal: nrmTokens.space.xs,
+    paddingVertical: nrmTokens.space.xxs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(128,128,128,0.25)',
+  },
+  sectionHeaderFixed: {
+    height: TRACK_LIST_SECTION_HEADER_HEIGHT,
+    justifyContent: 'center',
+  },
+  sectionHeaderLabel: {
+    fontSize: nrmTokens.font.finePrint,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+});
+
 export function NrmTrackMetadataSettingsHome({
   isDark,
   titleColor,
@@ -189,7 +242,26 @@ export function NrmTrackMetadataSettingsHome({
 }: Props) {
   const row = nrmChartTrackListStyles;
   const sectionListRef = useRef<SectionList<NrmDownloadTrackItem, TrackListSection>>(null);
+  const listColumnRef = useRef<View>(null);
   const searchInputRef = useRef<TextInput>(null);
+
+  /** 퀵 네비게이션 실측 보정용 — 리스트 뷰포트의 화면상 Y, 현재 스크롤 오프셋, 섹션별 실측 오프셋 */
+  const listPageYRef = useRef(0);
+  const scrollOffsetYRef = useRef(0);
+  const measuredSectionOffsetsRef = useRef<TrackListMeasuredOffsets>(new Map());
+  const refineScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const syncListPageY = useCallback(() => {
+    listColumnRef.current?.measureInWindow((_x, y) => {
+      listPageYRef.current = y;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (refineScrollTimerRef.current) clearTimeout(refineScrollTimerRef.current);
+    };
+  }, []);
 
   // 세션 캐시가 있으면 재진입 시 스피너 없이 즉시 이전 목록을 보여준다.
   const [tracks, setTracks] = useState<NrmDownloadTrackItem[]>(
@@ -360,6 +432,11 @@ export function NrmTrackMetadataSettingsHome({
     [sections],
   );
 
+  // 섹션 구성이 바뀌면(행 수 변동) 이전에 실측해둔 오프셋은 더 이상 유효하지 않다.
+  useEffect(() => {
+    measuredSectionOffsetsRef.current.clear();
+  }, [sections]);
+
   const flatItemLayout = useMemo(
     () => buildTrackListFlatItemLayout(sections),
     [sections],
@@ -430,19 +507,35 @@ export function NrmTrackMetadataSettingsHome({
   }, []);
 
   /**
-   * 퀵 네비게이션 — sections 직접 탐색 + 사전 계산 Y 오프셋 scrollTo.
+   * 퀵 네비게이션 — sections 직접 탐색 + 실측 보정된 Y 오프셋 scrollTo.
    * scrollToLocation/onScrollToIndexFailed 는 사용하지 않는다(실패 시 최상단 점프 버그).
+   *
+   * 1) 실측 오프셋(measuredSectionOffsetsRef)이 있으면 그 값을 우선 사용해 즉시 정확히 이동한다.
+   *    없으면 고정 높이 추정치(sectionStartOffsets)로 우선 이동한다.
+   * 2) 이동 직후 대상 섹션 헤더가 실제로 렌더링되면 onLayout이 진짜 위치를 실측해 저장하므로,
+   *    잠시 후 그 실측값과 처음 이동한 위치가 다르면(추정 오차) 한 번 더 정확한 위치로 보정한다.
    */
   const scrollToIndexLabel = useCallback(
     (label: TrackListIndexLabel, animated: boolean) => {
       if (sections.length === 0) return;
       const targetSectionIndex = findSectionIndexForJumpLabel(sections, label);
-      scrollSectionListToSection(
-        sectionListRef,
+      const targetLabel = sections[targetSectionIndex]?.title;
+      const y = resolveSectionScrollOffset(
+        sections,
         sectionStartOffsets,
+        measuredSectionOffsetsRef.current,
         targetSectionIndex,
-        animated,
       );
+      scrollSectionListToOffset(sectionListRef, y, animated);
+
+      if (refineScrollTimerRef.current) clearTimeout(refineScrollTimerRef.current);
+      refineScrollTimerRef.current = setTimeout(() => {
+        if (!targetLabel) return;
+        const measuredY = measuredSectionOffsetsRef.current.get(targetLabel);
+        if (measuredY != null && Math.abs(measuredY - y) > 4) {
+          scrollSectionListToOffset(sectionListRef, measuredY, false);
+        }
+      }, animated ? 260 : 60);
     },
     [sectionStartOffsets, sections],
   );
@@ -598,20 +691,33 @@ export function NrmTrackMetadataSettingsHome({
     [bodyColor, coverByKey, openEditor, row, titleColor],
   );
 
+  const onSectionHeaderMeasured = useCallback(
+    (label: TrackListIndexLabel, pageY: number) => {
+      recordMeasuredSectionOffset(
+        measuredSectionOffsetsRef.current,
+        label,
+        pageY,
+        listPageYRef.current,
+        scrollOffsetYRef.current,
+      );
+    },
+    [],
+  );
+
+  const onListScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    scrollOffsetYRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+
   const renderSectionHeader = useCallback(
     ({ section }: { section: TrackListSection }) => (
-      <View
-        style={[
-          styles.sectionHeader,
-          styles.sectionHeaderFixed,
-          { backgroundColor: sectionHeaderBg },
-        ]}>
-        <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
-          {section.title}
-        </Text>
-      </View>
+      <SectionHeaderRow
+        label={section.title}
+        bodyColor={bodyColor}
+        backgroundColor={sectionHeaderBg}
+        onMeasured={onSectionHeaderMeasured}
+      />
     ),
-    [bodyColor, sectionHeaderBg],
+    [bodyColor, sectionHeaderBg, onSectionHeaderMeasured],
   );
 
   const listEmpty = error ? (
@@ -684,7 +790,7 @@ export function NrmTrackMetadataSettingsHome({
       )}
 
       <View style={styles.listArea}>
-        <View style={styles.listColumn}>
+        <View style={styles.listColumn} ref={listColumnRef} onLayout={syncListPageY}>
           {searchOpen ? (
             <FlatList
               style={styles.listFlex}
@@ -715,6 +821,8 @@ export function NrmTrackMetadataSettingsHome({
               showsVerticalScrollIndicator={false}
               stickySectionHeadersEnabled
               getItemLayout={getSectionListItemLayout}
+              onScroll={onListScroll}
+              scrollEventThrottle={32}
               viewabilityConfig={viewabilityConfig}
               onViewableItemsChanged={onSectionViewableItemsChanged}
               initialNumToRender={12}
@@ -830,31 +938,18 @@ const styles = StyleSheet.create({
     paddingBottom: nrmTokens.space.xxl,
     flexGrow: 1,
   },
-  sectionHeader: {
-    paddingHorizontal: nrmTokens.space.xs,
-    paddingVertical: nrmTokens.space.xxs,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(128,128,128,0.25)',
-  },
-  sectionHeaderFixed: {
-    height: TRACK_LIST_SECTION_HEADER_HEIGHT,
-    justifyContent: 'center',
-  },
   /**
    * row.trackRow(nrmChartTrackListStyles)에 marginBottom: xxs 가 이미 있다.
    * 여기서 height를 TRACK_LIST_ROW_HEIGHT로 그대로 주면 실제 행 점유 높이가
    * (height + marginBottom) = TRACK_LIST_ROW_HEIGHT + xxs 가 되어, 퀵 네비게이션
    * 오프셋 계산(nrmTrackListSectionScroll.ts, 행당 TRACK_LIST_ROW_HEIGHT 가정)과
-   * 어긋나 목록이 아래로 누적 드리프트된다(뒤쪽 문자로 갈수록 더 크게 밀림).
+   * 어긋나 목록이 아래로 누적 드리프트된다(뒤쪽 문자로 갈수록 더 크게 밀린다).
    * marginBottom을 높이에서 미리 빼서 실제 점유 높이를 TRACK_LIST_ROW_HEIGHT로 맞춘다.
+   * (그래도 기기별 dp→px 라운딩까지는 상수로 못 맞추므로, 실측 보정은
+   *  nrmTrackListSectionScroll.ts의 resolveSectionScrollOffset이 추가로 처리한다)
    */
   trackRowFixed: {
     height: TRACK_LIST_ROW_HEIGHT - nrmTokens.space.xxs,
-  },
-  sectionHeaderLabel: {
-    fontSize: nrmTokens.font.finePrint,
-    fontWeight: '600',
-    letterSpacing: 0.3,
   },
   loader: { marginVertical: nrmTokens.space.xl },
   initCenter: {

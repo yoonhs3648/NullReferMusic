@@ -4,7 +4,7 @@ import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { getNrmSupabase } from '@/lib/nrmSupabaseClient';
 import { throwSupabaseError } from '@/lib/nrmSupabaseRows';
 
-type CrudOp = 'select' | 'insert' | 'update' | 'upsert' | 'storage_upload';
+type CrudOp = 'select' | 'insert' | 'update' | 'upsert' | 'storage_upload' | 'storage_list';
 
 function logCrudStart(op: CrudOp, table: string, detail?: Record<string, unknown>): void {
   logNrmDev('supabase.crud', { phase: 'start', op, table, ...detail });
@@ -122,6 +122,28 @@ export async function nrmSbUpdate(
   } catch (e) {
     logCrudError('update', table, e);
     throw e;
+  }
+}
+
+/** Storage 버킷 내 객체 목록 조회 — 업로드 전 중복 파일 존재 확인 등에 사용. */
+export async function nrmSbStorageList(
+  bucket: string,
+  path: string,
+  options?: { search?: string; limit?: number },
+): Promise<{ name: string }[]> {
+  logCrudStart('storage_list', bucket, { path, search: options?.search });
+  try {
+    const { data, error } = await getNrmSupabase()
+      .storage
+      .from(bucket)
+      .list(path, { limit: options?.limit ?? 100, search: options?.search });
+    throwSupabaseError(error, `${bucket}/${path} list`);
+    const rows = (Array.isArray(data) ? data : []) as { name: string }[];
+    logCrudOk('storage_list', bucket, { path, count: rows.length });
+    return rows;
+  } catch (e) {
+    logCrudError('storage_list', bucket, e, { path });
+    return [];
   }
 }
 

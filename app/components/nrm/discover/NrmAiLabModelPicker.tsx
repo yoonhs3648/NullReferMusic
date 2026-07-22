@@ -16,22 +16,22 @@ import {
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
-  fetchLlmProvidersForAiLab,
-  findLlmProviderById,
-  pickDefaultLlmProviderId,
-  type NrmLlmProviderItem,
-} from '@/lib/nrmLlmProviderClient';
+  fetchLlmModelsForAiLab,
+  findLlmModelById,
+  pickDefaultLlmModelId,
+  type NrmLlmModelItem,
+} from '@/lib/nrmLlmModelClient';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
 type Props = {
   isDark: boolean;
   value: number | null;
-  onChange: (providerId: number) => void;
+  onChange: (modelId: number) => void;
   /** chip: 상단 칩 / menuRow: 좌측 메뉴 행 */
   presentation?: 'chip' | 'menuRow';
 };
 
-/** AI Lab — LLMProvider(Type=LLM) 기반 모델 선택. */
+/** AI Lab — LLMModel(Type=LLM) 기반 모델 선택. */
 export function NrmAiLabModelPicker({
   isDark,
   value,
@@ -40,7 +40,7 @@ export function NrmAiLabModelPicker({
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
   const [open, setOpen] = useState(false);
-  const [providers, setProviders] = useState<NrmLlmProviderItem[]>([]);
+  const [models, setModels] = useState<NrmLlmModelItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,14 +53,14 @@ export function NrmAiLabModelPicker({
   const rowHover = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
   const inputBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
 
-  const loadProviders = useCallback(async (options?: { force?: boolean }) => {
+  const loadModels = useCallback(async (options?: { force?: boolean }) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const rows = await fetchLlmProvidersForAiLab({ force: options?.force });
-      setProviders(rows);
+      const rows = await fetchLlmModelsForAiLab({ force: options?.force });
+      setModels(rows);
     } catch {
-      setProviders([]);
+      setModels([]);
       setLoadError('모델 목록을 불러오지 못했습니다.');
     } finally {
       setLoading(false);
@@ -68,22 +68,22 @@ export function NrmAiLabModelPicker({
   }, []);
 
   useEffect(() => {
-    void loadProviders();
-  }, [loadProviders]);
+    void loadModels();
+  }, [loadModels]);
 
   useEffect(() => {
-    if (value != null || providers.length === 0) return;
-    const defaultId = pickDefaultLlmProviderId(providers);
+    if (value != null || models.length === 0) return;
+    const defaultId = pickDefaultLlmModelId(models);
     if (defaultId != null) onChange(defaultId);
-  }, [onChange, providers, value]);
+  }, [onChange, models, value]);
 
   useEffect(() => {
     if (!open) setSearchQuery('');
   }, [open]);
 
   const selected = useMemo(
-    () => findLlmProviderById(providers, value),
-    [providers, value],
+    () => findLlmModelById(models, value),
+    [models, value],
   );
 
   const selectedLabel = useMemo(() => {
@@ -93,24 +93,24 @@ export function NrmAiLabModelPicker({
     return '모델 선택';
   }, [loadError, loading, selected]);
 
-  const filteredProviders = useMemo(() => {
+  const filteredModels = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return providers;
-    return providers.filter((item) => item.modelDisplayName.toLowerCase().includes(q));
-  }, [providers, searchQuery]);
+    if (!q) return models;
+    return models.filter((item) => item.modelDisplayName.toLowerCase().includes(q));
+  }, [models, searchQuery]);
 
   const onPick = useCallback(
-    (item: NrmLlmProviderItem) => {
+    (item: NrmLlmModelItem) => {
       if (!item.isActive) return;
       setOpen(false);
-      if (item.providerId !== value) onChange(item.providerId);
+      if (item.modelId !== value) onChange(item.modelId);
     },
     [onChange, value],
   );
 
   const renderRow = useCallback(
-    ({ item }: ListRenderItemInfo<NrmLlmProviderItem>) => {
-      const isSelected = item.providerId === value;
+    ({ item }: ListRenderItemInfo<NrmLlmModelItem>) => {
+      const isSelected = item.modelId === value;
       const disabled = !item.isActive;
       return (
         <Pressable
@@ -137,9 +137,6 @@ export function NrmAiLabModelPicker({
               numberOfLines={2}>
               {item.modelDisplayName}
             </Text>
-            {!item.isActive ? (
-              <Text style={[styles.optionHint, { color: bodyColor }]}>비활성</Text>
-            ) : null}
           </View>
           {isSelected && !disabled ? (
             <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
@@ -195,8 +192,16 @@ export function NrmAiLabModelPicker({
         <Pressable
           style={[styles.modalRoot, { backgroundColor: getNrmModalScrimColor(isDark) }]}
           onPress={() => setOpen(false)}>
-          <View
-            onStartShouldSetResponder={() => true}
+          {/*
+            카드 내부 탭이 배경(닫기)으로 전파되지 않도록 onPress no-op으로 막는다.
+            이전엔 onStartShouldSetResponder={() => true}를 썼는데, 이 raw responder API는
+            터치 시작 시 무조건 이 뷰가 responder를 선점해버려 안드로이드에서 FlatList가
+            리스트 끝에 도달한 뒤 "새로 시작하는" 위로 스크롤 제스처를 responder 협상에서
+            빼앗기는 문제가 있었다(끝까지 내리면 다시 못 올라오는 버그의 실제 원인).
+            Pressable은 스크롤 제스처와 충돌 없이 탭만 소비한다.
+          */}
+          <Pressable
+            onPress={() => {}}
             style={[
               styles.modalCard,
               {
@@ -239,7 +244,7 @@ export function NrmAiLabModelPicker({
               <View style={styles.centerState}>
                 <Text style={[styles.stateText, { color: bodyColor }]}>{loadError}</Text>
                 <Pressable
-                  onPress={() => void loadProviders({ force: true })}
+                  onPress={() => void loadModels({ force: true })}
                   style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.85 }]}
                   accessibilityRole="button">
                   <Text style={[styles.retryLabel, { color: nrmTokens.color.primary }]}>
@@ -247,7 +252,7 @@ export function NrmAiLabModelPicker({
                   </Text>
                 </Pressable>
               </View>
-            ) : filteredProviders.length === 0 ? (
+            ) : filteredModels.length === 0 ? (
               <View style={styles.centerState}>
                 <Text style={[styles.stateText, { color: bodyColor }]}>
                   {searchQuery.trim() ? '검색 결과가 없습니다.' : '등록된 LLM 모델이 없습니다.'}
@@ -255,15 +260,16 @@ export function NrmAiLabModelPicker({
               </View>
             ) : (
               <FlatList
-                data={filteredProviders}
-                keyExtractor={(item) => String(item.providerId)}
+                style={styles.listFlex}
+                data={filteredModels}
+                keyExtractor={(item) => String(item.modelId)}
                 renderItem={renderRow}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={Platform.OS !== 'web'}
                 contentContainerStyle={styles.listContent}
               />
             )}
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </>
@@ -361,6 +367,13 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     paddingVertical: Platform.OS === 'ios' ? 8 : 6,
   },
+  /**
+   * modalCard가 고정 height + overflow:hidden 안에서 FlatList가 남는 공간을 정확히
+   * 채우도록 flex:1 필요 (없으면 contentSize 계산이 카드 표시 영역과 어긋남).
+   */
+  listFlex: {
+    flex: 1,
+  },
   listContent: {
     paddingBottom: nrmTokens.space.md,
   },
@@ -382,9 +395,6 @@ const styles = StyleSheet.create({
   },
   optionLabelSelected: {
     fontWeight: '600',
-  },
-  optionHint: {
-    fontSize: nrmTokens.font.caption,
   },
   optionDisabled: {
     opacity: 0.42,

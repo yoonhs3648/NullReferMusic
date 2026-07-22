@@ -71,10 +71,10 @@ export type NrmSupabaseMusicListRow = {
   updated_at?: string | null;
 };
 
-/** LLMProvider — ApiKey 등 비공개 컬럼은 앱에서 select 하지 않는다. */
-export type NrmSupabaseLlmProviderPublicRow = {
+/** LLMModel — 개별 모델(제공자별). ApiKey는 LLMProvider 소유(정규화) — 여기 없음. */
+export type NrmSupabaseLlmModelPublicRow = {
+  ModelID: number;
   ProviderID: number;
-  ProviderName: string;
   Type: string;
   ModelName: string;
   ModelDisplayName: string;
@@ -83,13 +83,60 @@ export type NrmSupabaseLlmProviderPublicRow = {
   IsActive: boolean;
 };
 
+/** LLMProvider — ApiKey는 앱에서 select 하지 않는다(컬럼 단위 GRANT로 차단됨). */
+export type NrmSupabaseLlmProviderRow = {
+  ProviderID: number;
+  ProviderName: string;
+  RegDate: string;
+};
+
 /** ChatSession — AI Lab 좌측 대화 목록 대응. SerialNo/SessionID 복합 PK. */
 export type NrmSupabaseChatSessionRow = {
   SessionID: number;
   SerialNo: string;
   ProviderID: number;
+  ModelID: number;
   Title: string;
   IsDeleted: boolean;
+  RegDate: string;
+  UpdateDate: string;
+};
+
+/** LLMUserPermission — 사용자×제공자 승인·할당 토큰. AllocatedToken=0은 무제한. */
+export type NrmSupabaseLlmUserPermissionRow = {
+  PermissionID: number;
+  SerialNo: string;
+  ProviderID: number;
+  IsApproved: boolean;
+  AllocatedToken: number;
+};
+
+/** LLMUserQuota — 사용자×제공자×월(YYYYMM) 누적 토큰 사용량. */
+export type NrmSupabaseLlmUserQuotaRow = {
+  QuotaID: number;
+  SerialNo: string;
+  ProviderID: number;
+  TargetMonth: string;
+  InputToken: number;
+  OutputToken: number;
+  TotalToken: number;
+};
+
+/** LLMProvider — 관리자 AI토큰 조회/할당 화면의 제공자 선택 목록용(ApiKey 제외). */
+export type NrmSupabaseLlmProviderAdminRow = {
+  ProviderID: number;
+  ProviderName: string;
+  RegDate: string;
+};
+
+/** LLMUserMonthlyAllocation — 관리자 AI토큰 할당 화면의 월별(YYYYMM) 설정 이력. */
+export type NrmSupabaseLlmUserMonthlyAllocationRow = {
+  AllocationID: number;
+  SerialNo: string;
+  ProviderID: number;
+  TargetMonth: string;
+  AllocatedToken: number;
+  UpdatedBySerialNo: string | null;
   RegDate: string;
   UpdateDate: string;
 };

@@ -667,6 +667,7 @@ export function NrmMetadataEditModal({
         website: site || undefined,
         producer: producer.trim() || undefined,
         remixer: remixer.trim() || undefined,
+        downloadPlatform: initialMetadataFields?.downloadPlatform,
       };
       const fileName = buildAudioFileName(
         artist.trim(),
@@ -685,6 +686,7 @@ export function NrmMetadataEditModal({
       discNumber,
       extension,
       fileNameFormat,
+      initialMetadataFields,
       item,
       lyricsMode,
       initialHasEmbeddedSyncLyrics,
