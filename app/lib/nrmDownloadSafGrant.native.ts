@@ -67,6 +67,26 @@ export async function loadStoredSafGrant(): Promise<string | null> {
   }
 }
 
+export type SafGrantWithEntries = { dirUri: string; entries: string[] };
+
+/**
+ * 저장된 SAF 허가 URI와 해당 디렉터리의 엔트리 목록을 한 번의
+ * `readDirectoryAsync` 호출로 함께 반환합니다.
+ * (허가 유효성 검증과 목록 조회를 위해 같은 디렉터리를 두 번 스캔하지 않도록 통합)
+ */
+export async function loadStoredSafGrantWithEntries(): Promise<SafGrantWithEntries | null> {
+  const stored = await AsyncStorage.getItem(SAF_GRANT_KEY).catch(() => null);
+  if (!stored) return null;
+
+  try {
+    const entries = await StorageAccessFramework.readDirectoryAsync(stored);
+    return { dirUri: stored, entries };
+  } catch {
+    await AsyncStorage.removeItem(SAF_GRANT_KEY).catch(() => {});
+    return null;
+  }
+}
+
 /**
  * 저장된 허가가 있으면 반환, 없으면 폴더 선택 UI를 띄워 새로 받습니다.
  * 사용자가 취소하면 null 반환.

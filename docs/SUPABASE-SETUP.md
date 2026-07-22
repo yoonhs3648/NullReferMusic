@@ -44,10 +44,16 @@ Supabase UI에 컬럼 주석이 잘 안 보이므로, **의미·DDL·제약은 M
 | `supabase/migrations/20260716100000_llm_tables.sql` | LLM 제공자·쿼터·호출 이력 (원격 수동 생성 시 스킵) |
 | `supabase/migrations/20260716110000_llm_user_permission.sql` | LLM 사용자 권한·할당 토큰 (원격 수동 생성 시 스킵) |
 | `supabase/migrations/20260716120000_chat_session_message.sql` | Chat 세션·메시지 (원격 수동 생성 시 스킵) |
+| `supabase/migrations/20260721120000_llm_chat_security_harden.sql` | LLM/Chat 6개 테이블 RLS 켜기(SELECT만) + `LLMProvider.ApiKey` 컬럼 차단 |
+| `supabase/migrations/20260721130000_chat_send_rpc.sql` | AI Lab 채팅 RPC: `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`/`nrm_rpc_increment_llm_user_quota`(service_role 전용) + `nrm_rpc_chat_delete_session`(anon) |
+| `supabase/functions/llm-chat-send/index.ts` | AI Lab 채팅 Edge Function — ApiKey를 서버사이드(service_role)에서만 사용해 LLM 호출. 배포: `supabase functions deploy llm-chat-send --project-ref bwkiaapffroyveqqjhom` |
 | `supabase/seed.sql` | GitHub JSON 기존 데이터 (재생성: 아래 명령) |
 | `scripts/generate-supabase-seed.mjs` | JSON → seed.sql 생성 |
 | `scripts/Sync-NrmGithubUserListToSupabase.ps1` | GitHub userList → Supabase 정합성 동기화 |
 | `scripts/Apply-NrmSupabaseMigration.ps1` | 원격 DB에 SQL 적용 (service role 필요) |
+| `scripts/seed-llm-provider-from-gemini.mjs` | Gemini API 모델 목록 → `LLMProvider` 시드 |
+| `scripts/seed-llm-admin-permissions.mjs` | admin APK → `LLMUserPermission` (active LLM 2종) |
+| `scripts/fix-llm-admin-serialno.mjs` | `LLMUserPermission.SerialNo`가 옛 bigint 값 `'0'`으로 남아있으면 `'admin'`으로 정정 (service role 필요) |
 
 ## 1. 스키마 적용 (최초 1회)
 
@@ -111,4 +117,47 @@ GitHub `data/*.json`은 더 이상 앱 런타임에서 사용하지 않습니다
 | **Database password** | psql / Supabase CLI link |
 | (선택) 기존 `inquiryAttachFile/` 파일 | Storage로 일괄 업로드 |
 
-Publishable key만으로는 DDL(테이블 생성)을 실행할 수 없습니다. Dashboard SQL Editor에서 수동 실행하거나 service role을 알려주세요.
+## 6. LLMProvider 시드 (Gemini)
+
+`LLMProvider`는 RLS로 anon/publishable 직접 INSERT가 막혀 있다. Gemini 모델 목록 시드:
+
+```powershell
+# 1) GEMINI_API_KEY 설정 (채팅에 노출하지 말 것 — 환경변수만)
+$env:GEMINI_API_KEY = '<your-gemini-api-key>'
+
+# 2) service_role 있으면 자동 INSERT
+$env:NRM_SUPABASE_SERVICE_ROLE_KEY = '<sb_secret_...>'   # 선택
+node scripts/seed-llm-provider-from-gemini.mjs
+
+# service_role/RPC 없으면 supabase/seed_llm_provider_gemini.sql 생성됨
+# → Dashboard SQL Editor에서 실행 (postgres 권한으로 RLS 우회)
+```
+
+admin RPC 경로: `supabase/migrations/20260721100000_llm_provider_admin_rpc.sql` 적용 후
+`nrm_rpc_admin_replace_llm_providers('admin', rows)` 로 publishable key에서도 시드 가능.
+
+`ApiKey`는 DB에만 저장하고 Git에 커밋하지 않는다 (`seed_llm_provider_gemini.sql`은 `.gitignore`).
+
+## 7. AI Lab 채팅 Edge Function 배포
+
+앱은 `LLMProvider.ApiKey`를 절대 갖고 있지 않다. 실제 LLM(Gemini 등) 호출은
+`supabase/functions/llm-chat-send`(Deno Edge Function, service_role)에서만 한다.
+
+```powershell
+# 1) Supabase CLI (npx로 설치 없이 실행 가능)
+npx supabase login   # SUPABASE_ACCESS_TOKEN 환경변수로도 로그인 가능
+
+# 2) 프로젝트 링크 (최초 1회, config.toml에 project_id 이미 있음)
+npx supabase link --project-ref bwkiaapffroyveqqjhom
+
+# 3) 마이그레이션 적용 (RLS 강화 + 채팅 RPC) — 이미 반영된 원격이면 스킵/무해
+npx supabase db push
+
+# 4) Edge Function 배포
+npx supabase functions deploy llm-chat-send --project-ref bwkiaapffroyveqqjhom
+```
+
+Edge Function 안에서는 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`가 **자동으로 주입**되므로
+별도 시크릿 설정이 필요 없다. 앱은 `getNrmSupabase().functions.invoke('llm-chat-send', { body })`
+(publishable key)로만 호출한다 — `app/lib/nrmLlmChatSend.ts`.
+

@@ -16,7 +16,14 @@ export const NRM_SUPABASE_TABLES = {
   inquiry: 'nrm_inquiry',
   userList: 'nrm_user_list',
   musicList: 'nrm_music_list',
+  llmProvider: 'LLMProvider',
+  llmUserPermission: 'LLMUserPermission',
+  chatSession: 'ChatSession',
+  chatMessage: 'ChatMessage',
 } as const;
+
+/** AI Lab 채팅 전송 Edge Function 이름 (ApiKey는 여기서만 서버사이드로 사용) */
+export const NRM_SUPABASE_LLM_CHAT_SEND_FUNCTION = 'llm-chat-send';
 
 /**
  * nrm_apk_version 최신 1건 조회 (뷰 없음).

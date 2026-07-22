@@ -13,17 +13,22 @@ import {
 import { NrmAiLabModelPicker } from '@/components/nrm/discover/NrmAiLabModelPicker';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
-import type { NrmAiLabConversation, NrmAiLabLlmModelId } from '@/lib/nrmAiLabChatUi';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
 type DrawerPanel = 'root' | 'usage';
 
+export type NrmAiLabSidebarConversation = {
+  id: string;
+  title: string;
+  updatedAtLabel: string;
+};
+
 type Props = {
   isDark: boolean;
-  conversations: NrmAiLabConversation[];
+  conversations: NrmAiLabSidebarConversation[];
   activeId: string | null;
-  llmModel: NrmAiLabLlmModelId;
-  onLlmModelChange: (id: NrmAiLabLlmModelId) => void;
+  llmProviderId: number | null;
+  onLlmProviderChange: (providerId: number) => void;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDelete: (id: string) => void;
@@ -35,8 +40,8 @@ export function NrmAiLabSidebar({
   isDark,
   conversations,
   activeId,
-  llmModel,
-  onLlmModelChange,
+  llmProviderId,
+  onLlmProviderChange,
   onSelect,
   onNewChat,
   onDelete,
@@ -100,8 +105,8 @@ export function NrmAiLabSidebar({
         <View style={styles.modelRow}>
           <NrmAiLabModelPicker
             isDark={isDark}
-            value={llmModel}
-            onChange={onLlmModelChange}
+            value={llmProviderId}
+            onChange={onLlmProviderChange}
             presentation="menuRow"
           />
         </View>
@@ -151,6 +156,12 @@ export function NrmAiLabSidebar({
 
         <Text style={[styles.sectionLabel, { color: bodyColor }]}>최근</Text>
 
+        {filtered.length === 0 ? (
+          <Text style={[styles.emptyListText, { color: bodyColor }]}>
+            {searchQuery.trim() ? '검색 결과가 없습니다.' : '대화 내역이 없습니다.'}
+          </Text>
+        ) : null}
+
         {filtered.map((c) => {
           const active = c.id === activeId;
           return (
@@ -169,6 +180,11 @@ export function NrmAiLabSidebar({
                 <Text style={[styles.chatTitle, { color: titleColor }]} numberOfLines={1}>
                   {c.title}
                 </Text>
+                {c.updatedAtLabel ? (
+                  <Text style={[styles.chatSubtitle, { color: bodyColor }]} numberOfLines={1}>
+                    {c.updatedAtLabel}
+                  </Text>
+                ) : null}
               </Pressable>
               <Pressable
                 onPress={() => setMenuForId(c.id)}
@@ -312,6 +328,16 @@ const styles = StyleSheet.create({
   chatTitle: {
     fontSize: nrmTokens.font.body,
     fontWeight: '400',
+  },
+  chatSubtitle: {
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '400',
+    marginTop: 1,
+  },
+  emptyListText: {
+    fontSize: nrmTokens.font.body,
+    paddingHorizontal: nrmTokens.space.xs,
+    paddingVertical: nrmTokens.space.sm,
   },
   moreBtn: {
     width: 44,

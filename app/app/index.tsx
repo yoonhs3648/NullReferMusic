@@ -186,6 +186,8 @@ export default function HomeScreen() {
   /** 차트·검색 위에 띄우는 유튜브 검색 (원 화면은 언마운트하지 않음 → 스크롤·선택 유지) */
   const [youtubeOverlay, setYoutubeOverlay] = useState<YoutubeOverlayState | null>(null);
   const [homeTab, setHomeTab] = useState<NrmHomeTab>('home');
+  /** Storage 탭을 한 번이라도 열면 언마운트하지 않고 숨김만 한다(재진입 지연 방지). */
+  const [storageEverOpened, setStorageEverOpened] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const homeTabRef = useRef(homeTab);
   homeTabRef.current = homeTab;
@@ -430,6 +432,9 @@ export default function HomeScreen() {
       if (tab === 'home') {
         resetToYoutubeHome();
         return;
+      }
+      if (tab === 'library') {
+        setStorageEverOpened(true);
       }
       setHomeTab(tab);
       setYoutubeOverlay(null);
@@ -1018,18 +1023,12 @@ export default function HomeScreen() {
     );
 
     let bodyContent = null;
+    const storageActive = homeTab === 'library' && !showSearchUi;
     if (showSearchUi) {
       bodyContent = youtubeHome;
     } else if (homeTab === 'library') {
-      bodyContent = (
-        <NrmTrackMetadataSettingsHome
-          isDark={isDark}
-          titleColor={titleColor}
-          bodyColor={bodyColor}
-          onBack={() => onHomeTabChange('home')}
-          hideBack
-        />
-      );
+      // Storage는 keep-alive로 별도 렌더(아래). bodyContent는 비움.
+      bodyContent = null;
     } else if (homeTab === 'discover') {
       bodyContent = (
         <NrmHomeDiscoverScreen
@@ -1103,7 +1102,22 @@ export default function HomeScreen() {
                   ? styles.youtubeWelcomeBodyCentered
                   : styles.youtubeWelcomeBody
             }>
-            {bodyContent}
+            {storageEverOpened ? (
+              <View
+                style={storageActive ? styles.storageKeepAliveVisible : styles.storageKeepAliveHidden}
+                pointerEvents={storageActive ? 'auto' : 'none'}
+                collapsable={false}>
+                <NrmTrackMetadataSettingsHome
+                  isDark={isDark}
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  onBack={() => onHomeTabChange('home')}
+                  hideBack
+                  isActive={storageActive}
+                />
+              </View>
+            ) : null}
+            {storageActive ? null : bodyContent}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1339,6 +1353,18 @@ const styles = StyleSheet.create({
     minHeight: 0,
     width: '100%',
     overflow: 'visible',
+  },
+
+  /** Storage 탭 keep-alive: 활성 시 일반 flex 레이아웃 */
+  storageKeepAliveVisible: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
+
+  /** Storage 탭 keep-alive: 비활성 시 화면에서 제거(언마운트하지 않음) */
+  storageKeepAliveHidden: {
+    display: 'none',
   },
 
   homeChartShell: {

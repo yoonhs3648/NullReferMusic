@@ -71,6 +71,41 @@ export type NrmSupabaseMusicListRow = {
   updated_at?: string | null;
 };
 
+/** LLMProvider — ApiKey 등 비공개 컬럼은 앱에서 select 하지 않는다. */
+export type NrmSupabaseLlmProviderPublicRow = {
+  ProviderID: number;
+  ProviderName: string;
+  Type: string;
+  ModelName: string;
+  ModelDisplayName: string;
+  Version: string;
+  Description: string | null;
+  IsActive: boolean;
+};
+
+/** ChatSession — AI Lab 좌측 대화 목록 대응. SerialNo/SessionID 복합 PK. */
+export type NrmSupabaseChatSessionRow = {
+  SessionID: number;
+  SerialNo: string;
+  ProviderID: number;
+  Title: string;
+  IsDeleted: boolean;
+  RegDate: string;
+  UpdateDate: string;
+};
+
+/** ChatMessage — Role: 사용자 SerialNo(사용자 발화) | 'assistant' | 'system'. */
+export type NrmSupabaseChatMessageRow = {
+  MessageID: number;
+  SessionID: number;
+  Role: string;
+  Content: string;
+  InputToken: number;
+  OutputToken: number;
+  TotalToken: number;
+  RegDate: string;
+};
+
 /** JSON 필드명 ↔ DB snake_case 매핑 참고 */
 export const NRM_SUPABASE_FIELD_MAP = {
   SerialNo: 'serial_no',

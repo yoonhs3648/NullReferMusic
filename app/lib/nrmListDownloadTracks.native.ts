@@ -6,7 +6,7 @@ import {
   NRM_DOWNLOAD_PUBLIC_FOLDER_NAME,
   type PersistedAudioLocation,
 } from '@/lib/nrmPersistDownload.native';
-import { loadStoredSafGrant } from '@/lib/nrmDownloadSafGrant';
+import { loadStoredSafGrantWithEntries } from '@/lib/nrmDownloadSafGrant';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 
 const AUDIO_EXT = new Set(['.mp3', '.m4a', '.mp4', '.aac', '.flac', '.wav', '.ogg']);
@@ -100,23 +100,29 @@ export async function listDownloadAudioTracks(): Promise<NrmDownloadTrackItem[]>
     return listFromFolder(folderUri, 'file');
   }
 
-  const dirUri = await loadStoredSafGrant();
-  if (!dirUri) return [];
+  // 허가 검증(readDirectoryAsync)과 목록 조회를 한 번의 스캔으로 통합
+  // (기존에는 loadStoredSafGrant()의 검증 스캔 + 아래 목록 스캔으로 동일 폴더를 2번 읽었음)
+  const grant = await loadStoredSafGrantWithEntries();
+  if (!grant) return [];
+  const { dirUri, entries } = grant;
 
-  const entries = await StorageAccessFramework.readDirectoryAsync(dirUri).catch(() => []);
-  const items: NrmDownloadTrackItem[] = [];
+  // 이름 조회를 O(1)로 만들기 위해 한 번만 디코딩해 맵으로 구성
+  // (기존에는 오디오 파일마다 전체 entries를 다시 순회 + 재디코딩하는 O(n²) 매칭이었음)
+  const entryNameByUri = new Map<string, string>();
+  const uriByLowerName = new Map<string, string>();
   for (const entryUri of entries) {
     const name = extractSafEntryName(entryUri);
+    entryNameByUri.set(entryUri, name);
+    uriByLowerName.set(name.toLowerCase(), entryUri);
+  }
+
+  const items: NrmDownloadTrackItem[] = [];
+  for (const entryUri of entries) {
+    const name = entryNameByUri.get(entryUri) ?? extractSafEntryName(entryUri);
     if (!isAudioFileName(name)) continue;
     const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
     const lrcName = name.replace(/\.[^.]+$/, '.lrc');
-    let lrcUri: string | undefined;
-    for (const other of entries) {
-      if (extractSafEntryName(other).toLowerCase() === lrcName.toLowerCase()) {
-        lrcUri = other;
-        break;
-      }
-    }
+    const lrcUri = uriByLowerName.get(lrcName.toLowerCase());
     const location: PersistedAudioLocation = {
       kind: 'saf',
       audioUri: entryUri,

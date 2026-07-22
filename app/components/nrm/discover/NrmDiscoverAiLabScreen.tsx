@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   FlatList,
@@ -22,30 +23,33 @@ import { NrmEdgeSwipeOpenLayer } from '@/components/nrm/NrmEdgeSwipeOpenLayer';
 import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
+import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
 import {
   nrmAiLabEmptyGreeting,
+  nrmAiLabRelativeTimeLabel,
   nrmAiLabTitleFromPrompt,
-  NRM_AI_LAB_DEFAULT_LLM_MODEL,
-  NRM_AI_LAB_DEMO_ASSISTANT_REPLY,
   type NrmAiLabConversation,
-  type NrmAiLabLlmModelId,
   type NrmAiLabMessage,
 } from '@/lib/nrmAiLabChatUi';
-import { getNrmAppUserName } from '@/lib/nrmAppSerialNo';
-import { getResolvedNrmBrandUserName } from '@/lib/nrmBrandIdentity';
+import { deleteChatSession, fetchChatMessages, fetchChatSessions } from '@/lib/nrmChatClient';
+import { logNrmRunError } from '@/lib/nrmDevLog';
+import { resolveLlmSerialNo } from '@/lib/nrmLlmSerialNo';
+import { sendLlmChatMessage } from '@/lib/nrmLlmChatSend';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
+import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
 type Props = {
   isDark: boolean;
 };
 
 const ICON_HIT = 44;
+const NETWORK_PROBLEM_TEXT = '네트워크 문제로 요청할 수 없어요. 나중에 다시 시도해 주세요.';
 
-function nextId(prefix: string): string {
+function nextTempId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** AI Lab — 앱 상단바·메뉴 패턴에 맞춘 대화 UI (실 LLM 연동 전 목업). */
+/** AI Lab — 앱 상단바·메뉴 패턴에 맞춘 대화 UI. ChatSession/ChatMessage 기반 실 LLM 연동. */
 export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -64,32 +68,67 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const cardBorder = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const modalScrim = getNrmModalScrimColor(isDark);
   const rootBg = getNrmRootBackgroundColor(isDark);
+  const systemBubbleBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.045)';
+  const systemTextColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
 
+  const [serialNo, setSerialNo] = useState<string | null>(null);
   const [conversations, setConversations] = useState<NrmAiLabConversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [llmModel, setLlmModel] = useState<NrmAiLabLlmModelId>(NRM_AI_LAB_DEFAULT_LLM_MODEL);
-  const [userName, setUserName] = useState(() => getResolvedNrmBrandUserName());
+  const [llmProviderId, setLlmProviderId] = useState<number | null>(null);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
+  const pendingLocalConversationRef = useRef<NrmAiLabConversation | null>(null);
+  /** 앱 설정 > 앱 이름 변경 값 우선, 없으면 APK 내장 AppName */
+  const greetingName = useNrmMainLogoDisplayName();
   const [keyboardInset, setKeyboardInset] = useState(0);
   const listRef = useRef<FlatList<NrmAiLabMessage>>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getNrmAppSerialNo().then((raw) => {
+      if (cancelled) return;
+      setSerialNo(resolveLlmSerialNo(raw));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refreshSessions = useCallback(async () => {
+    if (!serialNo) return;
+    try {
+      const rows = await fetchChatSessions(serialNo);
+      setConversations((prev) => {
+        const prevById = new Map(prev.map((c) => [c.id, c]));
+        const pendingLocal = pendingLocalConversationRef.current;
+        const merged = rows.map((row) => {
+          const existing = prevById.get(row.id);
+          return existing?.messagesLoaded ? { ...row, messages: existing.messages, messagesLoaded: true } : row;
+        });
+        // 서버에 아직 반영 안 된(방금 만든) 로컬 대화는 목록 맨 위에 유지
+        if (pendingLocal && !merged.some((c) => c.id === pendingLocal.id)) {
+          return [pendingLocal, ...merged];
+        }
+        return merged;
+      });
+    } catch (e) {
+      logNrmRunError('ailab.sessions', e, { serialNo });
+    }
+  }, [serialNo]);
+
+  useEffect(() => {
+    if (serialNo) void refreshSessions();
+  }, [serialNo, refreshSessions]);
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
     [activeId, conversations],
   );
   const messages = active?.messages ?? [];
-  const greeting = useMemo(() => nrmAiLabEmptyGreeting(userName), [userName]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getNrmAppUserName().then((name) => {
-      if (!cancelled && name.trim()) setUserName(name.trim());
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const greeting = useMemo(() => nrmAiLabEmptyGreeting(greetingName), [greetingName]);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -119,7 +158,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     // setMenuOpen 전에 화면 밖 위치 고정 → 첫 프레임 깜빡임 방지
     translateX.setValue(-drawerWRef.current);
     setMenuOpen(true);
-  }, [translateX]);
+    void refreshSessions();
+  }, [refreshSessions, translateX]);
 
   const closeMenu = useCallback(() => {
     Animated.timing(translateX, {
@@ -159,76 +199,137 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
       setActiveId(id);
       setDraft('');
       closeMenu();
+      const target = conversations.find((c) => c.id === id);
+      if (target) {
+        // 세션은 생성 시점 모델에 고정 — 이어서 보내는 요청도 동일 모델을 쓰도록 동기화.
+        setLlmProviderId(target.providerId);
+        if (!target.messagesLoaded) {
+          setMessagesLoading(true);
+          void fetchChatMessages(id)
+            .then((msgs) => {
+              setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, messages: msgs, messagesLoaded: true } : c)),
+              );
+            })
+            .catch((e) => logNrmRunError('ailab.messages', e, { sessionId: id }))
+            .finally(() => setMessagesLoading(false));
+        }
+      }
     },
-    [closeMenu],
+    [closeMenu, conversations],
   );
 
-  const handleDelete = useCallback((id: string) => {
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    setActiveId((cur) => (cur === id ? null : cur));
-  }, []);
+  const handleDelete = useCallback(
+    (id: string) => {
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      setActiveId((cur) => (cur === id ? null : cur));
+      if (pendingLocalConversationRef.current?.id === id) pendingLocalConversationRef.current = null;
+      if (!serialNo) return;
+      void deleteChatSession(serialNo, id).catch((e) => {
+        logNrmRunError('ailab.delete', e, { sessionId: id });
+        void refreshSessions();
+      });
+    },
+    [refreshSessions, serialNo],
+  );
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || sending || !serialNo || llmProviderId == null) return;
 
-    const userMsg: NrmAiLabMessage = { id: nextId('u'), role: 'user', content: text };
-    const assistantMsg: NrmAiLabMessage = {
-      id: nextId('a'),
-      role: 'assistant',
-      content: NRM_AI_LAB_DEMO_ASSISTANT_REPLY,
-    };
+    const tempUserId = nextTempId('u');
+    const userMsg: NrmAiLabMessage = { id: tempUserId, role: 'user', content: text, pending: true };
+    const targetId = activeId;
+    const sourceConvId = targetId ?? nextTempId('c');
 
     setDraft('');
+    setSending(true);
 
-    if (!activeId) {
-      const id = nextId('c');
+    if (!targetId) {
       const created: NrmAiLabConversation = {
-        id,
+        id: sourceConvId,
         title: nrmAiLabTitleFromPrompt(text),
         updatedAtLabel: '지금',
+        updatedAtIso: new Date().toISOString(),
+        providerId: llmProviderId,
         messages: [userMsg],
+        messagesLoaded: true,
       };
+      pendingLocalConversationRef.current = created;
       setConversations((prev) => [created, ...prev]);
-      setActiveId(id);
-      setTimeout(() => {
+      setActiveId(sourceConvId);
+    } else {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c)),
+      );
+    }
+
+    void sendLlmChatMessage({
+      serialNo,
+      providerId: llmProviderId,
+      sessionId: targetId,
+      message: text,
+    })
+      .then((result) => {
+        pendingLocalConversationRef.current = null;
+        setConversations((prev) => {
+          const sourceConv = prev.find((c) => c.id === sourceConvId);
+          const finalizedMessages = (sourceConv?.messages ?? [])
+            .filter((m) => m.id !== tempUserId)
+            .concat([result.userMessage, result.replyMessage]);
+          const finalizedConv: NrmAiLabConversation = {
+            id: result.sessionId,
+            title: result.title || sourceConv?.title || nrmAiLabTitleFromPrompt(text),
+            updatedAtLabel: '지금',
+            updatedAtIso: new Date().toISOString(),
+            providerId: llmProviderId,
+            messages: finalizedMessages,
+            messagesLoaded: true,
+          };
+          const rest = prev.filter((c) => c.id !== sourceConvId && c.id !== result.sessionId);
+          return [finalizedConv, ...rest];
+        });
+        setActiveId(result.sessionId);
+      })
+      .catch((e) => {
+        logNrmRunError('ailab.send', e, {
+          sourceConvId,
+          isNewConversation: !targetId,
+          providerId: llmProviderId,
+          messageLength: text.length,
+        });
+        const sysMsg: NrmAiLabMessage = {
+          id: nextTempId('s'),
+          role: 'system',
+          content: NETWORK_PROBLEM_TEXT,
+        };
         setConversations((prev) =>
           prev.map((c) =>
-            c.id === id
-              ? { ...c, updatedAtLabel: '지금', messages: [...c.messages, assistantMsg] }
+            c.id === sourceConvId
+              ? {
+                  ...c,
+                  messages: c.messages
+                    .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
+                    .concat(sysMsg),
+                }
               : c,
           ),
         );
-      }, 320);
-      return;
-    }
-
-    const sessionId = activeId;
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === sessionId
-          ? {
-              ...c,
-              title: c.messages.length === 0 ? nrmAiLabTitleFromPrompt(text) : c.title,
-              updatedAtLabel: '지금',
-              messages: [...c.messages, userMsg],
-            }
-          : c,
-      ),
-    );
-    setTimeout(() => {
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === sessionId
-            ? { ...c, updatedAtLabel: '지금', messages: [...c.messages, assistantMsg] }
-            : c,
-        ),
-      );
-    }, 320);
-  }, [activeId, draft]);
+      })
+      .finally(() => setSending(false));
+  }, [activeId, draft, llmProviderId, sending, serialNo]);
 
   const renderMessage = useCallback(
     ({ item }: ListRenderItemInfo<NrmAiLabMessage>) => {
+      if (item.role === 'system') {
+        return (
+          <NrmAiLabMessageEnter style={styles.msgRowSystem} delayMs={0}>
+            <View style={[styles.bubbleSystem, { backgroundColor: systemBubbleBg }]}>
+              <Text style={[styles.msgTextSystem, { color: systemTextColor }]}>{item.content}</Text>
+            </View>
+          </NrmAiLabMessageEnter>
+        );
+      }
       const isUser = item.role === 'user';
       return (
         <NrmAiLabMessageEnter
@@ -245,13 +346,14 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
               isUser
                 ? [styles.bubbleUser, { backgroundColor: userBubbleBg, borderColor: hairline }]
                 : styles.bubbleAssistant,
+              item.pending && styles.bubblePending,
             ]}>
             <Text style={[styles.msgText, { color: titleColor }]}>{item.content}</Text>
           </View>
         </NrmAiLabMessageEnter>
       );
     },
-    [hairline, titleColor, userBubbleBg],
+    [hairline, systemBubbleBg, systemTextColor, titleColor, userBubbleBg],
   );
 
   const emptyChat = (
@@ -295,7 +397,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
           { paddingHorizontal: padH },
           messages.length === 0 && styles.msgListContentEmpty,
         ]}
-        ListEmptyComponent={emptyChat}
+        ListEmptyComponent={messagesLoading ? null : emptyChat}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={Platform.OS === 'web'}
@@ -303,6 +405,11 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
           if (messages.length > 0) listRef.current?.scrollToEnd({ animated: false });
         }}
       />
+      {messagesLoading && messages.length === 0 ? (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator color={nrmTokens.color.primary} />
+        </View>
+      ) : null}
 
       <View style={{ paddingHorizontal: padH }}>
         <NrmAiLabComposer
@@ -310,6 +417,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
+          disabled={sending || !serialNo}
         />
       </View>
       {keyboardInset > 0 ? <View style={{ height: keyboardInset }} /> : null}
@@ -345,10 +453,14 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
             accessibilityViewIsModal>
             <NrmAiLabSidebar
               isDark={isDark}
-              conversations={conversations}
+              conversations={conversations.map((c) => ({
+                id: c.id,
+                title: c.title,
+                updatedAtLabel: nrmAiLabRelativeTimeLabel(c.updatedAtIso) || c.updatedAtLabel,
+              }))}
               activeId={activeId}
-              llmModel={llmModel}
-              onLlmModelChange={setLlmModel}
+              llmProviderId={llmProviderId}
+              onLlmProviderChange={setLlmProviderId}
               onSelect={handleSelect}
               onNewChat={handleNewChat}
               onDelete={handleDelete}
@@ -388,6 +500,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
   },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   msgRow: {
     marginBottom: nrmTokens.space.md,
     maxWidth: '100%',
@@ -398,6 +515,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: nrmTokens.space.sm,
     alignSelf: 'stretch',
+  },
+  msgRowSystem: {
+    marginBottom: nrmTokens.space.md,
+    alignItems: 'center',
   },
   avatar: {
     width: 28,
@@ -416,10 +537,25 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingRight: nrmTokens.space.sm,
   },
+  bubblePending: {
+    opacity: 0.6,
+  },
+  bubbleSystem: {
+    maxWidth: '90%',
+    borderRadius: nrmTokens.radius.md,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingVertical: nrmTokens.space.sm,
+  },
   msgText: {
     fontSize: nrmTokens.font.body,
     lineHeight: 24,
     fontWeight: '400',
+  },
+  msgTextSystem: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 18,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   empty: {
     alignItems: 'center',

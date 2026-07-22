@@ -14,6 +14,12 @@ export async function loadStoredSafGrant(): Promise<string | null> {
   return null;
 }
 
+export type SafGrantWithEntries = { dirUri: string; entries: string[] };
+
+export async function loadStoredSafGrantWithEntries(): Promise<SafGrantWithEntries | null> {
+  return null;
+}
+
 export async function acquireSafDirUri(_folderHint?: string): Promise<string | null> {
   return null;
 }

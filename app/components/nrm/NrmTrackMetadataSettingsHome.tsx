@@ -23,14 +23,26 @@ import type { NrmLyricsUiMode } from '@/lib/nrmMelonLyrics';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import {
+  getCachedDownloadSections,
+  getCachedDownloadTracks,
+  setCachedDownloadTracks,
+} from '@/lib/nrmTrackListCache';
+import { revealInChunksAsync, type RevealController } from '@/lib/nrmProgressiveReveal';
+import {
   buildTrackListSections,
   filterTracksByQuery,
-  getTrackListJumpBucket,
-  TRACK_LIST_INDEX_LABELS,
   sortTracksForList,
   type TrackListIndexLabel,
   type TrackListSection,
 } from '@/lib/nrmTrackListIndex';
+import {
+  buildTrackListFlatItemLayout,
+  computeSectionStartOffsets,
+  findSectionIndexForJumpLabel,
+  scrollSectionListToSection,
+  TRACK_LIST_ROW_HEIGHT,
+  TRACK_LIST_SECTION_HEADER_HEIGHT,
+} from '@/lib/nrmTrackListSectionScroll';
 import { applyTrackMetadataUpdate } from '@/lib/nrmTrackMetadataUpdate';
 import { deleteDownloadTrack } from '@/lib/nrmDeleteDownloadTrack';
 import {
@@ -61,6 +73,8 @@ type Props = {
   bodyColor: string;
   onBack: () => void;
   hideBack?: boolean;
+  /** false면 탭이 숨겨진 상태(keep-alive). 다시 true가 되면 조용히 목록만 재검증한다. */
+  isActive?: boolean;
 };
 
 function stemOf(fileName: string): string {
@@ -86,6 +100,19 @@ function isDownloadTrackItem(item: unknown): item is NrmDownloadTrackItem {
     'audioUri' in item &&
     'fileName' in item
   );
+}
+
+/** 캐시-현재 목록 비교용 — audioUri 시퀀스가 같으면 실질적 변경 없음으로 간주 */
+function tracksEqualByAudioUri(
+  a: NrmDownloadTrackItem[],
+  b: NrmDownloadTrackItem[],
+): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i]!.audioUri !== b[i]!.audioUri) return false;
+  }
+  return true;
 }
 
 function tracksFromViewTokens(
@@ -130,7 +157,11 @@ const TrackListItem = memo(function TrackListItem({
   return (
     <Pressable
       onPress={() => onPress(item)}
-      style={({ pressed }) => [row.trackRow, pressed && row.trackRowPressed]}
+      style={({ pressed }) => [
+        row.trackRow,
+        styles.trackRowFixed,
+        pressed && row.trackRowPressed,
+      ]}
       accessibilityRole="button">
       <NrmChartTrackArt imageUrl={coverUrl} cacheKey={coverKey} />
       <View style={row.trackMeta}>
@@ -154,21 +185,25 @@ export function NrmTrackMetadataSettingsHome({
   bodyColor,
   onBack,
   hideBack = false,
+  isActive = true,
 }: Props) {
   const row = nrmChartTrackListStyles;
   const sectionListRef = useRef<SectionList<NrmDownloadTrackItem, TrackListSection>>(null);
-  const pendingScrollTargetRef = useRef<{
-    sectionIndex: number;
-    itemIndex: number;
-    animated: boolean;
-    retryCount: number;
-  } | null>(null);
   const searchInputRef = useRef<TextInput>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [tracks, setTracks] = useState<NrmDownloadTrackItem[]>([]);
+  // 세션 캐시가 있으면 재진입 시 스피너 없이 즉시 이전 목록을 보여준다.
+  const [tracks, setTracks] = useState<NrmDownloadTrackItem[]>(
+    () => getCachedDownloadTracks() ?? [],
+  );
+  const tracksRef = useRef<NrmDownloadTrackItem[]>(tracks);
+  const [loading, setLoading] = useState(() => tracks.length === 0);
   const [listGeneration, setListGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const isActiveRef = useRef(isActive);
+  const initialReloadDoneRef = useRef(false);
+  const revealControllerRef = useRef<RevealController | null>(null);
+  /** reload() 중첩 호출 시 오래된 호출의 결과가 최신 호출을 덮어쓰지 않도록 하는 세대 토큰 */
+  const reloadGenerationRef = useRef(0);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -189,32 +224,100 @@ export function NrmTrackMetadataSettingsHome({
   const searchBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
   const sectionHeaderBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.surfacePearl;
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  /**
+   * @param options.silent true면 로딩 스피너를 띄우지 않고 백그라운드에서 조회한다.
+   *   (세션 캐시로 이미 화면에 목록이 표시된 상태에서 최신 여부만 조용히 확인할 때 사용)
+   *   내용이 실제로 바뀌지 않았으면 상태를 갱신하지 않아 커버 캐시 무효화·리렌더를 건너뛴다.
+   *
+   * silent가 아닌 콜드 스타트(캐시 없음) 로딩은 전체 목록을 기다렸다가 한 번에 그리지 않고,
+   * `revealInChunksAsync`로 앞에서부터 조금씩 화면에 흘려보낸다. 네이티브 폴더 스캔
+   * 자체(readDirectoryAsync/SAF)는 단일 호출이라 쪼갤 수 없지만, 그 결과를 받은 뒤의
+   * 정렬·섹션 구성·리스트 마운트 비용은 청크로 나눠 첫 화면이 훨씬 빨리 뜨게 한다.
+   */
+  const reload = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    const myGeneration = ++reloadGenerationRef.current;
+    const isCurrent = () => myGeneration === reloadGenerationRef.current;
+    revealControllerRef.current?.cancel();
+    revealControllerRef.current = null;
+    if (!silent) setLoading(true);
     setError(null);
     try {
       if (Platform.OS === 'web') {
+        if (!isCurrent()) return;
+        tracksRef.current = [];
         setTracks([]);
+        setCachedDownloadTracks([], []);
         setError('트랙 메타데이터 설정은 Android·iOS 앱에서만 사용할 수 있습니다.');
         return;
       }
       const items = await listDownloadAudioTracks();
-      setTracks(items);
-      setListGeneration((g) => g + 1);
-      if (items.length === 0) {
+      if (!isCurrent()) return; // 더 최신 reload()가 이미 시작됨 — 이 결과는 폐기
+
+      if (silent) {
+        // 이미 화면에 목록이 보이는 상태 — 조용히 비교 후 실제로 바뀐 경우에만 갱신
+        if (!tracksEqualByAudioUri(tracksRef.current, items)) {
+          tracksRef.current = items;
+          setTracks(items);
+          setListGeneration((g) => g + 1);
+          setCachedDownloadTracks(items, null);
+        } else {
+          setCachedDownloadTracks(items);
+        }
+      } else {
+        // 콜드 스타트 — 전체를 기다리지 않고 앞에서부터 조금씩 화면에 흘려보낸다
+        const { controller, done } = revealInChunksAsync(items, (visibleSoFar) => {
+          if (!isCurrent()) return;
+          tracksRef.current = visibleSoFar;
+          setTracks(visibleSoFar);
+          // 첫 청크가 뜨는 즉시 전체화면 "초기화 중" 안내를 내린다
+          setLoading(false);
+        });
+        revealControllerRef.current = controller;
+        await done;
+        if (!isCurrent()) return;
+        revealControllerRef.current = null;
+        setListGeneration((g) => g + 1);
+        setCachedDownloadTracks(items, null);
+      }
+
+      if (isCurrent() && items.length === 0) {
         setError('다운로드 경로에 오디오 파일이 없습니다. 다운로드 설정에서 경로를 확인하세요.');
       }
     } catch (e) {
+      if (!isCurrent()) return;
       setError(e instanceof Error ? e.message : '목록을 불러오지 못했습니다.');
-      setTracks([]);
+      if (!silent) {
+        tracksRef.current = [];
+        setTracks([]);
+        setCachedDownloadTracks([], []);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        if (!silent) setLoading(false);
+        initialReloadDoneRef.current = true;
+      }
     }
   }, []);
 
   useEffect(() => {
-    void reload();
+    // 캐시로 이미 목록을 보여주고 있으면 조용히 최신화만 확인, 없으면 최초 로딩
+    void reload(tracksRef.current.length > 0 ? { silent: true } : undefined);
   }, [reload]);
+
+  useEffect(() => {
+    return () => {
+      revealControllerRef.current?.cancel();
+    };
+  }, []);
+
+  // keep-alive: 탭이 다시 활성화되면 마운트 없이 조용히 목록만 재검증
+  useEffect(() => {
+    const wasActive = isActiveRef.current;
+    isActiveRef.current = isActive;
+    if (!isActive || wasActive || !initialReloadDoneRef.current) return;
+    void reload({ silent: true });
+  }, [isActive, reload]);
 
   useEffect(() => {
     if (searchOpen) {
@@ -230,9 +333,46 @@ export function NrmTrackMetadataSettingsHome({
     [tracks, searchQuery],
   );
 
-  const sections = useMemo(
-    () => buildTrackListSections(filteredTracks),
-    [filteredTracks],
+  const sections = useMemo(() => {
+    // 검색이 아닐 때 세션 캐시와 트랙이 일치하면 섹션 재구성(정렬·버킷)을 건너뛴다
+    if (!searchQuery.trim()) {
+      const cachedTracks = getCachedDownloadTracks();
+      const cachedSections = getCachedDownloadSections();
+      if (
+        cachedTracks &&
+        cachedSections &&
+        tracksEqualByAudioUri(cachedTracks, tracks)
+      ) {
+        return cachedSections;
+      }
+    }
+    return buildTrackListSections(filteredTracks);
+  }, [filteredTracks, searchQuery, tracks]);
+
+  // 검색이 아닌 전체 목록 섹션을 세션 캐시에 보존 → 다음 진입/리마운트 시 즉시 사용
+  useEffect(() => {
+    if (searchQuery.trim() || tracks.length === 0) return;
+    setCachedDownloadTracks(tracks, sections);
+  }, [searchQuery, sections, tracks]);
+
+  const sectionStartOffsets = useMemo(
+    () => computeSectionStartOffsets(sections),
+    [sections],
+  );
+
+  const flatItemLayout = useMemo(
+    () => buildTrackListFlatItemLayout(sections),
+    [sections],
+  );
+
+  const getSectionListItemLayout = useCallback(
+    (_data: TrackListSection[] | null, index: number) =>
+      flatItemLayout[index] ?? flatItemLayout[flatItemLayout.length - 1] ?? {
+        length: 0,
+        offset: 0,
+        index: 0,
+      },
+    [flatItemLayout],
   );
 
   const { coverByKey, requestCovers } = useTrackListCoverMap(listGeneration);
@@ -243,42 +383,6 @@ export function NrmTrackMetadataSettingsHome({
     () => sortTracksForList(filteredTracks),
     [filteredTracks],
   );
-
-  /** 빠른 점프 대상 계산용 — 실제 섹션 렌더용 data는 sections, 점프 타겟은 sortedTracks 기준 */
-  const jumpTargetSortedIndexByRank = useMemo(() => {
-    // selectedRank 이상인 버킷들 중 "리스트에서 가장 먼저 등장하는" 인덱스를 찾기 위해
-    // firstByRank의 suffix minimum을 사용합니다. (요청하신 앞에서부터 스캔 결과와 동일)
-    const firstByRank = new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1);
-    if (searchFlatData.length === 0) {
-      return { suffixMinByRank: new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1) };
-    }
-
-    for (let i = 0; i < searchFlatData.length; i += 1) {
-      const bucket = getTrackListJumpBucket(searchFlatData[i]?.displayLabel ?? '');
-      const rank = TRACK_LIST_INDEX_LABELS.indexOf(bucket);
-      if (rank >= 0 && firstByRank[rank] === -1) firstByRank[rank] = i;
-    }
-
-    let minPos = Number.POSITIVE_INFINITY;
-    const suffixMinByRank = new Array<number>(TRACK_LIST_INDEX_LABELS.length).fill(-1);
-    for (let r = TRACK_LIST_INDEX_LABELS.length - 1; r >= 0; r -= 1) {
-      if (firstByRank[r] !== -1) minPos = Math.min(minPos, firstByRank[r]!);
-      suffixMinByRank[r] = minPos === Number.POSITIVE_INFINITY ? -1 : minPos;
-    }
-
-    return { suffixMinByRank };
-  }, [searchFlatData]);
-
-  /** SectionList의 (sectionIndex, itemIndex) 위치 역참조 — 실제 리스트 기준으로 스크롤 */
-  const trackLocationByAudioUri = useMemo(() => {
-    const out = new Map<string, { sectionIndex: number; itemIndex: number }>();
-    sections.forEach((sec, sectionIndex) => {
-      sec.data.forEach((t, itemIndex) => {
-        out.set(t.audioUri, { sectionIndex, itemIndex });
-      });
-    });
-    return out;
-  }, [sections]);
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 15,
@@ -325,42 +429,22 @@ export function NrmTrackMetadataSettingsHome({
     setSearchQuery('');
   }, []);
 
+  /**
+   * 퀵 네비게이션 — sections 직접 탐색 + 사전 계산 Y 오프셋 scrollTo.
+   * scrollToLocation/onScrollToIndexFailed 는 사용하지 않는다(실패 시 최상단 점프 버그).
+   */
   const scrollToIndexLabel = useCallback(
     (label: TrackListIndexLabel, animated: boolean) => {
-      if (searchFlatData.length === 0 || sections.length === 0) return;
-
-      const selectedBucket = getTrackListJumpBucket(label);
-      const selectedRank = TRACK_LIST_INDEX_LABELS.indexOf(selectedBucket);
-      const fallbackSortedIndex = searchFlatData.length - 1;
-
-      const sortedIndexCandidate =
-        selectedRank >= 0 ? jumpTargetSortedIndexByRank.suffixMinByRank[selectedRank]! : -1;
-      const targetSortedIndex =
-        sortedIndexCandidate >= 0 ? sortedIndexCandidate : fallbackSortedIndex;
-
-      const targetTrack = searchFlatData[targetSortedIndex];
-      const loc = trackLocationByAudioUri.get(targetTrack.audioUri);
-      if (!loc) return;
-
-      pendingScrollTargetRef.current = {
-        sectionIndex: loc.sectionIndex,
-        itemIndex: loc.itemIndex,
+      if (sections.length === 0) return;
+      const targetSectionIndex = findSectionIndexForJumpLabel(sections, label);
+      scrollSectionListToSection(
+        sectionListRef,
+        sectionStartOffsets,
+        targetSectionIndex,
         animated,
-        retryCount: 0,
-      };
-      sectionListRef.current?.scrollToLocation({
-        sectionIndex: loc.sectionIndex,
-        itemIndex: loc.itemIndex,
-        animated,
-        viewPosition: 0,
-      });
+      );
     },
-    [
-      jumpTargetSortedIndexByRank.suffixMinByRank,
-      sections.length,
-      searchFlatData,
-      trackLocationByAudioUri,
-    ],
+    [sectionStartOffsets, sections],
   );
 
   const onSelectIndexLabel = useCallback(
@@ -516,7 +600,12 @@ export function NrmTrackMetadataSettingsHome({
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: TrackListSection }) => (
-      <View style={[styles.sectionHeader, { backgroundColor: sectionHeaderBg }]}>
+      <View
+        style={[
+          styles.sectionHeader,
+          styles.sectionHeaderFixed,
+          { backgroundColor: sectionHeaderBg },
+        ]}>
         <Text style={[styles.sectionHeaderLabel, { color: bodyColor }]}>
           {section.title}
         </Text>
@@ -525,43 +614,23 @@ export function NrmTrackMetadataSettingsHome({
     [bodyColor, sectionHeaderBg],
   );
 
-  const onScrollToIndexFailed = useCallback(
-    (info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
-      const pending = pendingScrollTargetRef.current;
-      if (!pending) return;
-
-      const nextRetryCount = pending.retryCount + 1;
-      if (nextRetryCount > 8) {
-        pendingScrollTargetRef.current = null;
-        return;
-      }
-
-      pendingScrollTargetRef.current = { ...pending, retryCount: nextRetryCount };
-
-      const offset = Math.max(0, info.averageItemLength * info.highestMeasuredFrameIndex);
-      sectionListRef.current?.getScrollResponder()?.scrollTo({ y: offset, animated: false });
-
-      setTimeout(() => {
-        const target = pendingScrollTargetRef.current;
-        if (!target) return;
-        sectionListRef.current?.scrollToLocation({
-          sectionIndex: target.sectionIndex,
-          itemIndex: target.itemIndex,
-          animated: target.animated,
-          viewPosition: 0,
-        });
-      }, 100);
-    },
-    [],
-  );
-
-  const listEmpty = loading ? (
-    <ActivityIndicator style={styles.loader} color={nrmTokens.color.primary} />
-  ) : error ? (
+  const listEmpty = error ? (
     <Text style={[styles.hint, { color: bodyColor }]}>{error}</Text>
   ) : searchOpen && searchQuery.trim() ? (
     <Text style={[styles.hint, { color: bodyColor }]}>검색 결과가 없습니다.</Text>
   ) : null;
+
+  // 캐시가 없어 처음 목록을 가져오는 중 — 탭 전체 정중앙에 초기화 안내
+  if (loading && tracks.length === 0) {
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.initCenter} accessibilityLabel="초기화 중입니다">
+          <ActivityIndicator size="large" color={nrmTokens.color.primary} />
+          <Text style={[styles.initLabel, { color: bodyColor }]}>초기화 중입니다...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
@@ -645,12 +714,14 @@ export function NrmTrackMetadataSettingsHome({
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               stickySectionHeadersEnabled
+              getItemLayout={getSectionListItemLayout}
               viewabilityConfig={viewabilityConfig}
               onViewableItemsChanged={onSectionViewableItemsChanged}
-              onScrollToIndexFailed={onScrollToIndexFailed}
-              initialNumToRender={15}
-              maxToRenderPerBatch={10}
-              windowSize={10}
+              initialNumToRender={12}
+              maxToRenderPerBatch={8}
+              windowSize={7}
+              updateCellsBatchingPeriod={50}
+              removeClippedSubviews={Platform.OS === 'android'}
             />
           )}
         </View>
@@ -765,10 +836,37 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(128,128,128,0.25)',
   },
+  sectionHeaderFixed: {
+    height: TRACK_LIST_SECTION_HEADER_HEIGHT,
+    justifyContent: 'center',
+  },
+  /**
+   * row.trackRow(nrmChartTrackListStyles)에 marginBottom: xxs 가 이미 있다.
+   * 여기서 height를 TRACK_LIST_ROW_HEIGHT로 그대로 주면 실제 행 점유 높이가
+   * (height + marginBottom) = TRACK_LIST_ROW_HEIGHT + xxs 가 되어, 퀵 네비게이션
+   * 오프셋 계산(nrmTrackListSectionScroll.ts, 행당 TRACK_LIST_ROW_HEIGHT 가정)과
+   * 어긋나 목록이 아래로 누적 드리프트된다(뒤쪽 문자로 갈수록 더 크게 밀림).
+   * marginBottom을 높이에서 미리 빼서 실제 점유 높이를 TRACK_LIST_ROW_HEIGHT로 맞춘다.
+   */
+  trackRowFixed: {
+    height: TRACK_LIST_ROW_HEIGHT - nrmTokens.space.xxs,
+  },
   sectionHeaderLabel: {
     fontSize: nrmTokens.font.finePrint,
     fontWeight: '600',
     letterSpacing: 0.3,
   },
   loader: { marginVertical: nrmTokens.space.xl },
+  initCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: nrmTokens.space.md,
+    paddingHorizontal: nrmTokens.space.lg,
+  },
+  initLabel: {
+    fontSize: nrmTokens.font.body,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
 });
