@@ -2,16 +2,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
-  type ListRenderItemInfo,
 } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
@@ -27,15 +25,38 @@ type Props = {
   isDark: boolean;
   value: number | null;
   onChange: (modelId: number) => void;
+  /**
+   * value가 아직 없을 때 기본 모델을 고를 때 호출(저장 없이 UI만 채울 때 사용).
+   * 없으면 onChange를 쓴다.
+   */
+  onDefaultSelect?: (modelId: number) => void;
+  /** false면 기본 모델 자동 선택을 하지 않음(선호값 로딩 대기용) */
+  allowAutoDefault?: boolean;
   /** chip: 상단 칩 / menuRow: 좌측 메뉴 행 */
   presentation?: 'chip' | 'menuRow';
 };
 
-/** AI Lab — LLMModel(Type=LLM) 기반 모델 선택. */
+const HEADER_HEIGHT = 52;
+const ROW_MIN_HEIGHT = 52;
+
+/**
+ * AI Lab — LLMModel(Type=LLM) 모델 선택.
+ *
+ * 정책(유지):
+ * - 목록: fetchLlmModelsForAiLab (IsActive 우선 → ModelID DESC; Groq 활성 1002/1001/1000이 상단)
+ * - value===null이고 allowAutoDefault면 pickDefaultLlmModelId (onDefaultSelect 우선, 저장은 부모 책임)
+ * - IsActive=false는 표시만, 선택 불가
+ * - presentation: chip | menuRow
+ *
+ * 스크롤: Modal 안 중첩 Pressable로 FlatList를 감싸지 않는다.
+ * (Android에서 리스트 끝 도달 후 위로 스크롤이 잠기던 원인이었음)
+ */
 export function NrmAiLabModelPicker({
   isDark,
   value,
   onChange,
+  onDefaultSelect,
+  allowAutoDefault = true,
   presentation = 'chip',
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
@@ -43,7 +64,6 @@ export function NrmAiLabModelPicker({
   const [models, setModels] = useState<NrmLlmModelItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -51,14 +71,15 @@ export function NrmAiLabModelPicker({
   const chipBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
   const sheetBg = isDark ? nrmTokens.color.surfaceTile2 : nrmTokens.color.canvas;
   const rowHover = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
-  const inputBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
+  const selectedBg = isDark ? 'rgba(0,102,204,0.22)' : 'rgba(0,102,204,0.10)';
+
+  const close = useCallback(() => setOpen(false), []);
 
   const loadModels = useCallback(async (options?: { force?: boolean }) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const rows = await fetchLlmModelsForAiLab({ force: options?.force });
-      setModels(rows);
+      setModels(await fetchLlmModelsForAiLab({ force: options?.force }));
     } catch {
       setModels([]);
       setLoadError('모델 목록을 불러오지 못했습니다.');
@@ -72,19 +93,12 @@ export function NrmAiLabModelPicker({
   }, [loadModels]);
 
   useEffect(() => {
-    if (value != null || models.length === 0) return;
+    if (!allowAutoDefault || value != null || models.length === 0) return;
     const defaultId = pickDefaultLlmModelId(models);
-    if (defaultId != null) onChange(defaultId);
-  }, [onChange, models, value]);
+    if (defaultId != null) (onDefaultSelect ?? onChange)(defaultId);
+  }, [allowAutoDefault, models, onChange, onDefaultSelect, value]);
 
-  useEffect(() => {
-    if (!open) setSearchQuery('');
-  }, [open]);
-
-  const selected = useMemo(
-    () => findLlmModelById(models, value),
-    [models, value],
-  );
+  const selected = useMemo(() => findLlmModelById(models, value), [models, value]);
 
   const selectedLabel = useMemo(() => {
     if (loading && !selected) return '불러오는 중…';
@@ -93,68 +107,26 @@ export function NrmAiLabModelPicker({
     return '모델 선택';
   }, [loadError, loading, selected]);
 
-  const filteredModels = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter((item) => item.modelDisplayName.toLowerCase().includes(q));
-  }, [models, searchQuery]);
-
   const onPick = useCallback(
     (item: NrmLlmModelItem) => {
       if (!item.isActive) return;
-      setOpen(false);
+      close();
       if (item.modelId !== value) onChange(item.modelId);
     },
-    [onChange, value],
+    [close, onChange, value],
   );
 
-  const renderRow = useCallback(
-    ({ item }: ListRenderItemInfo<NrmLlmModelItem>) => {
-      const isSelected = item.modelId === value;
-      const disabled = !item.isActive;
-      return (
-        <Pressable
-          disabled={disabled}
-          onPress={() => onPick(item)}
-          style={({ pressed }) => [
-            styles.optionRow,
-            isSelected && !disabled && {
-              backgroundColor: isDark ? 'rgba(0,102,204,0.22)' : 'rgba(0,102,204,0.10)',
-            },
-            pressed && !disabled && { backgroundColor: rowHover },
-            disabled && styles.optionDisabled,
-          ]}
-          accessibilityRole="button"
-          accessibilityState={{ selected: isSelected, disabled }}
-          accessibilityLabel={item.modelDisplayName}>
-          <View style={styles.optionTextWrap}>
-            <Text
-              style={[
-                styles.optionLabel,
-                { color: disabled ? bodyColor : titleColor },
-                isSelected && !disabled && styles.optionLabelSelected,
-              ]}
-              numberOfLines={2}>
-              {item.modelDisplayName}
-            </Text>
-          </View>
-          {isSelected && !disabled ? (
-            <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
-          ) : null}
-        </Pressable>
-      );
-    },
-    [bodyColor, isDark, onPick, rowHover, titleColor, value],
+  const sheetMaxHeight = Math.min(windowHeight * 0.75, 560);
+  const listBodyHeight = Math.max(
+    120,
+    Math.min(sheetMaxHeight - HEADER_HEIGHT, models.length * ROW_MIN_HEIGHT + nrmTokens.space.md),
   );
 
   const trigger =
     presentation === 'menuRow' ? (
       <Pressable
         onPress={() => setOpen(true)}
-        style={({ pressed }) => [
-          styles.menuRowTrigger,
-          pressed && { backgroundColor: rowHover },
-        ]}
+        style={({ pressed }) => [styles.menuRowTrigger, pressed && { backgroundColor: rowHover }]}
         accessibilityRole="button"
         accessibilityLabel={`모델 ${selectedLabel}`}>
         <View style={styles.menuRowLeft}>
@@ -188,32 +160,33 @@ export function NrmAiLabModelPicker({
     <>
       {trigger}
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable
-          style={[styles.modalRoot, { backgroundColor: getNrmModalScrimColor(isDark) }]}
-          onPress={() => setOpen(false)}>
-          {/*
-            카드 내부 탭이 배경(닫기)으로 전파되지 않도록 onPress no-op으로 막는다.
-            이전엔 onStartShouldSetResponder={() => true}를 썼는데, 이 raw responder API는
-            터치 시작 시 무조건 이 뷰가 responder를 선점해버려 안드로이드에서 FlatList가
-            리스트 끝에 도달한 뒤 "새로 시작하는" 위로 스크롤 제스처를 responder 협상에서
-            빼앗기는 문제가 있었다(끝까지 내리면 다시 못 올라오는 버그의 실제 원인).
-            Pressable은 스크롤 제스처와 충돌 없이 탭만 소비한다.
-          */}
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        {/*
+          레이아웃: 루트 View + 절대 위치 스크림 Pressable + 카드 View.
+          스크림이 카드를 감싸지 않으므로 리스트 스크롤 제스처와 닫기 탭이 분리된다.
+        */}
+        <View style={styles.root} pointerEvents="box-none">
           <Pressable
-            onPress={() => {}}
+            style={[styles.scrim, { backgroundColor: getNrmModalScrimColor(isDark) }]}
+            onPress={close}
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+          />
+
+          <View
             style={[
-              styles.modalCard,
+              styles.sheet,
               {
-                height: Math.min(windowHeight * 0.78, 560),
+                maxHeight: sheetMaxHeight,
                 backgroundColor: sheetBg,
                 borderColor: hairline,
               },
-            ]}>
-            <View style={[styles.modalHeader, { borderColor: hairline }]}>
-              <Text style={[styles.modalTitle, { color: titleColor }]}>LLM 모델</Text>
+            ]}
+            accessibilityViewIsModal>
+            <View style={[styles.header, { borderColor: hairline }]}>
+              <Text style={[styles.headerTitle, { color: titleColor }]}>LLM 모델</Text>
               <Pressable
-                onPress={() => setOpen(false)}
+                onPress={close}
                 hitSlop={8}
                 style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
@@ -222,55 +195,69 @@ export function NrmAiLabModelPicker({
               </Pressable>
             </View>
 
-            <View style={[styles.searchBox, { borderColor: hairline, backgroundColor: inputBg }]}>
-              <Ionicons name="search-outline" size={18} color={bodyColor} />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="모델 이름 검색"
-                placeholderTextColor={isDark ? '#6b7288' : '#9ca3af'}
-                style={[styles.searchInput, { color: titleColor }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-                clearButtonMode="while-editing"
-              />
-            </View>
-
             {loading ? (
-              <View style={styles.centerState}>
+              <View style={[styles.bodyState, { height: listBodyHeight }]}>
                 <ActivityIndicator color={nrmTokens.color.primary} />
               </View>
             ) : loadError ? (
-              <View style={styles.centerState}>
+              <View style={[styles.bodyState, { height: listBodyHeight }]}>
                 <Text style={[styles.stateText, { color: bodyColor }]}>{loadError}</Text>
                 <Pressable
                   onPress={() => void loadModels({ force: true })}
                   style={({ pressed }) => [styles.retryBtn, pressed && { opacity: 0.85 }]}
                   accessibilityRole="button">
-                  <Text style={[styles.retryLabel, { color: nrmTokens.color.primary }]}>
-                    다시 시도
-                  </Text>
+                  <Text style={[styles.retryLabel, { color: nrmTokens.color.primary }]}>다시 시도</Text>
                 </Pressable>
               </View>
-            ) : filteredModels.length === 0 ? (
-              <View style={styles.centerState}>
-                <Text style={[styles.stateText, { color: bodyColor }]}>
-                  {searchQuery.trim() ? '검색 결과가 없습니다.' : '등록된 LLM 모델이 없습니다.'}
-                </Text>
+            ) : models.length === 0 ? (
+              <View style={[styles.bodyState, { height: listBodyHeight }]}>
+                <Text style={[styles.stateText, { color: bodyColor }]}>등록된 LLM 모델이 없습니다.</Text>
               </View>
             ) : (
-              <FlatList
-                style={styles.listFlex}
-                data={filteredModels}
-                keyExtractor={(item) => String(item.modelId)}
-                renderItem={renderRow}
+              <ScrollView
+                style={{ height: listBodyHeight }}
+                contentContainerStyle={styles.listContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={Platform.OS !== 'web'}
-                contentContainerStyle={styles.listContent}
-              />
+                bounces
+                overScrollMode="always"
+                nestedScrollEnabled>
+                {models.map((item) => {
+                  const isSelected = item.modelId === value;
+                  const disabled = !item.isActive;
+                  return (
+                    <Pressable
+                      key={item.modelId}
+                      disabled={disabled}
+                      onPress={() => onPick(item)}
+                      style={({ pressed }) => [
+                        styles.row,
+                        isSelected && !disabled && { backgroundColor: selectedBg },
+                        pressed && !disabled && { backgroundColor: rowHover },
+                        disabled && styles.rowDisabled,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected, disabled }}
+                      accessibilityLabel={item.modelDisplayName}>
+                      <Text
+                        style={[
+                          styles.rowLabel,
+                          { color: disabled ? bodyColor : titleColor },
+                          isSelected && !disabled && styles.rowLabelSelected,
+                        ]}
+                        numberOfLines={2}>
+                        {item.modelDisplayName}
+                      </Text>
+                      {isSelected && !disabled ? (
+                        <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </>
   );
@@ -318,28 +305,32 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
-  modalRoot: {
+  root: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: nrmTokens.space.lg,
   },
-  modalCard: {
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sheet: {
     width: '100%',
     maxWidth: 440,
     borderRadius: nrmTokens.radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
+    zIndex: 1,
   },
-  modalHeader: {
+  header: {
+    height: HEADER_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: nrmTokens.space.md,
-    paddingVertical: nrmTokens.space.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  modalTitle: {
+  headerTitle: {
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
   },
@@ -350,57 +341,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: nrmTokens.radius.md,
   },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: nrmTokens.space.xs,
-    marginHorizontal: nrmTokens.space.md,
-    marginTop: nrmTokens.space.sm,
-    marginBottom: nrmTokens.space.xs,
-    paddingHorizontal: nrmTokens.space.sm,
-    borderRadius: nrmTokens.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    minHeight: 40,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: nrmTokens.font.body,
-    paddingVertical: Platform.OS === 'ios' ? 8 : 6,
-  },
-  /**
-   * modalCard가 고정 height + overflow:hidden 안에서 FlatList가 남는 공간을 정확히
-   * 채우도록 flex:1 필요 (없으면 contentSize 계산이 카드 표시 영역과 어긋남).
-   */
-  listFlex: {
-    flex: 1,
-  },
-  listContent: {
-    paddingBottom: nrmTokens.space.md,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.md,
-    paddingHorizontal: nrmTokens.space.md,
-  },
-  optionTextWrap: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  optionLabel: {
-    fontSize: nrmTokens.font.body,
-  },
-  optionLabelSelected: {
-    fontWeight: '600',
-  },
-  optionDisabled: {
-    opacity: 0.42,
-  },
-  centerState: {
-    flex: 1,
+  bodyState: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: nrmTokens.space.lg,
@@ -416,6 +357,29 @@ const styles = StyleSheet.create({
   },
   retryLabel: {
     fontSize: nrmTokens.font.body,
+    fontWeight: '600',
+  },
+  listContent: {
+    paddingBottom: nrmTokens.space.md,
+  },
+  row: {
+    minHeight: ROW_MIN_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: nrmTokens.space.sm,
+    paddingVertical: nrmTokens.space.md,
+    paddingHorizontal: nrmTokens.space.md,
+  },
+  rowDisabled: {
+    opacity: 0.42,
+  },
+  rowLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: nrmTokens.font.body,
+  },
+  rowLabelSelected: {
     fontWeight: '600',
   },
 });

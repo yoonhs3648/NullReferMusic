@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
@@ -45,6 +46,7 @@ type Props = {
 
 /** AI Lab 좌측 메뉴 「사용량 조회」 — 제공자별 월간 할당/사용 토큰을 도넛 차트로 표시. */
 export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -161,6 +163,16 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
     if (!q) return options;
     return options.filter((o) => o.providerName.toLowerCase().includes(q));
   }, [options, searchQuery]);
+
+  const showPickerSearch = options.length > 6;
+  /** NrmAdminLlmProviderPickerModal 과 동일 — maxHeight만 주면 Android에서 FlatList가 0px로 접힌다. */
+  const pickerCardHeight = Math.min(
+    windowHeight * 0.55,
+    Math.max(
+      200,
+      52 + (showPickerSearch ? 48 : 0) + filteredOptions.length * 64 + nrmTokens.space.md,
+    ),
+  );
 
   const unlimited = snapshot ? isNrmLlmAllocationUnlimited(snapshot.allocatedToken) : false;
   const percent =
@@ -352,6 +364,7 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
         visible={pickerOpen}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setPickerOpen(false)}>
         <Pressable
           style={[styles.pickerBackdrop, { backgroundColor: getNrmModalScrimColor(isDark) }]}
@@ -360,7 +373,14 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
               끝에 도달한 뒤 위로 스크롤하는 새 제스처를 responder에게 빼앗기는 문제 방지 */}
           <Pressable
             onPress={() => {}}
-            style={[styles.pickerCard, { backgroundColor: sheetBg, borderColor: hairline }]}>
+            style={[
+              styles.pickerCard,
+              {
+                height: pickerCardHeight,
+                backgroundColor: sheetBg,
+                borderColor: hairline,
+              },
+            ]}>
             <View style={[styles.pickerHeader, { borderColor: hairline }]}>
               <Text style={[styles.pickerTitle, { color: titleColor }]}>제공자 선택</Text>
               <Pressable
@@ -372,7 +392,7 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
                 <Ionicons name="close" size={22} color={bodyColor} />
               </Pressable>
             </View>
-            {options.length > 6 ? (
+            {showPickerSearch ? (
               <View
                 style={[
                   styles.pickerSearchBox,
@@ -390,15 +410,23 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
                 />
               </View>
             ) : null}
-            <FlatList
-              style={styles.pickerList}
-              data={filteredOptions}
-              keyExtractor={(item) => String(item.providerId)}
-              renderItem={renderOptionRow}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={Platform.OS !== 'web'}
-              contentContainerStyle={styles.pickerListContent}
-            />
+            {filteredOptions.length === 0 ? (
+              <View style={styles.pickerEmpty}>
+                <Text style={[styles.pickerEmptyText, { color: bodyColor }]}>
+                  검색 결과가 없습니다.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                style={styles.pickerList}
+                data={filteredOptions}
+                keyExtractor={(item) => String(item.providerId)}
+                renderItem={renderOptionRow}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={Platform.OS !== 'web'}
+                contentContainerStyle={styles.pickerListContent}
+              />
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -502,7 +530,6 @@ const styles = StyleSheet.create({
   pickerCard: {
     width: '100%',
     maxWidth: 420,
-    maxHeight: 480,
     borderRadius: nrmTokens.radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
@@ -543,11 +570,22 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     paddingVertical: Platform.OS === 'ios' ? 8 : 6,
   },
+  /** 고정 height 카드 안에서 목록이 보이도록 flex:1 (maxHeight만 쓰면 Android에서 0px). */
   pickerList: {
     flex: 1,
   },
   pickerListContent: {
     paddingBottom: nrmTokens.space.md,
+  },
+  pickerEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: nrmTokens.space.md,
+  },
+  pickerEmptyText: {
+    fontSize: nrmTokens.font.body,
+    textAlign: 'center',
   },
   optionRow: {
     flexDirection: 'row',

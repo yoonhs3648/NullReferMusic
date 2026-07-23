@@ -32,6 +32,8 @@ type Props = {
   serialNo: string | null;
   llmModelId: number | null;
   onLlmModelChange: (modelId: number) => void;
+  onLlmModelDefault?: (modelId: number) => void;
+  llmModelPrefReady?: boolean;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDelete: (id: string) => void;
@@ -52,6 +54,8 @@ export function NrmAiLabSidebar({
   serialNo,
   llmModelId,
   onLlmModelChange,
+  onLlmModelDefault,
+  llmModelPrefReady = true,
   onSelect,
   onNewChat,
   onDelete,
@@ -132,6 +136,8 @@ export function NrmAiLabSidebar({
             isDark={isDark}
             value={llmModelId}
             onChange={onLlmModelChange}
+            onDefaultSelect={onLlmModelDefault}
+            allowAutoDefault={llmModelPrefReady}
             presentation="menuRow"
           />
         </View>

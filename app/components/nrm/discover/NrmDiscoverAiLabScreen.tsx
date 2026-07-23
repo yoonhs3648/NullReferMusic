@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -37,10 +38,28 @@ import {
   loadAiLabSelectedModelId,
   saveAiLabSelectedModelId,
 } from '@/lib/nrmAiLabModelPreference';
+import {
+  loadAiLabWebSearchEnabled,
+  saveAiLabWebSearchEnabled,
+} from '@/lib/nrmAiLabWebSearchPreference';
+import {
+  fetchAiLabSuggestionCatalog,
+  pickAiLabSuggestionChips,
+} from '@/lib/nrmAiLabSuggestionPrompts';
+import type { NrmAiLabSuggestionChip } from '@/lib/nrmSupabaseDatabase.types';
 import { deleteChatSession, fetchChatMessages, fetchChatSessions } from '@/lib/nrmChatClient';
 import { logNrmRunError } from '@/lib/nrmDevLog';
 import { resolveLlmSerialNo } from '@/lib/nrmLlmSerialNo';
-import { NrmLlmChatSendError, sendLlmChatMessageStream } from '@/lib/nrmLlmChatSend';
+import {
+  NrmLlmChatSendError,
+  sendLlmChatMessageStream,
+  type NrmLlmToolRequestEvent,
+  type NrmLlmToolResultPayload,
+} from '@/lib/nrmLlmChatSend';
+import {
+  executeAiLabDownloadTool,
+  type NrmAiLabChoice,
+} from '@/lib/nrmAiLabDownloadTools';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
@@ -49,7 +68,8 @@ type Props = {
 };
 
 const ICON_HIT = 44;
-const NETWORK_PROBLEM_TEXT = '네트워크 문제로 요청할 수 없어요. 나중에 다시 시도해 주세요.';
+const NETWORK_PROBLEM_TEXT = '네트워크가 불안정해요 📡 나중에 다시 시도해 주세요.';
+const MAX_AI_LAB_TOOL_ROUNDS = 6;
 
 /**
  * 예전엔 전송 실패 원인과 무관하게 항상 NETWORK_PROBLEM_TEXT 하나로 뭉뚱그려
@@ -61,13 +81,13 @@ function aiLabSendErrorText(e: unknown): string {
   if (e instanceof NrmLlmChatSendError) {
     switch (e.code) {
       case 'fetch_error':
-        return '네트워크 연결이 원활하지 않아 요청을 보내지 못했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.';
+        return '네트워크가 안 좋아요 📡 연결 확인하고 다시 시도해 주세요.';
       case 'http_error':
-        return '서버에 일시적인 문제가 있어 요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.';
+        return '서버가 잠깐 삐끗했어요 🛠️ 잠시 후 다시 시도해 주세요.';
       case 'no_final':
-        return '응답을 받는 중 연결이 끊어졌어요. 다시 시도해 주세요.';
+        return '응답 받다 끊겼어요 🔌 다시 시도해 주세요.';
       case 'stream_error':
-        return '응답을 처리하는 중 문제가 발생했어요. 다시 시도해 주세요.';
+        return '응답 처리 중 문제가 생겼어요 😵 다시 시도해 주세요.';
     }
   }
   return NETWORK_PROBLEM_TEXT;
@@ -80,14 +100,17 @@ function nextTempId(prefix: string): string {
 /** AI Lab — 앱 상단바·메뉴 패턴에 맞춘 대화 UI. ChatSession/ChatMessage 기반 실 LLM 연동. */
 export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const drawerW = Math.max(280, Math.min(380, Math.round(windowWidth * 0.88) || 320));
+  const emptyPadTop = Math.max(28, Math.round(windowHeight * 0.1));
   const drawerWRef = useRef(drawerW);
   drawerWRef.current = drawerW;
   const sidebarBackHandlerRef = useRef<(() => boolean) | null>(null);
   const translateX = useRef(new Animated.Value(-drawerW)).current;
   /** 메인 NrmAppTopBar 와 동일 — 기종별 반응형 가로 여백 */
   const padH = Math.max(nrmTokens.space.md, Math.round(windowWidth * 0.04));
+  /** 하단 입력란만 조금 더 넓게(좌우 여백 축소) */
+  const composerPadH = Math.max(nrmTokens.space.xs, Math.round(windowWidth * 0.02));
 
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
@@ -106,6 +129,11 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [llmModelId, setLlmModelId] = useState<number | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [suggestionChips, setSuggestionChips] = useState<NrmAiLabSuggestionChip[]>([]);
+  const suggestionCatalogRef = useRef<Awaited<ReturnType<typeof fetchAiLabSuggestionCatalog>>>([]);
+  /** AsyncStorage 선호 모델 로드 완료 전엔 기본값으로 저장을 덮어쓰지 않음 */
+  const [llmModelPrefReady, setLlmModelPrefReady] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
   /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
@@ -126,21 +154,65 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     };
   }, []);
 
-  // 사용자가 마지막으로 직접 고른 모델을 기기에서 복원 — 없으면 모델 선택
-  // 컴포넌트가 자체적으로 기본 모델을 고른다(pickDefaultLlmModelId).
+  // 사용자가 마지막으로 직접 고른 모델을 기기에서 복원 — 로드 전에는 피커가
+  // pickDefault로 AsyncStorage를 덮어쓰지 않도록 prefReady를 기다린다.
   useEffect(() => {
     let cancelled = false;
-    void loadAiLabSelectedModelId().then((id) => {
-      if (!cancelled && id != null) setLlmModelId(id);
+    void loadAiLabSelectedModelId()
+      .then((id) => {
+        if (cancelled) return;
+        if (id != null) setLlmModelId(id);
+      })
+      .finally(() => {
+        if (!cancelled) setLlmModelPrefReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadAiLabWebSearchEnabled().then((on) => {
+      if (!cancelled) setWebSearchEnabled(on);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAiLabSuggestionCatalog().then((catalog) => {
+      if (cancelled) return;
+      suggestionCatalogRef.current = catalog;
+      setSuggestionChips(pickAiLabSuggestionChips(catalog, webSearchEnabled));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // 최초 로드 — webSearchEnabled는 아래 effect에서 재선정
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (suggestionCatalogRef.current.length === 0) return;
+    setSuggestionChips(pickAiLabSuggestionChips(suggestionCatalogRef.current, webSearchEnabled));
+  }, [webSearchEnabled]);
+
   const handleLlmModelChange = useCallback((modelId: number) => {
     setLlmModelId(modelId);
     void saveAiLabSelectedModelId(modelId);
+  }, []);
+
+  const handleWebSearchToggle = useCallback((on: boolean) => {
+    setWebSearchEnabled(on);
+    void saveAiLabWebSearchEnabled(on);
+  }, []);
+
+  /** 기본 모델 자동 선택 — UI만 채우고 저장하지 않음(사용자 선호 덮어쓰기 방지) */
+  const handleLlmModelDefault = useCallback((modelId: number) => {
+    setLlmModelId((prev) => (prev == null ? modelId : prev));
   }, []);
 
   const refreshSessions = useCallback(async () => {
@@ -257,8 +329,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
       closeMenu();
       const target = conversations.find((c) => c.id === id);
       if (target) {
-        // 세션은 생성 시점 모델에 고정 — 이어서 보내는 요청도 동일 모델을 쓰도록 동기화.
-        setLlmModelId(target.modelId);
+        // 모델은 좌측 피커/저장 선호값을 유지 — 과거 세션 ModelID로 UI를 덮어쓰지 않음.
+        // 실제 호출은 클라이언트가 보내는 modelId를 서버가 우선 사용한다.
         if (!target.messagesLoaded) {
           setMessagesLoading(true);
           void fetchChatMessages(id)
@@ -289,144 +361,244 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     [refreshSessions, serialNo],
   );
 
-  const handleSend = useCallback(() => {
-    const text = draft.trim();
-    if (!text || sending || !serialNo || llmModelId == null) return;
+  const sendUserText = useCallback(
+    (text: string) => {
+      if (!text || sending || !serialNo || llmModelId == null) return;
 
-    const tempUserId = nextTempId('u');
-    const tempAssistantId = nextTempId('a');
-    const userMsg: NrmAiLabMessage = { id: tempUserId, role: 'user', content: text, pending: true };
-    const targetId = activeId;
-    const sourceConvId = targetId ?? nextTempId('c');
+      const tempUserId = nextTempId('u');
+      const tempAssistantId = nextTempId('a');
+      const userMsg: NrmAiLabMessage = { id: tempUserId, role: 'user', content: text, pending: true };
+      const targetId = activeId;
+      const sourceConvId = targetId ?? nextTempId('c');
 
-    setDraft('');
-    setSending(true);
+      setSending(true);
 
-    if (!targetId) {
-      const created: NrmAiLabConversation = {
-        id: sourceConvId,
-        title: nrmAiLabTitleFromPrompt(text),
-        updatedAtLabel: '지금',
-        updatedAtIso: new Date().toISOString(),
-        modelId: llmModelId,
-        messages: [userMsg],
-        messagesLoaded: true,
+      if (!targetId) {
+        const created: NrmAiLabConversation = {
+          id: sourceConvId,
+          title: nrmAiLabTitleFromPrompt(text),
+          updatedAtLabel: '지금',
+          updatedAtIso: new Date().toISOString(),
+          modelId: llmModelId,
+          messages: [userMsg],
+          messagesLoaded: true,
+        };
+        pendingLocalConversationRef.current = created;
+        setConversations((prev) => [created, ...prev]);
+        setActiveId(sourceConvId);
+      } else {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c)),
+        );
+      }
+
+      let currentConvId = sourceConvId;
+      let gotFirstDelta = false;
+
+      const typingPlaceholder: NrmAiLabMessage = {
+        id: tempAssistantId,
+        role: 'assistant',
+        content: '',
+        typing: true,
       };
-      pendingLocalConversationRef.current = created;
-      setConversations((prev) => [created, ...prev]);
-      setActiveId(sourceConvId);
-    } else {
       setConversations((prev) =>
-        prev.map((c) => (c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c)),
+        prev.map((c) => (c.id === currentConvId ? { ...c, messages: [...c.messages, typingPlaceholder] } : c)),
       );
-    }
 
-    // 스트리밍 이벤트 클로저 상태 — meta 도착 시 임시 대화 id가 서버 sessionId로 바뀐다.
-    let currentConvId = sourceConvId;
-    let gotFirstDelta = false;
+      void (async () => {
+        let toolContinue = false;
+        let toolResults: NrmLlmToolResultPayload[] | undefined;
+        let lastToolChoices: NrmAiLabChoice[] | undefined;
+        let sessionIdForApi: string | null = targetId;
 
-    // 모델의 내부 추론(thinking) 때문에 첫 delta가 오기까지 몇 초 걸릴 수 있어, 전송 즉시
-    // "타이핑 중" 표시가 있는 빈 어시스턴트 버블을 먼저 붙여둔다 — 아무 반응 없이 멈춘
-    // 것처럼 보이지 않게.
-    const typingPlaceholder: NrmAiLabMessage = {
-      id: tempAssistantId,
-      role: 'assistant',
-      content: '',
-      typing: true,
-    };
-    setConversations((prev) =>
-      prev.map((c) => (c.id === currentConvId ? { ...c, messages: [...c.messages, typingPlaceholder] } : c)),
-    );
+        try {
+          for (let round = 0; round < MAX_AI_LAB_TOOL_ROUNDS; round += 1) {
+            const pendingToolCalls: NrmLlmToolRequestEvent[] = [];
+            let roundChoices: NrmAiLabChoice[] | undefined;
 
-    void sendLlmChatMessageStream(
-      { serialNo, modelId: llmModelId, sessionId: targetId, message: text },
-      {
-        onMeta: (meta) => {
-          const newConvId = meta.sessionId;
-          setConversations((prev) => {
-            const idx = prev.findIndex((c) => c.id === currentConvId);
-            if (idx === -1) return prev;
-            const conv = prev[idx];
-            const finalizedMessages = conv.messages.map((m) =>
-              m.id === tempUserId ? meta.userMessage : m,
+            if (toolContinue) {
+              setConversations((prev) =>
+                prev.map((c) =>
+                  c.id === currentConvId
+                    ? {
+                        ...c,
+                        messages: c.messages.map((m) =>
+                          m.id === tempAssistantId
+                            ? { ...m, content: '', typing: true, choices: undefined }
+                            : m,
+                        ),
+                      }
+                    : c,
+                ),
+              );
+              gotFirstDelta = false;
+            }
+
+            const outcome = await sendLlmChatMessageStream(
+              {
+                serialNo,
+                modelId: llmModelId,
+                sessionId: sessionIdForApi,
+                message: toolContinue ? '' : text,
+                enableWebSearch: webSearchEnabled,
+                toolContinue,
+                toolResults: toolContinue ? toolResults : undefined,
+              },
+              {
+                onMeta: (meta) => {
+                  if (toolContinue) {
+                    if (meta.sessionId) {
+                      sessionIdForApi = meta.sessionId;
+                      currentConvId = meta.sessionId;
+                    }
+                    return;
+                  }
+                  const newConvId = meta.sessionId;
+                  sessionIdForApi = newConvId;
+                  setConversations((prev) => {
+                    const idx = prev.findIndex((c) => c.id === currentConvId);
+                    if (idx === -1) return prev;
+                    const conv = prev[idx];
+                    const finalizedMessages = conv.messages.map((m) =>
+                      m.id === tempUserId ? meta.userMessage : m,
+                    );
+                    const updatedConv: NrmAiLabConversation = {
+                      ...conv,
+                      id: newConvId,
+                      title: meta.title || conv.title,
+                      modelId: llmModelId,
+                      messages: finalizedMessages,
+                    };
+                    const rest = prev.filter((_, i) => i !== idx).filter((c) => c.id !== newConvId);
+                    return [updatedConv, ...rest];
+                  });
+                  if (currentConvId !== newConvId) {
+                    pendingLocalConversationRef.current = null;
+                    currentConvId = newConvId;
+                    setActiveId(newConvId);
+                  }
+                },
+                onDelta: (chunk) => {
+                  gotFirstDelta = true;
+                  setConversations((prev) =>
+                    prev.map((c) =>
+                      c.id === currentConvId
+                        ? {
+                            ...c,
+                            messages: c.messages.map((m) =>
+                              m.id === tempAssistantId
+                                ? { ...m, content: m.content + chunk, typing: false }
+                                : m,
+                            ),
+                          }
+                        : c,
+                    ),
+                  );
+                },
+                onToolRequest: (ev) => {
+                  pendingToolCalls.push(ev);
+                },
+                onFinal: (final) => {
+                  const choices =
+                    (final.choices && final.choices.length > 0
+                      ? final.choices
+                      : lastToolChoices) ?? undefined;
+                  setConversations((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== currentConvId) return c;
+                      const messages = c.messages.map((m) =>
+                        m.id === tempAssistantId
+                          ? { ...final.message, choices }
+                          : m,
+                      );
+                      return {
+                        ...c,
+                        modelId: llmModelId,
+                        updatedAtLabel: '지금',
+                        updatedAtIso: new Date().toISOString(),
+                        messages,
+                      };
+                    }),
+                  );
+                },
+              },
             );
-            const updatedConv: NrmAiLabConversation = {
-              ...conv,
-              id: newConvId,
-              title: meta.title || conv.title,
-              modelId: llmModelId,
-              messages: finalizedMessages,
-            };
-            const rest = prev.filter((_, i) => i !== idx).filter((c) => c.id !== newConvId);
-            return [updatedConv, ...rest];
-          });
-          if (currentConvId !== newConvId) {
-            pendingLocalConversationRef.current = null;
-            currentConvId = newConvId;
-            setActiveId(newConvId);
+
+            if (outcome.kind !== 'tool_turn') {
+              break;
+            }
+
+            const nextResults: NrmLlmToolResultPayload[] = [];
+            for (const call of pendingToolCalls) {
+              const out = await executeAiLabDownloadTool(call.name, call.args);
+              if (out.choices && out.choices.length > 0) {
+                roundChoices = out.choices;
+              }
+              nextResults.push({
+                callId: call.callId,
+                name: call.name,
+                args: call.args,
+                response: out.result,
+              });
+            }
+            if (roundChoices) lastToolChoices = roundChoices;
+            toolResults = nextResults;
+            toolContinue = true;
+            if (nextResults.length === 0) {
+              throw new NrmLlmChatSendError('stream_error', 'llm-chat-send: empty_tool_requests');
+            }
+            if (round === MAX_AI_LAB_TOOL_ROUNDS - 1) {
+              throw new NrmLlmChatSendError('stream_error', 'llm-chat-send: tool_rounds_exceeded');
+            }
           }
-        },
-        onDelta: (chunk) => {
-          gotFirstDelta = true;
+        } catch (e) {
+          logNrmRunError('ailab.send', e, {
+            sourceConvId,
+            isNewConversation: !targetId,
+            modelId: llmModelId,
+            messageLength: text.length,
+            gotFirstDelta,
+          });
+          const sysMsg: NrmAiLabMessage = {
+            id: nextTempId('s'),
+            role: 'system',
+            content: aiLabSendErrorText(e),
+          };
           setConversations((prev) =>
             prev.map((c) =>
               c.id === currentConvId
                 ? {
                     ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === tempAssistantId ? { ...m, content: m.content + chunk, typing: false } : m,
-                    ),
+                    messages: c.messages
+                      .filter((m) => m.id !== tempAssistantId)
+                      .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
+                      .concat(sysMsg),
                   }
                 : c,
             ),
           );
-        },
-        onFinal: (final) => {
-          setConversations((prev) =>
-            prev.map((c) => {
-              if (c.id !== currentConvId) return c;
-              const messages = c.messages.map((m) => (m.id === tempAssistantId ? final.message : m));
-              return {
-                ...c,
-                updatedAtLabel: '지금',
-                updatedAtIso: new Date().toISOString(),
-                messages,
-              };
-            }),
-          );
-        },
-      },
-    )
-      .catch((e) => {
-        logNrmRunError('ailab.send', e, {
-          sourceConvId,
-          isNewConversation: !targetId,
-          modelId: llmModelId,
-          messageLength: text.length,
-          gotFirstDelta,
-        });
-        const sysMsg: NrmAiLabMessage = {
-          id: nextTempId('s'),
-          role: 'system',
-          content: aiLabSendErrorText(e),
-        };
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === currentConvId
-              ? {
-                  ...c,
-                  // 완성되지 못한 "타이핑 중" 어시스턴트 버블은 지우고 오류 안내만 남긴다.
-                  messages: c.messages
-                    .filter((m) => m.id !== tempAssistantId)
-                    .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
-                    .concat(sysMsg),
-                }
-              : c,
-          ),
-        );
-      })
-      .finally(() => setSending(false));
-  }, [activeId, draft, llmModelId, sending, serialNo]);
+        } finally {
+          setSending(false);
+        }
+      })();
+    },
+    [activeId, llmModelId, sending, serialNo, webSearchEnabled],
+  );
+
+  const handleSend = useCallback(() => {
+    const text = draft.trim();
+    if (!text || sending || !serialNo || llmModelId == null) return;
+    setDraft('');
+    sendUserText(text);
+  }, [draft, llmModelId, sendUserText, sending, serialNo]);
+
+  const handleChoicePress = useCallback(
+    (choice: NrmAiLabChoice) => {
+      if (sending || !serialNo || llmModelId == null) return;
+      sendUserText(choice.label);
+    },
+    [llmModelId, sendUserText, sending, serialNo],
+  );
 
   const renderMessage = useCallback(
     ({ item }: ListRenderItemInfo<NrmAiLabMessage>) => {
@@ -464,18 +636,76 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
             ) : (
               <NrmAiLabMarkdown content={item.content} color={titleColor} isDark={isDark} />
             )}
+            {!isUser && item.choices && item.choices.length > 0 && !item.typing ? (
+              <View style={styles.choiceRow}>
+                {item.choices.map((ch) => (
+                  <Pressable
+                    key={ch.id}
+                    disabled={sending}
+                    onPress={() => handleChoicePress(ch)}
+                    style={({ pressed }) => [
+                      styles.choiceChip,
+                      {
+                        borderColor: hairline,
+                        backgroundColor: userBubbleBg,
+                        opacity: sending ? 0.5 : pressed ? 0.72 : 1,
+                      },
+                    ]}>
+                    <Text style={[styles.choiceChipText, { color: titleColor }]} numberOfLines={2}>
+                      {ch.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </View>
         </NrmAiLabMessageEnter>
       );
     },
-    [hairline, isDark, systemBubbleBg, systemTextColor, titleColor, userBubbleBg],
+    [
+      hairline,
+      handleChoicePress,
+      isDark,
+      sending,
+      systemBubbleBg,
+      systemTextColor,
+      titleColor,
+      userBubbleBg,
+    ],
   );
 
   const emptyChat = (
-    <View style={styles.empty}>
+    <View style={[styles.empty, { paddingTop: emptyPadTop }]}>
       <NrmLogo markOnly markSize={72} />
       <Text style={[styles.emptyLine1, { color: titleColor }]}>{greeting.line1}</Text>
       <Text style={[styles.emptyLine2, { color: titleColor }]}>{greeting.line2}</Text>
+      {suggestionChips.length > 0 ? (
+        <View style={styles.suggestionList}>
+          {suggestionChips.map((chip) => (
+            <Pressable
+              key={`${chip.categoryId}-${chip.promptId}`}
+              disabled={sending || !serialNo || llmModelId == null}
+              onPress={() => {
+                if (sending || !serialNo || llmModelId == null) return;
+                void sendUserText(chip.promptText);
+              }}
+              style={({ pressed }) => [
+                styles.suggestionChip,
+                {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  borderColor: hairline,
+                  opacity: pressed ? 0.72 : sending ? 0.55 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={chip.promptText}>
+              <Text style={[styles.suggestionChipText, { color: titleColor }]} numberOfLines={2}>
+                {chip.promptText}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 
@@ -499,6 +729,30 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
           <NrmHamburgerIcon color={titleColor} size={22} />
         </Pressable>
         <View style={styles.topBarSpacer} />
+        <View
+          style={styles.webSearchToggle}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: webSearchEnabled }}
+          accessibilityLabel="인터넷 검색">
+          <Text
+            style={[
+              styles.webSearchLabel,
+              { color: webSearchEnabled ? nrmTokens.color.primary : titleColor },
+            ]}
+            numberOfLines={1}>
+            인터넷
+          </Text>
+          <Switch
+            value={webSearchEnabled}
+            onValueChange={handleWebSearchToggle}
+            trackColor={{
+              false: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
+              true: nrmTokens.color.primary,
+            }}
+            thumbColor={Platform.OS === 'android' ? '#ffffff' : undefined}
+            ios_backgroundColor={isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}
+          />
+        </View>
       </View>
 
       <FlatList
@@ -526,7 +780,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         </View>
       ) : null}
 
-      <View style={{ paddingHorizontal: padH }}>
+      <View style={{ paddingHorizontal: composerPadH }}>
         <NrmAiLabComposer
           isDark={isDark}
           value={draft}
@@ -577,6 +831,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
               serialNo={serialNo}
               llmModelId={llmModelId}
               onLlmModelChange={handleLlmModelChange}
+              onLlmModelDefault={handleLlmModelDefault}
+              llmModelPrefReady={llmModelPrefReady}
               onSelect={handleSelect}
               onNewChat={handleNewChat}
               onDelete={handleDelete}
@@ -607,6 +863,17 @@ const styles = StyleSheet.create({
   topBarSpacer: {
     flex: 1,
   },
+  webSearchToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: ICON_HIT,
+    paddingLeft: nrmTokens.space.sm,
+  },
+  webSearchLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   pressed: { opacity: 0.72 },
   msgList: { flex: 1 },
   msgListContent: {
@@ -615,7 +882,7 @@ const styles = StyleSheet.create({
   },
   msgListContentEmpty: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -676,10 +943,11 @@ const styles = StyleSheet.create({
   },
   empty: {
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     gap: nrmTokens.space.sm,
-    paddingVertical: nrmTokens.space.xxl,
-    paddingHorizontal: nrmTokens.space.lg,
+    paddingBottom: nrmTokens.space.xxl,
+    paddingHorizontal: nrmTokens.space.sm,
+    width: '100%',
   },
   emptyLine1: {
     marginTop: nrmTokens.space.sm,
@@ -691,6 +959,43 @@ const styles = StyleSheet.create({
     fontSize: nrmTokens.font.body,
     fontWeight: '400',
     textAlign: 'center',
+  },
+  suggestionList: {
+    marginTop: nrmTokens.space.lg,
+    width: '100%',
+    maxWidth: 420,
+    gap: nrmTokens.space.sm,
+  },
+  suggestionChip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.md,
+    paddingHorizontal: nrmTokens.space.md,
+    paddingVertical: 12,
+    alignSelf: 'stretch',
+  },
+  suggestionChipText: {
+    fontSize: nrmTokens.font.body,
+    lineHeight: 22,
+    fontWeight: '500',
+    textAlign: 'left',
+  },
+  choiceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: nrmTokens.space.sm,
+    marginTop: nrmTokens.space.sm,
+  },
+  choiceChip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.md,
+    paddingHorizontal: nrmTokens.space.sm,
+    paddingVertical: 8,
+    maxWidth: '100%',
+  },
+  choiceChipText: {
+    fontSize: nrmTokens.font.caption,
+    lineHeight: 18,
+    fontWeight: '500',
   },
   modalWrap: {
     flex: 1,

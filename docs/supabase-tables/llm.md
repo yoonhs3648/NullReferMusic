@@ -18,12 +18,16 @@ LLMProvider (1) ──< LLMModel (N)           제공자 1개(예: Google)가 �
 
 | 테이블 | 역할 |
 |--------|------|
-| **LLMProvider** | 제공자(ApiKey 소유자). 컬럼: `ProviderID`, `ProviderName`, `ApiKey`, `RegDate` 만. 시드: `ProviderID=1`, `ProviderName=Google` |
+| **LLMProvider** | 제공자(ApiKey 소유자). 컬럼: `ProviderID`, `ProviderName`, `ApiKey`, `RegDate` 만. 시드: `ProviderID=1` `Google`, `ProviderID=2` `Groq` |
 | **LLMModel** | 개별 모델(구 LLMProvider rename). PK=`ModelID`. `ProviderID` FK. **ApiKey/DailyLimit/MonthlyLimit/ProviderName 없음** |
+| **LLMSystemPrompt** | AI Lab **전역** 시스템 프롬프트. 활성 항목이 **모든 모델** 채팅에 동일 적용 |
 | **LLMUserPermission** | 사용자×**제공자** 승인·할당 |
 | **LLMUserQuota** | 사용자×**제공자**×월 누적. 정규화 시 모델별 행을 SUM으로 합침 → 제공자 1개면 `(SerialNo,TargetMonth)` 사실상 유일 |
 | **LLMTokenHistory** | 호출 이력. `ProviderID`(제공자) + `ModelID`(실제 모델) |
-| **ChatSession** | `ProviderID` + `ModelID` — 세션 생성 시 모델 고정, 이후 요청도 그 모델 사용 |
+| **LLMCallAttemptLog** | Gemini **시도별** 진단 로그(`llm-chat-send`). Edge Logs 없이도 실패 원인 조회 |
+| **LLMAiLabSuggestionCategory** | AI Lab 빈 화면 추천 질문 **카테고리** (`AnswerMode`) |
+| **LLMAiLabSuggestionPrompt** | 카테고리별 추천 질문 문구 |
+| **ChatSession** | `ProviderID` + `ModelID` — 세션에 마지막 사용 모델 기록. **실제 호출은 클라이언트가 보낸 `modelId` 우선**(모델 변경 시 세션 값도 갱신) |
 
 채팅 요청 body는 `modelId`(클라이언트가 고른 모델). Edge Function/`nrm_rpc_chat_prepare_turn`이 `LLMModel`→`LLMProvider` join으로 ApiKey를 얻고, 권한/쿼터는 **provider** 단위로 체크한다.
 
@@ -38,7 +42,7 @@ LLM 제공자(ApiKey 소유자). 정규화 후 **모델 목록이 아니다**.
 | 컬럼 | 타입 | 기본값 | NULL | 설명 |
 |------|------|--------|------|------|
 | `ProviderID` | `bigint` IDENTITY PK | — | NO | LLM 제공자 고유번호 |
-| `ProviderName` | `varchar` | — | NO | 제공자명 (예: `Google`) |
+| `ProviderName` | `varchar` | — | NO | 제공자명 (예: `Google`, `Groq`) |
 | `ApiKey` | `text` | — | NO | LLM API Key (이 제공자의 전체 모델이 공유) |
 | `RegDate` | `timestamptz` | `now()` | NO | 등록일시 |
 
@@ -76,9 +80,133 @@ CREATE TABLE public."LLMProvider"
 
 **제거된 컬럼(정규화):** `ApiKey`, `DailyLimit`, `MonthlyLimit`, `ProviderName` — 제공자 정보는 `LLMProvider` join.
 
-**현재 활성 채팅 모델 (2026-07-22):** `models/gemini-3.1-flash-lite`(`ModelID=21`), `models/gemini-3.5-flash`(`ModelID=28`)만 `IsActive=true`.
+**현재 활성 채팅 모델 (2026-07-23):** Groq 우선 — `openai/gpt-oss-120b`(`ModelID=1002`), `qwen/qwen3.6-27b`(`1001`), `llama-3.3-70b-versatile`(`1000`) + Google Gemini `models/gemini-3.1-flash-lite`(`21`), `models/gemini-3.5-flash`(`28`), `models/gemini-3.5-flash-lite`(`55`), `models/gemini-3.6-flash`(`56`).
+
+AI Lab 모델 선택 정렬(`sortLlmModelsForPicker`): `IsActive=true` 상단 → `ModelID` 내림차순 → `ProviderID` 내림차순. (Groq 활성 3종이 1002→1000이라 피커 최상단)
 
 관리자 시드 RPC: `nrm_rpc_admin_replace_llm_models` (구 `nrm_rpc_admin_replace_llm_providers` DROP).
+
+---
+
+## LLMSystemPrompt
+
+AI Lab 전역 시스템 프롬프트. 관리자페이지 「AI 시스템 프롬프트 설정」에서 CRUD.
+`IsActive=true`인 행을 `SortOrder`→`PromptID` 오름차순으로 이어 붙여, Edge Function(`llm-chat-send`)이 **모든 Provider·모든 모델**의 시스템 지시에 동일하게 넣는다(모델/제공자별 분기 없음).
+- Google(Gemini): `systemInstruction`
+- Groq: OpenAI 호환 `messages`의 `role=system`
+조합은 `buildChatSystemInstruction()` 한곳에서만 만든다.
+
+조합 순서:
+1. 코드가 매 요청 주입하는 `[CURRENT_DATETIME]`(Asia/Seoul, 하드코딩 아님)
+2. DB 활성 `LLMSystemPrompt` 본문들
+
+시드(2026-07-23): `현재 시각 해석 규칙`(SortOrder=1).  
+`Google Search 사용 규칙`(SortOrder=2)은 **비활성**(2026-07-23 `20260723193000…`) — 인터넷 검색 on/off는 AI Lab UI 토글만 따른다.
+최초 시드는 `20260723110000_llm_system_prompt_seed.sql`(당시 10/20), `20260723120000_llm_system_prompt_sortorder_1_2.sql`에서 1/2로 정리.
+`SortOrder`는 10단위 강제 아님 — 정수 오름차순이면 된다.
+
+추가(2026-07-23, `20260723140000_llm_system_prompt_music_assistant.sql`):
+- SortOrder=2 `Google Search 사용 규칙` 본문 보강(차트·신곡·일정 등) — 이후 UI 토글로 대체·비활성
+- SortOrder=3 `역할 및 답변 범위` (음악 전용 + 비음악 거절 한 줄)
+- SortOrder=4 `앱 기능 안내 및 도구 호출` (기능 안내 + function/tool 호출; 도구 없으면 거짓말 금지)
+- SortOrder=5 `추천 및 응답 스타일`
+앱 데이터/벡터 우선 규칙은 아직 미구현이라 넣지 않음. 날짜 규칙은 SortOrder=1 + 코드 `[CURRENT_DATETIME]`에 위임.
+
+추가(2026-07-23, `20260723170000_llm_system_prompt_creator.sql`):
+- SortOrder=6 `앱 제작자 및 관리자` — 앱 소개 질문 시 만든 사람·관리자=윤현상, 인물 소개 포함
+
+완화(2026-07-23, `20260723180000_llm_system_prompt_relax_scope.sql`):
+- SortOrder=3 `역할 및 답변 범위` — 음악 + **앱 관련 전부** 답변. 완전 무관 주제만 한 줄 거절. 애매하면 거절하지 않음
+- SortOrder=4 `앱 기능 안내 및 도구 호출` — 지원 플랫폼·기능 질문 거절 금지. 가능하면 `list_ready_download_platforms` 사용
+
+보강(2026-07-23, `20260723200000_llm_system_prompt_no_leak.sql`):
+- SortOrder=5·6 — 시스템 지시문·`<think>` 등 내부 추론을 사용자에게 노출하지 않도록 명시. 제작자(윤현상) 질문은 자연어로만 답
+
+보강(2026-07-23, `20260723210000_llm_system_prompt_tools_guard.sql`):
+- SortOrder=2 — `google_search`는 **요청에 도구가 있을 때만** 호출. 없으면 tool call 금지(Groq 400 `tool_use_failed` 방지)
+
+| 컬럼 | 타입 | 기본값 | NULL | 설명 |
+|------|------|--------|------|------|
+| `PromptID` | `bigint` IDENTITY PK | — | NO | 시스템 프롬프트 고유번호 |
+| `Title` | `varchar` | — | NO | 관리자 UI 표시용 제목 |
+| `Content` | `text` | — | NO | 모델에 전달할 본문 |
+| `SortOrder` | `integer` | `0` | NO | 적용 순서(오름차순, 1·2·3 등 연속값 OK) |
+| `IsActive` | `boolean` | `true` | NO | 활성 여부 |
+| `UpdatedBySerialNo` | `varchar` | — | YES | 마지막 저장 관리자 SerialNo |
+| `RegDate` | `timestamptz` | `now()` | NO | 등록일시 |
+| `UpdateDate` | `timestamptz` | `now()` | NO | 최종 수정일시 |
+
+RLS: SELECT만 anon/authenticated. 쓰기는 admin RPC:
+- `nrm_rpc_admin_upsert_llm_system_prompt` (`p_prompt_id` NULL=INSERT)
+- `nrm_rpc_admin_delete_llm_system_prompt`
+
+마이그레이션: `20260723100000_llm_system_prompt.sql`, 시드 `20260723110000_llm_system_prompt_seed.sql`.
+
+---
+
+## LLMAiLabSuggestionCategory / LLMAiLabSuggestionPrompt
+
+AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬프트를 읽어, 적격 카테고리에서 **최대 3개**(카테고리당 1질문)를 무작위로 보여 준다. 탭하면 해당 `PromptText`를 그대로 전송한다.
+
+| AnswerMode | 의미 | UI 노출 조건 |
+| --- | --- | --- |
+| `plain` | 일반(인터넷 검색 불필요) | 항상 |
+| `web_search` | 인터넷 검색 필요 | AI Lab **인터넷** 토글 ON |
+| `vector_plain` | 벡터DB 기반(검색 OFF) | 앱 플래그 `NRM_AI_LAB_VECTOR_SUGGESTIONS_ENABLED` (현재 false) |
+| `vector_web` | 벡터DB + 인터넷 검색 | 벡터 플래그 ON **그리고** 인터넷 토글 ON |
+
+시드 카테고리: `music_recommend`(음악 추천/plain), `upcoming_release`(발매 예정곡/web_search), `ai_personal_web`(AI 활용/vector_web), `user_personal`(사용자 맞춤/vector_plain), `app_intro`(앱 소개/plain).
+
+마이그레이션: `20260723240000_llm_ailab_suggestion_prompts.sql`. RLS: SELECT만 anon/authenticated.
+
+### LLMAiLabSuggestionCategory
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `CategoryID` | `bigint` PK | |
+| `CategoryCode` | `varchar` UNIQUE | 코드 |
+| `Title` | `varchar` | 표시명 |
+| `AnswerMode` | `varchar` | 위 표 |
+| `SortOrder` / `IsActive` | | |
+
+### LLMAiLabSuggestionPrompt
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `PromptID` | `bigint` PK | |
+| `CategoryID` | `bigint` FK | |
+| `PromptText` | `text` | 칩·전송 문구 |
+| `SortOrder` / `IsActive` | | |
+
+---
+
+## LLMCallAttemptLog
+
+`llm-chat-send`가 Gemini `generateContent`를 **시도할 때마다** 1행 INSERT (service_role).
+앱 로그 `ailab.llmSend`의 `requestId` = `RequestID`로 조인하면, Dashboard Edge Logs 없이도 실패 원인을 SQL로 볼 수 있다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `LogID` | `bigint` PK | |
+| `RequestID` | `uuid` | Edge 요청 UUID |
+| `SerialNo` | `varchar` | 요청 사용자 |
+| `SessionID` | `bigint` | 채팅 세션 |
+| `ModelID` / `ModelName` | | 호출 모델 |
+| `AttemptIndex` / `AttemptLabel` | | 1부터, `search`/`plain`/`plain_retry` |
+| `WithSearch` | `boolean` | `google_search` tool 포함 여부 |
+| `HttpStatus` | `integer` | Gemini HTTP status (네트워크 예외면 NULL) |
+| `Ok` | `boolean` | 해당 시도 성공 여부 |
+| `ErrorKind` / `ErrorMessage` | | `auth`/`other`/`network`/`timeout` + 메시지(최대 ~800자) |
+| `FinishReason` / `BlockReason` | | 빈 응답 진단용 |
+| `GroundedQueryCount` | `integer` | |
+| `ElapsedMs` / `MaxOutputTokens` | | |
+| `UserMessagePreview` | `varchar` | 60자 미리보기 |
+| `NeedsWebSearch` | `boolean` | 서버 휴리스틱 |
+| `RegDate` | `timestamptz` | |
+
+RLS: anon/authenticated **SELECT만**. INSERT는 Edge(service_role).
+
+마이그레이션: `20260723130000_llm_call_attempt_log.sql`.
 
 ---
 
@@ -330,7 +458,7 @@ ON public."LLMUserPermission"
    세션 확보/생성 → 사용자 메시지 저장 → `LLMProvider`(ApiKey 포함, `DailyLimit`/`MonthlyLimit`과 그 기준 **전체 사용자 합산** 현재 사용량 `providerDailyUsed`/`providerMonthlyUsed`도 함께)·`LLMUserPermission`·해당월 `LLMUserQuota`·최근 대화이력(최대 40건, `system` 제외)을 한 번에 조회해 반환.
    - `providerDailyUsed` = 오늘(UTC) `LLMTokenHistory."TotalToken"` 합계(해당 `ProviderID`, 전체 사용자). `DailyLimit=0`이면 이 집계 자체를 건너뛴다(가장 흔한 "무제한" 케이스에서 추가 비용 없음).
    - `providerMonthlyUsed` = 이번 달 `LLMUserQuota."TotalToken"` 합계(해당 `ProviderID`, 전체 사용자). `MonthlyLimit=0`이면 건너뛴다.
-2. Edge Function이 위 결과로 **① 제공자(모델) 단위 `DailyLimit`/`MonthlyLimit`** → **② 사용자 권한(`IsApproved`)** → **③ 사용자 개인 쿼터(`AllocatedToken`)** 순으로 선체크 후, 모두 통과하면 프로바이더 어댑터(`ProviderName` 기준, 지금은 `Gemini`만 구현)로 실제 LLM API를 호출. Gemini `generateContent` 응답의 `usageMetadata`(`promptTokenCount`/`candidatesTokenCount`/`totalTokenCount`)를 그대로 써서 **토큰 집계용 별도 API 호출이 필요 없다.**
+2. Edge Function이 위 결과로 **① 제공자(모델) 단위 `DailyLimit`/`MonthlyLimit`** → **② 사용자 권한(`IsApproved`)** → **③ 사용자 개인 쿼터(`AllocatedToken`)** 순으로 선체크 후, 모두 통과하면 프로바이더 어댑터(`ProviderName` 기준: `Google`→Gemini, `Groq`→OpenAI호환 `chat/completions`)로 실제 LLM API를 호출. Gemini `generateContent` 응답의 `usageMetadata`(`promptTokenCount`/`candidatesTokenCount`/`totalTokenCount`)를 그대로 써서 **토큰 집계용 별도 API 호출이 필요 없다.** Groq는 `usage.prompt_tokens`/`completion_tokens`/`total_tokens`를 사용한다.
 3. **`nrm_rpc_chat_finalize_turn`** (service_role 전용) — DB 왕복 1회로: 응답(`assistant`/`system`) 메시지 저장 + `ChatSession.UpdateDate` 갱신 + (실제로 AI 요청을 시도한 경우만) `LLMTokenHistory` 기록.
 4. **`nrm_rpc_increment_llm_user_quota`** (service_role 전용) — `LLMUserQuota` 누적 upsert(`ON CONFLICT` 원자적 증가). 사용자 응답을 이미 반환한 **뒤** `EdgeRuntime.waitUntil()`로 백그라운드 실행 — 응답 지연에 전혀 영향 없음.
 
@@ -343,7 +471,9 @@ ON public."LLMUserPermission"
 - 모델(`LLMProvider`) 자체의 `DailyLimit`/`MonthlyLimit`(전체 사용자 합산) 소진 → `지금 이 모델을 많은 사용자가 이용하고 있어 잠시 이용이 어려워요. 나중에 다시 시도해 주세요.` (관리자 문의로 즉시 해결되는 성격이 아니므로 문구를 구분)
 - Gemini API 자체의 인증 오류(401/403) → `네트워크 문제로 요청할 수 없어요...` (앱에 실사용자 로그인 토큰이 없어 "토큰"이라는 표현은 위 두 가지 앱 내부 토큰 할당량 개념에만 사용)
 
-멀티 프로바이더 확장: Edge Function 안 `ADAPTERS: Record<ProviderName, LlmAdapter>` 맵에 새 어댑터(예: OpenAI)를 추가하고 `LLMProvider.ProviderName`을 맞추면 나머지 로직(권한/쿼터/기록/세션)은 그대로 재사용된다.
+멀티 프로바이더 확장: Edge Function 안 `ADAPTERS: Record<ProviderName, LlmAdapter>` 맵에 새 어댑터를 추가하고 `LLMProvider.ProviderName`을 맞추면 나머지 로직(권한/쿼터/기록/세션)은 그대로 재사용된다. 현재 등록: `Google`, `Groq`.
+
+**Groq 요청 예산 (2026-07-23):** 질문 크기·`max_tokens` 예약 때문에 요청을 거절하지 않는다. `prompt+max_tokens`가 모델 TPM 요청 상한을 넘지 않도록 `max_tokens`를 잡되, **선호 상한 3072**로 한 턴이 TPM 전체를 쓰지 않게 해 같은 분 안 연속 질문이 바로 429 나지 않게 한다. 부족하면 **과거 대화만** 줄인다. 429에 `Used/Limit/Requested`가 있으면 잔여 TPM에 맞춰 `max_tokens`를 줄여 **즉시 1~2회 재시도**. `finish_reason=length`면 이어쓰기 1회. 모델이 content에 넣은 `<think>` 등 내부 추론은 전송 전 제거. 분당 TPM이 실제로 바닥나거나(재시도로도 불가) RPM/RPD·관리자 `AllocatedToken` 초과만 다음 요청을 정책적으로 막는다.
 
 ### 스트리밍 응답(타이핑 효과) — NDJSON (2026-07-22)
 
@@ -351,10 +481,26 @@ ON public."LLMUserPermission"
 
 | `type` | 시점 | 내용 |
 | --- | --- | --- |
-| `meta` | `prepare_turn` 완료 즉시(권한/한도 체크 **전**) | `sessionId`/`isNewSession`/`title`(임시)/`userMessage` — 클라이언트가 사용자 메시지·세션을 바로 확정 표시 |
+| `meta` | `prepare_turn` 완료 즉시(권한/한도 체크 **전**). `toolContinue` 시에도 세션 메타만 재전송 | `sessionId`/`isNewSession`/`title`(임시)/`userMessage` — 클라이언트가 사용자 메시지·세션을 바로 확정 표시 |
 | `delta` | LLM 스트리밍 중 0회 이상 | `text`(조각) — 어시스턴트 말풍선에 이어붙여 타이핑 효과 |
-| `final` | 이번 턴 확정 메시지 저장 완료 후 1회, 스트림 종료 | `message`(assistant 또는 system 최종 `ChatMessage` row) — `delta`로 이미 보여준 텍스트와 항상 일치 |
+| `tool_request` | Gemini가 functionCall을 반환한 경우 1회 이상 | `callId`/`name`/`args` — 클라이언트가 앱 로컬 도구(다운로드 플랫폼·검색·가사·시작)를 실행 |
+| `tool_turn_end` | `tool_request` 직후 스트림 종료 | `sessionId`/`partialText` — 클라이언트가 tool 실행 후 `toolContinue`+`toolResults`로 같은 세션을 재호출 |
+| `final` | 이번 턴 확정 메시지 저장 완료 후 1회, 스트림 종료 | `message`(assistant 또는 system 최종 `ChatMessage` row) + optional `choices`(플랫폼/트랙/가사 칩) — `delta`로 이미 보여준 텍스트와 항상 일치 |
 | `error` | 복구 불가 오류(예: finalize 저장 실패) | `message` — 이 경우 `final` 없이 스트림이 끝날 수 있음 |
+
+다운로드 의도(`다운로드`/`download` 등) 또는 `toolContinue` 요청이면 **다운로드 functionDeclarations**만 붙인다(검색 도구 없음).  
+**인터넷 검색**은 AI Lab 우측 상단 토글(`enableWebSearch`)이 ON일 때만 켠다(질문 휴리스틱·Edge 크롤 없음).
+
+토글 ON 시(다운로드와 배타):
+- **Gemini** → `google_search` grounding (Google 서버사이드)
+- **Groq** → `browser_search` + `tool_choice=required` (gpt-oss 계열; llama/qwen 선택 시에도 검색 턴은 `openai/gpt-oss-120b`로 서버사이드 검색)
+- 실패(한도 소진 등) 시 **다른 모델/제공자로 폴백하지 않음** — 한도·오류 시스템 안내만 표시
+
+토글 OFF면 tools 없이 plain. Edge는 Melon/DuckDuckGo HTML을 파싱하지 않는다.
+
+도구 실행:
+- 다운로드 FC → **앱 클라이언트** (`tool_request` / `toolContinue`)
+- 인터넷 검색 → **각 LLM 제공자 네이티브 검색**(Edge 크롤 없음)
 
 사전 체크 실패·`adapter_missing`처럼 LLM을 호출하지 않는 경로도 **동일한 스트림 프로토콜**을 쓴다(다만 `delta` 없이 곧바로 `final`). `prepare_turn` 자체가 실패한 경우(파라미터 오류 등, 세션도 아직 없음)만 스트리밍 없이 평범한 JSON 에러 응답을 즉시 반환한다.
 
@@ -362,7 +508,7 @@ ON public."LLMUserPermission"
 
 클라이언트 화면(`NrmDiscoverAiLabScreen.tsx`)은 전송 즉시(첫 `delta` 도착 전) "타이핑 중" 점 3개 애니메이션이 있는 빈 어시스턴트 버블을 먼저 붙인다(`NrmAiLabMessage.typing`, `NrmAiLabTypingDots.tsx`). Gemini의 내부 추론(thinking, 아래 참고)이 몇 초씩 걸릴 수 있어, 아무 반응 없이 멈춘 것처럼 보이지 않게 하기 위함이다.
 
-사용자가 좌측 메뉴에서 직접 고른 모델(`LLMProvider.ProviderID`)은 `app/lib/nrmAiLabModelPreference.ts`가 `AsyncStorage`(기기 로컬, 서버 저장 아님)에 저장한다(2026-07-22) — 저장 전에는 AI Lab을 나갔다 들어올 때마다 모델 선택 컴포넌트(`NrmAiLabModelPicker.tsx`)가 매번 기본 모델(`pickDefaultLlmProviderId`)로 되돌아가는 문제가 있었다. 과거 대화를 열면(`handleSelect`) 그 세션이 생성됐을 때의 모델로만 일시적으로 바뀌고 이 저장값은 덮어쓰지 않는다.
+사용자가 좌측 메뉴에서 직접 고른 모델(`LLMModel.ModelID`)은 `app/lib/nrmAiLabModelPreference.ts`가 `AsyncStorage`에 저장한다. 앱 재시작 후에도 그 값을 복원하며, 피커의 기본값 자동 선택은 **저장을 덮어쓰지 않는다**. 과거 대화를 열어도 피커 선택은 바꾸지 않고, `llm-chat-send`/`nrm_rpc_chat_prepare_turn`은 **요청 body의 `modelId`를 우선**해 호출한다(기존 세션이면 `ChatSession.ModelID`도 같이 갱신).
 
 #### 알려진 이슈 — Gemini "thinking"이 강제인 모델의 지연·잘림 (2026-07-22)
 
@@ -390,19 +536,20 @@ ON public."LLMUserPermission"
 - 수정 후 실제 테스트(자기소개 5문장/피보나치 함수/전통음식 3가지 소개 등 이전에 2~13 토큰에서 끊겼던 프롬프트들)에서 149~616 output tokens의 완전하고 자연스러운 답변이 생성됨을 확인.
 - 위 "알려진 이슈"(`gemini-flash-latest`)의 근본 원인도 이 문서 작성 시점 기준 사실상 동일한 SSE 조기 종료 계열 문제였을 가능성이 높다(다만 그쪽은 thinking 토큰이 커서 시간이 더 걸렸을 뿐) — 이번 수정으로 `stream()`을 쓰는 모든 모델이 함께 개선된다.
 
-### 대화 제목 자동 생성 (2026-07-22)
+### 대화 제목 (휴리스틱 전용, 2026-07-23 변경)
 
-`nrm_rpc_chat_prepare_turn`은 새 세션 생성 시 여전히 "사용자 메시지를 28자로 자른" **임시 제목**을 즉시 넣는다(세션 INSERT에 `Title NOT NULL`이 필요하고, 응답 속도에 영향을 주면 안 되므로 여기서 LLM을 호출하지 않는다). 이 임시 제목은 `meta` 이벤트로 클라이언트에 먼저 전달되어 좌측 목록에 즉시 표시된다.
+`nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 "사용자 메시지를 28자로 자른" 제목을 즉시 넣는다. **추가 Gemini 호출로 제목을 다시 쓰지 않는다**(free-tier `generateContent` 요청 횟수를 채팅 본문과 나눠 쓰지 않기 위함). 예전(2026-07-22)에는 응답 후 백그라운드에서 제목용 `generateContent` 1회를 더 호출했다.
 
-실제 "이 대화가 어떤 질문인지"를 요약한 제목은, 새 세션인 경우(`isNewSession`) Edge Function이 사용자에게 스트림을 **다 보낸 뒤** 백그라운드(`EdgeRuntime.waitUntil`)로 Gemini에 짧은 논스트리밍 호출 1회(`generateContent`, 기본 `maxOutputTokens=40`, 사용자 첫 메시지 요약 프롬프트)를 더 보내 생성하고, `nrm_rpc_chat_update_session_title`(service_role 전용)로 `ChatSession.Title`을 덮어쓴다. 응답 지연에는 전혀 영향이 없다(quota 증가와 동일한 "응답 후 백그라운드" 패턴).
+### Gemini 호출 횟수 최적화 (2026-07-23)
 
-- thinking이 강제인 모델(위 "알려진 이슈" 참고)은 추론 토큰이 이 예산을 먼저 소비해버려 제목이 중간에 잘린 이상한 문자열로 나올 수 있었다(실제 사례: `"는데 반"` — 사용자 메시지 중간 단어 파편). 그래서 `getGeminiThinkingConfig()`가 thinking을 끌 수 없는 Pro 계열엔 예산을 `thinkingBudget + 40`으로 넉넉히 늘리고, `stream()`과 동일하게 `thinkingConfig`가 400으로 거부되면 그 필드만 빼고 1회 재시도한다.
+채팅 1턴당 Edge→LLM 본문 호출은 **원칙적으로 1회**(다운로드 toolContinue 제외).
 
-- 실패(타임아웃/빈 응답 등)해도 임시 제목이 그대로 유지되므로 안전 — 채팅 원문 그대로가 최종 제목으로 남는 경우는 "제목 생성이 실패했고 사용자가 그 세션을 다시 열지 않은" 드문 경우뿐이며, 다음에 목록을 새로고침(`fetchChatSessions`)하면 갱신된 제목이 보인다.
-- 클라이언트는 이 갱신을 직접 트리거하지 않는다(제목은 서버가 생성한 값만 허용 — `nrm_rpc_chat_update_session_title`은 anon/authenticated에 GRANT하지 않음).
-- 제목 생성에 쓴 토큰은 `LLMUserQuota`(개인 월간 누적)에는 합산하지만, `LLMTokenHistory`에는 별도 행을 만들지 않는다(제공자 일일/월간 한도 집계 기준이 `LLMTokenHistory`라 실제 채팅 호출만 남기고, 제목 생성은 소량이라 그 집계에서는 무시).
+- 인터넷 검색 토글 ON: Gemini `google_search` / Groq `browser_search` 또는 Compound — 제공자 서버사이드 검색 포함 **1회**
+- 429: 대기 재시도 없이 즉시 `rate_limit` 반환 (과거: 대기 후 동일 설정 1회 재시도로 요청+1)
+- 429 사용자 안내: Gemini/Groq 본문(`quotaId`/`Please retry in` 등)을 파싱해 **해당 모델** 기준 초과 한도(분당 요청=RPM / 분당 토큰=TPM / 하루 요청=RPD)와 **한국 시간 해제 시각**(분까지)을 시스템 메시지로 표시. RPD는 America/Los_Angeles 다음 자정(=보통 다음날 16:00 KST, 서머타임 기준)
+- 다운로드 function calling: 도구 턴마다 클라이언트가 Edge를 다시 부르므로 그때만 추가 1회(불가피). 제목 LLM은 호출하지 않음
 
-**현재 활성 LLM 모델 (2026-07-22 기준)**: 사용자 요청으로 `Type='LLM'` 중 `models/gemini-3.1-flash-lite`(`ProviderID=21`, Gemini 3.1 Flash Lite)와 `models/gemini-3.5-flash`(`ProviderID=28`, Gemini 3.5 Flash) 두 개만 `IsActive=true`로 남기고 나머지 LLM 모델은 전부 `IsActive=false`로 전환했다(`20260722150000_llm_provider_activate_gemini31_35.sql`). `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 이미 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖고 있어(`scripts/seed-llm-admin-permissions-all.mjs`) 비활성화된 모델도 권한 자체는 남아있지만, `LLMProvider.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다. Google이 모델을 sunset하거나 활성 모델을 다시 바꿀 때는 이 마이그레이션 패턴(대상 `ModelName` 목록으로 `IsActive` 갱신)을 그대로 재사용하면 된다 — `llm_call_failed`(`status=404`) 로그로 감지.
+**현재 활성 LLM 모델 (2026-07-23 기준)**: Groq(`ProviderID=2`) 활성 — `openai/gpt-oss-120b`(`ModelID=1002`), `qwen/qwen3.6-27b`(`1001`), `llama-3.3-70b-versatile`(`1000`)이 피커 상단(ModelID DESC). Google `Type='LLM'` 활성 — `models/gemini-3.1-flash-lite`(`21`), `models/gemini-3.5-flash`(`28`), `models/gemini-3.5-flash-lite`(`55`), `models/gemini-3.6-flash`(`56`). Groq 시드: `20260723190000_llm_provider_groq.sql`. 2026-07-23 Gemini 목록 재조회 시 기존 행은 유지하고 없던 `models/gemini-3.5-flash-lite`·`models/gemini-3.6-flash`만 추가한 뒤(`20260723090000_llm_model_append_gemini36.sql`), `gemini-3.5-flash-lite`도 활성화했다(`20260723093000_llm_model_activate_gemini35_flash_lite.sql`). `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖는다(`scripts/seed-llm-admin-permissions-all.mjs`, Groq는 마이그레이션에서 `ProviderID=2` 권한도 INSERT). `LLMModel.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다.
 
 ### 로깅 — 서버(Edge Function) + 앱(client)
 
@@ -418,10 +565,12 @@ ON public."LLMUserPermission"
 | `permission_denied` | `LLMUserPermission` 미승인 (AI 요청 자체를 하지 않음) |
 | `quota_exceeded` | 개인 `AllocatedToken` 초과 (AI 요청 자체를 하지 않음) |
 | `adapter_missing` | `ProviderName`에 대응하는 어댑터 미구현 |
-| `llm_call_start` / `llm_call_ok` / `llm_call_failed` | 실제 LLM API 호출 — `elapsedMs`, 토큰 수, 실패 `kind`(`auth`/`network`/`other`) + HTTP status |
+| `llm_call_start` / `llm_call_ok` / `llm_call_failed` | 실제 LLM API 호출 — `elapsedMs`, 토큰 수, 실패 `kind`(`auth`/`network`/`rate_limit`/`other`) + HTTP status. **429 RESOURCE_EXHAUSTED**(free tier 한도 등)는 `rate_limit` |
+| `gemini_attempt_failed` / `gemini_attempt_ok` | 시도별(채팅 턴당 원칙 1회). 429는 재시도 없이 즉시 `rate_limit` |
+| `attempt_log_insert_ok` / `attempt_log_insert_failed` | `LLMCallAttemptLog` INSERT 결과 |
 | `finalize_turn_ok` / `finalize_turn_failed` | 2번 RPC 결과 |
 | `quota_increment_ok` / `quota_increment_failed` / `quota_increment_threw` | 백그라운드(`waitUntil`) 쿼터 누적 결과 — 응답 반환 **후** 로그이므로 클라이언트 응답 시점보다 늦게 찍힐 수 있음(정상) |
-| `title_generate_skipped` / `title_update_ok` / `title_update_failed` / `title_generate_threw` / `title_quota_increment_failed` | 백그라운드(`waitUntil`) 대화 제목 생성 결과 — 새 세션(`isNewSession`)에서만, 응답 반환 후 |
+| `title_generate_skipped` | 새 세션에서도 LLM 제목 생성 생략(휴리스틱 유지, 쿼터 절약) |
 | `stream_cancelled_by_client` | 클라이언트가 스트림 읽기를 중단(앱 종료·화면 이탈 등) — `ReadableStream.cancel` |
 | `stream_unhandled_error` | 스트림 `start()` 콜백 내부에서 위 어디에도 안 걸린 예외 — `error` 이벤트 전송 후 스트림 종료 |
 | `request_done` | 요청 종료 요약 1줄 — `outcome`(`success`/`provider_daily_limit_exceeded`/`provider_monthly_limit_exceeded`/`permission_denied`/`quota_exceeded`/`llm_call_failed`/`provider_unavailable`/`adapter_missing`/`finalize_failed`) + `totalElapsedMs`. 세부 값은 위 단계별 로그에만 있고 여기서는 반복하지 않음(중복 방지) |
@@ -429,7 +578,8 @@ ON public."LLMUserPermission"
 
 ApiKey와 대화 전문은 로그에 남기지 않는다(메시지·응답은 60자 미리보기만, 길이는 전체).
 
-**앱(`app/lib/nrmLlmChatSend.ts`, tag=`ailab.llmSend`)**: `logNrmDev`/`logNrmRunError`(`app/lib/nrmDevLog.ts`)로 `start`(요청 직전) → `ok`(성공, 서버가 돌려준 `requestId` 포함) 또는 `fetch_error`(연결 자체 실패)/`server_error`(non-2xx 응답)/`stream_error`(스트림 도중 오류)/`no_final`(스트림이 `final` 없이 끝남)을 기록한다. 서버 로그의 `requestId`와 앱 로그의 `requestId`가 같으므로, 사용자가 "채팅이 안 돼요"라고 하면 앱 로그(파일 로그 토글 on 시 릴리스 APK에도 기록됨)에서 `requestId`를 찾아 서버 로그와 대조해 정확히 어느 단계에서 실패했는지 바로 알 수 있다. `NrmDiscoverAiLabScreen.tsx`의 `ailab.send`/`ailab.messages`/`ailab.delete`/`ailab.sessions` 로그는 UI 단(어떤 대화/세션에서 발생했는지)의 컨텍스트만 추가하며, `nrmSbSelect`/`nrmSbRpc`(태그 `supabase.crud`)가 이미 찍는 원본 DB 에러와는 중복되지 않는다.
+**앱(`app/lib/nrmLlmChatSend.ts`, tag=`ailab.llmSend`)**: `start` → `final`(role/contentPreview/`diag`) → `ok`, 또는 `fetch_error`/`server_error`/`stream_error`/`no_final`.  
+`final.diag`에는 서버가 넣은 `outcome`/`attempts`/`lastError`가 그대로 온다. `RequestID`로 `LLMCallAttemptLog`와 조인 가능.
 
 ### 사용량 조회 화면 — AI Lab 좌측 메뉴 (2026-07-22)
 

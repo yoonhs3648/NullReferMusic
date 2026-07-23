@@ -141,6 +141,52 @@ export type NrmSupabaseLlmUserMonthlyAllocationRow = {
   UpdateDate: string;
 };
 
+/** LLMSystemPrompt — AI Lab 전역 시스템 프롬프트(모든 모델 동일 적용). */
+export type NrmSupabaseLlmSystemPromptRow = {
+  PromptID: number;
+  Title: string;
+  Content: string;
+  SortOrder: number;
+  IsActive: boolean;
+  UpdatedBySerialNo: string | null;
+  RegDate: string;
+  UpdateDate: string;
+};
+
+/** AI Lab 추천 질문 응답 모드 */
+export type NrmAiLabSuggestionAnswerMode =
+  | 'plain'
+  | 'web_search'
+  | 'vector_plain'
+  | 'vector_web';
+
+export type NrmSupabaseLlmAiLabSuggestionCategoryRow = {
+  CategoryID: number;
+  CategoryCode: string;
+  Title: string;
+  AnswerMode: NrmAiLabSuggestionAnswerMode;
+  SortOrder: number;
+  IsActive: boolean;
+};
+
+export type NrmSupabaseLlmAiLabSuggestionPromptRow = {
+  PromptID: number;
+  CategoryID: number;
+  PromptText: string;
+  SortOrder: number;
+  IsActive: boolean;
+};
+
+/** UI 칩용(선정 결과) */
+export type NrmAiLabSuggestionChip = {
+  promptId: number;
+  categoryId: number;
+  categoryCode: string;
+  categoryTitle: string;
+  answerMode: NrmAiLabSuggestionAnswerMode;
+  promptText: string;
+};
+
 /** ChatMessage — Role: 사용자 SerialNo(사용자 발화) | 'assistant' | 'system'. */
 export type NrmSupabaseChatMessageRow = {
   MessageID: number;

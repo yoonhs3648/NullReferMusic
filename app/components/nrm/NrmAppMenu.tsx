@@ -49,6 +49,7 @@ import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInqu
 import { NrmAdminDiscoverEditPanel } from '@/components/nrm/settings/NrmAdminDiscoverEditPanel';
 import { NrmAdminLlmTokenLookupPanel } from '@/components/nrm/settings/NrmAdminLlmTokenLookupPanel';
 import { NrmAdminLlmTokenAllocationPanel } from '@/components/nrm/settings/NrmAdminLlmTokenAllocationPanel';
+import { NrmAdminLlmSystemPromptPanel } from '@/components/nrm/settings/NrmAdminLlmSystemPromptPanel';
 import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDeviceResetPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
@@ -195,6 +196,7 @@ type Panel =
   | 'adminDiscoverEdit'
   | 'adminLlmTokenLookup'
   | 'adminLlmTokenAllocation'
+  | 'adminLlmSystemPrompt'
   | 'adminDeviceReset'
   | ChartMenuPanel
   | 'periodCharts'
@@ -1713,6 +1715,21 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
+                  onPress={() => pushPanel('adminLlmSystemPrompt')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    AI 시스템 프롬프트 설정
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
                   onPress={() => pushPanel('adminDeviceReset')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1834,6 +1851,20 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminLlmTokenAllocationPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminLlmSystemPrompt' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminLlmSystemPromptPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

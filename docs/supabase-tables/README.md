@@ -14,7 +14,7 @@ Supabase Dashboard는 테이블/컬럼 `COMMENT`를 UI에서 잘 보여주지 �
 
 | 그룹 | MD | 테이블 | 상태 |
 |------|-----|--------|------|
-| LLM | [`llm.md`](./llm.md) | `LLMProvider`, `LLMModel`, `LLMUserPermission`, `LLMUserQuota`, `LLMTokenHistory`, `LLMUserMonthlyAllocation` | 원격 생성됨 (2026-07-22 정규화) |
+| LLM | [`llm.md`](./llm.md) | `LLMProvider`, `LLMModel`, `LLMSystemPrompt`, `LLMUserPermission`, `LLMUserQuota`, `LLMTokenHistory`, `LLMUserMonthlyAllocation`, `LLMCallAttemptLog`, `LLMAiLabSuggestionCategory`, `LLMAiLabSuggestionPrompt` | 원격 생성됨 (Suggestion 2026-07-23) |
 | Chat | [`chat.md`](./chat.md) | `ChatSession`, `ChatMessage` | 원격 생성됨 |
 | 기존 NRM | [`nrm-core.md`](./nrm-core.md) | `nrm_apk_version`, `nrm_alarm`, `nrm_user_ban_list`, `nrm_inquiry`, `nrm_user_list`, `nrm_music_list` | 운영 중 |
 | Track 이력 | [`track-history.md`](./track-history.md) | `TrackHistory` (+ Storage `album-covers`) | 원격 생성됨 |

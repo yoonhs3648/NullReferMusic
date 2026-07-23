@@ -27,7 +27,7 @@ LLMProvider (1) ──< LLMModel (N)
 | `SessionID` | `bigint` IDENTITY | — | NO | 대화 세션 고유번호 **(복합 PK)** |
 | `SerialNo` | `varchar` | — | NO | 사용자 일련번호 (앱 `getNrmAppSerialNo()` 원문, 예: `"admin"`, `"1092452918"`) **(복합 PK)** |
 | `ProviderID` | `bigint` | — | NO | LLM 제공자 고유번호 (`LLMProvider.ProviderID`) |
-| `ModelID` | `bigint` | — | NO | 이 세션이 사용하는 LLM 모델 (`LLMModel.ModelID`) — 생성 시 고정 |
+| `ModelID` | `bigint` | — | NO | 이 세션이 마지막으로 사용한 LLM 모델 (`LLMModel.ModelID`). 생성 시 넣고, 클라이언트가 모델을 바꾸면 `nrm_rpc_chat_prepare_turn`이 갱신 |
 | `Title` | `varchar` | — | NO | 대화 제목 |
 | `IsDeleted` | `boolean` | `false` | NO | 삭제 여부 (소프트 삭제) |
 | `RegDate` | `timestamptz` | `now()` | NO | 생성 일시 |

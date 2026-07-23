@@ -1,5 +1,7 @@
 /** AI Lab 채팅 UI 전용 타입·상수 (Supabase ChatSession/ChatMessage 기반 실 데이터). */
 
+import type { NrmAiLabChoice } from '@/lib/nrmAiLabDownloadTools';
+
 export type NrmAiLabMessageRole = 'user' | 'assistant' | 'system';
 
 export type NrmAiLabMessage = {
@@ -11,6 +13,8 @@ export type NrmAiLabMessage = {
   pending?: boolean;
   /** 어시스턴트가 아직 답변을 만드는 중(첫 delta 도착 전) — 타이핑 인디케이터 표시용 */
   typing?: boolean;
+  /** 플랫폼/트랙/가사 선택 칩 — 탭하면 사용자 메시지로 전송 */
+  choices?: NrmAiLabChoice[];
 };
 
 export type NrmAiLabConversation = {

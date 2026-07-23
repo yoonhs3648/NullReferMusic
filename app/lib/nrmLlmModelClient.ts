@@ -33,11 +33,12 @@ function mapLlmModelRow(row: NrmSupabaseLlmModelPublicRow): NrmLlmModelItem {
   };
 }
 
-/** Type=LLM — IsActive 우선, ModelDisplayName 가나다순. */
+/** Type=LLM — IsActive 우선 → ModelID 높은 순 → ProviderID 높은 순. */
 export function sortLlmModelsForPicker(items: NrmLlmModelItem[]): NrmLlmModelItem[] {
   return [...items].sort((a, b) => {
     if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-    return a.modelDisplayName.localeCompare(b.modelDisplayName, 'ko-KR', { sensitivity: 'base' });
+    if (a.modelId !== b.modelId) return b.modelId - a.modelId;
+    return b.providerId - a.providerId;
   });
 }
 
@@ -61,7 +62,8 @@ export async function fetchLlmModelsForAiLab(options?: {
           .select(LLM_MODEL_PUBLIC_SELECT)
           .eq('Type', 'LLM')
           .order('IsActive', { ascending: false })
-          .order('ModelDisplayName', { ascending: true }),
+          .order('ModelID', { ascending: false })
+          .order('ProviderID', { ascending: false }),
     );
     const items = sortLlmModelsForPicker(rows.map(mapLlmModelRow));
     memoryCache = items;
