@@ -1,22 +1,26 @@
-// AI Lab 「인터넷 검색」 ON/OFF — 기기 로컬 저장(모델 선택과 동일 패턴).
+/**
+ * @deprecated AI Lab 인터넷 검색은 서버 Intent Classifier가 자동 결정한다.
+ * UI 토글은 제거됨. 남은 AsyncStorage 키는 무시해도 된다.
+ */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'nrm_ai_lab_web_search_enabled_v1';
 
+/** @deprecated 항상 false — 토글 제거 후 호환용 */
 export async function loadAiLabWebSearchEnabled(): Promise<boolean> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw == null) return false;
-    return raw === '1' || raw === 'true';
+    await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {
-    return false;
+    // ignore
   }
+  return false;
 }
 
-export async function saveAiLabWebSearchEnabled(enabled: boolean): Promise<void> {
+/** @deprecated no-op */
+export async function saveAiLabWebSearchEnabled(_enabled: boolean): Promise<void> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, enabled ? '1' : '0');
+    await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {
-    // 저장 실패는 무시 — 이번 세션 state만 유지.
+    // ignore
   }
 }

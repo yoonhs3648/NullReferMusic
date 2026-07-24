@@ -11,9 +11,14 @@ import {
 } from 'react-native';
 
 import { NrmAiLabModelPicker } from '@/components/nrm/discover/NrmAiLabModelPicker';
+import { NrmAiLabMusicPlatformPickerModal } from '@/components/nrm/discover/NrmAiLabMusicPlatformPickerModal';
 import { NrmAiLabUsagePanel } from '@/components/nrm/discover/NrmAiLabUsagePanel';
 import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
+import {
+  getAiLabMusicPlatformLabel,
+  type MusicPlatformId,
+} from '@/lib/nrmAiLabMusicPlatform';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 
 type DrawerPanel = 'root' | 'usage';
@@ -34,6 +39,8 @@ type Props = {
   onLlmModelChange: (modelId: number) => void;
   onLlmModelDefault?: (modelId: number) => void;
   llmModelPrefReady?: boolean;
+  musicPlatformId: MusicPlatformId;
+  onMusicPlatformChange: (id: MusicPlatformId) => void;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDelete: (id: string) => void;
@@ -56,6 +63,8 @@ export function NrmAiLabSidebar({
   onLlmModelChange,
   onLlmModelDefault,
   llmModelPrefReady = true,
+  musicPlatformId,
+  onMusicPlatformChange,
   onSelect,
   onNewChat,
   onDelete,
@@ -66,6 +75,7 @@ export function NrmAiLabSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [menuForId, setMenuForId] = useState<string | null>(null);
+  const [platformModalOpen, setPlatformModalOpen] = useState(false);
 
   // Android 하드웨어 뒤로: 서브패널이면 루트로 pop(처리함=true), 루트면 부모가 닫도록 false.
   useEffect(() => {
@@ -153,6 +163,25 @@ export function NrmAiLabSidebar({
             </View>
             <Text style={[styles.rowLabel, { color: titleColor }]}>사용량 조회</Text>
           </View>
+        </Pressable>
+
+        <Pressable
+          onPress={() => setPlatformModalOpen(true)}
+          style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}
+          accessibilityRole="button"
+          accessibilityLabel="플랫폼 선택">
+          <View style={styles.rowLeft}>
+            <View style={styles.iconSlot}>
+              <Ionicons name="musical-notes-outline" size={22} color={titleColor} />
+            </View>
+            <View style={styles.rowTextCol}>
+              <Text style={[styles.rowLabel, { color: titleColor }]}>플랫폼 선택</Text>
+              <Text style={[styles.rowSubLabel, { color: bodyColor }]} numberOfLines={1}>
+                {getAiLabMusicPlatformLabel(musicPlatformId)}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={bodyColor} />
         </Pressable>
 
         <Pressable
@@ -271,6 +300,14 @@ export function NrmAiLabSidebar({
           </Pressable>
         </Pressable>
       </Modal>
+
+      <NrmAiLabMusicPlatformPickerModal
+        visible={platformModalOpen}
+        isDark={isDark}
+        value={musicPlatformId}
+        onChange={onMusicPlatformChange}
+        onClose={() => setPlatformModalOpen(false)}
+      />
     </View>
   );
 }
@@ -308,6 +345,16 @@ const styles = StyleSheet.create({
     gap: nrmTokens.space.sm,
     flex: 1,
     minWidth: 0,
+  },
+  rowTextCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rowSubLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
   },
   iconSlot: {
     width: 28,

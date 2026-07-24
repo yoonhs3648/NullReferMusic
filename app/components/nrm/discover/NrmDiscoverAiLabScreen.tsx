@@ -9,7 +9,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -31,17 +30,24 @@ import {
   nrmAiLabEmptyGreeting,
   nrmAiLabRelativeTimeLabel,
   nrmAiLabTitleFromPrompt,
+  parseAgentUiFromDiag,
+  agentUiBadgeIconName,
   type NrmAiLabConversation,
   type NrmAiLabMessage,
 } from '@/lib/nrmAiLabChatUi';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   loadAiLabSelectedModelId,
   saveAiLabSelectedModelId,
 } from '@/lib/nrmAiLabModelPreference';
 import {
-  loadAiLabWebSearchEnabled,
-  saveAiLabWebSearchEnabled,
-} from '@/lib/nrmAiLabWebSearchPreference';
+  aiLabMusicPlatformUnavailableMessage,
+  DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
+  loadAiLabSelectedMusicPlatformId,
+  resolveAiLabMusicPlatformForMessage,
+  saveAiLabSelectedMusicPlatformId,
+  type MusicPlatformId,
+} from '@/lib/nrmAiLabMusicPlatform';
 import {
   fetchAiLabSuggestionCatalog,
   pickAiLabSuggestionChips,
@@ -129,11 +135,13 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [llmModelId, setLlmModelId] = useState<number | null>(null);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [suggestionChips, setSuggestionChips] = useState<NrmAiLabSuggestionChip[]>([]);
   const suggestionCatalogRef = useRef<Awaited<ReturnType<typeof fetchAiLabSuggestionCatalog>>>([]);
   /** AsyncStorage 선호 모델 로드 완료 전엔 기본값으로 저장을 덮어쓰지 않음 */
   const [llmModelPrefReady, setLlmModelPrefReady] = useState(false);
+  const [musicPlatformId, setMusicPlatformId] = useState<MusicPlatformId>(
+    DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
+  );
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
   /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
@@ -173,8 +181,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    void loadAiLabWebSearchEnabled().then((on) => {
-      if (!cancelled) setWebSearchEnabled(on);
+    void loadAiLabSelectedMusicPlatformId().then((id) => {
+      if (!cancelled) setMusicPlatformId(id);
     });
     return () => {
       cancelled = true;
@@ -186,33 +194,26 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     void fetchAiLabSuggestionCatalog().then((catalog) => {
       if (cancelled) return;
       suggestionCatalogRef.current = catalog;
-      setSuggestionChips(pickAiLabSuggestionChips(catalog, webSearchEnabled));
+      setSuggestionChips(pickAiLabSuggestionChips(catalog));
     });
     return () => {
       cancelled = true;
     };
-    // 최초 로드 — webSearchEnabled는 아래 effect에서 재선정
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (suggestionCatalogRef.current.length === 0) return;
-    setSuggestionChips(pickAiLabSuggestionChips(suggestionCatalogRef.current, webSearchEnabled));
-  }, [webSearchEnabled]);
 
   const handleLlmModelChange = useCallback((modelId: number) => {
     setLlmModelId(modelId);
     void saveAiLabSelectedModelId(modelId);
   }, []);
 
-  const handleWebSearchToggle = useCallback((on: boolean) => {
-    setWebSearchEnabled(on);
-    void saveAiLabWebSearchEnabled(on);
-  }, []);
-
   /** 기본 모델 자동 선택 — UI만 채우고 저장하지 않음(사용자 선호 덮어쓰기 방지) */
   const handleLlmModelDefault = useCallback((modelId: number) => {
     setLlmModelId((prev) => (prev == null ? modelId : prev));
+  }, []);
+
+  const handleMusicPlatformChange = useCallback((id: MusicPlatformId) => {
+    setMusicPlatformId(id);
+    void saveAiLabSelectedMusicPlatformId(id);
   }, []);
 
   const refreshSessions = useCallback(async () => {
@@ -411,6 +412,36 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         let lastToolChoices: NrmAiLabChoice[] | undefined;
         let sessionIdForApi: string | null = targetId;
 
+        const resolvedPlatform = await resolveAiLabMusicPlatformForMessage(
+          text,
+          musicPlatformId,
+        );
+        const musicPlatformBlocked =
+          !resolvedPlatform.available || !resolvedPlatform.searchSupported;
+
+        if (resolvedPlatform.explicit && !resolvedPlatform.available) {
+          const sysMsg: NrmAiLabMessage = {
+            id: nextTempId('s'),
+            role: 'system',
+            content: aiLabMusicPlatformUnavailableMessage(resolvedPlatform.label),
+          };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === currentConvId
+                ? {
+                    ...c,
+                    messages: c.messages
+                      .filter((m) => m.id !== tempAssistantId)
+                      .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
+                      .concat(sysMsg),
+                  }
+                : c,
+            ),
+          );
+          setSending(false);
+          return;
+        }
+
         try {
           for (let round = 0; round < MAX_AI_LAB_TOOL_ROUNDS; round += 1) {
             const pendingToolCalls: NrmLlmToolRequestEvent[] = [];
@@ -440,9 +471,12 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                 modelId: llmModelId,
                 sessionId: sessionIdForApi,
                 message: toolContinue ? '' : text,
-                enableWebSearch: webSearchEnabled,
                 toolContinue,
                 toolResults: toolContinue ? toolResults : undefined,
+                musicPlatformId: resolvedPlatform.platformId,
+                musicPlatformLabel: resolvedPlatform.label,
+                musicPlatformBlocked,
+                musicPlatformExplicit: resolvedPlatform.explicit,
               },
               {
                 onMeta: (meta) => {
@@ -503,12 +537,13 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                     (final.choices && final.choices.length > 0
                       ? final.choices
                       : lastToolChoices) ?? undefined;
+                  const agentUi = parseAgentUiFromDiag(final.diag);
                   setConversations((prev) =>
                     prev.map((c) => {
                       if (c.id !== currentConvId) return c;
                       const messages = c.messages.map((m) =>
                         m.id === tempAssistantId
-                          ? { ...final.message, choices }
+                          ? { ...final.message, choices, agentUi }
                           : m,
                       );
                       return {
@@ -530,7 +565,9 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
 
             const nextResults: NrmLlmToolResultPayload[] = [];
             for (const call of pendingToolCalls) {
-              const out = await executeAiLabDownloadTool(call.name, call.args);
+              const out = await executeAiLabDownloadTool(call.name, call.args, {
+                musicPlatformId: resolvedPlatform.platformId,
+              });
               if (out.choices && out.choices.length > 0) {
                 roundChoices = out.choices;
               }
@@ -582,7 +619,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         }
       })();
     },
-    [activeId, llmModelId, sending, serialNo, webSearchEnabled],
+    [activeId, llmModelId, musicPlatformId, sending, serialNo],
   );
 
   const handleSend = useCallback(() => {
@@ -636,6 +673,58 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
             ) : (
               <NrmAiLabMarkdown content={item.content} color={titleColor} isDark={isDark} />
             )}
+            {!isUser && item.agentUi && !item.typing ? (
+              <View style={styles.agentMetaBlock}>
+                {item.agentUi.warnings.length > 0 ? (
+                  <View style={styles.agentWarnRow}>
+                    {item.agentUi.warnings.map((w) => (
+                      <View
+                        key={w.id}
+                        style={[styles.agentWarnChip, { borderColor: hairline }]}>
+                        <Ionicons name="warning-outline" size={12} color={systemTextColor} />
+                        <Text style={[styles.agentMetaText, { color: systemTextColor }]}>
+                          {w.message}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {item.agentUi.badges.length > 0 ? (
+                  <View style={styles.agentMetaRow}>
+                    {item.agentUi.badges.map((b) => (
+                      <View
+                        key={b.id}
+                        style={[styles.agentMetaChip, { borderColor: hairline }]}>
+                        <Ionicons
+                          name={agentUiBadgeIconName(b.icon) as keyof typeof Ionicons.glyphMap}
+                          size={12}
+                          color={systemTextColor}
+                        />
+                        <Text
+                          style={[styles.agentMetaText, { color: systemTextColor }]}
+                          numberOfLines={1}>
+                          {b.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {item.agentUi.actions.length > 0 ? (
+                  <View style={styles.agentMetaRow}>
+                    {item.agentUi.actions.map((a) => (
+                      <View
+                        key={a.id}
+                        style={[styles.agentActionChip, { borderColor: hairline }]}>
+                        <Ionicons name="download-outline" size={12} color={systemTextColor} />
+                        <Text style={[styles.agentMetaText, { color: systemTextColor }]}>
+                          {a.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             {!isUser && item.choices && item.choices.length > 0 && !item.typing ? (
               <View style={styles.choiceRow}>
                 {item.choices.map((ch) => (
@@ -729,30 +818,6 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
           <NrmHamburgerIcon color={titleColor} size={22} />
         </Pressable>
         <View style={styles.topBarSpacer} />
-        <View
-          style={styles.webSearchToggle}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: webSearchEnabled }}
-          accessibilityLabel="인터넷 검색">
-          <Text
-            style={[
-              styles.webSearchLabel,
-              { color: webSearchEnabled ? nrmTokens.color.primary : titleColor },
-            ]}
-            numberOfLines={1}>
-            인터넷
-          </Text>
-          <Switch
-            value={webSearchEnabled}
-            onValueChange={handleWebSearchToggle}
-            trackColor={{
-              false: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
-              true: nrmTokens.color.primary,
-            }}
-            thumbColor={Platform.OS === 'android' ? '#ffffff' : undefined}
-            ios_backgroundColor={isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}
-          />
-        </View>
       </View>
 
       <FlatList
@@ -833,6 +898,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
               onLlmModelChange={handleLlmModelChange}
               onLlmModelDefault={handleLlmModelDefault}
               llmModelPrefReady={llmModelPrefReady}
+              musicPlatformId={musicPlatformId}
+              onMusicPlatformChange={handleMusicPlatformChange}
               onSelect={handleSelect}
               onNewChat={handleNewChat}
               onDelete={handleDelete}
@@ -862,17 +929,6 @@ const styles = StyleSheet.create({
   },
   topBarSpacer: {
     flex: 1,
-  },
-  webSearchToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: ICON_HIT,
-    paddingLeft: nrmTokens.space.sm,
-  },
-  webSearchLabel: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   pressed: { opacity: 0.72 },
   msgList: { flex: 1 },
@@ -984,6 +1040,54 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: nrmTokens.space.sm,
     marginTop: nrmTokens.space.sm,
+  },
+  agentMetaBlock: {
+    marginTop: nrmTokens.space.sm,
+    gap: 6,
+  },
+  agentMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  agentWarnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  agentMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  agentWarnChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    opacity: 0.9,
+  },
+  agentActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: nrmTokens.radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  agentMetaText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '500',
+    maxWidth: 140,
   },
   choiceChip: {
     borderWidth: StyleSheet.hairlineWidth,

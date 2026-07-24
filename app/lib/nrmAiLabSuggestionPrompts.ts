@@ -1,7 +1,9 @@
 /**
  * AI Lab 빈 화면 추천 질문.
  * - DB: LLMAiLabSuggestionCategory / LLMAiLabSuggestionPrompt
- * - 벡터 카테고리(vector_*)는 플래그 false면 절대 노출하지 않음(사용자가 켤 때 다시 요청).
+ * - 인터넷 검색은 서버 Intent Classifier가 자동 결정(클라이언트 토글 없음).
+ * - web_search 카테고리도 항상 후보에 포함(실제 검색 여부는 질문 Intent가 결정).
+ * - 벡터 카테고리(vector_*)는 플래그 false면 절대 노출하지 않음.
  */
 
 import { getNrmSupabase } from '@/lib/nrmSupabaseClient';
@@ -32,16 +34,10 @@ function shuffleInPlace<T>(arr: T[]): T[] {
   return arr;
 }
 
-function isCategoryEligible(
-  mode: NrmAiLabSuggestionAnswerMode,
-  webSearchEnabled: boolean,
-): boolean {
-  if (mode === 'plain') return true;
-  if (mode === 'web_search') return webSearchEnabled;
+function isCategoryEligible(mode: NrmAiLabSuggestionAnswerMode): boolean {
+  if (mode === 'plain' || mode === 'web_search') return true;
   if (mode === 'vector_plain' || mode === 'vector_web') {
-    if (!NRM_AI_LAB_VECTOR_SUGGESTIONS_ENABLED) return false;
-    if (mode === 'vector_web') return webSearchEnabled;
-    return true;
+    return NRM_AI_LAB_VECTOR_SUGGESTIONS_ENABLED;
   }
   return false;
 }
@@ -88,20 +84,18 @@ export async function fetchAiLabSuggestionCatalog(): Promise<CategoryWithPrompts
 
 /**
  * 적격 카테고리에서 최대 3개(카테고리당 1질문) 무작위 선정.
- * webSearchEnabled / 벡터 플래그에 따라 후보가 달라진다.
+ * 검색 토글 없음 — plain/web_search 모두 후보. 벡터는 플래그 ON일 때만.
  */
 export function pickAiLabSuggestionChips(
   catalog: CategoryWithPrompts[],
-  webSearchEnabled: boolean,
   maxCount = 3,
 ): NrmAiLabSuggestionChip[] {
   const eligible = catalog.filter((c) =>
-    isCategoryEligible(c.AnswerMode as NrmAiLabSuggestionAnswerMode, webSearchEnabled),
+    isCategoryEligible(c.AnswerMode as NrmAiLabSuggestionAnswerMode),
   );
   if (eligible.length === 0) return [];
 
   const pickedCats = shuffleInPlace([...eligible]).slice(0, Math.max(1, maxCount));
-  // 화면에서는 SortOrder 순으로 안정적으로 나열
   pickedCats.sort((a, b) => a.SortOrder - b.SortOrder || a.CategoryID - b.CategoryID);
 
   const chips: NrmAiLabSuggestionChip[] = [];

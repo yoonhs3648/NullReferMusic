@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { Linking, Platform, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { useMemo, type ReactNode } from 'react';
+import { Linking, Platform, StyleSheet, Text, type TextStyle, type ViewStyle } from 'react-native';
+import Markdown, { MarkdownIt } from 'react-native-markdown-display';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 
@@ -18,22 +18,49 @@ const MONO_FONT = Platform.select({
   default: 'monospace',
 });
 
+const markdownIt = MarkdownIt({ typographer: true, linkify: true });
+
+/**
+ * 모델이 자주 내는 MD 변형을 파서가 인식하도록 정규화.
+ * - 전각 ＊～ → ASCII
+ * - `** 텍스트 **` / `~~ 텍스트 ~~` 처럼 안쪽 공백이 있으면 strong/s 로 안 잡혀 마커가 그대로 보임
+ */
+export function normalizeAiLabMarkdown(content: string): string {
+  let t = content ?? '';
+  if (!t) return '';
+  t = t.replace(/\uFF0A/g, '*'); // ＊
+  t = t.replace(/\uFF5E/g, '~'); // ～
+  // ** spaced ** / __ spaced __
+  t = t.replace(/\*\*\s+([^*]+?)\s+\*\*/g, '**$1**');
+  t = t.replace(/__\s+([^_]+?)\s+__/g, '**$1**');
+  // ~~ spaced ~~
+  t = t.replace(/~~\s+([^~]+?)\s+~~/g, '~~$1~~');
+  // * spaced * (단일 이탤릭) — 목록(*)과 충돌하지 않게 줄 중간만
+  t = t.replace(/(^|[^\n*])\*\s+([^*\n]+?)\s+\*(?=[^\n*]|$)/g, '$1*$2*');
+  return t;
+}
+
 function buildMarkdownStyles(color: string, isDark: boolean): MdStyles {
   const muted = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
   const codeBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
   const quoteBorder = isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.16)';
   const fenceBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
   const link = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+  // fontWeight를 body/text에 두면 Android에서 nested strong 이 무시되는 경우가 많다.
   const body: TextStyle = {
     color,
     fontSize: nrmTokens.font.body,
     lineHeight: 24,
-    fontWeight: '400',
   };
 
   return {
     body,
     text: body,
+    textgroup: {
+      color,
+      fontSize: nrmTokens.font.body,
+      lineHeight: 24,
+    },
     paragraph: {
       ...body,
       marginTop: 0,
@@ -198,10 +225,38 @@ function onLinkPress(url: string): boolean {
 /** AI Lab 어시스턴트 답변 — Markdown 문법을 UI 스타일로 렌더. */
 export function NrmAiLabMarkdown({ content, color, isDark }: Props) {
   const mdStyles = useMemo(() => buildMarkdownStyles(color, isDark), [color, isDark]);
+  const normalized = useMemo(() => normalizeAiLabMarkdown(content), [content]);
+
+  const rules = useMemo(
+    () => ({
+      // Android nested Text + fontWeight 이슈: strong/em/s 에 스타일을 직접 고정
+      strong: (node: { key: string }, children: ReactNode) => (
+        <Text key={node.key} style={mdStyles.strong as TextStyle}>
+          {children}
+        </Text>
+      ),
+      em: (node: { key: string }, children: ReactNode) => (
+        <Text key={node.key} style={mdStyles.em as TextStyle}>
+          {children}
+        </Text>
+      ),
+      s: (node: { key: string }, children: ReactNode) => (
+        <Text key={node.key} style={mdStyles.s as TextStyle}>
+          {children}
+        </Text>
+      ),
+    }),
+    [mdStyles],
+  );
 
   return (
-    <Markdown style={mdStyles} mergeStyle onLinkPress={onLinkPress}>
-      {content}
+    <Markdown
+      style={mdStyles}
+      rules={rules}
+      mergeStyle
+      markdownit={markdownIt}
+      onLinkPress={onLinkPress}>
+      {normalized}
     </Markdown>
   );
 }

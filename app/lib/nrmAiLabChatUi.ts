@@ -4,28 +4,48 @@ import type { NrmAiLabChoice } from '@/lib/nrmAiLabDownloadTools';
 
 export type NrmAiLabMessageRole = 'user' | 'assistant' | 'system';
 
+export type NrmAiLabAgentUiBadge = {
+  id: string;
+  label: string;
+  icon?: string;
+};
+
+export type NrmAiLabAgentUiAction = {
+  id: string;
+  label: string;
+  kind?: string;
+};
+
+export type NrmAiLabAgentUiWarning = {
+  id: string;
+  message: string;
+};
+
+/** Edge AgentResponse.ui — badges / actions / warnings */
+export type NrmAiLabAgentUiHints = {
+  badges: NrmAiLabAgentUiBadge[];
+  actions: NrmAiLabAgentUiAction[];
+  warnings: NrmAiLabAgentUiWarning[];
+  providerLabel?: string;
+  latencyMs?: number;
+};
+
 export type NrmAiLabMessage = {
-  /** `${MessageID}` — 낙관적 전송 중에는 임시 id */
   id: string;
   role: NrmAiLabMessageRole;
   content: string;
-  /** 전송 중(로컬 낙관적 메시지, 서버 확정 전) */
   pending?: boolean;
-  /** 어시스턴트가 아직 답변을 만드는 중(첫 delta 도착 전) — 타이핑 인디케이터 표시용 */
   typing?: boolean;
-  /** 플랫폼/트랙/가사 선택 칩 — 탭하면 사용자 메시지로 전송 */
   choices?: NrmAiLabChoice[];
+  agentUi?: NrmAiLabAgentUiHints;
 };
 
 export type NrmAiLabConversation = {
-  /** `${SessionID}` */
   id: string;
   title: string;
   updatedAtLabel: string;
-  /** 정렬용 원본 시각 (최근 대화순 정렬) */
   updatedAtIso: string;
   modelId: number;
-  /** 메시지는 대화 진입 시 지연 로딩 — 목록 단계에서는 빈 배열일 수 있음 */
   messages: NrmAiLabMessage[];
   messagesLoaded: boolean;
 };
@@ -46,7 +66,6 @@ export function nrmAiLabEmptyGreeting(userName: string): { line1: string; line2:
   };
 }
 
-/** 목록/헤더 표기용 상대 시각. */
 export function nrmAiLabRelativeTimeLabel(iso: string): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return '';
@@ -60,4 +79,114 @@ export function nrmAiLabRelativeTimeLabel(iso: string): string {
   if (diffDay < 7) return `${diffDay}일 전`;
   const d = new Date(t);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function asStringArrayObject(
+  raw: unknown,
+  labelKey: 'label' | 'message',
+): Array<{ id: string; label?: string; message?: string; icon?: string; kind?: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ id: string; label?: string; message?: string; icon?: string; kind?: string }> =
+    [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const id = String(r.id ?? '').trim();
+    if (!id) continue;
+    if (labelKey === 'label') {
+      const label = String(r.label ?? '').trim();
+      if (!label) continue;
+      out.push({
+        id,
+        label,
+        icon: typeof r.icon === 'string' ? r.icon : undefined,
+        kind: typeof r.kind === 'string' ? r.kind : undefined,
+      });
+    } else {
+      const message = String(r.message ?? '').trim();
+      if (!message) continue;
+      out.push({ id, message });
+    }
+  }
+  return out;
+}
+
+export function parseAgentUiFromDiag(diag: unknown): NrmAiLabAgentUiHints | undefined {
+  if (!diag || typeof diag !== 'object') return undefined;
+  const ar = (diag as { agentResponse?: unknown }).agentResponse;
+  if (!ar || typeof ar !== 'object') return undefined;
+  const ui = (ar as { ui?: unknown }).ui;
+  if (!ui || typeof ui !== 'object') return undefined;
+  const u = ui as Record<string, unknown>;
+
+  const badges = asStringArrayObject(u.badges, 'label').map((b) => ({
+    id: b.id,
+    label: String(b.label ?? ''),
+    icon: b.icon,
+  }));
+  const actions = asStringArrayObject(u.actions, 'label').map((a) => ({
+    id: a.id,
+    label: String(a.label ?? ''),
+    kind: a.kind,
+  }));
+  const warnings = asStringArrayObject(u.warnings, 'message').map((w) => ({
+    id: w.id,
+    message: String(w.message ?? ''),
+  }));
+
+  // 구버전 show* 플래그 폴백
+  if (badges.length === 0) {
+    if (u.showSearchIcon) badges.push({ id: 'web', label: 'Web', icon: 'globe' });
+    if (u.showMusicIcon) badges.push({ id: 'music', label: 'Music', icon: 'musical-notes' });
+    if (u.showRagIcon) badges.push({ id: 'rag', label: 'RAG', icon: 'library' });
+    if (u.showRecommendIcon) {
+      badges.push({ id: 'recommend', label: 'Recommend', icon: 'sparkles' });
+    }
+    if (u.showCitations) badges.push({ id: 'citations', label: '출처', icon: 'book' });
+    if (typeof u.providerLabel === 'string' && u.providerLabel) {
+      badges.push({ id: 'provider', label: u.providerLabel, icon: 'chip' });
+    }
+    if (typeof u.latencyMs === 'number' && u.latencyMs > 0) {
+      badges.push({
+        id: 'latency',
+        label: `${(u.latencyMs / 1000).toFixed(1)}초`,
+        icon: 'flash',
+      });
+    }
+  }
+
+  if (badges.length === 0 && actions.length === 0 && warnings.length === 0) {
+    return undefined;
+  }
+
+  return {
+    badges,
+    actions,
+    warnings,
+    providerLabel: typeof u.providerLabel === 'string' ? u.providerLabel : undefined,
+    latencyMs: typeof u.latencyMs === 'number' ? u.latencyMs : undefined,
+  };
+}
+
+export function agentUiBadgeIconName(icon?: string): string {
+  switch (icon) {
+    case 'globe':
+      return 'globe-outline';
+    case 'musical-notes':
+      return 'musical-notes-outline';
+    case 'library':
+      return 'library-outline';
+    case 'sparkles':
+      return 'sparkles-outline';
+    case 'book':
+      return 'book-outline';
+    case 'bulb':
+      return 'bulb-outline';
+    case 'chip':
+      return 'hardware-chip-outline';
+    case 'flash':
+      return 'flash-outline';
+    default:
+      return 'ellipse-outline';
+  }
 }

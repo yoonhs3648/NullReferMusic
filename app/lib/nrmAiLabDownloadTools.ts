@@ -1,35 +1,35 @@
 /**
- * AI Lab — 다운로드용 플랫폼 준비 상태·검색·가사 옵션·다운로드 시작.
- * Edge Gemini functionCall의 클라이언트 실행부.
+ * AI Lab — Melon 전용 검색·가사 옵션·다운로드 시작.
+ * 파이프라인: Melon 검색 → (선택) → Melon 메타 → YouTube → 임베드 → (선택) 가사
  */
 import { Platform } from 'react-native';
 
-import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
-import { buildChartAudioMetadata, type NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import {
+  aiLabNonMelonSearchMessage,
+  DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
+  getAiLabMusicPlatformLabel,
+  MusicPlatformId,
+  normalizeMusicPlatformArg,
+  type MusicPlatformId as MusicPlatformIdType,
+} from '@/lib/nrmAiLabMusicPlatform';
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import {
   applyDownloadExtension,
   loadAlignModelPreference,
   loadDownloadEncodeSettings,
   loadDownloadFileNameFormat,
 } from '@/lib/nrmDownloadSettings';
-import { hasLastfmChartAccess } from '@/lib/nrmLastfmApiSettings';
-import { searchLastfmTracks } from '@/lib/nrmLastfmSearchClient';
 import {
   buildLyricsSentinel,
   type NrmLyricsUiMode,
 } from '@/lib/nrmMelonLyrics';
-import { searchMelonTracks } from '@/lib/nrmMelonSearchClient';
-import { scheduleNativeDownloadJob } from '@/lib/nrmNativeDownloadOrchestrator';
-import { loadAlignLyricsLangDetectionMode } from '@/lib/nrmAlignLyricsLangDetectionSettings';
 import {
-  NRM_LYRICS_MODE_LABELS,
-  loadLyricsModeOrder,
-  type NrmLyricsModeOrderId,
-} from '@/lib/nrmLyricsOrderSettings';
-import { hasSpotifyChartAccess } from '@/lib/nrmSpotifyApiSettings';
-import { searchSpotifyTracks } from '@/lib/nrmSpotifySearchClient';
-import { loadTranslationProvider } from '@/lib/nrmTranslationSettings';
-import { getDeepLApiKey } from '@/lib/nrmDeepLApiSettings';
+  buildMelonSeedAudioMetadata,
+  buildMelonTrackAudioMetadata,
+} from '@/lib/nrmMelonDownloadMetadata';
+import { fetchMelonTrackDetail } from '@/lib/nrmMelonSearchClient';
+import { scheduleNativeDownloadJob } from '@/lib/nrmNativeDownloadOrchestrator';
+import { MelonProvider, searchViaMusicMetadataProvider } from '@/lib/nrmMusicMetadataProvider';
 import { buildAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { searchYoutube } from '@/lib/youtubeSearchClient';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
@@ -37,7 +37,7 @@ import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 export type NrmAiLabDownloadPlatformId = 'melon' | 'spotify' | 'lastfm' | 'appleMusic';
 
 export type NrmAiLabReadyPlatform = {
-  id: NrmAiLabDownloadPlatformId;
+  id: MusicPlatformIdType;
   label: string;
 };
 
@@ -55,22 +55,98 @@ export type NrmAiLabTrackHit = {
 
 export type NrmAiLabChoice = { id: string; label: string };
 
+/** AI Lab lyricsOption (FC) */
+export type AiLabLyricsOption =
+  | 'none'
+  | 'ko'
+  | 'en'
+  | 'auto'
+  | 'ko_translate'
+  | 'en_translate'
+  | 'auto_translate';
+
+export type ParsedAiLabLyrics = {
+  lyricsMode: NrmLyricsUiMode;
+  alignLang?: 'ko' | 'en';
+  lyricsOption: AiLabLyricsOption;
+};
+
 const LOG = 'ailab.downloadTools';
+
+export type AiLabDownloadToolContext = {
+  musicPlatformId: MusicPlatformIdType;
+};
+
+const LYRICS_OPTION_CHOICES: NrmAiLabChoice[] = [
+  { id: 'ko', label: '1. 한국어 팩' },
+  { id: 'en', label: '2. 영어 팩' },
+  { id: 'auto_translate', label: '3. 번역지원' },
+];
+
+/**
+ * lyricsOption → 앱 내부 lyricsMode/alignLang.
+ * Melon 메타 기반이므로 melon / melon_translation 사용.
+ */
+export function parseAiLabLyricsOption(raw: string | null | undefined): ParsedAiLabLyrics {
+  const v = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (!v || v === 'none' || v === 'unset' || v === 'no' || v === '없이') {
+    return { lyricsMode: 'unset', lyricsOption: 'none' };
+  }
+  if (v === 'ko' || v === 'korean' || v === '한국어' || v === '한국어팩') {
+    return { lyricsMode: 'melon', alignLang: 'ko', lyricsOption: 'ko' };
+  }
+  if (v === 'en' || v === 'english' || v === '영어' || v === '영어팩') {
+    return { lyricsMode: 'melon', alignLang: 'en', lyricsOption: 'en' };
+  }
+  if (v === 'auto') {
+    return { lyricsMode: 'melon', lyricsOption: 'auto' };
+  }
+  if (
+    v === 'ko_translate' ||
+    v === 'ko_translation' ||
+    v === '한국어번역' ||
+    v === '번역_ko'
+  ) {
+    return { lyricsMode: 'melon_translation', alignLang: 'ko', lyricsOption: 'ko_translate' };
+  }
+  if (
+    v === 'en_translate' ||
+    v === 'en_translation' ||
+    v === '영어번역' ||
+    v === '번역_en'
+  ) {
+    return { lyricsMode: 'melon_translation', alignLang: 'en', lyricsOption: 'en_translate' };
+  }
+  if (
+    v === 'auto_translate' ||
+    v === 'translate' ||
+    v === 'translation' ||
+    v === '번역' ||
+    v === '번역지원'
+  ) {
+    return { lyricsMode: 'melon_translation', lyricsOption: 'auto_translate' };
+  }
+  // 레거시 FC lyricsMode 직접 전달
+  if (v === 'melon') return { lyricsMode: 'melon', lyricsOption: 'auto' };
+  if (v === 'melon_translation') {
+    return { lyricsMode: 'melon_translation', lyricsOption: 'auto_translate' };
+  }
+  if (v === 'configured') return { lyricsMode: 'configured', lyricsOption: 'auto' };
+  if (v === 'translation') {
+    return { lyricsMode: 'translation', lyricsOption: 'auto_translate' };
+  }
+  return { lyricsMode: 'unset', lyricsOption: 'none' };
+}
 
 export async function listReadyDownloadPlatforms(): Promise<{
   platforms: NrmAiLabReadyPlatform[];
   choices: NrmAiLabChoice[];
 }> {
-  const [spotifyOk, lastfmOk] = await Promise.all([
-    hasSpotifyChartAccess(),
-    hasLastfmChartAccess(),
-  ]);
-  // Melon·Apple Music: 토큰 없음 — 앱에서 차트/검색 접근 가능하면 포함
   const platforms: NrmAiLabReadyPlatform[] = [
-    { id: 'melon', label: 'Melon' },
-    ...(spotifyOk ? [{ id: 'spotify' as const, label: 'Spotify' }] : []),
-    ...(lastfmOk ? [{ id: 'lastfm' as const, label: 'Last.fm' }] : []),
-    { id: 'appleMusic', label: 'Apple Music' },
+    { id: MusicPlatformId.MELON, label: MelonProvider.label },
   ];
   return {
     platforms,
@@ -78,175 +154,111 @@ export async function listReadyDownloadPlatforms(): Promise<{
   };
 }
 
-async function searchAppleMusicTracks(query: string): Promise<NrmAiLabTrackHit[]> {
-  const q = encodeURIComponent(query.trim());
-  if (!q) return [];
-  const url = `https://itunes.apple.com/search?term=${q}&entity=song&limit=8&country=kr`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const json = (await res.json()) as {
-    results?: Array<Record<string, unknown>>;
-  };
-  const rows = Array.isArray(json.results) ? json.results : [];
-  return rows.map((r, i) => {
-    const trackId = String(r.trackId ?? r.collectionId ?? i);
-    const title = String(r.trackName ?? '');
-    const artist = String(r.artistName ?? '');
-    return {
-      ref: `apple:${trackId}`,
-      platform: 'appleMusic' as const,
-      title,
-      artist,
-      album: String(r.collectionName ?? ''),
-      imageUrl: String(r.artworkUrl100 ?? '').replace('100x100', '600x600'),
-      externalUrl: String(r.trackViewUrl ?? r.collectionViewUrl ?? ''),
-      releaseDate: String(r.releaseDate ?? '').slice(0, 10),
-      genre: String(r.primaryGenreName ?? ''),
-    };
-  });
+function legacyToMusicPlatformId(platform: NrmAiLabDownloadPlatformId): MusicPlatformIdType {
+  switch (platform) {
+    case 'melon':
+      return MusicPlatformId.MELON;
+    case 'spotify':
+      return MusicPlatformId.SPOTIFY_PREMIUM;
+    case 'lastfm':
+      return MusicPlatformId.LAST_FM;
+    case 'appleMusic':
+      return MusicPlatformId.APPLE_MUSIC;
+    default:
+      return DEFAULT_AI_LAB_MUSIC_PLATFORM_ID;
+  }
 }
 
 export async function searchTrackOnPlatform(
   platform: NrmAiLabDownloadPlatformId,
   query: string,
 ): Promise<{ hits: NrmAiLabTrackHit[]; choices: NrmAiLabChoice[]; error?: string }> {
-  const q = query.trim();
-  if (!q) return { hits: [], choices: [], error: 'empty_query' };
-
-  try {
-    if (platform === 'melon') {
-      const out = await searchMelonTracks(q);
-      if (!out.ok) return { hits: [], choices: [], error: out.errorCode ?? 'search_failed' };
-      const hits: NrmAiLabTrackHit[] = (out.data.tracks ?? []).slice(0, 8).map((t) => ({
-        ref: `melon:${t.songId}`,
-        platform: 'melon',
-        title: t.name,
-        artist: t.artist,
-        album: t.album,
-        imageUrl: t.imageUrl,
-        externalUrl: t.url,
-        releaseDate: '',
-        genre: '',
-      }));
-      return {
-        hits,
-        choices: hits.map((h) => ({
-          id: h.ref,
-          label: `${h.artist} - ${h.title}`.trim(),
-        })),
-      };
-    }
-
-    if (platform === 'spotify') {
-      const out = await searchSpotifyTracks(q);
-      if (!out.ok) return { hits: [], choices: [], error: out.errorCode ?? 'search_failed' };
-      const hits: NrmAiLabTrackHit[] = (out.data.tracks ?? []).slice(0, 8).map((t) => ({
-        ref: `spotify:${t.id}`,
-        platform: 'spotify',
-        title: t.name,
-        artist: t.artists,
-        album: t.albumName ?? '',
-        imageUrl: t.imageUrl ?? '',
-        externalUrl: t.spotifyUrl ?? '',
-        releaseDate: '',
-        genre: '',
-      }));
-      return {
-        hits,
-        choices: hits.map((h) => ({
-          id: h.ref,
-          label: `${h.artist} - ${h.title}`.trim(),
-        })),
-      };
-    }
-
-    if (platform === 'lastfm') {
-      const out = await searchLastfmTracks(q);
-      if (!out.ok) return { hits: [], choices: [], error: out.errorCode ?? 'search_failed' };
-      const hits: NrmAiLabTrackHit[] = (out.data.tracks ?? []).slice(0, 8).map((t, i) => ({
-        ref: `lastfm:${encodeURIComponent(t.artist)}|${encodeURIComponent(t.name)}|${i}`,
-        platform: 'lastfm',
-        title: t.name,
-        artist: t.artist,
-        album: '',
-        imageUrl: t.imageUrl ?? '',
-        externalUrl: t.url ?? '',
-        releaseDate: '',
-        genre: '',
-      }));
-      return {
-        hits,
-        choices: hits.map((h) => ({
-          id: h.ref,
-          label: `${h.artist} - ${h.title}`.trim(),
-        })),
-      };
-    }
-
-    const hits = await searchAppleMusicTracks(q);
+  const id = legacyToMusicPlatformId(platform);
+  if (id !== MusicPlatformId.MELON) {
     return {
-      hits,
-      choices: hits.map((h) => ({
-        id: h.ref,
-        label: `${h.artist} - ${h.title}`.trim(),
-      })),
+      hits: [],
+      choices: [],
+      error: `search_unsupported:${id}`,
     };
-  } catch (e) {
-    logNrmRunError(LOG, e, { event: 'search_failed', platform, query: q.slice(0, 80) });
-    return { hits: [], choices: [], error: e instanceof Error ? e.message : String(e) };
   }
+  const out = await searchViaMusicMetadataProvider(query, MusicPlatformId.MELON);
+  return { hits: out.hits, choices: out.choices, error: out.error };
+}
+
+async function searchMusicTool(
+  query: string,
+  fcPlatform: string | undefined,
+  _ctx: AiLabDownloadToolContext,
+): Promise<{ result: Record<string, unknown>; choices?: NrmAiLabChoice[] }> {
+  if (!query) {
+    return { result: { ok: false, error: 'missing_query' } };
+  }
+
+  const requested = normalizeMusicPlatformArg(fcPlatform);
+  if (requested && requested !== MusicPlatformId.MELON) {
+    const label = getAiLabMusicPlatformLabel(requested);
+    return {
+      result: {
+        ok: false,
+        error: 'platform_unsupported',
+        platformId: requested,
+        message: aiLabNonMelonSearchMessage(label),
+        suggestMelon: true,
+        nextHint: 'Melon으로 검색할지 사용자에게 확인한 뒤 search_music(query)만 호출.',
+      },
+    };
+  }
+
+  const out = await searchViaMusicMetadataProvider(query, MusicPlatformId.MELON);
+  const count = out.hits.length;
+  return {
+    result: {
+      ok: !out.error && count > 0,
+      hits: out.hits,
+      error: out.error ?? null,
+      count,
+      providerId: MusicPlatformId.MELON,
+      platformId: MusicPlatformId.MELON,
+      usedFcPlatform: Boolean(requested),
+      preferenceId: MusicPlatformId.MELON,
+      nextHint:
+        count === 1
+          ? '검색 결과 1건. 다운로드 의도·가사 옵션 확정이면 start_music_download(hit, lyricsOption). 찾기만이면 결과 안내.'
+          : count > 1
+            ? '여러 후보 — 사용자 선택 후 start_music_download. 선택은 choices 사용.'
+            : out.error
+              ? null
+              : '검색 결과 없음',
+    },
+    choices: out.choices,
+  };
 }
 
 export async function getLyricsDownloadOptions(): Promise<{
-  options: Array<{ id: NrmLyricsModeOrderId; label: string }>;
+  options: Array<{ id: string; label: string }>;
   choices: NrmAiLabChoice[];
-  alignLangRequired: boolean;
-  alignLangChoices: NrmAiLabChoice[];
+  askPrompt: string;
   notes: string[];
 }> {
-  const [order, alignMode, provider] = await Promise.all([
-    loadLyricsModeOrder(),
-    loadAlignLyricsLangDetectionMode(),
-    loadTranslationProvider(),
-  ]);
-  const notes: string[] = [];
-  if (provider === 'deepl') {
-    const key = (await getDeepLApiKey()).trim();
-    if (!key) notes.push('DeepL 키가 없어 번역 모드는 실패할 수 있어요.');
-  }
-  const alignLangRequired = alignMode === 'manual';
-  const options = order.map((id) => ({
-    id,
-    label: NRM_LYRICS_MODE_LABELS[id],
-  }));
   return {
-    options,
-    choices: options.map((o) => ({ id: o.id, label: o.label })),
-    alignLangRequired,
-    alignLangChoices: alignLangRequired
-      ? [
-          { id: 'ko', label: '한국어 언어팩 (KO)' },
-          { id: 'en', label: '영어 언어팩 (EN)' },
-        ]
-      : [],
-    notes,
+    options: LYRICS_OPTION_CHOICES.map((c) => ({ id: c.id, label: c.label })),
+    choices: LYRICS_OPTION_CHOICES,
+    askPrompt:
+      '가사 생성 옵션을 선택해주세요.\n\n1. 한국어 팩\n\n2. 영어 팩\n\n3. 번역지원',
+    notes: [
+      '가사 요청만 있고 옵션이 없으면 Function Call 전에 위 질문을 먼저 한다.',
+      '옵션이 이미 포함되면 start_music_download(lyricsOption)로 바로 진행.',
+      '가사 요청이 없으면 lyricsOption=none (기본).',
+    ],
   };
 }
 
-function hitToChartTrack(hit: NrmAiLabTrackHit): ChartTrackItem {
-  return {
-    rank: 1,
-    trackId: hit.ref,
-    title: hit.title,
-    artists: hit.artist,
-    album: hit.album,
-    genre: hit.genre,
-    imageUrl: hit.imageUrl,
-    externalUrl: hit.externalUrl,
-    durationMs: 0,
-    popularity: 0,
-    releaseDate: hit.releaseDate,
-  };
+function extractMelonSongId(hit: NrmAiLabTrackHit): string | null {
+  const fromRef = hit.ref.match(/^melon:(.+)$/i);
+  if (fromRef?.[1]) return fromRef[1].trim();
+  const fromUrl = hit.externalUrl.match(/songId=(\d+)/i);
+  if (fromUrl?.[1]) return fromUrl[1].trim();
+  return null;
 }
 
 function applyLyricsToMetadata(
@@ -279,17 +291,62 @@ export async function startMusicDownload(params: {
     return { ok: false, error: 'web_download_not_supported_in_ailab' };
   }
 
-  const track = hitToChartTrack(params.hit);
-  let meta = buildChartAudioMetadata(track, params.hit.artist, params.hit.title);
-  if (params.hit.platform === 'melon') meta = { ...meta, downloadPlatform: 'Melon' };
-  if (params.hit.platform === 'spotify') meta = { ...meta, downloadPlatform: 'Spotify' };
-  if (params.hit.platform === 'lastfm') meta = { ...meta, downloadPlatform: 'LastFm' };
-  if (params.hit.platform === 'appleMusic') meta = { ...meta, downloadPlatform: 'AppleMusic' };
-  meta = applyLyricsToMetadata(meta, params.lyricsMode, params.alignLang);
+  if (params.hit.platform !== 'melon') {
+    return { ok: false, error: 'melon_only_download' };
+  }
 
-  const query = `${params.hit.artist} ${params.hit.title}`.trim();
-  logNrmDev(LOG, { event: 'youtube_search_start', query: query.slice(0, 80) });
-  const yt = await searchYoutube(query);
+  const artist = params.hit.artist.trim();
+  const title = params.hit.title.trim();
+  if (!artist || !title) {
+    return { ok: false, error: 'missing_artist_or_title' };
+  }
+
+  const songId = extractMelonSongId(params.hit);
+  let meta: NrmAudioFileMetadata = buildMelonSeedAudioMetadata(
+    {
+      songId: songId ?? undefined,
+      artist,
+      title,
+      album: params.hit.album,
+      genre: params.hit.genre,
+      releaseDate: params.hit.releaseDate,
+      imageUrl: params.hit.imageUrl,
+    },
+    artist,
+    title,
+  );
+
+  if (songId) {
+    try {
+      const detailOut = await fetchMelonTrackDetail(songId);
+      if (detailOut.ok) {
+        meta = {
+          ...buildMelonTrackAudioMetadata(detailOut.data, artist, title),
+          downloadPlatform: 'Melon',
+        };
+        // Melon plain 가사는 다운로드 시 lyricsOption이 있을 때만 sentinel로 덮어씀
+      }
+    } catch (e) {
+      logNrmRunError(LOG, e, { event: 'melon_detail_failed', songId });
+    }
+  }
+
+  if (params.lyricsMode !== 'unset') {
+    meta = applyLyricsToMetadata(meta, params.lyricsMode, params.alignLang);
+  } else {
+    // 가사 생성 없음 — Melon 상세의 원문 가사는 메타로 유지(있으면)
+    delete meta.melonAlignLang;
+  }
+
+  // YouTube 검색은 반드시 Melon 메타(아티스트+제목) 기준 — 사용자 원문 직접 검색 금지
+  const ytQuery = `${meta.artist} ${meta.title}`.trim();
+  logNrmDev(LOG, {
+    event: 'youtube_search_start',
+    query: ytQuery.slice(0, 80),
+    songId: songId ?? null,
+    lyricsMode: params.lyricsMode,
+  });
+  const yt = await searchYoutube(ytQuery);
   if (!yt.ok || !yt.items?.length) {
     return { ok: false, error: yt.ok ? 'youtube_no_results' : yt.userMessage };
   }
@@ -297,11 +354,10 @@ export async function startMusicDownload(params: {
   const encode = await loadDownloadEncodeSettings();
   const format = await loadDownloadFileNameFormat();
   const fileName = applyDownloadExtension(
-    buildAudioFileName(params.hit.artist, params.hit.title, encode.extension, format),
+    buildAudioFileName(meta.artist, meta.title, encode.extension, format),
     encode.extension,
   );
 
-  // align 모델 프리로드 힌트 (실패 무시)
   void loadAlignModelPreference().catch(() => undefined);
 
   try {
@@ -314,7 +370,7 @@ export async function startMusicDownload(params: {
     return {
       ok: true,
       videoId: item.videoId,
-      label: `${params.hit.artist} - ${params.hit.title}`,
+      label: `${meta.artist} - ${meta.title}`,
     };
   } catch (e) {
     logNrmRunError(LOG, e, { event: 'start_download_failed' });
@@ -325,23 +381,60 @@ export async function startMusicDownload(params: {
 export async function executeAiLabDownloadTool(
   name: string,
   args: Record<string, unknown>,
+  ctx?: Partial<AiLabDownloadToolContext>,
 ): Promise<{ result: Record<string, unknown>; choices?: NrmAiLabChoice[] }> {
+  const toolCtx: AiLabDownloadToolContext = {
+    musicPlatformId: MusicPlatformId.MELON,
+  };
+  void ctx;
+  void toolCtx;
+
   if (name === 'list_ready_download_platforms') {
     const out = await listReadyDownloadPlatforms();
     return {
-      result: { platforms: out.platforms },
+      result: {
+        platforms: [
+          {
+            id: MusicPlatformId.MELON,
+            label: MelonProvider.label,
+            capabilities: MelonProvider.capabilities,
+          },
+        ],
+        note: '이번 버전은 Melon만 검색·다운로드 지원',
+      },
       choices: out.choices,
     };
+  }
+  if (name === 'search_music') {
+    return searchMusicTool(
+      String(args.query ?? '').trim(),
+      args.platform != null ? String(args.platform) : undefined,
+      toolCtx,
+    );
   }
   if (name === 'search_track_on_platform') {
     const platform = String(args.platform ?? '') as NrmAiLabDownloadPlatformId;
     const query = String(args.query ?? '');
-    const out = await searchTrackOnPlatform(platform, query);
+    if (platform !== 'melon' && normalizeMusicPlatformArg(platform) !== MusicPlatformId.MELON) {
+      const label = getAiLabMusicPlatformLabel(
+        normalizeMusicPlatformArg(platform) ?? MusicPlatformId.SPOTIFY,
+      );
+      return {
+        result: {
+          hits: [],
+          error: 'platform_unsupported',
+          message: aiLabNonMelonSearchMessage(label),
+          count: 0,
+        },
+      };
+    }
+    const out = await searchTrackOnPlatform('melon', query);
     return {
       result: {
         hits: out.hits,
         error: out.error ?? null,
         count: out.hits.length,
+        platformId: MusicPlatformId.MELON,
       },
       choices: out.choices,
     };
@@ -351,22 +444,40 @@ export async function executeAiLabDownloadTool(
     return {
       result: {
         options: out.options,
-        alignLangRequired: out.alignLangRequired,
+        askPrompt: out.askPrompt,
         notes: out.notes,
       },
       choices: out.choices,
     };
   }
-  if (name === 'start_music_download') {
+  if (name === 'start_music_download' || name === 'download_music') {
     const hit = args.hit as NrmAiLabTrackHit | undefined;
-    const lyricsMode = (String(args.lyricsMode ?? 'unset') || 'unset') as NrmLyricsUiMode;
-    const alignRaw = String(args.alignLang ?? '');
-    const alignLang = alignRaw === 'ko' || alignRaw === 'en' ? alignRaw : undefined;
     if (!hit?.title || !hit?.artist) {
       return { result: { ok: false, error: 'missing_hit' } };
     }
-    const out = await startMusicDownload({ hit, lyricsMode, alignLang });
-    return { result: out };
+    // lyricsOption 우선, 없으면 레거시 lyricsMode
+    const optionRaw =
+      args.lyricsOption != null
+        ? String(args.lyricsOption)
+        : args.lyricsMode != null
+          ? String(args.lyricsMode)
+          : 'none';
+    const parsed = parseAiLabLyricsOption(optionRaw);
+    const alignRaw = String(args.alignLang ?? '');
+    const alignLang =
+      alignRaw === 'ko' || alignRaw === 'en' ? alignRaw : parsed.alignLang;
+    const out = await startMusicDownload({
+      hit: { ...hit, platform: 'melon' },
+      lyricsMode: parsed.lyricsMode,
+      alignLang,
+    });
+    return {
+      result: {
+        ...out,
+        lyricsOption: parsed.lyricsOption,
+        lyricsMode: parsed.lyricsMode,
+      },
+    };
   }
   return { result: { ok: false, error: `unknown_tool:${name}` } };
 }

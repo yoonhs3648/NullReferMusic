@@ -10,41 +10,24 @@
 // LLMModel→LLMProvider join으로 apiKey/providerName을 얻는다. 권한(LLMUserPermission)·
 // 월간 사용량(LLMUserQuota)은 모델 단위가 아니라 "제공자" 단위로 관리된다(providerId).
 //
-// 흐름(성능을 위해 DB 왕복을 최소화):
-//   1) nrm_rpc_chat_prepare_turn  — 세션 확보/생성 + 사용자 메시지 저장 +
-//      provider/permission/quota/history 를 한 번에 조회 (DB 왕복 1회)
-//   2) (필요 시) LLM Provider REST API 스트리밍 호출 — DB와 무관한 순수 HTTP.
-//      응답은 NDJSON(줄바꿈으로 구분된 JSON) 스트림으로 클라이언트에 그대로
-//      릴레이한다 — 앱이 "타이핑 효과"로 보여줄 수 있게.
-//   3) nrm_rpc_chat_finalize_turn — 응답(assistant/system) 저장 + 세션 갱신 +
-//      (요청을 실제로 시도한 경우만) LLMTokenHistory 기록 (DB 왕복 1회)
-//   4) LLMUserQuota 누적은 스트림을 이미 다 보낸 뒤 백그라운드(EdgeRuntime.waitUntil).
-//      대화 제목은 prepare_turn 휴리스틱(메시지 앞부분)만 쓰고, 추가 Gemini 호출은 하지 않는다
-//      (free-tier 요청 쿼터를 채팅 본문과 나눠 쓰지 않기 위함).
+// 흐름 (Agent 파이프라인, 2026-07-24):
+//   1) nrm_rpc_chat_prepare_turn — 세션+유저메시지+provider/permission/quota/history
+//   2) Intent Classifier (Gemini Flash Lite) → needSearch / needDownloadTools / needVector / needFaq
+//      (실패 시 휴리스틱 폴백). FAQ·VectorDB Context Collector는 스텁(확장 포인트).
+//   3) 모듈형 System Prompt 조립 + 메인 LLM 스트리밍 (도구 모드는 Intent가 결정)
+//      — 사용자 검색 토글·다운로드 정규식 휴리스틱 제거
+//   4) nrm_rpc_chat_finalize_turn + waitUntil quota
 //
 // NDJSON 스트리밍 프로토콜 (한 줄에 JSON 객체 하나, Content-Type: application/x-ndjson):
-//   {"type":"meta","requestId":...,"sessionId":...,"isNewSession":...,"title":...,"userMessage":{...}}
-//     — prepare_turn 완료 즉시 전송(권한/한도 체크 전). 클라이언트가 세션/사용자
-//       메시지를 바로 확정 표시할 수 있게 가장 먼저 보낸다.
-//   {"type":"delta","text":"..."}
-//     — LLM이 실제로 스트리밍 응답 중일 때만, 조각(delta) 단위로 여러 번 전송.
-//   {"type":"final","requestId":...,"sessionId":...,"isNewSession":...,"title":...,"message":{...}}
-//     — 이번 턴의 최종 확정 메시지(assistant 또는 system) 저장 완료 후 1회 전송,
-//       스트림 종료. delta로 이미 보여준 텍스트와 message.Content가 항상 일치한다.
-//   {"type":"error","requestId":...,"message":"..."}
-//     — meta 전송 후 처리 중 복구 불가능한 오류(finalize 저장 실패 등). 이 경우
-//       final은 오지 않고 스트림이 그대로 끝난다.
-// meta 이전(=prepare_turn 자체가 실패한) 경우는 스트리밍하지 않고 기존처럼 평범한
-// JSON 에러 응답(4xx/5xx)을 즉시 반환한다.
+//   {"type":"meta",...} / {"type":"delta","text":"..."} / {"type":"tool_request",...}
+//   {"type":"tool_turn_end",...} / {"type":"final",...} / {"type":"error",...}
+// meta 이전(=prepare_turn 자체가 실패한) 경우는 스트리밍하지 않고 JSON 에러(4xx/5xx).
 //
-// 멀티 프로바이더 확장: ADAPTERS 맵에 LLMProvider.ProviderName 별 어댑터를 등록한다.
-// 현재: Google(Gemini generateContent), Groq(OpenAI-compatible chat/completions).
-// 지금은 Gemini만 구현. ChatGPT/Claude 등을 추가하려면 새 어댑터를 만들어 맵에
-// 등록하기만 하면 된다(아래 나머지 로직은 전혀 건드리지 않아도 됨).
+// 멀티 프로바이더: ADAPTERS + PROVIDER_CAPABILITIES(agent/types.ts).
+// 현재: Google(Gemini), Groq. OpenAI/Claude/Grok 등은 어댑터+캐파빌리티만 추가.
 //
-// Gemini/Groq: AI Lab 「인터넷 검색」토글 ON이면 각 제공자 네이티브 웹검색만 사용한다.
-// Gemini → google_search grounding / Groq → browser_search 또는 Compound web_search.
-// Edge는 Melon·DuckDuckGo 등을 크롤하지 않는다. 검색 on/off는 클라이언트 토글만 따른다.
+// 웹검색: Intent needSearch → Gemini google_search / Groq browser_search (네이티브).
+// Edge는 웹을 크롤하지 않는다. 클라이언트 enableWebSearch 필드는 무시(하위호환).
 //
 // 로깅: 요청마다 requestId(UUID) 하나로 전 구간을 묶는다. Supabase Dashboard →
 // Edge Functions → llm-chat-send → Logs (또는 `supabase functions logs
@@ -53,6 +36,33 @@
 // 본문은 절대 로그에 남기지 않는다(메시지는 길이/미리보기만).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+
+import {
+  assignExperiment,
+  buildAgentRequest,
+  buildAgentResponse,
+  cacheKeyForQuestion,
+  emptyAgentState,
+  executePlanToAdapterOptions,
+  getActivePromptVersion,
+  getCircuitBreaker,
+  getInputGuard,
+  getOutputGuard,
+  getProviderHealthMonitor,
+  getProviderRateLimiter,
+  getQuestionCache,
+  hasProvider,
+  logAgentPlanSummary,
+  logAgentPhase,
+  logAgentStateSnapshot,
+  logAgentTimings,
+  metricsFromAgentResponse,
+  registerAdapterAsProvider,
+  resolveFeatureFlags,
+  runEvaluation,
+  runExecutionGraph,
+  runPlanner,
+} from './agent/mod.ts';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -80,7 +90,8 @@ const GEMINI_CHAT_MAX_OUTPUT_TOKENS_MODERN = 65536;
 const GEMINI_TITLE_TIMEOUT_MS = 8_000;
 const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 40;
 const GEMINI_TITLE_MAX_LEN = 24;
-const CHAT_HISTORY_LIMIT = 40;
+/** 최근 턴만 전달. 향후 Session Summary 메모리와 합칠 예정(지금은 요약 없음). */
+const CHAT_HISTORY_LIMIT = 15;
 const LOG_PREVIEW_LEN = 60;
 
 const MSG_PERMISSION_DENIED = (modelDisplayName: string) =>
@@ -456,15 +467,15 @@ type GeminiFunctionCallPart = {
 };
 
 type StreamOptions = {
-  /** 관리자 DB(LLMSystemPrompt)에서 불러온 전역 시스템 프롬프트 — 모든 모델에 동일 적용 */
-  adminSystemInstruction?: string;
-  /** AI Lab 다운로드 function calling 활성화(앱 클라이언트 실행) — 검색과 배타 */
-  enableDownloadTools?: boolean;
   /**
-   * true면 클라이언트 AI Lab 「인터넷 검색」토글 ON.
-   * Gemini=google_search, Groq=browser_search 또는 Compound web_search (서버사이드 AI 검색).
-   * Edge는 웹을 크롤하지 않는다.
+   * 메인 LLM 시스템 프롬프트.
+   * Agent 파이프라인이 `[CURRENT_DATETIME]`/`[INTENT]`까지 조립해 넘기면
+   * 어댑터는 datetime·검색 힌트를 중복 부착하지 않는다.
    */
+  adminSystemInstruction?: string;
+  /** Intent needDownloadTools / toolContinue — 검색과 배타 */
+  enableDownloadTools?: boolean;
+  /** Intent needSearch — Gemini=google_search, Groq=browser_search */
   enableWebSearch?: boolean;
   /** tool 결과 이어가기 — Gemini contents에 functionResponse를 붙일 때 사용 */
   toolContinue?: {
@@ -473,8 +484,11 @@ type StreamOptions = {
   };
 };
 
+/**
+ * Provider 공통 인터페이스.
+ * 새 제공자(OpenAI/Claude/xAI Grok/DeepSeek 등)는 이 계약 + PROVIDER_CAPABILITIES만 맞추면 된다.
+ */
 interface LlmAdapter {
-  /** 스트리밍 호출. onDelta는 텍스트 조각이 도착할 때마다 호출된다(0회 이상). */
   stream(
     apiKey: string,
     modelName: string,
@@ -483,8 +497,11 @@ interface LlmAdapter {
     onDelta: (deltaText: string) => void,
     options?: StreamOptions,
   ): Promise<AdapterResult>;
-  /** 대화 제목 생성(짧은 논스트리밍 호출). 실패 시 null — 호출부가 임시 제목을 유지. */
   generateTitle(apiKey: string, modelName: string, userMessage: string): Promise<TitleResult | null>;
+}
+
+function isAgentAssembledSystemPrompt(text: string): boolean {
+  return text.includes('[CURRENT_DATETIME]') && text.includes('[INTENT]');
 }
 
 // Gemini 2.5+/3.x 계열은 기본적으로 "thinking"(응답 전 내부 추론)이 활성화되어 있고,
@@ -529,14 +546,11 @@ function buildGeminiContents(history: ChatTurn[], userMessage: string) {
   ];
 }
 
-// 타이핑 효과 재생 단위(문자 수)·간격 — 실제 네트워크 스트리밍이 아니라, 이미 확정된
-// 전체 텍스트를 잘라서 onDelta에 순차 전달하는 방식(아래 "왜 스트리밍 대신 재생?" 참고).
-// 긴 답(차트 등)에서 delay를 그대로 쓰면 Edge wall-clock을 태워 finalize 전에 끊길 수 있어
-// 짧은 답만 살짝 간격을 두고, 길면 거의 즉시 밀어 보낸다.
+// SSE 조기 종료 등으로 논스트리밍 fallback 했을 때만 쓰는 재생 타이핑.
+// 정상 경로는 제공자 SSE를 그대로 onDelta로 릴레이한다.
 const TYPING_REPLAY_CHUNK_CHARS = 24;
 const TYPING_REPLAY_DELAY_MS = 12;
 const TYPING_REPLAY_FAST_CHARS = 48;
-/** 이 길이 이상이면 delay 없이 큰 청크로만 보낸다(차트·목록 등). */
 const TYPING_REPLAY_NO_DELAY_MIN_LEN = 600;
 
 async function emitAsTypingDeltas(
@@ -563,24 +577,9 @@ function sanitizeGeneratedTitle(raw: string): string {
 }
 
 /**
- * Gemini 호출 — chat도 title과 동일하게 논스트리밍 `generateContent`를 쓴다.
- *
- * 왜 스트리밍(`streamGenerateContent?alt=sse`) 대신 재생(replay) 방식인가 (2026-07-22):
- * 실 로그로 확인한 결과, `streamGenerateContent`가 `finishReason` 없이(=완료 신호
- * 없이) SSE 연결을 조기 종료하는 경우가 있었다 — 예: "안녕하세요! 😊"(3 토큰)에서
- * 끊기거나 "파이"(2 토큰)처럼 단어 중간에서 끊김. `maxOutputTokens`(65536까지 올려도
- * 무관), thinking 예산과는 무관하게 실제 사용 토큰이 그 한도에 한참 못 미친 채로
- * 끊겼고, 두 번째 SSE 프레임까지는 정상 수신됐는데 그 다음 프레임(`finishReason`이
- * 담겨야 할)이 아예 오지 않고 연결이 끝났다(readCount 늘어나지 않고 `done:true`) —
- * 즉 우리 파싱 버그가 아니라 외부(Google SSE 게이트웨이 추정) 조기 종료.
- *
- * `generateTitle()`은 애초에 논스트리밍 `generateContent`를 쓰고 있었고 이런 조기
- * 종료 증상이 보고된 적이 없어, chat 응답도 같은 방식으로 바꿨다: 응답을 통째로
- * 받아(불완전하면 HTTP/JSON 파싱 자체가 실패하므로 "일부만 온 것을 완성된 것처럼
- * 오인"할 수가 없다) 확정한 뒤, 타이핑 효과는 서버에서 `onDelta`를 여러 번 호출해
- * 재생한다(`emitAsTypingDeltas`). 네트워크 전송 자체는 이미 fast(1~5초)라 체감
- * 지연은 거의 없고, 클라이언트는 전송 즉시 붙는 "타이핑 중" 표시(typing placeholder)
- * 덕분에 차이를 못 느낀다.
+ * Gemini/Groq 채팅은 가능하면 제공자 SSE를 실시간 릴레이한다.
+ * Gemini `streamGenerateContent`가 finishReason 없이 조기 종료되면(과거 재현)
+ * 같은 요청을 논스트리밍 `generateContent`로 한 번 더 받아 확정한다.
  */
 /** Gemini Grounding with Google Search — generateContent REST. */
 const GEMINI_GOOGLE_SEARCH_TOOL = { google_search: {} };
@@ -590,42 +589,50 @@ const GEMINI_GOOGLE_SEARCH_TOOL = { google_search: {} };
 const DOWNLOAD_FUNCTION_DECLARATIONS = [
   {
     name: 'list_ready_download_platforms',
-    description:
-      '사용자가 지금 앱에서 사용 가능한 음악 메타데이터 플랫폼 목록을 가져온다. 다운로드 요청 시 반드시 먼저 호출한다.',
+    description: '사용 가능 플랫폼 목록. 이번 버전은 Melon만.',
     parameters: { type: 'object', properties: {} },
   },
   {
-    name: 'search_track_on_platform',
-    description: '선택한 플랫폼에서 곡을 검색한다. platform은 melon|spotify|lastfm|appleMusic.',
+    name: 'search_music',
+    description:
+      'Melon 곡 검색. platform은 생략/melon만. 다른 플랫폼 요청 시 호출하지 말고 미지원 안내.',
     parameters: {
       type: 'object',
       properties: {
-        platform: { type: 'string' },
-        query: { type: 'string', description: '예: Eminem Lose Yourself' },
+        query: { type: 'string', description: '예: 아이유 좋은날' },
+        platform: {
+          type: 'string',
+          description: 'optional — melon only',
+        },
       },
-      required: ['platform', 'query'],
+      required: ['query'],
     },
   },
   {
     name: 'get_lyrics_download_options',
-    description: '사용자 환경에 맞는 가사 생성/번역/언어팩 선택지를 가져온다. 다운로드 확정 전에 호출한다.',
+    description:
+      '가사 옵션(한국어 팩/영어 팩/번역지원). 가사만 요청되고 옵션이 없을 때 질문용.',
     parameters: { type: 'object', properties: {} },
   },
   {
     name: 'start_music_download',
     description:
-      '확정된 트랙 hit와 가사 옵션으로 실제 다운로드를 시작한다. hit는 search_track_on_platform 결과 항목 그대로.',
+      'Melon hit로 다운로드. YouTube는 Melon 메타로만 검색. lyricsOption 기본 none.',
     parameters: {
       type: 'object',
       properties: {
-        hit: { type: 'object' },
+        hit: { type: 'object', description: 'search_music hits 항목' },
+        lyricsOption: {
+          type: 'string',
+          description: 'none|ko|en|auto|ko_translate|en_translate|auto_translate',
+        },
         lyricsMode: {
           type: 'string',
-          description: 'unset|configured|translation|melon|melon_translation',
+          description: 'legacy; prefer lyricsOption',
         },
-        alignLang: { type: 'string', description: 'ko|en — 수동 언어팩일 때만' },
+        alignLang: { type: 'string', description: 'ko|en optional' },
       },
-      required: ['hit', 'lyricsMode'],
+      required: ['hit'],
     },
   },
 ];
@@ -633,21 +640,15 @@ const DOWNLOAD_FUNCTION_DECLARATIONS = [
 /** @deprecated 이름 호환 — DOWNLOAD_FUNCTION_DECLARATIONS 와 동일 */
 const GEMINI_DOWNLOAD_FUNCTION_DECLARATIONS = DOWNLOAD_FUNCTION_DECLARATIONS;
 
-function messageLikelyNeedsDownloadTools(userMessage: string): boolean {
-  // 앱 로컬 다운로드 FC가 실제로 필요한 의도만. 일반 안내·차트 검색 질문은 제외.
-  return /다운로드|받아\s*줘|받아줘|다운\s*받|download|곡을?\s*받|음악을?\s*받|트랙을?\s*받|mp3|flac/i.test(
-    userMessage,
-  );
-}
-
-/** UI 토글 ON일 때만 코드가 잠깐 붙이는 힌트(DB 시스템 프롬프트 아님). */
+/** UI 토글 레거시 힌트 — Agent `[WEB_SEARCH_RULES]`가 없을 때만 사용 */
 function appendWebSearchEnabledHint(systemText: string, enabled: boolean): string {
   if (!enabled) return systemText;
+  if (systemText.includes('[WEB_SEARCH_RULES]')) return systemText;
   return (
     `${systemText.trim()}\n\n` +
     `[WEB_SEARCH_ENABLED]\n` +
-    `사용자가 AI Lab에서 인터넷 검색을 켰다.\n` +
-    `반드시 제공된 웹 검색 도구로 최신 정보를 검색한 뒤, 그 결과만 근거로 한국어로 답하라.`
+    `이번 턴은 최신 정보가 필요하다.\n` +
+    `반드시 제공된 웹 검색 도구로 검색한 뒤, 그 결과만 근거로 한국어로 재정리해 답하라.`
   );
 }
 
@@ -705,8 +706,9 @@ function buildChatSystemInstruction(dbSystemInstruction?: string): string {
   return fromDb ? `${live}\n\n${fromDb}` : live;
 }
 
-/** Groq 등: 이번 요청에 tools가 없을 때 모델이 google_search 등을 勝手히 호출하지 못하게 덧붙인다. */
+/** Groq 등: tools 없을 때 가짜 tool call 방지. Agent가 이미 [TOOLS]를 넣었으면 스킵. */
 function appendNoToolsGuard(systemText: string): string {
+  if (systemText.includes('[TOOLS]')) return systemText;
   return (
     `${systemText.trim()}\n\n` +
     `[TOOLS]\n` +
@@ -718,6 +720,22 @@ function appendNoToolsGuard(systemText: string): string {
 /** @deprecated buildChatSystemInstruction 별칭 */
 function buildGeminiChatSystemInstruction(dbSystemInstruction?: string): string {
   return buildChatSystemInstruction(dbSystemInstruction);
+}
+
+/** Agent 조립본이면 그대로, 아니면 datetime+DB 래핑 */
+function resolveAdapterSystemInstruction(
+  adminSystemInstruction: string | undefined,
+  opts: { enableWebSearch: boolean; enableTools: boolean },
+): string {
+  const raw = (adminSystemInstruction ?? '').trim();
+  let text = isAgentAssembledSystemPrompt(raw)
+    ? raw
+    : buildChatSystemInstruction(adminSystemInstruction);
+  text = appendWebSearchEnabledHint(text, opts.enableWebSearch);
+  if (!opts.enableTools && !opts.enableWebSearch) {
+    text = appendNoToolsGuard(text);
+  }
+  return text;
 }
 
 function extractGeminiVisibleText(parts: unknown): string {
@@ -886,7 +904,10 @@ async function parseGeminiGenerateContentResponse(
 const geminiAdapter: LlmAdapter = {
   async stream(apiKey, modelName, history, userMessage, onDelta, options) {
     const modelPath = modelName.startsWith('models/') ? modelName : `models/${modelName}`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const nonStreamUrl =
+      `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const streamUrl =
+      `https://generativelanguage.googleapis.com/v1beta/${modelPath}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
     const enableDownloadTools = options?.enableDownloadTools === true;
     const toolContinue = options?.toolContinue;
     const contents = toolContinue
@@ -913,9 +934,11 @@ const geminiAdapter: LlmAdapter = {
     const modernMaxOutputTokens = getGeminiMaxOutputTokens(modelName);
     const needsWebSearch =
       !enableDownloadTools && !toolContinue && options?.enableWebSearch === true;
-    let systemInstructionText = buildGeminiChatSystemInstruction(options?.adminSystemInstruction);
-    systemInstructionText = appendWebSearchEnabledHint(systemInstructionText, needsWebSearch);
-    // 다운로드 FC ↔ google_search 배타. 검색 ON이면 Gemini 네이티브 google_search만.
+    const systemInstructionText = resolveAdapterSystemInstruction(options?.adminSystemInstruction, {
+      enableWebSearch: needsWebSearch,
+      enableTools: !!(enableDownloadTools || toolContinue || needsWebSearch),
+    });
+    // 다운로드 FC ↔ google_search 배타. Intent needSearch면 Gemini 네이티브 google_search.
     const attempts = enableDownloadTools || toolContinue
       ? [
           {
@@ -947,16 +970,14 @@ const geminiAdapter: LlmAdapter = {
           ];
     const attemptDiags: GeminiAttemptDiag[] = [];
 
-    const doFetch = async (attempt: GeminiAttempt) => {
+    const buildBody = (attempt: GeminiAttempt) => {
       const generationConfig: Record<string, unknown> = {
         maxOutputTokens: attempt.maxOutputTokens,
         temperature: 0.8,
       };
-      // thinkingBudget:0 은 Gemini 3.x에서 400을 내는 경우가 있어, 명시적으로 켠 시도에서만 붙인다.
       if (attempt.useThinking && thinkingConfig) {
         generationConfig.thinkingConfig = thinkingConfig;
       }
-
       const body: Record<string, unknown> = {
         systemInstruction: { parts: [{ text: systemInstructionText }] },
         contents,
@@ -967,8 +988,15 @@ const geminiAdapter: LlmAdapter = {
       } else if (attempt.withSearch) {
         body.tools = [GEMINI_GOOGLE_SEARCH_TOOL];
       }
-      return fetchGeminiWithTimeout(url, body, attempt.timeoutMs);
+      return body;
     };
+
+    const doFetch = async (attempt: GeminiAttempt, mode: 'sse' | 'json') =>
+      fetchGeminiWithTimeout(
+        mode === 'sse' ? streamUrl : nonStreamUrl,
+        buildBody(attempt),
+        attempt.timeoutMs,
+      );
 
     let lastFail: AdapterFailure | null = null;
 
@@ -977,7 +1005,7 @@ const geminiAdapter: LlmAdapter = {
       const attemptStarted = Date.now();
       let res: Response;
       try {
-        res = await doFetch(attempt);
+        res = await doFetch(attempt, 'sse');
       } catch (e) {
         const aborted =
           (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) ||
@@ -1020,75 +1048,223 @@ const geminiAdapter: LlmAdapter = {
         return lastFail;
       }
 
-      const parsed = await parseGeminiGenerateContentResponse(res, attempt.withSearch);
-      if (!parsed.ok) {
-        const rateLimited = isGeminiRateLimitStatus(parsed.status);
-        const kind = parsed.status === 401 || parsed.status === 403
-          ? 'auth'
-          : rateLimited
-            ? 'rate_limit'
-            : 'other';
-        const diag: GeminiAttemptDiag = {
+      if (!res.ok) {
+        const parsed = await parseGeminiGenerateContentResponse(res, attempt.withSearch);
+        if (!parsed.ok) {
+          const rateLimited = isGeminiRateLimitStatus(parsed.status);
+          const kind = parsed.status === 401 || parsed.status === 403
+            ? 'auth'
+            : rateLimited
+              ? 'rate_limit'
+              : 'other';
+          const diag: GeminiAttemptDiag = {
+            attemptIndex: i + 1,
+            attemptLabel: attempt.label,
+            withSearch: attempt.withSearch,
+            maxOutputTokens: attempt.maxOutputTokens,
+            ok: false,
+            httpStatus: parsed.status,
+            errorKind: kind,
+            errorMessage: parsed.message.slice(0, rateLimited ? 6000 : 800),
+            finishReason: parsed.finishReason ?? null,
+            blockReason: parsed.blockReason ?? null,
+            groundedQueryCount: parsed.groundedQueryCount ?? 0,
+            elapsedMs: Date.now() - attemptStarted,
+          };
+          attemptDiags.push(diag);
+          lastFail = {
+            ok: false,
+            kind,
+            status: parsed.status,
+            message: parsed.message,
+            attempts: attemptDiags,
+            needsWebSearch,
+          };
+          console.warn(
+            JSON.stringify({
+              fn: 'llm-chat-send',
+              event: 'gemini_attempt_failed',
+              attempt: i + 1,
+              label: attempt.label,
+              withSearch: attempt.withSearch,
+              status: parsed.status,
+              elapsedMs: diag.elapsedMs,
+              message: parsed.message.slice(0, 500),
+              finishReason: diag.finishReason,
+              blockReason: diag.blockReason,
+              rateLimited,
+            }),
+          );
+          if (lastFail.kind === 'auth') return lastFail;
+          if (rateLimited) return lastFail;
+          if (i < attempts.length - 1) continue;
+          break;
+        }
+      }
+
+      const emitter = createVisibleDeltaEmitter(onDelta);
+      let finishReason: string | undefined;
+      let blockReason: string | undefined;
+      let grounding: unknown;
+      // deno-lint-ignore no-explicit-any
+      let usage: any = {};
+      const functionCalls: GeminiFunctionCallPart[] = [];
+      const fcSeen = new Set<string>();
+      let groundedQueries: string[] = [];
+
+      try {
+        await readSseDataLines(res, (json) => {
+          // deno-lint-ignore no-explicit-any
+          const j = json as any;
+          if (j?.promptFeedback?.blockReason) {
+            blockReason = String(j.promptFeedback.blockReason);
+          }
+          if (j?.usageMetadata) usage = j.usageMetadata;
+          const candidate = j?.candidates?.[0];
+          if (!candidate) return;
+          if (typeof candidate.finishReason === 'string' && candidate.finishReason) {
+            finishReason = candidate.finishReason;
+          }
+          if (candidate.groundingMetadata) {
+            grounding = candidate.groundingMetadata;
+            if (Array.isArray(candidate.groundingMetadata.webSearchQueries)) {
+              groundedQueries = candidate.groundingMetadata.webSearchQueries.filter(
+                (q: unknown) => typeof q === 'string',
+              );
+            }
+          }
+          const parts = candidate?.content?.parts;
+          const piece = extractGeminiVisibleText(parts);
+          if (piece && !isTrivialGeminiText(piece)) {
+            const rawSoFar = emitter.getRaw();
+            if (piece.startsWith(rawSoFar) && piece.length > rawSoFar.length) {
+              emitter.push(piece.slice(rawSoFar.length));
+            } else if (!rawSoFar.endsWith(piece)) {
+              emitter.push(piece);
+            }
+          }
+          for (const fc of extractGeminiFunctionCalls(parts)) {
+            const key = `${fc.name}:${JSON.stringify(fc.args)}`;
+            if (fcSeen.has(key)) continue;
+            fcSeen.add(key);
+            functionCalls.push(fc);
+          }
+        });
+      } catch (e) {
+        const errorMessage = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+        attemptDiags.push({
           attemptIndex: i + 1,
-          attemptLabel: attempt.label,
+          attemptLabel: `${attempt.label}_sse_read`,
           withSearch: attempt.withSearch,
           maxOutputTokens: attempt.maxOutputTokens,
           ok: false,
-          httpStatus: parsed.status,
-          errorKind: kind,
-          errorMessage: parsed.message.slice(0, rateLimited ? 6000 : 800),
-          finishReason: parsed.finishReason ?? null,
-          blockReason: parsed.blockReason ?? null,
-          groundedQueryCount: parsed.groundedQueryCount ?? 0,
+          httpStatus: res.status,
+          errorKind: 'network',
+          errorMessage: errorMessage.slice(0, 800),
+          finishReason: finishReason ?? null,
+          blockReason: blockReason ?? null,
+          groundedQueryCount: groundedQueries.length,
           elapsedMs: Date.now() - attemptStarted,
-        };
-        attemptDiags.push(diag);
+        });
         lastFail = {
           ok: false,
-          kind,
-          status: parsed.status,
-          message: parsed.message,
+          kind: 'network',
+          message: errorMessage,
           attempts: attemptDiags,
           needsWebSearch,
         };
-        console.warn(
-          JSON.stringify({
-            fn: 'llm-chat-send',
-            event: 'gemini_attempt_failed',
-            attempt: i + 1,
-            label: attempt.label,
-            withSearch: attempt.withSearch,
-            status: parsed.status,
-            elapsedMs: diag.elapsedMs,
-            message: parsed.message.slice(0, 500),
-            finishReason: diag.finishReason,
-            blockReason: diag.blockReason,
-            rateLimited,
-          }),
-        );
-        if (lastFail.kind === 'auth') return lastFail;
+        if (i < attempts.length - 1) continue;
+        return lastFail;
+      }
 
-        // 429: 대기 후 재시도하면 free-tier 요청만 더 소모한다. 즉시 rate_limit로 반환.
-        if (rateLimited) {
-          return lastFail;
+      let fullText = emitter.finish();
+      let usedFallback = false;
+
+      // finishReason 없이 끊기면 논스트리밍으로 확정(과거 Google SSE 조기 종료 대응)
+      if (!finishReason || (!fullText && functionCalls.length === 0)) {
+        try {
+          const res2 = await doFetch(attempt, 'json');
+          const parsed = await parseGeminiGenerateContentResponse(res2, attempt.withSearch);
+          if (parsed.ok) {
+            usedFallback = true;
+            const authoritative = parsed.fullText;
+            if (authoritative.startsWith(fullText)) {
+              const rest = authoritative.slice(fullText.length);
+              if (rest) await emitAsTypingDeltas(rest, onDelta);
+            } else if (!fullText) {
+              if (authoritative) await emitAsTypingDeltas(authoritative, onDelta);
+            }
+            fullText = authoritative;
+            finishReason = parsed.finishReason ?? finishReason;
+            blockReason = parsed.blockReason ?? blockReason;
+            groundedQueries = parsed.groundedQueries;
+            usage = parsed.json?.usageMetadata ?? usage;
+            if (parsed.functionCalls.length > 0) {
+              functionCalls.length = 0;
+              functionCalls.push(...parsed.functionCalls);
+            }
+          } else if (!fullText && functionCalls.length === 0) {
+            const rateLimited = isGeminiRateLimitStatus(parsed.status);
+            const kind = parsed.status === 401 || parsed.status === 403
+              ? 'auth'
+              : rateLimited
+                ? 'rate_limit'
+                : 'other';
+            attemptDiags.push({
+              attemptIndex: i + 1,
+              attemptLabel: `${attempt.label}_fallback`,
+              withSearch: attempt.withSearch,
+              maxOutputTokens: attempt.maxOutputTokens,
+              ok: false,
+              httpStatus: parsed.status,
+              errorKind: kind,
+              errorMessage: parsed.message.slice(0, rateLimited ? 6000 : 800),
+              finishReason: parsed.finishReason ?? null,
+              blockReason: parsed.blockReason ?? null,
+              groundedQueryCount: parsed.groundedQueryCount ?? 0,
+              elapsedMs: Date.now() - attemptStarted,
+            });
+            lastFail = {
+              ok: false,
+              kind,
+              status: parsed.status,
+              message: parsed.message,
+              attempts: attemptDiags,
+              needsWebSearch,
+            };
+            if (kind === 'auth' || rateLimited) return lastFail;
+            if (i < attempts.length - 1) continue;
+            break;
+          }
+        } catch {
+          // fallback 실패 시 스트림에서 모은 텍스트라도 있으면 사용
         }
+      }
 
+      if (!fullText && functionCalls.length === 0) {
+        lastFail = {
+          ok: false,
+          kind: 'other',
+          message: 'gemini: empty response after stream',
+          attempts: attemptDiags,
+          needsWebSearch,
+        };
         if (i < attempts.length - 1) continue;
         break;
       }
 
       const diagOk: GeminiAttemptDiag = {
         attemptIndex: i + 1,
-        attemptLabel: attempt.label,
+        attemptLabel: usedFallback ? `${attempt.label}_sse_fallback` : `${attempt.label}_sse`,
         withSearch: attempt.withSearch,
         maxOutputTokens: attempt.maxOutputTokens,
         ok: true,
         httpStatus: res.status,
         errorKind: null,
-        errorMessage: null,
-        finishReason: parsed.finishReason ?? null,
-        blockReason: parsed.blockReason ?? null,
-        groundedQueryCount: parsed.groundedQueries.length,
+        errorMessage: usedFallback ? 'sse_early_end_used_generateContent' : null,
+        finishReason: finishReason ?? null,
+        blockReason: blockReason ?? null,
+        groundedQueryCount: groundedQueries.length,
         elapsedMs: Date.now() - attemptStarted,
       };
       attemptDiags.push(diagOk);
@@ -1100,19 +1276,14 @@ const geminiAdapter: LlmAdapter = {
           attempt: i + 1,
           label: attempt.label,
           withSearch: attempt.withSearch,
-          groundedQueryCount: parsed.groundedQueries.length,
+          groundedQueryCount: groundedQueries.length,
           elapsedMs: diagOk.elapsedMs,
-          textLen: parsed.fullText.length,
+          textLen: fullText.length,
           finishReason: diagOk.finishReason,
+          usedFallback,
         }),
       );
 
-      const { fullText, json, finishReason, groundedQueries, usedSearch, functionCalls } = parsed;
-      if (fullText) {
-        await emitAsTypingDeltas(fullText, onDelta);
-      }
-
-      const usage = json?.usageMetadata ?? {};
       return {
         ok: true,
         text: fullText,
@@ -1121,7 +1292,7 @@ const geminiAdapter: LlmAdapter = {
         totalTokens: Number(usage.totalTokenCount ?? 0),
         finishReason,
         thoughtsTokens: Number(usage.thoughtsTokenCount ?? 0),
-        grounded: Boolean(usedSearch && groundedQueries.length > 0),
+        grounded: Boolean(attempt.withSearch && groundedQueries.length > 0),
         groundedQueryCount: groundedQueries.length,
         attempts: attemptDiags,
         needsWebSearch,
@@ -1149,9 +1320,6 @@ const geminiAdapter: LlmAdapter = {
       '규칙: 명사형으로 12자 이내. 설명·따옴표·마침표 없이 제목 한 줄만 출력. 메시지를 그대로 베끼지 말고 핵심 주제만 요약.\n\n' +
       `사용자 메시지:\n${userMessage}`;
 
-    // thinking 토큰도 maxOutputTokens 예산을 함께 쓰므로, thinking을 완전히 끌 수 없는
-    // Pro 계열(thinkingBudget=128 고정)에서는 예산을 넉넉히 늘려야 실제 제목 텍스트가
-    // 중간에 잘리지 않는다(끌 수 있는 Flash 계열은 기존 예산으로 충분).
     const maxOutputTokens =
       thinkingConfig && (thinkingConfig.thinkingBudget as number) > 0
         ? (thinkingConfig.thinkingBudget as number) + GEMINI_TITLE_MAX_OUTPUT_TOKENS
@@ -1173,7 +1341,6 @@ const geminiAdapter: LlmAdapter = {
       });
 
     try {
-      // thinkingBudget:0 이 400인 모델이 있어, 먼저 thinking 없이 시도
       let res = await doFetch(false);
       if (!res.ok && res.status === 400 && thinkingConfig) {
         res = await doFetch(true);
@@ -1301,9 +1468,14 @@ function parseGroqTpmUsage(errorBody: string): {
 }
 
 /**
- * Qwen/GPT-OSS 등이 content에 넣는 내부 추론(<think>…)·지시문 인용을 사용자 답에서 제거.
+ * Qwen/GPT-OSS 등이 content에 넣는 내부 추론(<think>…)·지시문 인용·
+ * Groq browser_search 인라인 인용(【2†L6-L10】)을 사용자 답에서 제거.
  */
 function stripModelPrivateReasoning(text: string): string {
+  return sanitizeAssistantVisibleText(text);
+}
+
+function sanitizeAssistantVisibleText(text: string): string {
   let t = text ?? '';
   if (!t) return '';
   t = t.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '');
@@ -1316,7 +1488,132 @@ function stripModelPrivateReasoning(text: string): string {
   t = t.replace(/^[\s\S]*?<\/think>\s*/i, '');
   // 흔한 내부 독백 헤더
   t = t.replace(/^(?:Here's a thinking process:|The user is asking[\s\S]*?\n\n)(?=[가-힣A-Z])/i, '');
+  // Groq browser_search / OpenAI 계열 인라인 인용 — 예: 【2†L6-L10】, 【3】, [1†L1-L4]
+  t = t.replace(/\u3010\d+\u2020[^\u3011]*\u3011/g, '');
+  t = t.replace(/\u3010\d+\u3011/g, '');
+  t = t.replace(/【\d+†[^】]*】/g, '');
+  t = t.replace(/【\d+】/g, '');
+  t = t.replace(/\[\d+\u2020[^\]]*\]/g, '');
+  t = t.replace(/\[\d+†[^\]]*\]/g, '');
+  // 시스템 지시 블록이 그대로 새어 나온 경우
+  t = t.replace(/\[WEB_SEARCH_ENABLED\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
+  t = t.replace(/\[CURRENT_DATETIME\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
+  t = t.replace(/\[TOOLS\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
+  t = t.replace(/[ \t]{2,}/g, ' ');
+  t = t.replace(/ ?\n/g, '\n');
+  t = t.replace(/\n{3,}/g, '\n\n');
   return t.replace(/^\s+|\s+$/g, '').trim();
+}
+
+/** 과거에 Content에 붙였던 출처 마커만 제거(더 이상 저장하지 않음). */
+const NRM_SOURCES_WRAP_START = '\n\n\u001eNRM_SOURCES:';
+const NRM_SOURCES_WRAP_END = '\u001e';
+
+function stripLegacySourcesMarker(raw: string): string {
+  const text = raw ?? '';
+  const start = text.lastIndexOf(NRM_SOURCES_WRAP_START);
+  if (start < 0) return text;
+  const payloadStart = start + NRM_SOURCES_WRAP_START.length;
+  const end = text.indexOf(NRM_SOURCES_WRAP_END, payloadStart);
+  if (end < 0) return text;
+  return text.slice(0, start).replace(/\s+$/g, '');
+}
+
+/**
+ * 스트리밍 중 【…】 인라인 인용은 닫히기 전까지 보류하고, sanitize 후 증가분만 onDelta.
+ */
+function createVisibleDeltaEmitter(onDelta: (deltaText: string) => void) {
+  let emitted = '';
+  let raw = '';
+
+  const emitFromRaw = (includeIncompleteCitation: boolean) => {
+    let work = raw;
+    if (!includeIncompleteCitation) {
+      const incomplete = work.match(/(?:【|\u3010)[^】\u3011]*$/);
+      if (incomplete && incomplete.index != null) {
+        work = work.slice(0, incomplete.index);
+      }
+    }
+    const clean = sanitizeAssistantVisibleText(work);
+    if (clean.startsWith(emitted)) {
+      const add = clean.slice(emitted.length);
+      if (add) {
+        emitted = clean;
+        onDelta(add);
+      }
+      return;
+    }
+    emitted = clean;
+  };
+
+  return {
+    push(chunk: string) {
+      if (!chunk) return;
+      raw += chunk;
+      emitFromRaw(false);
+    },
+    finish(): string {
+      emitFromRaw(true);
+      const clean = sanitizeAssistantVisibleText(raw);
+      if (clean.startsWith(emitted)) {
+        const add = clean.slice(emitted.length);
+        if (add) onDelta(add);
+      }
+      emitted = clean;
+      return clean;
+    },
+    getRaw(): string {
+      return raw;
+    },
+  };
+}
+
+async function readSseDataLines(
+  res: Response,
+  onDataJson: (json: Record<string, unknown>) => void,
+): Promise<void> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // SSE 이벤트는 빈 줄로 구분
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) >= 0) {
+      const eventBlock = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const lines = eventBlock.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trimEnd();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const json = JSON.parse(payload) as Record<string, unknown>;
+          onDataJson(json);
+        } catch {
+          // ignore malformed chunk
+        }
+      }
+    }
+  }
+  // trailing data: without blank line
+  if (buffer.trim()) {
+    for (const line of buffer.split(/\r?\n/)) {
+      const trimmed = line.trimEnd();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        onDataJson(JSON.parse(payload) as Record<string, unknown>);
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 function groqToolsOpenAi(_mode: 'download' | 'web_search' = 'download'): Array<Record<string, unknown>> {
@@ -1452,7 +1749,22 @@ function parseGroqChatCompletion(json: Record<string, unknown> | null): {
   // deno-lint-ignore no-explicit-any
   const choice: any = Array.isArray(json?.choices) ? (json as any).choices[0] : null;
   const message = choice?.message ?? {};
-  const text = typeof message.content === 'string' ? message.content.trim() : '';
+  let text = '';
+  if (typeof message.content === 'string') {
+    text = message.content.trim();
+  } else if (Array.isArray(message.content)) {
+    // 일부 모델은 content 를 parts 배열로 반환
+    text = message.content
+      .map((part: unknown) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+          return (part as { text: string }).text;
+        }
+        return '';
+      })
+      .join('')
+      .trim();
+  }
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
   const functionCalls: Array<{ callId: string; name: string; args: Record<string, unknown> }> = [];
   for (const tc of toolCalls) {
@@ -1498,10 +1810,8 @@ const groqAdapter: LlmAdapter = {
     const enableDownloadTools = options?.enableDownloadTools === true;
     const enableWebSearch = options?.enableWebSearch === true && !enableDownloadTools;
     const toolContinue = options?.toolContinue;
-    // 시스템 프롬프트는 Google/Groq 동일 소스(DB LLMSystemPrompt + CURRENT_DATETIME)
-    let systemText = buildChatSystemInstruction(options?.adminSystemInstruction);
     const needsWebSearch = enableWebSearch;
-    // 다운로드 FC ↔ 네이티브 웹검색 ↔ 없음 — 배타.
+    // 다운로드 FC ↔ 네이티브 웹검색 ↔ 없음 — Intent/AgentPlan이 배타적으로 결정.
     const toolMode: 'download' | 'web_search' | 'none' = enableDownloadTools || toolContinue
       ? 'download'
       : enableWebSearch
@@ -1516,11 +1826,10 @@ const groqAdapter: LlmAdapter = {
           : GROQ_BROWSER_SEARCH_MODEL
         : modelName;
 
-    if (toolMode === 'none') {
-      systemText = appendNoToolsGuard(systemText);
-    } else if (toolMode === 'web_search') {
-      systemText = appendWebSearchEnabledHint(systemText, true);
-    }
+    let systemText = resolveAdapterSystemInstruction(options?.adminSystemInstruction, {
+      enableWebSearch: useBrowserSearch,
+      enableTools: toolMode !== 'none',
+    });
 
     const attemptLabel =
       toolMode === 'download'
@@ -1545,18 +1854,28 @@ const groqAdapter: LlmAdapter = {
       withTools: sendTools,
     });
 
-    const doFetch = async (messages: Array<Record<string, unknown>>, maxTokens: number) => {
+    const doFetch = async (
+      messages: Array<Record<string, unknown>>,
+      maxTokens: number,
+      asStream = false,
+      opts?: { forcePlain?: boolean },
+    ) => {
+      const forcePlain = opts?.forcePlain === true;
       const body: Record<string, unknown> = {
-        model: effectiveModelName,
+        model: forcePlain ? modelName : effectiveModelName,
         messages,
         temperature: 0.8,
         max_tokens: maxTokens,
-        stream: false,
+        stream: asStream,
       };
-      if (sendTools && toolMode === 'download') {
+      // 출처/인라인 인용을 아예 요청하지 않음(본문 【n†…】·annotation 비용 회피).
+      if (useBrowserSearch && !forcePlain) {
+        body.citation_options = 'disabled';
+      }
+      if (!forcePlain && sendTools && toolMode === 'download') {
         body.tools = groqToolsOpenAi('download');
         body.tool_choice = 'auto';
-      } else if (useBrowserSearch) {
+      } else if (!forcePlain && useBrowserSearch) {
         body.tools = [{ type: 'browser_search' }];
         body.tool_choice = 'required';
       }
@@ -1569,6 +1888,95 @@ const groqAdapter: LlmAdapter = {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(GROQ_CHAT_TIMEOUT_MS),
       });
+    };
+
+    const consumeGroqStream = async (
+      streamRes: Response,
+      onTextDelta: (t: string) => void,
+    ): Promise<{
+      text: string;
+      functionCalls: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      finishReason: string | null;
+      // deno-lint-ignore no-explicit-any
+      rawMessage: any;
+    }> => {
+      const emitter = createVisibleDeltaEmitter(onTextDelta);
+      let finishReason: string | null = null;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let totalTokens = 0;
+      const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+      // deno-lint-ignore no-explicit-any
+      let lastMessage: any = {};
+
+      await readSseDataLines(streamRes, (json) => {
+        // deno-lint-ignore no-explicit-any
+        const j = json as any;
+        if (j?.usage) {
+          inputTokens = Number(j.usage.prompt_tokens ?? inputTokens);
+          outputTokens = Number(j.usage.completion_tokens ?? outputTokens);
+          totalTokens = Number(j.usage.total_tokens ?? inputTokens + outputTokens);
+        }
+        const choice = Array.isArray(j?.choices) ? j.choices[0] : null;
+        if (!choice) return;
+        if (typeof choice.finish_reason === 'string' && choice.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+        const delta = choice.delta ?? {};
+        if (typeof delta.content === 'string' && delta.content) {
+          emitter.push(delta.content);
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            const idx = Number(tc.index ?? 0);
+            const cur = toolAcc.get(idx) ?? { id: '', name: '', args: '' };
+            if (typeof tc.id === 'string' && tc.id) cur.id = tc.id;
+            if (typeof tc.function?.name === 'string' && tc.function.name) {
+              cur.name += tc.function.name;
+            }
+            if (typeof tc.function?.arguments === 'string') {
+              cur.args += tc.function.arguments;
+            }
+            toolAcc.set(idx, cur);
+          }
+        }
+        if (choice.message) lastMessage = { ...lastMessage, ...choice.message };
+      });
+
+      const text = emitter.finish();
+      const functionCalls: Array<{ callId: string; name: string; args: Record<string, unknown> }> = [];
+      for (const [, tc] of [...toolAcc.entries()].sort((a, b) => a[0] - b[0])) {
+        const name = tc.name.trim();
+        if (!name) continue;
+        let args: Record<string, unknown> = {};
+        if (tc.args.trim()) {
+          try {
+            const parsedArgs = JSON.parse(tc.args);
+            if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+              args = parsedArgs as Record<string, unknown>;
+            }
+          } catch {
+            args = {};
+          }
+        }
+        functionCalls.push({
+          callId: tc.id || `${name}_${functionCalls.length}`,
+          name,
+          args,
+        });
+      }
+      return {
+        text,
+        functionCalls,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        finishReason,
+        rawMessage: lastMessage,
+      };
     };
 
     // 최대 4회: 예산 축소 / 잔여 TPM(최소 완료 토큰 이상일 때만) / 가짜 tool call 재시도
@@ -1642,7 +2050,7 @@ const groqAdapter: LlmAdapter = {
       }
 
       try {
-        res = await doFetch(prepared.messages, usedMaxTokens);
+        res = await doFetch(prepared.messages, usedMaxTokens, false);
       } catch (e) {
         const aborted =
           (e instanceof Error && (e.name === 'AbortError' || /aborted|timeout/i.test(e.message))) ||
@@ -1729,13 +2137,15 @@ const groqAdapter: LlmAdapter = {
       };
     }
 
+    // browser_search + stream 조합에서 delta.content 가 비는 경우가 있어
+    // 검증된 non-stream JSON 경로를 쓰고, UI 타이핑은 emitAsTypingDeltas 로 전달한다.
     // deno-lint-ignore no-explicit-any
     const json: any = await res.json().catch(() => null);
     if (!json) {
       attemptDiags.push({
         attemptIndex: attemptDiags.length + 1,
         attemptLabel,
-        withSearch: false,
+        withSearch: needsWebSearch,
         maxOutputTokens: usedMaxTokens,
         ok: false,
         httpStatus: res.status,
@@ -1757,24 +2167,14 @@ const groqAdapter: LlmAdapter = {
     }
 
     let parsed = parseGroqChatCompletion(json);
-    // 네이티브 웹검색은 서버사이드 — client download FC만 앱으로 넘긴다.
     if (toolMode !== 'download') {
-      parsed = {
-        ...parsed,
-        text: stripModelPrivateReasoning(parsed.text),
-        functionCalls: [],
-      };
+      parsed = { ...parsed, functionCalls: [] };
     }
 
-    const rawBeforeStrip = parsed.text;
     parsed = { ...parsed, text: stripModelPrivateReasoning(parsed.text) };
 
-    // think만 채우고 보이는 답이 비면 → 최종 답만 재요청
-    if (
-      !parsed.text &&
-      parsed.functionCalls.length === 0 &&
-      (parsed.finishReason === 'length' || /<think/i.test(rawBeforeStrip))
-    ) {
+    // 빈 답(think만 / stop+empty / length) → 검색·툴 없이 최종 답만 1회 재요청
+    if (!parsed.text && parsed.functionCalls.length === 0) {
       const finalOnlyMessages = [
         ...prepared.messages,
         {
@@ -1783,23 +2183,22 @@ const groqAdapter: LlmAdapter = {
             '내부 생각·지시문 인용·<think> 출력 없이, 위 질문에 대한 최종 답변만 한국어로 짧게 작성해 줘.',
         },
       ];
-      const contInputEst =
-        estimateGroqMessagesTokens(finalOnlyMessages) + (sendTools ? GROQ_TOOLS_OVERHEAD_TOKENS : 0);
-      const tpmCeiling = getGroqTpmRequestCeiling(effectiveModelName);
+      const contInputEst = estimateGroqMessagesTokens(finalOnlyMessages);
+      const tpmCeiling = getGroqTpmRequestCeiling(modelName);
       const contMax = Math.min(
         GROQ_PREFERRED_COMPLETION_TOKENS,
-        getGroqModelMaxCompletion(effectiveModelName),
+        getGroqModelMaxCompletion(modelName),
         Math.max(GROQ_MIN_COMPLETION_TOKENS, tpmCeiling - contInputEst - GROQ_TPM_MARGIN_TOKENS),
       );
       try {
-        const contRes = await doFetch(finalOnlyMessages, contMax);
+        const contRes = await doFetch(finalOnlyMessages, contMax, false, { forcePlain: true });
         if (contRes.ok) {
           // deno-lint-ignore no-explicit-any
           const contJson: any = await contRes.json().catch(() => null);
           const contParsed = parseGroqChatCompletion(contJson);
           const contText = stripModelPrivateReasoning(contParsed.text);
           if (contText) {
-            parsed = { ...contParsed, text: contText };
+            parsed = { ...contParsed, text: contText, functionCalls: [] };
             usedMaxTokens = contMax;
           }
         }
@@ -1808,7 +2207,7 @@ const groqAdapter: LlmAdapter = {
       }
     }
 
-    // finish_reason=length 로 답이 잘리면 이어서 1회 더 요청(질문 거절이 아니라 완료 보장)
+    // finish_reason=length 로 답이 잘리면 이어서 1회 더 요청
     if (
       parsed.finishReason === 'length' &&
       parsed.text &&
@@ -1832,7 +2231,7 @@ const groqAdapter: LlmAdapter = {
         Math.max(256, tpmCeiling - contInputEst - GROQ_TPM_MARGIN_TOKENS),
       );
       try {
-        const contRes = await doFetch(contMessages, contMax);
+        const contRes = await doFetch(contMessages, contMax, false);
         if (contRes.ok) {
           // deno-lint-ignore no-explicit-any
           const contJson: any = await contRes.json().catch(() => null);
@@ -1859,7 +2258,7 @@ const groqAdapter: LlmAdapter = {
       attemptDiags.push({
         attemptIndex: attemptDiags.length + 1,
         attemptLabel,
-        withSearch: false,
+        withSearch: needsWebSearch,
         maxOutputTokens: usedMaxTokens,
         ok: false,
         httpStatus: res.status,
@@ -1925,11 +2324,45 @@ const groqAdapter: LlmAdapter = {
   },
 };
 
-/** LLMProvider.ProviderName → 어댑터. OpenAI/Claude 등 추가 시 여기만 늘리면 된다. */
+/** Provider Registry 등록 — 새 Provider는 registerAdapterAsProvider / registerProvider 만 추가 */
+registerAdapterAsProvider({
+  id: 'Google',
+  displayName: 'Google Gemini',
+  stream: (apiKey, modelName, history, userMessage, onDelta, options) =>
+    geminiAdapter.stream(apiKey, modelName, history, userMessage, onDelta, options),
+  generateTitle: (apiKey, modelName, userMessage) =>
+    geminiAdapter.generateTitle(apiKey, modelName, userMessage),
+});
+registerAdapterAsProvider({
+  id: 'Groq',
+  displayName: 'Groq',
+  stream: (apiKey, modelName, history, userMessage, onDelta, options) =>
+    groqAdapter.stream(apiKey, modelName, history, userMessage, onDelta, options),
+  generateTitle: (apiKey, modelName, userMessage) =>
+    groqAdapter.generateTitle(apiKey, modelName, userMessage),
+});
+
+/** @deprecated Registry 사용 — 호환용 맵 */
 const ADAPTERS: Record<string, LlmAdapter> = {
   Google: geminiAdapter,
   Groq: groqAdapter,
 };
+void ADAPTERS;
+
+async function fetchGoogleProviderApiKey(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('LLMProvider')
+    .select('ApiKey')
+    .eq('ProviderName', 'Google')
+    .eq('IsActive', true)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data?.ApiKey) return null;
+  return String(data.ApiKey);
+}
 
 function currentTargetMonth(): string {
   const now = new Date();
@@ -1991,6 +2424,10 @@ Deno.serve(async (req: Request) => {
         args?: Record<string, unknown>;
         response?: Record<string, unknown>;
       }>;
+      musicPlatformId?: string | null;
+      musicPlatformLabel?: string | null;
+      musicPlatformBlocked?: boolean;
+      musicPlatformExplicit?: boolean;
     };
     try {
       payload = await req.json();
@@ -2004,6 +2441,11 @@ Deno.serve(async (req: Request) => {
     const sessionId = payload.sessionId != null ? Number(payload.sessionId) : null;
     const message = String(payload.message ?? '').trim();
     const isToolContinue = payload.toolContinue === true;
+    const musicPlatformId = String(payload.musicPlatformId ?? 'melon').trim() || 'melon';
+    const musicPlatformLabel =
+      String(payload.musicPlatformLabel ?? '').trim() || musicPlatformId;
+    const musicPlatformBlocked = payload.musicPlatformBlocked === true;
+    const musicPlatformExplicit = payload.musicPlatformExplicit === true;
     const toolResultsRaw = Array.isArray(payload.toolResults) ? payload.toolResults : [];
     const toolResults = toolResultsRaw
       .map((r) => {
@@ -2053,7 +2495,8 @@ Deno.serve(async (req: Request) => {
       sessionId: sessionId ?? 'new',
       messageLength: message.length,
       messagePreview: preview(message),
-      enableWebSearch: payload.enableWebSearch === true,
+      // 레거시 필드 — Agent Intent가 검색을 결정하므로 무시한다(로그만 남김).
+      legacyEnableWebSearchIgnored: payload.enableWebSearch === true,
       toolContinue: isToolContinue,
       toolResultCount: toolResults.length,
     });
@@ -2129,7 +2572,7 @@ Deno.serve(async (req: Request) => {
         .reverse()
         .map((h: { Role?: string; Content?: string }) => ({
           role: String(h.Role ?? ''),
-          content: String(h.Content ?? ''),
+          content: stripLegacySourcesMarker(String(h.Content ?? '')),
         }));
       prepared = {
         sessionId: Number(sessionRow.SessionID),
@@ -2373,10 +2816,8 @@ Deno.serve(async (req: Request) => {
             return;
           }
 
-          const adapter = ADAPTERS[model.providerName];
-          if (!adapter) {
-            // 아직 구현하지 않은 프로바이더 — 실제 요청을 시도한 것이 아니므로 이력 미기록.
-            logErr(requestId, 'adapter_missing', new Error(`no adapter registered for providerName=${model.providerName}`), {
+          if (!hasProvider(model.providerName)) {
+            logErr(requestId, 'adapter_missing', new Error(`no provider registered for providerName=${model.providerName}`), {
               providerId: model.providerId,
               providerName: model.providerName,
             });
@@ -2386,11 +2827,11 @@ Deno.serve(async (req: Request) => {
 
           const chatHistory: ChatTurn[] = (Array.isArray(history) ? history : []).map((h) => ({
             role: h.role === 'assistant' ? 'assistant' : 'user',
-            content: String(h.content ?? ''),
+            content: stripLegacySourcesMarker(String(h.content ?? '')),
           }));
 
-          // 관리자 전역 시스템 프롬프트(LLMSystemPrompt) — 모델 무관 동일 적용
-          let adminSystemInstruction = '';
+          // 관리자 DB 시스템 프롬프트 — Agent 조립의 ADMIN_SYSTEM_PROMPT 섹션으로 편입
+          let adminDbPrompt = '';
           let adminPromptCount = 0;
           try {
             const { data: promptRows, error: promptError } = await supabase
@@ -2406,64 +2847,177 @@ Deno.serve(async (req: Request) => {
                 .map((r: { Content?: string }) => String(r?.Content ?? '').trim())
                 .filter((t: string) => t.length > 0);
               adminPromptCount = texts.length;
-              adminSystemInstruction = texts.join('\n\n');
+              adminDbPrompt = texts.join('\n\n');
             }
           } catch (e) {
             logErr(requestId, 'system_prompt_fetch_threw', e);
           }
 
-          const enableDownloadTools =
-            isToolContinue || (!isToolContinue && messageLikelyNeedsDownloadTools(message));
-          // 인터넷 검색은 클라이언트 AI Lab 토글만 따른다(휴리스틱·Edge 크롤 없음).
-          const enableWebSearch =
-            !enableDownloadTools &&
-            !isToolContinue &&
-            payload.enableWebSearch === true;
+          // ── Production: FeatureFlag / Experiment / Guard / Cache / AgentRequest
+          const featureFlags = await resolveFeatureFlags(serialNo);
+          const experiment = await assignExperiment(serialNo);
+          const promptVersion =
+            experiment?.overrides?.promptVersion ?? getActivePromptVersion();
+
+          let userTextForLlm = isToolContinue ? '' : message;
+          if (!isToolContinue && featureFlags.inputGuard) {
+            const guarded = await getInputGuard().check(userTextForLlm);
+            if (!guarded.allowed) {
+              await finishWithSystem(
+                guarded.reasons[0] || '요청을 처리할 수 없어요.',
+                false,
+                'input_guard_blocked',
+              );
+              return;
+            }
+            userTextForLlm = guarded.text;
+          }
+
+          const agentRequest = buildAgentRequest({
+            traceId: requestId,
+            requestId,
+            serialNo,
+            userMessage: userTextForLlm,
+            sessionId: resolvedSessionId,
+            modelId: model.modelId,
+            isToolContinue,
+            promptVersion,
+            experimentId: experiment?.experimentId ?? null,
+            featureFlags,
+          });
+
+          if (!isToolContinue && featureFlags.questionCache) {
+            const qKey = cacheKeyForQuestion(serialNo, model.modelId, userTextForLlm);
+            const cached = await getQuestionCache().get(qKey);
+            // 구현체가 hit을 주면 향후 short-circuit. 기본 noop은 항상 miss.
+            if (cached.hit && cached.answer) {
+              logAgentPhase(requestId, 'question_cache_hit', { traceId: requestId, key: qKey });
+            }
+          }
+
+          // Intent → Planner(Graph) → Executor(Provider Registry)
+          const googleApiKeyForIntent =
+            model.providerName === 'Google'
+              ? model.apiKey
+              : await fetchGoogleProviderApiKey(supabase);
+
+          const agentState = emptyAgentState(
+            requestId,
+            serialNo,
+            userTextForLlm,
+            isToolContinue,
+            requestId,
+          );
+
+          const { plan: agentPlan, state: plannedState } = await runPlanner({
+            state: agentState,
+            userMessage: userTextForLlm,
+            isToolContinue,
+            googleApiKey: googleApiKeyForIntent,
+            adminDbPrompt,
+            provider: {
+              providerId: model.providerId,
+              providerName: model.providerName,
+              modelId: model.modelId,
+              modelName: model.modelName,
+              modelDisplayName: model.modelDisplayName,
+            },
+            history: chatHistory,
+            supabase,
+            musicPlatform: {
+              id: musicPlatformId,
+              label: musicPlatformLabel,
+              blocked: musicPlatformBlocked,
+              explicit: musicPlatformExplicit,
+            },
+          });
+
+          const bridge = executePlanToAdapterOptions(agentPlan);
+          const enableDownloadTools = bridge.enableDownloadTools;
+          const enableWebSearch = bridge.enableWebSearch;
+          const adminSystemInstruction = bridge.systemInstruction;
+
+          logAgentStateSnapshot(requestId, plannedState);
+          logAgentPlanSummary(requestId, agentPlan);
 
           logInfo(requestId, 'llm_call_start', {
+            traceId: agentPlan.traceId,
             providerName: model.providerName,
             modelName: model.modelName,
             historyCount: chatHistory.length,
+            historyBudgetTurns: agentPlan.historyBudgetTurns,
             messageLength: message.length,
             adminPromptCount,
             adminPromptChars: adminSystemInstruction.length,
             toolContinue: isToolContinue,
             enableDownloadTools,
             enableWebSearch,
+            musicPlatformId,
+            musicPlatformLabel,
+            musicPlatformBlocked,
+            musicPlatformExplicit,
+            intent: agentPlan.intent.intent,
+            toolNames: bridge.toolNames,
+            contextProviders: bridge.contextProvidersUsed,
+            graph: bridge.graphNodeIds,
+            retry: bridge.retry,
+            timeoutMs: bridge.timeoutMs,
+            planTimings: plannedState.timings,
           });
           const llmStartedAt = Date.now();
           let deltaCount = 0;
-          const streamOptions: StreamOptions = {
-            adminSystemInstruction,
-            enableDownloadTools,
-            enableWebSearch,
-          };
-          if (isToolContinue) {
-            streamOptions.toolContinue = {
-              modelFunctionCalls: toolResults.map((t) => ({
-                callId: t.callId,
-                name: t.name,
-                args: t.args,
-              })),
-              functionResponses: toolResults.map((t) => ({
-                name: t.name,
-                response: t.response,
-              })),
-            };
-          }
-          const result = await adapter.stream(
-            model.apiKey,
-            model.modelName,
-            chatHistory,
-            // tool continue 시 새 user text는 contents에 넣지 않음(adapter가 toolContinue 사용).
-            isToolContinue ? '' : message,
-            (deltaText) => {
+          const toolContinuePayload = isToolContinue
+            ? {
+                modelFunctionCalls: toolResults.map((t) => ({
+                  callId: t.callId,
+                  name: t.name,
+                  args: t.args,
+                })),
+                functionResponses: toolResults.map((t) => ({
+                  name: t.name,
+                  response: t.response,
+                })),
+              }
+            : undefined;
+
+          const resultRaw = await runExecutionGraph({
+            plan: agentPlan,
+            state: plannedState,
+            apiKey: model.apiKey,
+            history: chatHistory,
+            userMessage: isToolContinue ? '' : userTextForLlm,
+            onDelta: (deltaText) => {
               deltaCount += 1;
               send({ type: 'delta', text: deltaText });
             },
-            streamOptions,
-          );
+            toolContinue: toolContinuePayload,
+          });
+          logAgentTimings(agentPlan.traceId, plannedState.timings, {
+            tokenUsage: plannedState.tokenUsage ?? null,
+            promptVersion: agentRequest.promptVersion,
+            experimentId: agentRequest.experimentId,
+          });
           const llmElapsedMs = Date.now() - llmStartedAt;
+
+          // runExecutionGraph 는 Normalized → legacy shape
+          const result = resultRaw as {
+            ok: boolean;
+            kind?: 'auth' | 'network' | 'rate_limit' | 'other';
+            status?: number;
+            message?: string;
+            text?: string;
+            inputTokens?: number;
+            outputTokens?: number;
+            totalTokens?: number;
+            thoughtsTokens?: number;
+            finishReason?: string | null;
+            grounded?: boolean;
+            groundedQueryCount?: number;
+            functionCalls?: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
+            needsWebSearch: boolean;
+            // deno-lint-ignore no-explicit-any
+            attempts: any[];
+          };
 
           await persistLlmCallAttemptLogs(supabase, {
             requestId,
@@ -2481,10 +3035,10 @@ Deno.serve(async (req: Request) => {
               outcome: 'llm_call_failed',
               kind: result.kind,
               status: result.status ?? null,
-              lastError: result.message.slice(0, 500),
+              lastError: String(result.message ?? '').slice(0, 500),
               needsWebSearch: result.needsWebSearch,
-              attemptCount: result.attempts.length,
-              attempts: result.attempts,
+              attemptCount: Array.isArray(result.attempts) ? result.attempts.length : 0,
+              attempts: result.attempts ?? [],
               llmElapsedMs,
             };
             logWarn(requestId, 'llm_call_failed', {
@@ -2492,19 +3046,24 @@ Deno.serve(async (req: Request) => {
               providerName: model.providerName,
               kind: result.kind,
               status: result.status ?? null,
-              message: result.message.slice(0, 500),
+              message: String(result.message ?? '').slice(0, 500),
               deltaCount,
               needsWebSearch: result.needsWebSearch,
-              attemptCount: result.attempts.length,
-              attempts: result.attempts,
+              attemptCount: Array.isArray(result.attempts) ? result.attempts.length : 0,
+              attempts: result.attempts ?? [],
             });
+            getProviderHealthMonitor().recordFailure(
+              model.providerName,
+              String(result.kind ?? 'other'),
+            );
+            getCircuitBreaker().onFailure(model.providerName);
             const replyText =
               result.kind === 'auth'
                 ? MSG_TOKEN_EXPIRED
                 : result.kind === 'network'
                   ? MSG_NETWORK_PROBLEM
                   : result.kind === 'rate_limit'
-                    ? buildMsgLlmRateLimit(result.message, model.modelDisplayName, {
+                    ? buildMsgLlmRateLimit(String(result.message ?? ''), model.modelDisplayName, {
                         wasWebSearch: enableWebSearch,
                       })
                     : MSG_LLM_UNAVAILABLE;
@@ -2572,19 +3131,35 @@ Deno.serve(async (req: Request) => {
           });
 
           // tool continue 후 텍스트만 왔는데 비어 있으면 시스템 안내.
-          if (!result.text.trim()) {
+          if (!String(result.text ?? '').trim()) {
             await finishWithSystem(MSG_LLM_UNAVAILABLE, true, 'empty_after_tools');
             return;
           }
+
+          let finalAnswer = String(result.text ?? '');
+          if (featureFlags.outputGuard) {
+            const out = await getOutputGuard().check(finalAnswer);
+            finalAnswer = out.text;
+          }
+
+          plannedState.tokenUsage = {
+            inputTokens: Number(result.inputTokens ?? 0),
+            outputTokens: Number(result.outputTokens ?? 0),
+            totalTokens: Number(result.totalTokens ?? 0),
+          };
+          plannedState.timings = {
+            ...plannedState.timings,
+            llmMs: llmElapsedMs,
+          };
 
           const finalizeStartedAt = Date.now();
           const { data: finalizeData, error: finalizeError } = await supabase.rpc('nrm_rpc_chat_finalize_turn', {
             p_session_id: resolvedSessionId,
             p_role: 'assistant',
-            p_content: result.text,
-            p_input_token: result.inputTokens,
-            p_output_token: result.outputTokens,
-            p_total_token: result.totalTokens,
+            p_content: finalAnswer,
+            p_input_token: Number(result.inputTokens ?? 0),
+            p_output_token: Number(result.outputTokens ?? 0),
+            p_total_token: Number(result.totalTokens ?? 0),
             p_serial_no: serialNo,
             p_provider_id: model.providerId,
             p_model_id: model.modelId,
@@ -2612,6 +3187,56 @@ Deno.serve(async (req: Request) => {
             sessionId: resolvedSessionId,
             role: 'assistant',
           });
+
+          getProviderHealthMonitor().recordSuccess(model.providerName, llmElapsedMs);
+          getCircuitBreaker().onSuccess(model.providerName);
+
+          let agentResponse = buildAgentResponse({
+            request: agentRequest,
+            plan: agentPlan,
+            state: plannedState,
+            answer: finalAnswer,
+            ok: true,
+            role: 'assistant',
+            toolCalls: [],
+            citations:
+              result.grounded === true && Number(result.groundedQueryCount ?? 0) > 0
+                ? [
+                    {
+                      title: `웹 검색 ${Number(result.groundedQueryCount)}건`,
+                      snippet: 'google_search grounding',
+                    },
+                  ]
+                : [],
+            searchUsed: enableWebSearch || result.needsWebSearch === true,
+            musicSearchUsed:
+              agentPlan.intent.needsMusicSearch ||
+              agentPlan.intent.needsDownloadTool ||
+              agentPlan.intent.intent === 'download',
+            latencyMs: llmElapsedMs,
+            raw: { attempts: result.attempts },
+          });
+          if (featureFlags.evaluation) {
+            const evaluation = await runEvaluation(agentResponse);
+            agentResponse = { ...agentResponse, evaluation };
+          }
+          const metrics = metricsFromAgentResponse(agentResponse);
+          logAgentPhase(requestId, 'agent_response', {
+            traceId: agentResponse.traceId,
+            promptVersion: agentResponse.promptVersion,
+            experimentId: agentResponse.experimentId,
+            ui: agentResponse.ui,
+            evaluation: agentResponse.evaluation,
+            promptDiagnostics: agentResponse.promptDiagnostics,
+            contextDiagnostics: agentResponse.contextDiagnostics,
+            metrics,
+          });
+
+          if (featureFlags.questionCache) {
+            const qKey = cacheKeyForQuestion(serialNo, model.modelId, userTextForLlm);
+            void getQuestionCache().set(qKey, finalAnswer);
+          }
+
           const successDiag = {
             outcome: 'success',
             needsWebSearch: result.needsWebSearch,
@@ -2619,9 +3244,25 @@ Deno.serve(async (req: Request) => {
             groundedQueryCount: result.groundedQueryCount ?? 0,
             finishReason: result.finishReason ?? null,
             thoughtsTokens: result.thoughtsTokens ?? 0,
-            attemptCount: result.attempts.length,
-            attempts: result.attempts,
+            attemptCount: Array.isArray(result.attempts) ? result.attempts.length : 0,
+            attempts: result.attempts ?? [],
             llmElapsedMs,
+            agentResponse: {
+              promptVersion: agentResponse.promptVersion,
+              experimentId: agentResponse.experimentId,
+              evaluation: agentResponse.evaluation,
+              ui: agentResponse.ui,
+              promptDiagnostics: agentResponse.promptDiagnostics,
+              contextDiagnostics: agentResponse.contextDiagnostics,
+              metrics,
+              tokenUsage: agentResponse.tokenUsage,
+              contextUsed: agentResponse.contextUsed,
+              searchUsed: agentResponse.searchUsed,
+              musicSearchUsed: agentResponse.musicSearchUsed,
+              ragUsed: agentResponse.ragUsed,
+              recommendationUsed: agentResponse.recommendationUsed,
+              citations: agentResponse.citations,
+            },
           };
           send({
             type: 'final',

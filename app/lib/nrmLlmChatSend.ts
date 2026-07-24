@@ -53,6 +53,8 @@ export type NrmLlmChatFinalEvent = {
   title: string;
   message: NrmAiLabMessage;
   choices?: NrmAiLabChoice[];
+  /** Edge final.diag (agentResponse.ui / evaluation) */
+  diag?: unknown;
 };
 
 export type NrmLlmToolRequestEvent = {
@@ -99,10 +101,15 @@ export async function sendLlmChatMessageStream(
     modelId: number;
     sessionId: string | null;
     message: string;
-    /** AI Lab 인터넷 검색 토글 — Edge가 모델 네이티브 웹검색을 켠다 */
+    /** @deprecated 서버 Intent가 검색을 결정. 전송 body에 넣지 않음. */
     enableWebSearch?: boolean;
     toolContinue?: boolean;
     toolResults?: NrmLlmToolResultPayload[];
+    /** AI Lab 선택/명시 음악 플랫폼 */
+    musicPlatformId?: string;
+    musicPlatformLabel?: string;
+    musicPlatformBlocked?: boolean;
+    musicPlatformExplicit?: boolean;
   },
   handlers: NrmLlmChatSendHandlers,
 ): Promise<{ kind: 'final' | 'tool_turn'; requestId?: string }> {
@@ -111,9 +118,12 @@ export async function sendLlmChatMessageStream(
     modelId,
     sessionId,
     message,
-    enableWebSearch = false,
     toolContinue,
     toolResults,
+    musicPlatformId,
+    musicPlatformLabel,
+    musicPlatformBlocked,
+    musicPlatformExplicit,
   } = params;
   const startedAt = Date.now();
   const isToolContinue = toolContinue === true && (toolResults?.length ?? 0) > 0;
@@ -123,7 +133,6 @@ export async function sendLlmChatMessageStream(
     modelId,
     sessionId: sessionId ?? 'new',
     messageLength: message.length,
-    enableWebSearch,
     toolContinue: isToolContinue,
     toolResultCount: toolResults?.length ?? 0,
   });
@@ -150,9 +159,12 @@ export async function sendLlmChatMessageStream(
         modelId,
         sessionId: sessionId != null ? Number(sessionId) : null,
         message: isToolContinue ? '' : message,
-        enableWebSearch: !isToolContinue && enableWebSearch === true,
         toolContinue: isToolContinue,
         toolResults: isToolContinue ? toolResults : undefined,
+        musicPlatformId: musicPlatformId ?? null,
+        musicPlatformLabel: musicPlatformLabel ?? null,
+        musicPlatformBlocked: musicPlatformBlocked === true,
+        musicPlatformExplicit: musicPlatformExplicit === true,
       }),
     });
   } catch (e) {
@@ -278,6 +290,7 @@ export async function sendLlmChatMessageStream(
         title: String(raw.title ?? '새 대화'),
         message,
         choices,
+        diag: raw.diag ?? null,
       });
       logNrmDev(LOG_TAG, {
         phase: 'final',
@@ -287,6 +300,10 @@ export async function sendLlmChatMessageStream(
         role: message.role,
         contentPreview: String(message.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
         choiceCount: choices?.length ?? 0,
+        agentUi: (raw.diag as { agentResponse?: { ui?: unknown } } | null)?.agentResponse?.ui ?? null,
+        evaluation:
+          (raw.diag as { agentResponse?: { evaluation?: unknown } } | null)?.agentResponse?.evaluation ??
+          null,
         diag: raw.diag ?? null,
       });
       return;
