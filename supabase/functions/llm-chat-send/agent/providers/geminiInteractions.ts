@@ -970,6 +970,7 @@ export async function streamGeminiInteractions(
     const functionCalls: GeminiFunctionCallPart[] = [];
     const groundedQueries: string[] = [];
     let streamError: string | null = null;
+    let completedStepsText = '';
 
     // Streaming FC accumulation
     type FcAccum = { id: string; name: string; argsRaw: string };
@@ -1005,6 +1006,9 @@ export async function streamGeminiInteractions(
             interactionStatus = 'requires_action';
           }
           usage = usageFromInteraction(interaction);
+          // completed 페이로드 steps — delta 누락 시 전체 텍스트 보완
+          const stepsText = extractTextFromInteractionSteps(interaction.steps);
+          if (stepsText) completedStepsText = stepsText;
           if (interactionStatus === 'requires_action' || interactionStatus === 'completed') {
             finishReason = interactionStatus === 'requires_action' ? 'tool_calls' : 'STOP';
           }
@@ -1016,6 +1020,7 @@ export async function streamGeminiInteractions(
           eventType === 'interaction.in_progress'
         ) {
           if (typeof json.status === 'string') interactionStatus = json.status;
+          else if (eventType === 'interaction.in_progress') interactionStatus = 'in_progress';
           return;
         }
 
@@ -1117,7 +1122,22 @@ export async function streamGeminiInteractions(
     }
 
     let fullText = emitter.finish();
+    // completed 이벤트에 더 긴 확정 텍스트가 있으면 우선
+    if (completedStepsText && completedStepsText.length >= fullText.length) {
+      if (completedStepsText.length > fullText.length) {
+        const rest = completedStepsText.slice(fullText.length);
+        if (rest) await emitAsTypingDeltas(rest, onDelta);
+      }
+      fullText = completedStepsText;
+    }
     let usedFallback = false;
+
+    /** STOP/tool_calls/completed/requires_action 만 정상 종료. in_progress 등은 조기 종료로 본다. */
+    const streamComplete =
+      finishReason === 'STOP' ||
+      finishReason === 'tool_calls' ||
+      interactionStatus === 'completed' ||
+      interactionStatus === 'requires_action';
 
     if (streamError && !fullText && functionCalls.length === 0) {
       const kind = classifyGeminiFailureKind(res.status, streamError);
@@ -1171,8 +1191,8 @@ export async function streamGeminiInteractions(
       break;
     }
 
-    // 스트림이 비어 있으면 논스트리밍 Interactions로 확정
-    if ((!finishReason && !interactionStatus) || (!fullText && functionCalls.length === 0)) {
+    // 스트림이 비정상 종료(in_progress 등)이거나 본문이 비면 논스트리밍 Interactions로 확정
+    if (!streamComplete || (!fullText && functionCalls.length === 0)) {
       try {
         const unaryBody = buildBody(attempt, false);
         const res2 = await fetchInteractionsWithTimeout(
@@ -1191,7 +1211,8 @@ export async function streamGeminiInteractions(
           } else if (!fullText && authoritative) {
             await emitAsTypingDeltas(authoritative, onDelta);
           }
-          fullText = authoritative;
+          // prefix 불일치여도 finalize/onFinal이 권위 본문을 쓰도록 fullText만 교체
+          if (authoritative) fullText = authoritative;
           if (parsed.functionCalls.length > 0) {
             functionCalls.length = 0;
             functionCalls.push(...parsed.functionCalls);
@@ -1205,7 +1226,7 @@ export async function streamGeminiInteractions(
           interactionStatus = parsed.status ?? interactionStatus;
           finishReason = functionCalls.length > 0
             ? 'tool_calls'
-            : (finishReason ?? 'STOP');
+            : 'STOP';
         } else if (!fullText && functionCalls.length === 0) {
           const rateLimited = isGeminiRateLimitStatus(parsed.status);
           const kind = parsed.status === 401 || parsed.status === 403

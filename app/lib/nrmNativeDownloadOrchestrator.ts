@@ -162,6 +162,8 @@ export function scheduleNativeDownloadJob(
                   onLyricsStageEnded: lyricsWaiter.options?.onLyricsStageEnded,
                   onLyricsPersisted: lyricsWaiter.options?.onLyricsPersisted,
                   onLyricsStageFailed: lyricsWaiter.options?.onLyricsStageFailed,
+                  melonLyricsPreloadOverride:
+                    lyricsWaiter.options?.melonLyricsPreloadOverride,
                 });
                 lyricsWarning = out.lyricsWarning;
               } catch (e) {

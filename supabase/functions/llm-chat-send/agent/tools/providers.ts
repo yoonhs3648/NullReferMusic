@@ -33,7 +33,7 @@ registerTool(
       id: 'search_music',
       name: 'search_music',
       description:
-        'Melon 곡 검색. platform은 생략하거나 melon만. Spotify/Apple Music 등 다른 플랫폼이면 호출하지 말고 미지원 안내 후 Melon 제안을 한다.',
+        'Melon 트랙(곡) 검색. 「멜론에서」 없어도 호출. 「blooming 알려줘」도 이 도구. platform은 melon만.',
       kind: 'download_fc',
       priority: 15,
       parameters: {
@@ -49,7 +49,7 @@ registerTool(
       },
       examples: [
         { user: '좋은날 찾아줘', args: { query: '좋은날' } },
-        { user: 'Melon에서 좋은날', args: { query: '좋은날', platform: 'melon' } },
+        { user: 'blooming 알려줘', args: { query: 'blooming' } },
       ],
     },
     supports: (ctx) =>
@@ -63,14 +63,80 @@ registerTool(
 registerTool(
   createTool({
     definition: {
-      id: 'get_lyrics_download_options',
-      name: 'get_lyrics_download_options',
+      id: 'search_music_artist',
+      name: 'search_music_artist',
+      description: 'Melon 아티스트 검색. 가수 정보 요청 시.',
+      kind: 'download_fc',
+      priority: 16,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '예: 아이유' },
+        },
+        required: ['query'],
+      },
+      examples: [{ user: '아이유 가수 정보', args: { query: '아이유' } }],
+    },
+    supports: (ctx) =>
+      ctx.isToolContinue ||
+      ctx.intent.needsMusicSearch ||
+      ctx.intent.needsDownloadTool ||
+      ctx.intent.intent === 'download',
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
+      id: 'search_music_album',
+      name: 'search_music_album',
+      description: 'Melon 앨범 검색. 앨범 정보 요청 시.',
+      kind: 'download_fc',
+      priority: 17,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '예: Love poem' },
+        },
+        required: ['query'],
+      },
+      examples: [{ user: 'Love poem 앨범 알려줘', args: { query: 'Love poem' } }],
+    },
+    supports: (ctx) =>
+      ctx.isToolContinue ||
+      ctx.intent.needsMusicSearch ||
+      ctx.intent.needsDownloadTool ||
+      ctx.intent.intent === 'download',
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
+      id: 'get_ai_lab_lyrics_capability',
+      name: 'get_ai_lab_lyrics_capability',
       description:
-        '가사 옵션 선택지(한국어 팩/영어 팩/번역지원). 가사 요청만 있고 옵션이 없을 때 질문 문구용. 보통은 텍스트로 먼저 질문하고, 필요 시 이 도구로 선택지를 가져온다.',
+        '가사 생성 가능 여부(wav2vec2-base + en-kotransliterator). canAskLyrics면 다운로드 후 가사 되묻기 가능.',
       kind: 'download_fc',
       priority: 30,
       parameters: emptyObjectParams,
-      examples: [{ user: '가사 넣어서 받아줘', args: {} }],
+      examples: [{ user: '좋은날 다운로드해줘', args: {} }],
+    },
+    supports: (ctx) =>
+      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
+      id: 'get_lyrics_download_options',
+      name: 'get_lyrics_download_options',
+      description: '레거시 — get_ai_lab_lyrics_capability와 동일.',
+      kind: 'download_fc',
+      priority: 31,
+      parameters: emptyObjectParams,
+      examples: [{ user: '가사 생성할 수 있어?', args: {} }],
     },
     supports: (ctx) =>
       ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
@@ -83,7 +149,7 @@ registerTool(
       id: 'start_music_download',
       name: 'start_music_download',
       description:
-        'Melon 검색 hit로 다운로드. YouTube는 Melon 메타(아티스트+제목)로만 검색. lyricsOption 기본 none. hit는 search_music 결과 그대로.',
+        'Melon hit로 오디오 다운로드(요청당 1곡). 기본 lyricsOption=none. 가사 명시면 auto. 번역은 넣지 말 것.',
       kind: 'download_fc',
       priority: 40,
       parameters: {
@@ -92,30 +158,75 @@ registerTool(
           hit: { type: 'object', description: 'search_music hits[] 항목' },
           lyricsOption: {
             type: 'string',
-            description:
-              'none|ko|en|auto|ko_translate|en_translate|auto_translate (기본 none)',
+            description: 'none(기본)|auto(명시적 가사)',
           },
           lyricsMode: {
             type: 'string',
             description: '레거시. lyricsOption 없을 때만',
           },
-          alignLang: { type: 'string', description: 'ko|en — 선택' },
         },
         required: ['hit'],
       },
       examples: [
         {
           user: '좋은날 다운로드해줘',
-          args: { hit: { ref: 'melon:123', platform: 'melon', title: '좋은 날', artist: '아이유' }, lyricsOption: 'none' },
-        },
-        {
-          user: '좋은날 다운로드하고 한국어팩으로 가사도',
           args: {
             hit: { ref: 'melon:123', platform: 'melon', title: '좋은 날', artist: '아이유' },
-            lyricsOption: 'ko',
+            lyricsOption: 'none',
+          },
+        },
+        {
+          user: '좋은날 다운로드하고 가사도',
+          args: {
+            hit: { ref: 'melon:123', platform: 'melon', title: '좋은 날', artist: '아이유' },
+            lyricsOption: 'auto',
           },
         },
       ],
+    },
+    supports: (ctx) =>
+      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
+      id: 'start_ai_lab_lyrics',
+      name: 'start_ai_lab_lyrics',
+      description:
+        '최근 다운로드 곡 Melon 가사 생성(wav2vec2-base+다국어 발음 전처리). 번역 없음.',
+      kind: 'download_fc',
+      priority: 45,
+      parameters: {
+        type: 'object',
+        properties: {
+          videoId: { type: 'string', description: 'start_music_download videoId' },
+          hit: { type: 'object', description: 'optional hit' },
+        },
+      },
+      examples: [{ user: '예, 가사 생성', args: { videoId: 'abc' } }],
+    },
+    supports: (ctx) =>
+      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
+      id: 'translate_ai_lab_lyrics',
+      name: 'translate_ai_lab_lyrics',
+      description: '영문 가사를 Google Translator로 한국어 번역.',
+      kind: 'download_fc',
+      priority: 46,
+      parameters: {
+        type: 'object',
+        properties: {
+          videoId: { type: 'string', description: '대상 videoId' },
+        },
+      },
+      examples: [{ user: '예, 번역해주세요', args: { videoId: 'abc' } }],
     },
     supports: (ctx) =>
       ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',

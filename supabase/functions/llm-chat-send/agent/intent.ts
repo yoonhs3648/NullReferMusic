@@ -341,15 +341,33 @@ export async function classifyIntentWithLlm(
   }
 }
 
+export function intentWhenClassifierUnavailable(reason: string): IntentResult {
+  return {
+    intent: 'general',
+    confidence: 0,
+    needsWebSearch: false,
+    needsVectorSearch: false,
+    needsFaqSearch: false,
+    needsDownloadTool: false,
+    needsHistory: false,
+    needsUserProfile: false,
+    needsMusicSearch: false,
+    reasoning: reason.slice(0, 160),
+    source: 'classifier_failed',
+  };
+}
+
 export async function analyzeUserIntent(params: {
   userMessage: string;
   isToolContinue: boolean;
   googleApiKey: string | null;
 }): Promise<IntentResult> {
   if (params.isToolContinue) return toolContinueIntentResult();
-  if (params.googleApiKey) {
-    const classified = await classifyIntentWithLlm(params.googleApiKey, params.userMessage);
-    if (classified) return classified;
+  if (!params.googleApiKey?.trim()) {
+    return intentWhenClassifierUnavailable('no_google_api_key');
   }
-  return classifyIntentHeuristic(params.userMessage);
+  const classified = await classifyIntentWithLlm(params.googleApiKey, params.userMessage);
+  if (classified) return classified;
+  // Classifier 실패 시 휴리스틱 폴백 없음 — tool calling 비활성(일반 답변)
+  return intentWhenClassifierUnavailable('classifier_failed_or_unparsed');
 }

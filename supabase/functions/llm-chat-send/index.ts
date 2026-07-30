@@ -3316,6 +3316,9 @@ Deno.serve(async (req: Request) => {
               /** Gemini Interactions: 클라이언트가 toolContinue 시 previousInteractionId로 반환 */
               previousInteractionId: result.interactionId ?? null,
             });
+            // 새 세션 첫 턴이 tool_turn으로 끝나도 요약 제목을 적용한다.
+            // (미적용 시 toolContinue는 isNewSession=false라 제목이 휴리스틱에 영구 고정됨)
+            await applyGeneratedTitle(send);
             logInfo(requestId, 'request_done', {
               outcome: 'tool_turn',
               totalElapsedMs: Date.now() - startedAt,

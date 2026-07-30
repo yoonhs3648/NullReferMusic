@@ -54,7 +54,10 @@ export type FinalizeParallelOptions = {
   /** APK: 오디오 큐 작업이 실제 시작될 때 (추출 직전, 알림·FGS dl 토큰) */
   onAudioDownloadStarted?: () => void;
   /** APK: 오디오가 저장 경로에 쓰인 직후 (알림용) */
-  onAudioPersisted?: (savedLabel: string) => void;
+  onAudioPersisted?: (
+    savedLabel: string,
+    location?: PersistedAudioLocation,
+  ) => void;
   /** APK: 가사 생성 작업 큐 진입/시작 (알림용) */
   onLyricsStageStarted?: () => void;
   /** APK: 가사 생성 작업 종료 (성공 여부) */
@@ -65,6 +68,8 @@ export type FinalizeParallelOptions = {
   ) => void;
   /** APK: LRC 사이드카가 실제 저장 경로에 쓰인 직후 (알림용) */
   onLyricsPersisted?: (lrcUri: string) => void;
+  /** AI Lab 등 — Melon FA preload 강제(정렬 모델·transliterator·Google 번역) */
+  melonLyricsPreloadOverride?: import('@/lib/nrmMelonLyricsLrcStage').MelonLyricsLrcPreload;
 };
 
 export type FinalizeParallelResult = {
@@ -342,7 +347,7 @@ export async function finalizeNativeAudioStage(
     temps.add(whisperCopyResult);
     whisperSourceUri = whisperCopyResult;
   }
-  options?.onAudioPersisted?.(audioSaved.savedLabel);
+  options?.onAudioPersisted?.(audioSaved.savedLabel, audioSaved.location);
   void appendActivityHistory({
     fileName: displayLabelFromAudioFileName(safeName),
     audioUri: audioSaved.location.audioUri,
@@ -379,7 +384,11 @@ export async function finalizeNativeLyricsStage(
   audioStage: NativeAudioStageResult,
   options?: Pick<
     FinalizeParallelOptions,
-    'onLyricsStageStarted' | 'onLyricsStageEnded' | 'onLyricsPersisted' | 'onLyricsStageFailed'
+    | 'onLyricsStageStarted'
+    | 'onLyricsStageEnded'
+    | 'onLyricsPersisted'
+    | 'onLyricsStageFailed'
+    | 'melonLyricsPreloadOverride'
   >,
 ): Promise<FinalizeParallelResult> {
   const {
@@ -427,13 +436,18 @@ export async function finalizeNativeLyricsStage(
       const { fetchMelonPlainLyricsFromWebsite } = await import('@/lib/nrmMelonLyrics');
       plainForMelonAlign = (await fetchMelonPlainLyricsFromWebsite(embedMetadata.website)).trim();
     }
-    const melonPreload = lyricsPreload
-      ? {
-          alignModelPreference: lyricsPreload.alignModelPreference,
-          melonSyncSettings: lyricsPreload.melonSyncSettings,
-          translationClient: lyricsPreload.translationClient,
-        }
-      : undefined;
+    const melonPreload = {
+      ...(lyricsPreload
+        ? {
+            alignModelPreference: lyricsPreload.alignModelPreference,
+            melonSyncSettings: lyricsPreload.melonSyncSettings,
+            translationClient: lyricsPreload.translationClient,
+          }
+        : {}),
+      ...(options?.melonLyricsPreloadOverride ?? {}),
+    };
+    const melonPreloadArg =
+      Object.keys(melonPreload).length > 0 ? melonPreload : undefined;
     try {
       const result = await serialGate(safeName, () => {
         if (melonMode && plainForMelonAlign) {
@@ -445,7 +459,7 @@ export async function finalizeNativeLyricsStage(
               extension,
               plainForMelonAlign,
               melonAlignLang,
-              melonPreload,
+              melonPreloadArg,
             );
           }
           return import('@/lib/nrmMelonLyricsLrcStage').then((m) =>
@@ -455,7 +469,7 @@ export async function finalizeNativeLyricsStage(
               extension,
               plainForMelonAlign,
               melonAlignLang,
-              melonPreload,
+              melonPreloadArg,
             ),
           );
         }

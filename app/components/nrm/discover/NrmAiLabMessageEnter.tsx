@@ -15,6 +15,11 @@ export function NrmAiLabMessageEnter({ children, style, delayMs = 0 }: Props) {
   const scale = useRef(new Animated.Value(0.94)).current;
 
   useEffect(() => {
+    const snapVisible = () => {
+      opacity.setValue(1);
+      translateY.setValue(0);
+      scale.setValue(1);
+    };
     const anim = Animated.sequence([
       Animated.delay(delayMs),
       Animated.parallel([
@@ -37,8 +42,14 @@ export function NrmAiLabMessageEnter({ children, style, delayMs = 0 }: Props) {
         }),
       ]),
     ]);
-    anim.start();
-    return () => anim.stop();
+    anim.start(({ finished }) => {
+      // 탭 이탈·언마운트로 애니메이션이 끊기면 opacity 0에 고착될 수 있음
+      if (!finished) snapVisible();
+    });
+    return () => {
+      anim.stop();
+      snapVisible();
+    };
   }, [delayMs, opacity, scale, translateY]);
 
   return (

@@ -188,6 +188,8 @@ export default function HomeScreen() {
   const [homeTab, setHomeTab] = useState<NrmHomeTab>('home');
   /** Storage 탭을 한 번이라도 열면 언마운트하지 않고 숨김만 한다(재진입 지연 방지). */
   const [storageEverOpened, setStorageEverOpened] = useState(false);
+  /** AI Lab 탭도 Storage와 같이 keep-alive — 이탈 중 스트리밍·응답 UI 유실 방지. */
+  const [aiLabEverOpened, setAiLabEverOpened] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const homeTabRef = useRef(homeTab);
   homeTabRef.current = homeTab;
@@ -435,6 +437,9 @@ export default function HomeScreen() {
       }
       if (tab === 'library') {
         setStorageEverOpened(true);
+      }
+      if (tab === 'discover') {
+        setAiLabEverOpened(true);
       }
       setHomeTab(tab);
       setYoutubeOverlay(null);
@@ -1024,19 +1029,15 @@ export default function HomeScreen() {
 
     let bodyContent = null;
     const storageActive = homeTab === 'library' && !showSearchUi;
+    const aiLabActive = homeTab === 'discover' && !showSearchUi;
     if (showSearchUi) {
       bodyContent = youtubeHome;
     } else if (homeTab === 'library') {
       // Storage는 keep-alive로 별도 렌더(아래). bodyContent는 비움.
       bodyContent = null;
     } else if (homeTab === 'discover') {
-      bodyContent = (
-        <NrmHomeDiscoverScreen
-          isDark={isDark}
-          paddingHorizontal={pad}
-          onNavigateYoutube={navigateToYoutubeFromMelon}
-        />
-      );
+      // AI Lab도 keep-alive로 별도 렌더(아래). bodyContent는 비움.
+      bodyContent = null;
     } else if (homeTab === 'history') {
       bodyContent = <NrmHomeHistoryScreen isDark={isDark} />;
     } else if (showWelcomeQuote) {
@@ -1117,7 +1118,20 @@ export default function HomeScreen() {
                 />
               </View>
             ) : null}
-            {storageActive ? null : bodyContent}
+            {aiLabEverOpened ? (
+              <View
+                style={aiLabActive ? styles.storageKeepAliveVisible : styles.storageKeepAliveHidden}
+                pointerEvents={aiLabActive ? 'auto' : 'none'}
+                collapsable={false}>
+                <NrmHomeDiscoverScreen
+                  isDark={isDark}
+                  paddingHorizontal={pad}
+                  onNavigateYoutube={navigateToYoutubeFromMelon}
+                  isActive={aiLabActive}
+                />
+              </View>
+            ) : null}
+            {storageActive || aiLabActive ? null : bodyContent}
           </View>
         </View>
       </KeyboardAvoidingView>

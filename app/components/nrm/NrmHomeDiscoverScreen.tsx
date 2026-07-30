@@ -32,6 +32,8 @@ type Props = {
   isDark: boolean;
   paddingHorizontal: number;
   onNavigateYoutube: (params: MelonYoutubeNavigateParams) => void;
+  /** 하단 탭에서 AI Lab이 보일 때 true — 숨김 keep-alive 중 스트리밍은 유지하고, 재진입 시 메시지 동기화 */
+  isActive?: boolean;
 };
 
 type DiscoverSubView = 'ai-lab' | 'list' | 'track-search';
@@ -40,6 +42,7 @@ export function NrmHomeDiscoverScreen({
   isDark,
   paddingHorizontal,
   onNavigateYoutube,
+  isActive = true,
 }: Props) {
   const titleColor = isDark ? nrmTokens.color.bodyOnDark : nrmTokens.color.ink;
   const bodyColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
@@ -227,7 +230,7 @@ export function NrmHomeDiscoverScreen({
       <View
         style={[styles.aiLabLayer, subView !== 'ai-lab' && styles.aiLabLayerHidden]}
         pointerEvents={subView === 'ai-lab' ? 'auto' : 'none'}>
-        <NrmDiscoverAiLabScreen isDark={isDark} />
+        <NrmDiscoverAiLabScreen isDark={isDark} isActive={isActive && subView === 'ai-lab'} />
       </View>
 
       {subView === 'list' || subView === 'track-search' ? (

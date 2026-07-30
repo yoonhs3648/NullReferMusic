@@ -26,6 +26,10 @@ export type MelonLyricsLrcPreload = {
   alignModelPreference?: NrmAlignModelId;
   melonSyncSettings?: NrmMelonSyncSettings;
   translationClient?: typeof import('@/lib/nrmTranslationClient');
+  /** AI Lab 등 — 사용자 설정 무시하고 언어감지 모드 강제 */
+  forceLangDetectionMode?: 'manual' | 'auto' | 'transliterator';
+  /** AI Lab 번역 — DeepL 설정이어도 Google 고정 */
+  forceGoogleTranslate?: boolean;
 };
 
 /** EN→KO transliterator — 줄 안 라틴 단어가 있을 때만 전처리 */
@@ -65,7 +69,8 @@ export async function transcribeMelonLyricsLrc(
     return { lyricsRequested: true, lyricsEmbedded: false, lyricsMelonAlignFailed: true };
   }
 
-  const langDetectionMode = await loadAlignLyricsLangDetectionMode();
+  const langDetectionMode =
+    preload?.forceLangDetectionMode ?? (await loadAlignLyricsLangDetectionMode());
   let faPlain = plain;
   let transliteratorLineMappings: EspeakLineMapping[] | undefined;
 
@@ -210,10 +215,18 @@ export async function transcribeMelonLyricsLrc(
     });
     const translateT0 = Date.now();
     try {
-      const { translateLrcToKorean } = translationPrep
-        ? await translationPrep
-        : await import('@/lib/nrmTranslationClient');
-      const translated = await translateLrcToKorean(lrc);
+      let translated: { ok: true; lrc: string } | { ok: false; message?: string };
+      if (preload?.forceGoogleTranslate) {
+        const { translateLrcToKoreanWithGoogleTranslate } = await import(
+          '@/lib/nrmGoogleTranslateClient'
+        );
+        translated = await translateLrcToKoreanWithGoogleTranslate(lrc);
+      } else {
+        const { translateLrcToKorean } = translationPrep
+          ? await translationPrep
+          : await import('@/lib/nrmTranslationClient');
+        translated = await translateLrcToKorean(lrc);
+      }
       if (translated.ok) {
         lrc = translated.lrc;
         logDownloadStage('translate', 'deepl_melon_ok', {

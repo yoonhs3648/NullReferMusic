@@ -12,13 +12,46 @@ import {
   type MusicProviderCapabilities,
 } from '@/lib/nrmAiLabMusicPlatform';
 import type { NrmAiLabChoice, NrmAiLabDownloadPlatformId, NrmAiLabTrackHit } from '@/lib/nrmAiLabDownloadTools';
-import { searchMelonTracks } from '@/lib/nrmMelonSearchClient';
+import {
+  searchMelonAlbums,
+  searchMelonArtists,
+  searchMelonTracks,
+} from '@/lib/nrmMelonSearchClient';
 import { logNrmRunError } from '@/lib/nrmDevLog';
 
 export type { MusicProviderCapabilities };
 
 export type MusicMetadataSearchResult = {
   hits: NrmAiLabTrackHit[];
+  choices: NrmAiLabChoice[];
+  error?: string;
+  providerId: MusicPlatformIdType;
+};
+
+export type MusicArtistSearchResult = {
+  artists: Array<{
+    ref: string;
+    artistId: string;
+    name: string;
+    imageUrl: string;
+    genre: string;
+    externalUrl: string;
+  }>;
+  choices: NrmAiLabChoice[];
+  error?: string;
+  providerId: MusicPlatformIdType;
+};
+
+export type MusicAlbumSearchResult = {
+  albums: Array<{
+    ref: string;
+    albumId: string;
+    name: string;
+    artist: string;
+    imageUrl: string;
+    releaseDate: string;
+    externalUrl: string;
+  }>;
   choices: NrmAiLabChoice[];
   error?: string;
   providerId: MusicPlatformIdType;
@@ -34,10 +67,23 @@ export interface MusicMetadataProvider {
 
 const LOG = 'ailab.musicMetadata';
 
+/** 트랙 선택 칩: 가수 - 노래제목 (앨범명) */
+export function formatAiLabTrackChoiceLabel(hit: {
+  artist: string;
+  title: string;
+  album?: string;
+}): string {
+  const artist = hit.artist.trim();
+  const title = hit.title.trim();
+  const album = (hit.album ?? '').trim();
+  const base = `${artist} - ${title}`.trim();
+  return album ? `${base} (${album})` : base;
+}
+
 function toChoices(hits: NrmAiLabTrackHit[]): NrmAiLabChoice[] {
   return hits.map((h) => ({
     id: h.ref,
-    label: `${h.artist} - ${h.title}`.trim(),
+    label: formatAiLabTrackChoiceLabel(h),
   }));
 }
 
@@ -191,6 +237,102 @@ export async function searchViaMusicMetadataProvider(
     };
   }
   return MelonProvider.search(query);
+}
+
+export async function searchMelonArtistsViaProvider(
+  query: string,
+): Promise<MusicArtistSearchResult> {
+  const q = query.trim();
+  if (!q) {
+    return {
+      artists: [],
+      choices: [],
+      error: 'empty_query',
+      providerId: MusicPlatformId.MELON,
+    };
+  }
+  try {
+    const out = await searchMelonArtists(q);
+    if (!out.ok) {
+      return {
+        artists: [],
+        choices: [],
+        error: out.errorCode ?? 'search_failed',
+        providerId: MusicPlatformId.MELON,
+      };
+    }
+    const artists = (out.data.artists ?? []).slice(0, 8).map((a) => ({
+      ref: `melon-artist:${a.artistId}`,
+      artistId: a.artistId,
+      name: a.name,
+      imageUrl: a.imageUrl,
+      genre: a.genre,
+      externalUrl: a.url,
+    }));
+    return {
+      artists,
+      choices: artists.map((a) => ({ id: a.ref, label: a.name.trim() })),
+      providerId: MusicPlatformId.MELON,
+    };
+  } catch (e) {
+    logNrmRunError(LOG, e, { event: 'melon_artist_search_failed', query: q.slice(0, 80) });
+    return {
+      artists: [],
+      choices: [],
+      error: e instanceof Error ? e.message : String(e),
+      providerId: MusicPlatformId.MELON,
+    };
+  }
+}
+
+export async function searchMelonAlbumsViaProvider(
+  query: string,
+): Promise<MusicAlbumSearchResult> {
+  const q = query.trim();
+  if (!q) {
+    return {
+      albums: [],
+      choices: [],
+      error: 'empty_query',
+      providerId: MusicPlatformId.MELON,
+    };
+  }
+  try {
+    const out = await searchMelonAlbums(q);
+    if (!out.ok) {
+      return {
+        albums: [],
+        choices: [],
+        error: out.errorCode ?? 'search_failed',
+        providerId: MusicPlatformId.MELON,
+      };
+    }
+    const albums = (out.data.albums ?? []).slice(0, 8).map((a) => ({
+      ref: `melon-album:${a.albumId}`,
+      albumId: a.albumId,
+      name: a.name,
+      artist: a.artist,
+      imageUrl: a.imageUrl,
+      releaseDate: a.releaseDate,
+      externalUrl: a.url,
+    }));
+    return {
+      albums,
+      choices: albums.map((a) => ({
+        id: a.ref,
+        label: `${a.artist.trim()} - ${a.name.trim()}`.trim(),
+      })),
+      providerId: MusicPlatformId.MELON,
+    };
+  } catch (e) {
+    logNrmRunError(LOG, e, { event: 'melon_album_search_failed', query: q.slice(0, 80) });
+    return {
+      albums: [],
+      choices: [],
+      error: e instanceof Error ? e.message : String(e),
+      providerId: MusicPlatformId.MELON,
+    };
+  }
 }
 
 /** @deprecated Factory.resolve 사용 */

@@ -12,7 +12,12 @@ export type AiLabIntentKind =
   | 'download'
   | 'faq';
 
-export type IntentSource = 'classifier' | 'heuristic_fallback' | 'tool_continue';
+export type IntentSource =
+  | 'classifier'
+  | 'classifier_failed'
+  | 'tool_continue'
+  /** @deprecated analyzeUserIntent에서는 더 이상 사용하지 않음 */
+  | 'heuristic_fallback';
 
 export type IntentResult = {
   intent: AiLabIntentKind;

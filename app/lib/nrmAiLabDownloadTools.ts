@@ -1,6 +1,6 @@
 /**
- * AI Lab — Melon 전용 검색·가사 옵션·다운로드 시작.
- * 파이프라인: Melon 검색 → (선택) → Melon 메타 → YouTube → 임베드 → (선택) 가사
+ * AI Lab — Melon 전용 검색·다운로드·가사 후속 도구.
+ * 파이프라인: Melon 검색 → (선택) → Melon 메타 → YouTube → 오디오 → (선택) 가사
  */
 import { Platform } from 'react-native';
 
@@ -12,6 +12,22 @@ import {
   normalizeMusicPlatformArg,
   type MusicPlatformId as MusicPlatformIdType,
 } from '@/lib/nrmAiLabMusicPlatform';
+import {
+  AI_LAB_MELON_LYRICS_PRELOAD,
+  getAiLabLyricsCapability,
+  LYRICS_YES_NO_CHOICES,
+  maybeAskTranslationAfterAiLabLyrics,
+  registerAiLabDownload,
+  startAiLabLyrics,
+  translateAiLabLyrics,
+  updateAiLabDownloadAudio,
+} from '@/lib/nrmAiLabLyricsFollowup';
+import {
+  nrmBackgroundWorkAcquire,
+  nrmBackgroundWorkRelease,
+  nrmDownloadBackgroundWorkToken,
+  nrmLyricsBackgroundWorkToken,
+} from '@/lib/nrmBackgroundWork';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
 import {
   applyDownloadExtension,
@@ -28,9 +44,22 @@ import {
   buildMelonTrackAudioMetadata,
 } from '@/lib/nrmMelonDownloadMetadata';
 import { fetchMelonTrackDetail } from '@/lib/nrmMelonSearchClient';
+import {
+  nrmNotifyDownloadFinished,
+  nrmNotifyDownloadQueued,
+  nrmNotifyDownloadStarted,
+  nrmNotifyLyricsFailed,
+  setupNrmMobileDownloadNotifications,
+} from '@/lib/nrmMobileDownloadNotifications';
 import { scheduleNativeDownloadJob } from '@/lib/nrmNativeDownloadOrchestrator';
-import { MelonProvider, searchViaMusicMetadataProvider } from '@/lib/nrmMusicMetadataProvider';
-import { buildAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
+import {
+  MelonProvider,
+  searchMelonAlbumsViaProvider,
+  searchMelonArtistsViaProvider,
+  searchViaMusicMetadataProvider,
+} from '@/lib/nrmMusicMetadataProvider';
+import { splitMetadataForDownloadStages } from '@/lib/nrmWhisperLyrics';
+import { buildAudioFileName, displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 import { searchYoutube } from '@/lib/youtubeSearchClient';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
@@ -55,7 +84,7 @@ export type NrmAiLabTrackHit = {
 
 export type NrmAiLabChoice = { id: string; label: string };
 
-/** AI Lab lyricsOption (FC) */
+/** AI Lab lyricsOption (FC) — 기본 none. 번역은 후속 translate_ai_lab_lyrics */
 export type AiLabLyricsOption =
   | 'none'
   | 'ko'
@@ -77,15 +106,30 @@ export type AiLabDownloadToolContext = {
   musicPlatformId: MusicPlatformIdType;
 };
 
-const LYRICS_OPTION_CHOICES: NrmAiLabChoice[] = [
-  { id: 'ko', label: '1. 한국어 팩' },
-  { id: 'en', label: '2. 영어 팩' },
-  { id: 'auto_translate', label: '3. 번역지원' },
-];
+const ONE_DOWNLOAD_PER_REQUEST_MESSAGE =
+  '한 번의 요청에서는 오디오 1곡만 다운로드할 수 있습니다. 추가 곡은 새 메시지로 요청해 주세요.';
+
+export function isAiLabStartDownloadToolName(name: string): boolean {
+  return name === 'start_music_download' || name === 'download_music';
+}
+
+export function aiLabOneDownloadPerRequestResult(): {
+  result: Record<string, unknown>;
+} {
+  return {
+    result: {
+      ok: false,
+      error: 'one_download_per_request',
+      message: ONE_DOWNLOAD_PER_REQUEST_MESSAGE,
+      nextHint:
+        '이 요청에서는 더 이상 start_music_download를 호출하지 않는다. 사용자에게 새 메시지로 추가 곡을 요청하라고 안내.',
+    },
+  };
+}
 
 /**
- * lyricsOption → 앱 내부 lyricsMode/alignLang.
- * Melon 메타 기반이므로 melon / melon_translation 사용.
+ * lyricsOption → 앱 내부 lyricsMode.
+ * AI Lab은 기본 none. 명시적 가사만 melon(번역 없음). 번역은 후속 도구.
  */
 export function parseAiLabLyricsOption(raw: string | null | undefined): ParsedAiLabLyrics {
   const v = String(raw ?? '')
@@ -95,49 +139,26 @@ export function parseAiLabLyricsOption(raw: string | null | undefined): ParsedAi
   if (!v || v === 'none' || v === 'unset' || v === 'no' || v === '없이') {
     return { lyricsMode: 'unset', lyricsOption: 'none' };
   }
-  if (v === 'ko' || v === 'korean' || v === '한국어' || v === '한국어팩') {
-    return { lyricsMode: 'melon', alignLang: 'ko', lyricsOption: 'ko' };
-  }
-  if (v === 'en' || v === 'english' || v === '영어' || v === '영어팩') {
-    return { lyricsMode: 'melon', alignLang: 'en', lyricsOption: 'en' };
-  }
-  if (v === 'auto') {
-    return { lyricsMode: 'melon', lyricsOption: 'auto' };
-  }
+  // 명시적 가사 요청 — 번역 없이 Melon 정렬만 (번역은 translate_ai_lab_lyrics)
   if (
+    v === 'ko' ||
+    v === 'en' ||
+    v === 'auto' ||
+    v === 'melon' ||
+    v === 'yes' ||
+    v === '가사' ||
+    v === 'lyrics' ||
     v === 'ko_translate' ||
-    v === 'ko_translation' ||
-    v === '한국어번역' ||
-    v === '번역_ko'
-  ) {
-    return { lyricsMode: 'melon_translation', alignLang: 'ko', lyricsOption: 'ko_translate' };
-  }
-  if (
     v === 'en_translate' ||
-    v === 'en_translation' ||
-    v === '영어번역' ||
-    v === '번역_en'
-  ) {
-    return { lyricsMode: 'melon_translation', alignLang: 'en', lyricsOption: 'en_translate' };
-  }
-  if (
     v === 'auto_translate' ||
-    v === 'translate' ||
-    v === 'translation' ||
+    v === 'melon_translation' ||
     v === '번역' ||
     v === '번역지원'
   ) {
-    return { lyricsMode: 'melon_translation', lyricsOption: 'auto_translate' };
-  }
-  // 레거시 FC lyricsMode 직접 전달
-  if (v === 'melon') return { lyricsMode: 'melon', lyricsOption: 'auto' };
-  if (v === 'melon_translation') {
-    return { lyricsMode: 'melon_translation', lyricsOption: 'auto_translate' };
+    return { lyricsMode: 'melon', lyricsOption: 'auto' };
   }
   if (v === 'configured') return { lyricsMode: 'configured', lyricsOption: 'auto' };
-  if (v === 'translation') {
-    return { lyricsMode: 'translation', lyricsOption: 'auto_translate' };
-  }
+  if (v === 'translation') return { lyricsMode: 'melon', lyricsOption: 'auto' };
   return { lyricsMode: 'unset', lyricsOption: 'none' };
 }
 
@@ -188,7 +209,6 @@ export async function searchTrackOnPlatform(
 async function searchMusicTool(
   query: string,
   fcPlatform: string | undefined,
-  _ctx: AiLabDownloadToolContext,
 ): Promise<{ result: Record<string, unknown>; choices?: NrmAiLabChoice[] }> {
   if (!query) {
     return { result: { ok: false, error: 'missing_query' } };
@@ -217,15 +237,16 @@ async function searchMusicTool(
       hits: out.hits,
       error: out.error ?? null,
       count,
+      kind: 'track',
       providerId: MusicPlatformId.MELON,
       platformId: MusicPlatformId.MELON,
       usedFcPlatform: Boolean(requested),
       preferenceId: MusicPlatformId.MELON,
       nextHint:
         count === 1
-          ? '검색 결과 1건. 다운로드 의도·가사 옵션 확정이면 start_music_download(hit, lyricsOption). 찾기만이면 결과 안내.'
+          ? '검색 결과 1건. 다운로드면 먼저 「다운로드를 진행합니다.」를 말한 뒤 start_music_download(hit, lyricsOption=none). 가사 미요청이면 capability로 되묻기. 요청당 1곡.'
           : count > 1
-            ? '여러 후보 — 사용자 선택 후 start_music_download. 선택은 choices 사용.'
+            ? '여러 후보 — choices(가수 - 제목 (앨범))로 사용자 선택 후 진행. 요청당 다운로드 1곡만.'
             : out.error
               ? null
               : '검색 결과 없음',
@@ -234,22 +255,53 @@ async function searchMusicTool(
   };
 }
 
-export async function getLyricsDownloadOptions(): Promise<{
-  options: Array<{ id: string; label: string }>;
-  choices: NrmAiLabChoice[];
-  askPrompt: string;
-  notes: string[];
-}> {
+async function searchArtistTool(
+  query: string,
+): Promise<{ result: Record<string, unknown>; choices?: NrmAiLabChoice[] }> {
+  if (!query) return { result: { ok: false, error: 'missing_query' } };
+  const out = await searchMelonArtistsViaProvider(query);
+  const count = out.artists.length;
   return {
-    options: LYRICS_OPTION_CHOICES.map((c) => ({ id: c.id, label: c.label })),
-    choices: LYRICS_OPTION_CHOICES,
-    askPrompt:
-      '가사 생성 옵션을 선택해주세요.\n\n1. 한국어 팩\n\n2. 영어 팩\n\n3. 번역지원',
-    notes: [
-      '가사 요청만 있고 옵션이 없으면 Function Call 전에 위 질문을 먼저 한다.',
-      '옵션이 이미 포함되면 start_music_download(lyricsOption)로 바로 진행.',
-      '가사 요청이 없으면 lyricsOption=none (기본).',
-    ],
+    result: {
+      ok: !out.error && count > 0,
+      artists: out.artists,
+      error: out.error ?? null,
+      count,
+      kind: 'artist',
+      providerId: MusicPlatformId.MELON,
+      nextHint:
+        count > 1
+          ? '여러 아티스트 — choices로 선택 확인.'
+          : count === 1
+            ? '아티스트 1건. 정보 안내. 곡 다운로드가 필요하면 search_music으로 트랙 검색.'
+            : '검색 결과 없음',
+    },
+    choices: out.choices,
+  };
+}
+
+async function searchAlbumTool(
+  query: string,
+): Promise<{ result: Record<string, unknown>; choices?: NrmAiLabChoice[] }> {
+  if (!query) return { result: { ok: false, error: 'missing_query' } };
+  const out = await searchMelonAlbumsViaProvider(query);
+  const count = out.albums.length;
+  return {
+    result: {
+      ok: !out.error && count > 0,
+      albums: out.albums,
+      error: out.error ?? null,
+      count,
+      kind: 'album',
+      providerId: MusicPlatformId.MELON,
+      nextHint:
+        count > 1
+          ? '여러 앨범 — choices(가수 - 앨범명)로 선택 확인.'
+          : count === 1
+            ? '앨범 1건. 정보 안내. 수록곡 다운로드면 search_music으로 트랙 검색.'
+            : '검색 결과 없음',
+    },
+    choices: out.choices,
   };
 }
 
@@ -286,7 +338,20 @@ export async function startMusicDownload(params: {
   hit: NrmAiLabTrackHit;
   lyricsMode: NrmLyricsUiMode;
   alignLang?: 'ko' | 'en';
-}): Promise<{ ok: true; videoId: string; label: string } | { ok: false; error: string }> {
+  /** 사용자가 가사 생성을 명시했는지 (모델 게이트용) */
+  explicitLyricsRequest?: boolean;
+}): Promise<
+  | {
+      ok: true;
+      videoId: string;
+      label: string;
+      lyricsQueued: boolean;
+      lyricsCapability: Awaited<ReturnType<typeof getAiLabLyricsCapability>>;
+      lyricsAskEligible: boolean;
+      lyricsSkippedReason?: string;
+    }
+  | { ok: false; error: string; message?: string }
+> {
   if (Platform.OS === 'web') {
     return { ok: false, error: 'web_download_not_supported_in_ailab' };
   }
@@ -299,6 +364,23 @@ export async function startMusicDownload(params: {
   const title = params.hit.title.trim();
   if (!artist || !title) {
     return { ok: false, error: 'missing_artist_or_title' };
+  }
+
+  const capability = await getAiLabLyricsCapability();
+  let lyricsMode = params.lyricsMode;
+  let lyricsSkippedReason: string | undefined;
+  let lyricsQueued = false;
+
+  if (params.explicitLyricsRequest || lyricsMode !== 'unset') {
+    if (!capability.canGenerateLyrics) {
+      lyricsMode = 'unset';
+      lyricsSkippedReason = capability.message;
+    } else {
+      lyricsMode = 'melon';
+      lyricsQueued = true;
+    }
+  } else {
+    lyricsMode = 'unset';
   }
 
   const songId = extractMelonSongId(params.hit);
@@ -324,27 +406,25 @@ export async function startMusicDownload(params: {
           ...buildMelonTrackAudioMetadata(detailOut.data, artist, title),
           downloadPlatform: 'Melon',
         };
-        // Melon plain 가사는 다운로드 시 lyricsOption이 있을 때만 sentinel로 덮어씀
       }
     } catch (e) {
       logNrmRunError(LOG, e, { event: 'melon_detail_failed', songId });
     }
   }
 
-  if (params.lyricsMode !== 'unset') {
-    meta = applyLyricsToMetadata(meta, params.lyricsMode, params.alignLang);
+  if (lyricsMode !== 'unset') {
+    // AI Lab: transliterator 고정 → KO 팩
+    meta = applyLyricsToMetadata(meta, lyricsMode, 'ko');
   } else {
-    // 가사 생성 없음 — Melon 상세의 원문 가사는 메타로 유지(있으면)
     delete meta.melonAlignLang;
   }
 
-  // YouTube 검색은 반드시 Melon 메타(아티스트+제목) 기준 — 사용자 원문 직접 검색 금지
   const ytQuery = `${meta.artist} ${meta.title}`.trim();
   logNrmDev(LOG, {
     event: 'youtube_search_start',
     query: ytQuery.slice(0, 80),
     songId: songId ?? null,
-    lyricsMode: params.lyricsMode,
+    lyricsMode,
   });
   const yt = await searchYoutube(ytQuery);
   if (!yt.ok || !yt.items?.length) {
@@ -357,20 +437,111 @@ export async function startMusicDownload(params: {
     buildAudioFileName(meta.artist, meta.title, encode.extension, format),
     encode.extension,
   );
+  const displayLabel = displayLabelFromAudioFileName(fileName);
+  const lyricsSplit = splitMetadataForDownloadStages(meta);
+  const needsLyrics = !!(lyricsSplit?.whisperMode ?? lyricsSplit?.melonMode);
 
   void loadAlignModelPreference().catch(() => undefined);
 
+  registerAiLabDownload({
+    videoId: item.videoId,
+    fileName,
+    displayLabel,
+    hit: { ...params.hit, platform: 'melon', artist, title },
+    website: meta.website,
+  });
+
+  const lyricsAskEligible =
+    !params.explicitLyricsRequest &&
+    !lyricsQueued &&
+    capability.canAskLyrics;
+
   try {
+    await setupNrmMobileDownloadNotifications();
+    nrmNotifyDownloadQueued(item.videoId, displayLabel);
     void scheduleNativeDownloadJob({
       videoId: item.videoId,
       fileName,
       metadata: meta,
       isAborted: () => false,
+      options: {
+        melonLyricsPreloadOverride: needsLyrics ? AI_LAB_MELON_LYRICS_PRELOAD : undefined,
+        onAudioDownloadStarted: () => {
+          nrmNotifyDownloadStarted(item.videoId, displayLabel);
+        },
+        onAudioPersisted: (label, location) => {
+          nrmNotifyDownloadFinished(item.videoId, displayLabel, true, 'audio');
+          if (location?.audioUri) {
+            updateAiLabDownloadAudio(item.videoId, {
+              audioUri: location.audioUri,
+              fileName: location.fileName || fileName,
+              location,
+            });
+          }
+          void label;
+          if (needsLyrics) {
+            nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(item.videoId));
+          }
+          nrmBackgroundWorkRelease(nrmDownloadBackgroundWorkToken(item.videoId));
+        },
+        onLyricsStageStarted: () => {
+          nrmNotifyDownloadStarted(item.videoId, displayLabel, 'lyrics');
+          nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(item.videoId));
+        },
+        onLyricsStageEnded: (success) => {
+          nrmNotifyDownloadFinished(item.videoId, displayLabel, success, 'lyrics');
+          nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(item.videoId));
+          if (success && lyricsQueued) {
+            void maybeAskTranslationAfterAiLabLyrics(item.videoId);
+          }
+        },
+        onLyricsStageFailed: (warning) => {
+          const reason =
+            warning === 'memory_insufficient'
+              ? '메모리가 부족합니다.'
+              : warning === 'melon_align_failed'
+                ? '가사 정렬에 실패했습니다.'
+                : warning === 'translation_failed'
+                  ? '번역에 실패했습니다.'
+                  : warning === 'translation_exhausted'
+                    ? '번역 사용량이 초과되었습니다.'
+                    : undefined;
+          void nrmNotifyLyricsFailed(displayLabel, item.videoId, reason);
+        },
+        onLyricsPersisted: () => {
+          nrmNotifyDownloadFinished(item.videoId, displayLabel, true, 'lyrics');
+        },
+      },
+    }).catch((e) => {
+      if (needsLyrics) {
+        nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(item.videoId));
+      }
+      logNrmRunError(LOG, e, { event: 'ailab_download_job_failed', videoId: item.videoId });
     });
     return {
       ok: true,
       videoId: item.videoId,
       label: `${meta.artist} - ${meta.title}`,
+      lyricsQueued,
+      lyricsCapability: capability,
+      lyricsAskEligible,
+      lyricsSkippedReason,
+      ...(lyricsAskEligible
+        ? {
+            askPrompt: capability.askPrompt,
+            lyricsChoices: LYRICS_YES_NO_CHOICES,
+            nextHint:
+              '다운로드 시작됨. 사용자에게 「가사도 생성을 할까요?」를 묻고, 예이면 start_ai_lab_lyrics 호출.',
+          }
+        : lyricsSkippedReason
+          ? {
+              nextHint: `오디오만 시작. 가사 요청이 있었으나 모델 미설치: ${lyricsSkippedReason}`,
+            }
+          : {
+              nextHint: lyricsQueued
+                ? '다운로드+가사 큐 시작(wav2vec2-base+transliterator). 영문이면 완료 후 번역 질문.'
+                : '다운로드 시작. 가사 생성 안 함.',
+            }),
     };
   } catch (e) {
     logNrmRunError(LOG, e, { event: 'start_download_failed' });
@@ -409,8 +580,13 @@ export async function executeAiLabDownloadTool(
     return searchMusicTool(
       String(args.query ?? '').trim(),
       args.platform != null ? String(args.platform) : undefined,
-      toolCtx,
     );
+  }
+  if (name === 'search_music_artist') {
+    return searchArtistTool(String(args.query ?? '').trim());
+  }
+  if (name === 'search_music_album') {
+    return searchAlbumTool(String(args.query ?? '').trim());
   }
   if (name === 'search_track_on_platform') {
     const platform = String(args.platform ?? '') as NrmAiLabDownloadPlatformId;
@@ -439,23 +615,36 @@ export async function executeAiLabDownloadTool(
       choices: out.choices,
     };
   }
-  if (name === 'get_lyrics_download_options') {
-    const out = await getLyricsDownloadOptions();
+  if (name === 'get_ai_lab_lyrics_capability' || name === 'get_lyrics_download_options') {
+    const cap = await getAiLabLyricsCapability();
     return {
       result: {
-        options: out.options,
-        askPrompt: out.askPrompt,
-        notes: out.notes,
+        ...cap,
+        notes: [
+          '가사 생성은 사용자가 명시한 경우에만. 미요청이면 다운로드 후 canAskLyrics일 때만 되묻기.',
+          '정렬: wav2vec2-base + 다국어 발음 전처리(en-kotransliterator) 필수.',
+          '번역은 가사 생성 후 영문일 때만, Google Translator 고정.',
+        ],
       },
-      choices: out.choices,
+      choices: cap.choices,
     };
   }
-  if (name === 'start_music_download' || name === 'download_music') {
+  if (name === 'start_ai_lab_lyrics') {
+    const hit = args.hit as NrmAiLabTrackHit | undefined;
+    const videoId = args.videoId != null ? String(args.videoId) : undefined;
+    const result = await startAiLabLyrics({ videoId, hit });
+    return { result };
+  }
+  if (name === 'translate_ai_lab_lyrics') {
+    const videoId = args.videoId != null ? String(args.videoId) : undefined;
+    const result = await translateAiLabLyrics({ videoId });
+    return { result };
+  }
+  if (isAiLabStartDownloadToolName(name)) {
     const hit = args.hit as NrmAiLabTrackHit | undefined;
     if (!hit?.title || !hit?.artist) {
       return { result: { ok: false, error: 'missing_hit' } };
     }
-    // lyricsOption 우선, 없으면 레거시 lyricsMode
     const optionRaw =
       args.lyricsOption != null
         ? String(args.lyricsOption)
@@ -463,20 +652,25 @@ export async function executeAiLabDownloadTool(
           ? String(args.lyricsMode)
           : 'none';
     const parsed = parseAiLabLyricsOption(optionRaw);
-    const alignRaw = String(args.alignLang ?? '');
-    const alignLang =
-      alignRaw === 'ko' || alignRaw === 'en' ? alignRaw : parsed.alignLang;
+    const explicit =
+      args.explicitLyrics === true ||
+      args.explicitLyrics === 'true' ||
+      (parsed.lyricsOption !== 'none' && optionRaw.trim() !== '' && optionRaw !== 'none');
     const out = await startMusicDownload({
       hit: { ...hit, platform: 'melon' },
-      lyricsMode: parsed.lyricsMode,
-      alignLang,
+      lyricsMode: explicit ? 'melon' : 'unset',
+      explicitLyricsRequest: explicit,
     });
+    if (!out.ok) {
+      return { result: out };
+    }
     return {
       result: {
         ...out,
-        lyricsOption: parsed.lyricsOption,
-        lyricsMode: parsed.lyricsMode,
+        lyricsOption: explicit ? 'auto' : 'none',
+        lyricsMode: explicit && out.lyricsQueued ? 'melon' : 'unset',
       },
+      choices: out.lyricsAskEligible ? LYRICS_YES_NO_CHOICES : undefined,
     };
   }
   return { result: { ok: false, error: `unknown_tool:${name}` } };

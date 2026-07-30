@@ -95,26 +95,35 @@ export class PromptBuilder {
       `[DOWNLOAD_RULES]\n` +
         `앱 다운로드/곡 찾기 — 이번 버전은 Melon만 지원한다.\n` +
         `\n` +
-        `## 검색\n` +
-        `- 곡 검색: search_music(query). platform은 생략하거나 melon만.\n` +
-        `- Spotify/Apple Music/Last.fm 등 다른 플랫폼을 요청하면 Function Call 하지 말고\n` +
-        `  「해당 플랫폼 검색은 현재 지원하지 않습니다. Melon으로 검색할까요?」를 안내한다.\n` +
-        `- 「좋은날 찾아줘」→ search_music → 결과 표시.\n` +
+        `## 요청당 1곡 (필수)\n` +
+        `- 사용자 메시지 1회당 start_music_download는 최대 1회.\n` +
+        `- 여러 곡 요청이면 1곡만 진행하고 나머지는 새 메시지로 안내.\n` +
         `\n` +
-        `## 다운로드 파이프라인 (필수 순서)\n` +
-        `1) Melon 검색(search_music)\n` +
-        `2) 결과 1건이면 바로 진행 가능. 여러 건이면 사용자 선택(choices)\n` +
-        `3) start_music_download(hit, lyricsOption)\n` +
-        `   → 클라이언트가 Melon 메타 확보 → YouTube 검색(Melon artist+title) → 오디오 → Melon 메타 임베드\n` +
-        `- YouTube를 사용자 입력만으로 직접 검색하게 안내하거나 가정하지 않는다.\n` +
+        `## 검색 (Melon 자동 — 「멜론에서」 불필요)\n` +
+        `- 곡/트랙 정보·다운로드: search_music(query)\n` +
+        `- 가수 정보: search_music_artist(query)\n` +
+        `- 앨범 정보: search_music_album(query)\n` +
+        `- 「blooming 알려줘」→ search_music. Spotify 등 다른 플랫폼 요청 시 FC 없이 미지원 안내.\n` +
+        `- 결과 복수면 choices로 확인. 트랙 칩 포맷: 「가수 - 노래제목 (앨범명)」\n` +
         `\n` +
-        `## 가사 (lyricsOption)\n` +
-        `- 기본: lyricsOption=none (가사 생성 안 함). 「좋은날 다운로드해줘」→ none.\n` +
-        `- 「가사도 넣어줘」만 있고 옵션이 없으면 Function Call 전에 먼저 질문한다:\n` +
-        `  「가사 생성 옵션을 선택해주세요.\\n\\n1. 한국어 팩\\n\\n2. 영어 팩\\n\\n3. 번역지원」\n` +
-        `- 「한국어팩으로 가사」「영어팩」「번역도」등 옵션이 이미 있으면 추가 질문 없이\n` +
-        `  start_music_download(lyricsOption=ko|en|auto_translate|…).\n` +
-        `- lyricsOption: none|ko|en|auto|ko_translate|en_translate|auto_translate`,
+        `## 다운로드 선응답 (필수)\n` +
+        `1) Melon 검색 → 필요 시 사용자 선택\n` +
+        `2) 다운로드 확정 시 먼저 텍스트로 「다운로드를 진행합니다.」를 말한 뒤\n` +
+        `   start_music_download(hit, lyricsOption=none) 호출. 완료를 기다리지 않는다.\n` +
+        `3) YouTube는 Melon artist+title로만 (사용자 원문 직접 검색 가정 금지)\n` +
+        `\n` +
+        `## 가사 (기본 생성 안 함)\n` +
+        `- 「아이유 blooming 다운로드해줘」→ 가사 없이 오디오만.\n` +
+        `- 사용자가 가사를 명시하지 않았고, tool 결과 lyricsAskEligible=true이면\n` +
+        `  같은 답변에 「가사도 생성을 할까요?」+ choices(예/아니요).\n` +
+        `- lyricsAskEligible=false(모델 미설치)면 가사 질문을 하지 않는다.\n` +
+        `- 사용자가 가사를 명시한 경우: lyricsOption=auto로 start_music_download.\n` +
+        `  모델 미설치면 오디오만 하고 설치 안내(tool 결과 lyricsSkippedReason).\n` +
+        `- 사용자가 「예, 가사 생성」→ start_ai_lab_lyrics(videoId).\n` +
+        `- 정렬은 항상 wav2vec2-base + 다국어 발음 전처리. 한국어팩/영어팩/번역지원 선택지 금지.\n` +
+        `- 영문 가사 완료 후 번역 질문(또는 「예, 번역해주세요」)→ translate_ai_lab_lyrics.\n` +
+        `  번역기는 항상 Google Translator(DeepL 설정 무시).\n` +
+        `- lyricsOption: none|auto 만 사용. 번역은 start_music_download에 넣지 않는다.`,
     );
   }
 

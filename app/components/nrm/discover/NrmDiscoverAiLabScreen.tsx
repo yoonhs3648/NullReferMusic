@@ -14,6 +14,7 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NrmAiLabComposer } from '@/components/nrm/discover/NrmAiLabComposer';
@@ -63,19 +64,25 @@ import {
   type NrmLlmToolResultPayload,
 } from '@/lib/nrmLlmChatSend';
 import {
+  aiLabOneDownloadPerRequestResult,
   executeAiLabDownloadTool,
+  isAiLabStartDownloadToolName,
   type NrmAiLabChoice,
 } from '@/lib/nrmAiLabDownloadTools';
+import { setAiLabLyricsFollowupHooks } from '@/lib/nrmAiLabLyricsFollowup';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
 
 type Props = {
   isDark: boolean;
+  /** 탭/레이어가 보일 때 true. false→true 전환 시 활성 세션 메시지를 DB와 재동기화 */
+  isActive?: boolean;
 };
 
 const ICON_HIT = 44;
 const NETWORK_PROBLEM_TEXT = '네트워크가 불안정해요 📡 나중에 다시 시도해 주세요.';
 const MAX_AI_LAB_TOOL_ROUNDS = 6;
+const ACTIVE_SESSION_STORAGE_KEY = 'nrm_ai_lab_active_session_id_v1';
 
 /**
  * 예전엔 전송 실패 원인과 무관하게 항상 NETWORK_PROBLEM_TEXT 하나로 뭉뚱그려
@@ -104,7 +111,7 @@ function nextTempId(prefix: string): string {
 }
 
 /** AI Lab — 앱 상단바·메뉴 패턴에 맞춘 대화 UI. ChatSession/ChatMessage 기반 실 LLM 연동. */
-export function NrmDiscoverAiLabScreen({ isDark }: Props) {
+export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const drawerW = Math.max(280, Math.min(380, Math.round(windowWidth * 0.88) || 320));
@@ -146,10 +153,41 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const [sending, setSending] = useState(false);
   /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
   const pendingLocalConversationRef = useRef<NrmAiLabConversation | null>(null);
+  /** isActive false→true 감지용 */
+  const wasActiveRef = useRef(isActive);
   /** 앱 설정 > 앱 이름 변경 값 우선, 없으면 APK 내장 AppName */
   const greetingName = useNrmMainLogoDisplayName();
   const [keyboardInset, setKeyboardInset] = useState(0);
   const listRef = useRef<FlatList<NrmAiLabMessage>>(null);
+
+  const persistActiveSessionId = useCallback((sessionId: string | null) => {
+    if (!sessionId || sessionId.startsWith('c-')) {
+      void AsyncStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY).catch(() => {});
+      return;
+    }
+    void AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId).catch(() => {});
+  }, []);
+
+  const reloadSessionMessages = useCallback(async (sessionId: string) => {
+    if (!sessionId || sessionId.startsWith('c-')) return;
+    try {
+      const msgs = await fetchChatMessages(sessionId);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === sessionId
+            ? {
+                ...c,
+                messages: msgs,
+                messagesLoaded: true,
+                // 전송 중 로컬 typing 말풍선이 있으면 DB 스냅샷으로 덮지 않음 — 호출측에서 sending 가드
+              }
+            : c,
+        ),
+      );
+    } catch (e) {
+      logNrmRunError('ailab.messages', e, { sessionId });
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,6 +197,32 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  useEffect(() => {
+    setAiLabLyricsFollowupHooks({
+      onAskTranslation: (payload) => {
+        const convId = activeIdRef.current;
+        if (!convId) return;
+        const msg: NrmAiLabMessage = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content: payload.message,
+          choices: payload.choices,
+        };
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId ? { ...c, messages: [...c.messages, msg] } : c,
+          ),
+        );
+      },
+    });
+    return () => {
+      setAiLabLyricsFollowupHooks({});
     };
   }, []);
 
@@ -220,19 +284,38 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
     if (!serialNo) return;
     try {
       const rows = await fetchChatSessions(serialNo);
+      let restoredId: string | null = null;
+      try {
+        restoredId = (await AsyncStorage.getItem(ACTIVE_SESSION_STORAGE_KEY))?.trim() || null;
+      } catch {
+        restoredId = null;
+      }
       setConversations((prev) => {
         const prevById = new Map(prev.map((c) => [c.id, c]));
         const pendingLocal = pendingLocalConversationRef.current;
         const merged = rows.map((row) => {
           const existing = prevById.get(row.id);
-          return existing?.messagesLoaded ? { ...row, messages: existing.messages, messagesLoaded: true } : row;
+          return existing?.messagesLoaded
+            ? { ...row, messages: existing.messages, messagesLoaded: true }
+            : row;
         });
-        // 서버에 아직 반영 안 된(방금 만든) 로컬 대화는 목록 맨 위에 유지
-        if (pendingLocal && !merged.some((c) => c.id === pendingLocal.id)) {
-          return [pendingLocal, ...merged];
+        // 서버 목록에 아직 없는 로컬(임시 id) 대화 — 스트리밍 중 목록 새로고침에 메시지 유실 방지
+        const locals = prev.filter(
+          (c) =>
+            c.messagesLoaded &&
+            c.messages.length > 0 &&
+            !merged.some((m) => m.id === c.id),
+        );
+        const withLocals = locals.length > 0 ? [...locals, ...merged] : merged;
+        if (pendingLocal && !withLocals.some((c) => c.id === pendingLocal.id)) {
+          return [pendingLocal, ...withLocals.filter((c) => c.id !== pendingLocal.id)];
         }
-        return merged;
+        return withLocals;
       });
+      // 재진입 시 마지막 대화를 다시 연다(목록에 있을 때만)
+      if (restoredId && rows.some((r) => r.id === restoredId)) {
+        setActiveId((cur) => cur ?? restoredId);
+      }
     } catch (e) {
       logNrmRunError('ailab.sessions', e, { serialNo });
     }
@@ -241,6 +324,54 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   useEffect(() => {
     if (serialNo) void refreshSessions();
   }, [serialNo, refreshSessions]);
+
+  /** 활성 세션이 목록 새로고침으로 messagesLoaded=false가 되면 DB에서 메시지를 다시 채운다.
+   * 전송 중(sending)에는 스트리밍 로컬 메시지를 덮어쓰지 않는다. */
+  useEffect(() => {
+    if (!activeId || sending) return;
+    const target = conversations.find((c) => c.id === activeId);
+    if (!target || target.messagesLoaded) return;
+    let cancelled = false;
+    setMessagesLoading(true);
+    void fetchChatMessages(activeId)
+      .then((msgs) => {
+        if (cancelled) return;
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeId
+              ? {
+                  ...c,
+                  messages: c.messagesLoaded && c.messages.length > 0 ? c.messages : msgs,
+                  messagesLoaded: true,
+                }
+              : c,
+          ),
+        );
+      })
+      .catch((e) => logNrmRunError('ailab.messages', e, { sessionId: activeId }))
+      .finally(() => {
+        if (!cancelled) setMessagesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, conversations, sending]);
+
+  /** 탭 복귀 시 DB와 재동기화 — 이탈 중 서버에 확정된 assistant 메시지를 UI에 반영 */
+  useEffect(() => {
+    const becameActive = isActive && !wasActiveRef.current;
+    wasActiveRef.current = isActive;
+    if (!becameActive || sending) return;
+    const sid = activeId;
+    if (!sid || sid.startsWith('c-')) return;
+    void reloadSessionMessages(sid);
+  }, [activeId, isActive, reloadSessionMessages, sending]);
+
+  useEffect(() => {
+    if (activeId && !activeId.startsWith('c-')) {
+      persistActiveSessionId(activeId);
+    }
+  }, [activeId, persistActiveSessionId]);
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -320,24 +451,35 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
   const handleNewChat = useCallback(() => {
     setActiveId(null);
     setDraft('');
+    persistActiveSessionId(null);
     closeMenu();
-  }, [closeMenu]);
+  }, [closeMenu, persistActiveSessionId]);
 
   const handleSelect = useCallback(
     (id: string) => {
       setActiveId(id);
       setDraft('');
+      persistActiveSessionId(id);
       closeMenu();
       const target = conversations.find((c) => c.id === id);
       if (target) {
         // 모델은 좌측 피커/저장 선호값을 유지 — 과거 세션 ModelID로 UI를 덮어쓰지 않음.
         // 실제 호출은 클라이언트가 보내는 modelId를 서버가 우선 사용한다.
-        if (!target.messagesLoaded) {
+        // 선택 시마다 DB에서 다시 읽어, 이탈 중 확정된 assistant 누락을 막는다.
+        if (!target.messagesLoaded || !sending) {
           setMessagesLoading(true);
           void fetchChatMessages(id)
             .then((msgs) => {
               setConversations((prev) =>
-                prev.map((c) => (c.id === id ? { ...c, messages: msgs, messagesLoaded: true } : c)),
+                prev.map((c) =>
+                  c.id === id
+                    ? {
+                        ...c,
+                        messages: sending && c.messagesLoaded ? c.messages : msgs,
+                        messagesLoaded: true,
+                      }
+                    : c,
+                ),
               );
             })
             .catch((e) => logNrmRunError('ailab.messages', e, { sessionId: id }))
@@ -345,7 +487,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         }
       }
     },
-    [closeMenu, conversations],
+    [closeMenu, conversations, persistActiveSessionId, sending],
   );
 
   const handleDelete = useCallback(
@@ -444,6 +586,8 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
         }
 
         try {
+          /** 사용자 메시지 1회당 오디오 다운로드 시작은 최대 1회 */
+          let downloadsStartedThisSend = 0;
           for (let round = 0; round < MAX_AI_LAB_TOOL_ROUNDS; round += 1) {
             const pendingToolCalls: NrmLlmToolRequestEvent[] = [];
             let roundChoices: NrmAiLabChoice[] | undefined;
@@ -504,21 +648,25 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                       title: meta.title || conv.title,
                       modelId: llmModelId,
                       messages: finalizedMessages,
+                      messagesLoaded: true,
                     };
+                    if (pendingLocalConversationRef.current?.id === currentConvId) {
+                      pendingLocalConversationRef.current = null;
+                    }
                     const rest = prev.filter((_, i) => i !== idx).filter((c) => c.id !== newConvId);
                     return [updatedConv, ...rest];
                   });
                   if (currentConvId !== newConvId) {
-                    pendingLocalConversationRef.current = null;
                     currentConvId = newConvId;
                     setActiveId(newConvId);
                   }
                 },
                 onDelta: (chunk) => {
                   gotFirstDelta = true;
+                  const convId = currentConvId;
                   setConversations((prev) =>
                     prev.map((c) =>
-                      c.id === currentConvId
+                      c.id === convId
                         ? {
                             ...c,
                             messages: c.messages.map((m) =>
@@ -540,23 +688,43 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                       ? final.choices
                       : lastToolChoices) ?? undefined;
                   const agentUi = parseAgentUiFromDiag(final.diag);
+                  const convId = currentConvId;
+                  const finalSessionId = String(final.sessionId ?? '').trim();
                   setConversations((prev) =>
                     prev.map((c) => {
-                      if (c.id !== currentConvId) return c;
+                      if (c.id !== convId && c.id !== finalSessionId) return c;
                       const messages = c.messages.map((m) =>
                         m.id === tempAssistantId
-                          ? { ...final.message, choices, agentUi }
-                          : m,
+                          ? {
+                              // FlatList key를 유지해 MessageEnter가 opacity 0으로 재마운트되지 않게 함
+                              ...final.message,
+                              id: tempAssistantId,
+                              content: String(final.message.content ?? m.content ?? ''),
+                              choices,
+                              agentUi,
+                              typing: false,
+                              pending: false,
+                            }
+                          : m.id === tempUserId
+                            ? { ...m, pending: false }
+                            : m,
                       );
                       return {
                         ...c,
+                        id: finalSessionId || c.id,
                         modelId: llmModelId,
                         updatedAtLabel: '지금',
                         updatedAtIso: new Date().toISOString(),
+                        messagesLoaded: true,
                         messages,
                       };
                     }),
                   );
+                  if (finalSessionId) {
+                    void AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, finalSessionId).catch(
+                      () => {},
+                    );
+                  }
                 },
                 onTitleUpdated: ({ sessionId, title: newTitle }) => {
                   setConversations((prev) =>
@@ -578,11 +746,33 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
 
             const nextResults: NrmLlmToolResultPayload[] = [];
             for (const call of pendingToolCalls) {
+              if (
+                isAiLabStartDownloadToolName(call.name) &&
+                downloadsStartedThisSend >= 1
+              ) {
+                const blocked = aiLabOneDownloadPerRequestResult();
+                nextResults.push({
+                  callId: call.callId,
+                  name: call.name,
+                  args: call.args,
+                  response: blocked.result,
+                });
+                continue;
+              }
               const out = await executeAiLabDownloadTool(call.name, call.args, {
                 musicPlatformId: resolvedPlatform.platformId,
               });
               if (out.choices && out.choices.length > 0) {
                 roundChoices = out.choices;
+              }
+              if (isAiLabStartDownloadToolName(call.name)) {
+                const err = String(
+                  (out.result as { error?: unknown } | undefined)?.error ?? '',
+                );
+                // 가사 미선택·hit 누락은 아직 다운로드 시도가 아님
+                if (err !== 'lyrics_option_required' && err !== 'missing_hit') {
+                  downloadsStartedThisSend += 1;
+                }
               }
               nextResults.push({
                 callId: call.callId,

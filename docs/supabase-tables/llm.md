@@ -529,8 +529,12 @@ start_music_download(hit, lyricsOption)
 - AI Lab **플랫폼 선택** UI: 전체 플랫폼 목록 표시, **Melon만 선택 가능**(그 외 회색)
 - 가용성: 토큰/연동 게이트 미사용 — `Melon=Enabled`, 그 외=`Disabled` 강제
 - Spotify/Apple Music 등 요청 시: Function Call 없이 미지원 안내 + Melon 제안
-- `lyricsOption`: `none|ko|en|auto|ko_translate|en_translate|auto_translate` (기본 `none`)
-- 가사 옵션 없이 「가사도」만 요청 → FC 전 질문(한국어 팩/영어 팩/번역지원)
+- **요청당 1곡**: 사용자 메시지 1회당 `start_music_download` 성공은 최대 1회(클라이언트 하드 가드).
+- **검색**: `search_music`(트랙) / `search_music_artist` / `search_music_album` — Melon 언급 없이도 자동 호출. 트랙 칩: `가수 - 노래제목 (앨범명)`
+- **다운로드 선응답**: 먼저 「다운로드를 진행합니다.」 텍스트 → `start_music_download(lyricsOption=none)` (완료 대기 금지)
+- **가사 기본 없음**. 미요청 + `lyricsAskEligible`이면 「가사도 생성을 할까요?」. 모델(wav2vec2-base + en-kotransliterator) 미설치면 되묻기 자체를 하지 않음
+- 후속: `start_ai_lab_lyrics` → (영문만) 번역 질문 → `translate_ai_lab_lyrics`(Google 고정)
+- `lyricsOption`: `none|auto` (번역은 download에 넣지 않음)
 
 ### FAQ Context
 
@@ -555,7 +559,7 @@ start_music_download(hit, lyricsOption)
   → Intent Classifier (Gemini Flash Lite JSON)
        intent: general|music|latest|download|app|recommendation
        needSearch / needDownloadTools / needVector / needFaq
-       (실패 시 heuristic_fallback)
+       (Classifier 실패·API 키 없음 → source=`classifier_failed`, 도구 비활성. 휴리스틱 폴백 없음)
   → Context Collectors (스텁)
        FAQ — faqData 키워드 매칭 / VectorDB — 스텁(내일 RAG)
   → toolMode = download | none  (web_search 모드 비활성)
@@ -594,7 +598,7 @@ start_music_download(hit, lyricsOption)
 | `delta` | LLM 스트리밍 | text 조각 |
 | `tool_request` | 다운로드 FC | callId/name/args — 앱이 실행 |
 | `tool_turn_end` | tool_request 후 | 클라이언트가 toolContinue 재호출. Interactions 시 `previousInteractionId` |
-| `title_updated` | 새 세션 제목 LLM 요약 후(final 직전) | `sessionId` / `title` — 좌측 메뉴 갱신 |
+| `title_updated` | 새 세션 제목 LLM 요약 후(`final` 직전 또는 첫 턴 `tool_turn_end` 직후) | `sessionId` / `title` — 좌측 메뉴 갱신 |
 | `final` | 확정 | assistant 또는 system |
 | `error` | 복구 불가 | message |
 
@@ -718,7 +722,9 @@ start_music_download(hit, lyricsOption)
 ### 대화 제목 (LLM 요약, 2026-07-29 복구)
 
 `nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 **임시 제목**(사용자 메시지 28자 절단)을 즉시 넣는다.  
-본문 LLM 스트리밍과 **병렬**로 Edge가 짧은 제목용 LLM 호출 1회를 하고, 응답 종료 직전 `nrm_rpc_chat_update_session_title`로 덮어쓴 뒤 NDJSON `title_updated`를 보낸다. 앱 좌측 메뉴가 즉시 반영한다.  
+본문 LLM 스트리밍과 **병렬**로 Edge가 짧은 제목용 LLM 호출 1회를 하고, `final` **또는** 새 세션 첫 턴의 `tool_turn_end` 직후 `nrm_rpc_chat_update_session_title`로 덮어쓴 뒤 NDJSON `title_updated`를 보낸다. 앱 좌측 메뉴가 즉시 반영한다.  
+(`tool_turn_end`에서 미적용하면 이후 `toolContinue`는 `isNewSession=false`라 제목이 휴리스틱에 고정되는 버그가 있어 2026-07-30에 수정.)  
+Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠STOP) 논스트리밍 unary로 본문을 재확정한다(2026-07-30).  
 실패 시 임시 제목이 유지된다. (2026-07-23~29 사이에는 쿼터 절약으로 LLM 제목을 끄고 휴리스틱만 썼음)
 
 ### Gemini 호출 횟수 최적화 (2026-07-23)
