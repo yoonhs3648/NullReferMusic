@@ -1,7 +1,11 @@
 /**
  * Intent Classifier — IntentResult 구조체.
+ *
+ * Google 호출: Feature Flag에 따라 Interactions API 우선, 실패 시 Legacy generateContent.
  */
 
+import { shouldUseGeminiInteractionsApi } from './ops/geminiApiMode.ts';
+import { classifyIntentViaInteractions } from './providers/geminiInteractions.ts';
 import type { AiLabIntentKind, IntentResult } from './types.ts';
 
 export const INTENT_CLASSIFIER_MODEL = 'models/gemini-2.0-flash-lite';
@@ -122,6 +126,16 @@ function parseClassifierJson(text: string): IntentResult | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 학습 컷오프/실시간 웹이 필요한 질문 여부.
+ * 웹 검색 비활성 이후에는 메인 LLM을 호출하지 않고 채팅 경고로 대체한다.
+ */
+export function isBeyondKnowledgeCutoffIntent(
+  intent: Pick<IntentResult, 'intent' | 'needsWebSearch'>,
+): boolean {
+  return intent.needsWebSearch === true || intent.intent === 'latest';
 }
 
 export function classifyIntentHeuristic(userMessage: string): IntentResult {
@@ -256,6 +270,22 @@ export async function classifyIntentWithLlm(
   const message = userMessage.trim().slice(0, 2000);
   if (!message || !apiKey.trim()) return null;
 
+  if (shouldUseGeminiInteractionsApi()) {
+    const text = await classifyIntentViaInteractions({
+      apiKey,
+      modelName: INTENT_CLASSIFIER_MODEL,
+      systemInstruction: CLASSIFIER_SYSTEM,
+      userMessage: message,
+      maxOutputTokens: INTENT_MAX_OUTPUT_TOKENS,
+      timeoutMs: INTENT_TIMEOUT_MS,
+    });
+    if (text) {
+      const parsed = parseClassifierJson(text);
+      if (parsed) return parsed;
+    }
+    // Interactions 실패/파싱 실패 → Legacy generateContent 폴백
+  }
+
   const url =
     `https://generativelanguage.googleapis.com/v1beta/${INTENT_CLASSIFIER_MODEL}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
@@ -283,6 +313,7 @@ export async function classifyIntentWithLlm(
           event: 'intent_classifier_http_error',
           status: res.status,
           bodyPreview: errBody.slice(0, 300),
+          api: 'generateContent',
         }),
       );
       return null;
@@ -303,6 +334,7 @@ export async function classifyIntentWithLlm(
         fn: 'llm-chat-send',
         event: 'intent_classifier_exception',
         message: e instanceof Error ? e.message : String(e),
+        api: 'generateContent',
       }),
     );
     return null;

@@ -92,6 +92,13 @@ export {
   DEFAULT_FEATURE_FLAGS,
 } from './ops/featureFlags.ts';
 export type { FeatureFlags, FeatureFlagDef } from './ops/featureFlags.ts';
+export {
+  resolveGeminiApiMode,
+  resolveGeminiApiModeFromEnv,
+  shouldUseGeminiInteractionsApi,
+  setGeminiInteractionsApiOverride,
+} from './ops/geminiApiMode.ts';
+export type { GeminiApiMode } from './ops/geminiApiMode.ts';
 export { getActivePromptVersion, registerPromptVersion } from './ops/promptVersion.ts';
 export { runEvaluation, registerAnswerEvaluator } from './ops/evaluation.ts';
 export {
@@ -124,6 +131,20 @@ export { assignExperiment, registerExperimentAssigner } from './ops/experiment.t
 export { metricsFromAgentResponse } from './ops/metrics.ts';
 export type { AgentMetrics } from './ops/metrics.ts';
 export {
+  buildProviderHttpDiag,
+  classifyQuotaFromResponse,
+  detectToolsInRequestBody,
+  headersToRecord,
+  pickProviderRequestId,
+  snapshotRequestBody,
+} from './ops/providerHttpDiag.ts';
+export type {
+  ProviderHttpDiag,
+  QuotaClass,
+  QuotaClassification,
+  RequestBodySnapshot,
+} from './ops/providerHttpDiag.ts';
+export {
   getReRankProvider,
   registerReRankProvider,
   rerankContext,
@@ -142,6 +163,9 @@ export {
   setDefaultMusicMetadataProvider,
   MelonProvider,
 } from './music/metadataProvider.ts';
+
+export { analyzeUserIntent, classifyIntentHeuristic, isBeyondKnowledgeCutoffIntent } from './intent.ts';
+export { INTENT_CLASSIFIER_MODEL } from './intent.ts';
 
 /** @deprecated */
 export { runPlanner as buildAgentPlan } from './planner.ts';

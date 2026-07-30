@@ -20,14 +20,19 @@
 //
 // NDJSON 스트리밍 프로토콜 (한 줄에 JSON 객체 하나, Content-Type: application/x-ndjson):
 //   {"type":"meta",...} / {"type":"delta","text":"..."} / {"type":"tool_request",...}
-//   {"type":"tool_turn_end",...} / {"type":"final",...} / {"type":"error",...}
+//   {"type":"tool_turn_end",...} / {"type":"title_updated",...} / {"type":"final",...} / {"type":"error",...}
 // meta 이전(=prepare_turn 자체가 실패한) 경우는 스트리밍하지 않고 JSON 에러(4xx/5xx).
 //
 // 멀티 프로바이더: ADAPTERS + PROVIDER_CAPABILITIES(agent/types.ts).
 // 현재: Google(Gemini), Groq. OpenAI/Claude/Grok 등은 어댑터+캐파빌리티만 추가.
 //
-// 웹검색: Intent needSearch → Gemini google_search / Groq browser_search (네이티브).
-// Edge는 웹을 크롤하지 않는다. 클라이언트 enableWebSearch 필드는 무시(하위호환).
+// 웹검색: 전면 비활성(2026-07-29). 학습 컷오프는 systemInstruction에 주입하지 않음.
+// 클라이언트 enableWebSearch 필드는 무시(하위호환).
+//
+// Gemini API (2026-07): 기본은 Interactions API(`/v1beta/interactions`).
+// Legacy generateContent/streamGenerateContent는 Feature Flag·env로 유지(비교 테스트).
+//   - FeatureFlags.geminiInteractionsApi (기본 true)
+//   - env GEMINI_API_MODE=interactions|legacy 또는 GEMINI_USE_INTERACTIONS_API=0|1
 //
 // 로깅: 요청마다 requestId(UUID) 하나로 전 구간을 묶는다. Supabase Dashboard →
 // Edge Functions → llm-chat-send → Logs (또는 `supabase functions logs
@@ -62,7 +67,24 @@ import {
   runEvaluation,
   runExecutionGraph,
   runPlanner,
+  buildProviderHttpDiag,
+  classifyQuotaFromResponse,
+  detectToolsInRequestBody,
+  headersToRecord,
+  pickProviderRequestId,
+  snapshotRequestBody,
+  shouldUseGeminiInteractionsApi,
+  setGeminiInteractionsApiOverride,
 } from './agent/mod.ts';
+import type { ProviderHttpDiag, QuotaClass } from './agent/mod.ts';
+import {
+  generateTitleGeminiInteractions,
+  streamGeminiInteractions,
+} from './agent/providers/geminiInteractions.ts';
+import {
+  toLegacyGeminiFunctionDeclarations,
+  toOpenAiFunctionTools,
+} from './agent/tools/downloadDeclarations.ts';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -104,7 +126,7 @@ const MSG_LLM_UNAVAILABLE = '지금 AI 응답을 못 받았어요 😵 잠시 �
 /** Gemini 429 폴백(세부 파싱 실패 시) */
 const MSG_LLM_RATE_LIMIT_FALLBACK = 'AI 요청이 너무 많아요 🔥 잠시 후 다시 시도해 주세요.';
 
-type GeminiRateLimitKind = 'rpm' | 'tpm' | 'rpd' | 'unknown';
+type GeminiRateLimitKind = 'grounding' | 'rpm' | 'tpm' | 'rpd' | 'unknown';
 
 type GeminiRateLimitInfo = {
   kind: GeminiRateLimitKind;
@@ -114,6 +136,9 @@ type GeminiRateLimitInfo = {
   unlockAt: Date;
   modelHint: string | null;
   limit: number | null;
+  quotaId: string | null;
+  quotaMetric: string | null;
+  quotaEvidence: string | null;
 };
 
 function pad2(n: number): string {
@@ -220,39 +245,10 @@ function parseGeminiRetryAfterMs(errorBody: string): number | null {
   return null;
 }
 
-function detectGeminiRateLimitKind(errorBody: string): GeminiRateLimitKind {
-  const id = errorBody.match(/"quotaId"\s*:\s*"([^"]+)"/i)?.[1] ?? '';
-  const metric = errorBody.match(/"quotaMetric"\s*:\s*"([^"]+)"/i)?.[1]
-    ?? errorBody.match(/Quota exceeded for metric:\s*([^\s,]+)/i)?.[1]
-    ?? '';
-  // quotaId / metric 우선 (본문 전체보다 정확)
-  const idMetric = `${id} ${metric}`.toLowerCase();
-  if (/perday|per_day|requestsperday/.test(idMetric)) return 'rpd';
-  if (/token/.test(idMetric) && /perminute|per_minute|tpm/.test(idMetric)) return 'tpm';
-  if (/token/.test(idMetric)) return 'tpm';
-  if (/perminute|per_minute|requestsperminute/.test(idMetric)) return 'rpm';
-
-  const blob = errorBody.toLowerCase();
-  // Groq: "tokens per minute (TPM)", "tokens per day (TPD)"
-  if (/tokens per day|\btpd\b|per day.*token|token.*per day/i.test(blob)) return 'rpd';
-  if (/tokens per minute|\btpm\b|type"\s*:\s*"tokens"|request too large/.test(blob)) return 'tpm';
-  if (/perday|per_day|requestsperday/.test(blob)) return 'rpd';
-  if (/tokens?\s*per\s*minute|perminutetoken|input_token|output_token/.test(blob)) return 'tpm';
-  if (/perminute|per_minute|requestsperminute/.test(blob)) return 'rpm';
-
-  // free-tier 실측: limit≈5 → RPM, limit≈20+ → RPD
-  if (/generate_content_free_tier_requests/i.test(errorBody)) {
-    const limitRaw = errorBody.match(/limit:\s*([0-9]+)/i)?.[1]
-      ?? errorBody.match(/"quotaValue"\s*:\s*"([0-9]+)"/i)?.[1];
-    const limit = limitRaw != null ? Number(limitRaw) : null;
-    if (limit != null && Number.isFinite(limit) && limit <= 10) return 'rpm';
-    return 'rpd';
-  }
-  return 'unknown';
-}
-
 function rateLimitKindLabel(kind: GeminiRateLimitKind): string {
   switch (kind) {
+    case 'grounding':
+      return '웹 검색(그라운딩)';
     case 'rpm':
       return '분당 요청 횟수';
     case 'tpm':
@@ -265,7 +261,8 @@ function rateLimitKindLabel(kind: GeminiRateLimitKind): string {
 }
 
 function parseGeminiRateLimitInfo(errorBody: string, now = new Date()): GeminiRateLimitInfo {
-  const kind = detectGeminiRateLimitKind(errorBody);
+  const classified = classifyQuotaFromResponse(429, errorBody);
+  const kind = classified.quotaClass;
   const retryAfterMs = parseGeminiRetryAfterMs(errorBody);
   const modelHint =
     errorBody.match(/model:\s*([a-z0-9._-]+)/i)?.[1]
@@ -294,38 +291,35 @@ function parseGeminiRateLimitInfo(errorBody: string, now = new Date()): GeminiRa
     unlockAt,
     modelHint,
     limit: Number.isFinite(limit) ? limit : null,
+    quotaId: classified.quotaId,
+    quotaMetric: classified.quotaMetric,
+    quotaEvidence: classified.quotaEvidence,
   };
 }
 
-/** 일반 사용자용 429 안내 — 모델·한도 종류·한국시간 해제 시각 */
+/** 앱 UI용 짧은 안내. 상세 진단(QuotaClass/헤더/본문)은 LLMCallAttemptLog 전용. */
 function buildMsgLlmRateLimit(
   errorBody: string,
   modelDisplayName: string,
-  options?: { wasWebSearch?: boolean },
+  options?: {
+    quotaClass?: QuotaClass | null;
+  },
 ): string {
   const body = (errorBody ?? '').trim();
-  if (!body) return MSG_LLM_RATE_LIMIT_FALLBACK;
-  const info = parseGeminiRateLimitInfo(body);
+  if (!body && options?.quotaClass == null) return MSG_LLM_RATE_LIMIT_FALLBACK;
+  const info = parseGeminiRateLimitInfo(body || '{}');
+  const kind = (options?.quotaClass ?? info.kind) as GeminiRateLimitKind;
+  const kindLabel = rateLimitKindLabel(kind);
   const modelLabel = (modelDisplayName || info.modelHint || '선택한 모델').trim();
   const unlockLabel = formatDateTimeKst(info.unlockAt);
   const limitHint =
-    info.limit != null && Number.isFinite(info.limit)
+    info.limit != null && Number.isFinite(info.limit) && kind !== 'unknown'
       ? ` (한도 ${info.limit.toLocaleString('ko-KR')})`
       : '';
 
-  // google_search / browser_search 전용 쿼터는 RPM/RPD quotaId가 비는 경우가 많음
-  if (options?.wasWebSearch && info.kind === 'unknown') {
-    return (
-      `「${modelLabel}」인터넷 검색 한도를 넘었어요 🔥\n\n` +
-      `초과한 한도: 웹 검색(그라운딩) 할당량\n` +
-      `다시 사용 가능해지는 시각: ${unlockLabel} (한국 시간)\n\n` +
-      `일반 채팅은 될 수 있어요. 잠시 뒤 인터넷 검색을 다시 켜 보거나, 다른 모델을 골라 주세요.`
-    );
-  }
-
   return (
     `「${modelLabel}」모델의 이용 한도를 넘었어요 🔥\n\n` +
-    `초과한 한도: ${info.kindLabel}${limitHint}\n` +
+    `초과한 한도: ${kindLabel}${limitHint}\n` +
     `다시 사용 가능해지는 시각: ${unlockLabel} (한국 시간)\n\n` +
     `이 시각 이후에 다시 시도하거나, 다른 모델을 골라 주세요.`
   );
@@ -389,6 +383,7 @@ async function persistLlmCallAttemptLogs(
     AttemptIndex: a.attemptIndex,
     AttemptLabel: a.attemptLabel,
     WithSearch: a.withSearch,
+    WithTools: a.withTools === true,
     HttpStatus: a.httpStatus,
     Ok: a.ok,
     ErrorKind: a.errorKind,
@@ -400,6 +395,19 @@ async function persistLlmCallAttemptLogs(
     MaxOutputTokens: a.maxOutputTokens,
     UserMessagePreview: preview(params.userMessage),
     NeedsWebSearch: params.needsWebSearch,
+    ProviderRequestID: a.providerRequestId ?? null,
+    RetryAfterHeader: a.retryAfterHeader ?? null,
+    ResponseHeadersJson: a.responseHeaders ?? null,
+    RateLimitHeadersJson: a.rateLimitHeaders ?? null,
+    ResponseBodyText: a.responseBodyText ?? null,
+    RequestBodyJson: a.requestBodyJson ?? null,
+    RequestBodySha256: a.requestBodySha256 ?? null,
+    RequestBodyBytes: a.requestBodyBytes ?? null,
+    RequestBodyTruncated: a.requestBodyTruncated === true,
+    QuotaClass: a.quotaClass ?? null,
+    QuotaId: a.quotaId ?? null,
+    QuotaMetric: a.quotaMetric ?? null,
+    QuotaEvidence: a.quotaEvidence ?? null,
   }));
   const { error } = await supabase.from('LLMCallAttemptLog').insert(rows);
   if (error) {
@@ -411,11 +419,12 @@ async function persistLlmCallAttemptLogs(
 
 type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
-/** Gemini 1회 시도 진단 — Edge console + LLMCallAttemptLog + 앱 final.diag 에 동일 구조로 남긴다. */
+/** Gemini/Groq 1회 시도 진단 — Edge console + LLMCallAttemptLog + 앱 final.diag 에 동일 구조로 남긴다. */
 type GeminiAttemptDiag = {
   attemptIndex: number;
   attemptLabel: string;
   withSearch: boolean;
+  withTools?: boolean;
   maxOutputTokens: number;
   ok: boolean;
   httpStatus: number | null;
@@ -425,7 +434,120 @@ type GeminiAttemptDiag = {
   blockReason: string | null;
   groundedQueryCount: number;
   elapsedMs: number;
+  providerRequestId?: string | null;
+  retryAfterHeader?: string | null;
+  responseHeaders?: Record<string, string> | null;
+  rateLimitHeaders?: Record<string, string> | null;
+  responseBodyText?: string | null;
+  requestBodyJson?: Record<string, unknown> | null;
+  requestBodySha256?: string | null;
+  requestBodyBytes?: number | null;
+  requestBodyTruncated?: boolean;
+  quotaClass?: QuotaClass | null;
+  quotaId?: string | null;
+  quotaMetric?: string | null;
+  quotaEvidence?: string | null;
 };
+
+function emptyAttemptHttpFields(): Pick<
+  GeminiAttemptDiag,
+  | 'withTools'
+  | 'providerRequestId'
+  | 'retryAfterHeader'
+  | 'responseHeaders'
+  | 'rateLimitHeaders'
+  | 'responseBodyText'
+  | 'requestBodyJson'
+  | 'requestBodySha256'
+  | 'requestBodyBytes'
+  | 'requestBodyTruncated'
+  | 'quotaClass'
+  | 'quotaId'
+  | 'quotaMetric'
+  | 'quotaEvidence'
+> {
+  return {
+    withTools: false,
+    providerRequestId: null,
+    retryAfterHeader: null,
+    responseHeaders: null,
+    rateLimitHeaders: null,
+    responseBodyText: null,
+    requestBodyJson: null,
+    requestBodySha256: null,
+    requestBodyBytes: null,
+    requestBodyTruncated: false,
+    quotaClass: null,
+    quotaId: null,
+    quotaMetric: null,
+    quotaEvidence: null,
+  };
+}
+
+async function attachRequestSnapshot(
+  diag: GeminiAttemptDiag,
+  body: Record<string, unknown>,
+  persistJson: boolean,
+): Promise<void> {
+  const tools = detectToolsInRequestBody(body);
+  diag.withTools = tools.withTools;
+  const snap = await snapshotRequestBody(body, persistJson);
+  diag.requestBodyJson = snap.requestBodyJson;
+  diag.requestBodySha256 = snap.requestBodySha256;
+  diag.requestBodyBytes = snap.requestBodyBytes;
+  diag.requestBodyTruncated = snap.requestBodyTruncated;
+}
+
+function attachHttpDiag(diag: GeminiAttemptDiag, http: ProviderHttpDiag, httpStatus: number): void {
+  diag.responseHeaders = http.responseHeaders;
+  diag.rateLimitHeaders = http.rateLimitHeaders;
+  diag.retryAfterHeader = http.retryAfterHeader;
+  diag.providerRequestId = http.providerRequestId;
+  diag.responseBodyText = http.responseBodyText;
+  if (httpStatus === 429) {
+    diag.quotaClass = http.quota.quotaClass;
+    diag.quotaId = http.quota.quotaId;
+    diag.quotaMetric = http.quota.quotaMetric;
+    diag.quotaEvidence = http.quota.quotaEvidence;
+  }
+}
+
+function logQuotaDiagEvent(
+  modelName: string,
+  attempt: { label: string; withSearch: boolean },
+  diag: GeminiAttemptDiag,
+  requestBody: Record<string, unknown>,
+): void {
+  const tools = detectToolsInRequestBody(requestBody);
+  console.warn(
+    JSON.stringify({
+      fn: 'llm-chat-send',
+      event: 'provider_http_quota_diag',
+      ts: new Date().toISOString(),
+      modelName,
+      attemptLabel: attempt.label,
+      httpStatus: diag.httpStatus,
+      latencyMs: diag.elapsedMs,
+      withTools: tools.withTools,
+      withGoogleSearch: tools.withGoogleSearch,
+      withSearch: attempt.withSearch,
+      providerRequestId: diag.providerRequestId,
+      retryAfterHeader: diag.retryAfterHeader,
+      rateLimitHeaders: diag.rateLimitHeaders,
+      responseHeaders: diag.responseHeaders,
+      responseBodyText: diag.responseBodyText,
+      quotaClass: diag.quotaClass,
+      quotaId: diag.quotaId,
+      quotaMetric: diag.quotaMetric,
+      quotaEvidence: diag.quotaEvidence,
+      requestBodySha256: diag.requestBodySha256,
+      requestBodyBytes: diag.requestBodyBytes,
+      requestBodyTruncated: diag.requestBodyTruncated,
+      // Edge Logs용 — DB RequestBodyJson과 동일 정책(실패 시 스냅샷)
+      requestBodyJson: diag.requestBodyJson,
+    }),
+  );
+}
 
 type AdapterSuccess = {
   ok: true;
@@ -439,12 +561,14 @@ type AdapterSuccess = {
   thoughtsTokens?: number;
   /** 진단용 — google_search grounding 사용 여부 */
   grounded?: boolean;
-  /** 진단용 — groundingMetadata.webSearchQueries 개수 */
+  /** 진단용 — groundingMetadata.webSearchQueries / google_search_call queries 개수 */
   groundedQueryCount?: number;
   attempts: GeminiAttemptDiag[];
   needsWebSearch: boolean;
   /** 앱이 실행할 function call (다운로드 도구 등) */
   functionCalls?: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
+  /** Gemini Interactions: toolContinue용 interaction.id */
+  interactionId?: string | null;
 };
 type AdapterFailure = {
   ok: false;
@@ -455,6 +579,7 @@ type AdapterFailure = {
   attempts: GeminiAttemptDiag[];
   needsWebSearch: boolean;
   functionCalls?: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
+  interactionId?: string | null;
 };
 type AdapterResult = AdapterSuccess | AdapterFailure;
 
@@ -477,10 +602,12 @@ type StreamOptions = {
   enableDownloadTools?: boolean;
   /** Intent needSearch — Gemini=google_search, Groq=browser_search */
   enableWebSearch?: boolean;
-  /** tool 결과 이어가기 — Gemini contents에 functionResponse를 붙일 때 사용 */
+  /** tool 결과 이어가기 — Gemini contents/Interactions function_result */
   toolContinue?: {
     modelFunctionCalls: GeminiFunctionCallPart[];
     functionResponses: Array<{ name: string; response: Record<string, unknown> }>;
+    /** Interactions API: previous_interaction_id */
+    previousInteractionId?: string | null;
   };
 };
 
@@ -578,78 +705,25 @@ function sanitizeGeneratedTitle(raw: string): string {
 
 /**
  * Gemini/Groq 채팅은 가능하면 제공자 SSE를 실시간 릴레이한다.
- * Gemini `streamGenerateContent`가 finishReason 없이 조기 종료되면(과거 재현)
- * 같은 요청을 논스트리밍 `generateContent`로 한 번 더 받아 확정한다.
+ * - Gemini 기본: Interactions API (`/v1beta/interactions?alt=sse`)
+ * - Gemini Legacy(Feature Flag off): `streamGenerateContent?alt=sse`.
+ *   finishReason 없이 조기 종료되면 같은 요청을 논스트리밍 `generateContent`로 확정.
  */
-/** Gemini Grounding with Google Search — generateContent REST. */
-const GEMINI_GOOGLE_SEARCH_TOOL = { google_search: {} };
+/** Gemini Grounding with Google Search — Legacy generateContent REST. */
+const GEMINI_GOOGLE_SEARCH_TOOL_LEGACY = { google_search: {} };
+/** @deprecated 이름 호환 — Legacy 전용 */
+const GEMINI_GOOGLE_SEARCH_TOOL = GEMINI_GOOGLE_SEARCH_TOOL_LEGACY;
+void GEMINI_GOOGLE_SEARCH_TOOL;
 
-/** AI Lab 앱 다운로드 tools — 클라이언트가 실행하고 functionResponse로 되돌린다.
- * Gemini JSON schema는 additionalProperties를 거부한다(400). OpenAI/Groq 쪽은 무시해도 된다. */
-const DOWNLOAD_FUNCTION_DECLARATIONS = [
-  {
-    name: 'list_ready_download_platforms',
-    description: '사용 가능 플랫폼 목록. 이번 버전은 Melon만.',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'search_music',
-    description:
-      'Melon 곡 검색. platform은 생략/melon만. 다른 플랫폼 요청 시 호출하지 말고 미지원 안내.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '예: 아이유 좋은날' },
-        platform: {
-          type: 'string',
-          description: 'optional — melon only',
-        },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'get_lyrics_download_options',
-    description:
-      '가사 옵션(한국어 팩/영어 팩/번역지원). 가사만 요청되고 옵션이 없을 때 질문용.',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'start_music_download',
-    description:
-      'Melon hit로 다운로드. YouTube는 Melon 메타로만 검색. lyricsOption 기본 none.',
-    parameters: {
-      type: 'object',
-      properties: {
-        hit: { type: 'object', description: 'search_music hits 항목' },
-        lyricsOption: {
-          type: 'string',
-          description: 'none|ko|en|auto|ko_translate|en_translate|auto_translate',
-        },
-        lyricsMode: {
-          type: 'string',
-          description: 'legacy; prefer lyricsOption',
-        },
-        alignLang: { type: 'string', description: 'ko|en optional' },
-      },
-      required: ['hit'],
-    },
-  },
-];
+/** AI Lab 앱 다운로드 tools — 클라이언트가 실행하고 functionResponse로 되돌린다. */
+const DOWNLOAD_FUNCTION_DECLARATIONS = toLegacyGeminiFunctionDeclarations();
 
 /** @deprecated 이름 호환 — DOWNLOAD_FUNCTION_DECLARATIONS 와 동일 */
 const GEMINI_DOWNLOAD_FUNCTION_DECLARATIONS = DOWNLOAD_FUNCTION_DECLARATIONS;
 
-/** UI 토글 레거시 힌트 — Agent `[WEB_SEARCH_RULES]`가 없을 때만 사용 */
-function appendWebSearchEnabledHint(systemText: string, enabled: boolean): string {
-  if (!enabled) return systemText;
-  if (systemText.includes('[WEB_SEARCH_RULES]')) return systemText;
-  return (
-    `${systemText.trim()}\n\n` +
-    `[WEB_SEARCH_ENABLED]\n` +
-    `이번 턴은 최신 정보가 필요하다.\n` +
-    `반드시 제공된 웹 검색 도구로 검색한 뒤, 그 결과만 근거로 한국어로 재정리해 답하라.`
-  );
+/** 웹 검색 전면 비활성 — 레거시 힌트 주입하지 않음 */
+function appendWebSearchEnabledHint(systemText: string, _enabled: boolean): string {
+  return systemText;
 }
 
 /** Groq: gpt-oss 계열만 서버사이드 browser_search 지원 */
@@ -828,6 +902,7 @@ type GeminiParsedFail = {
   finishReason?: string;
   blockReason?: string;
   groundedQueryCount?: number;
+  httpDiag?: ProviderHttpDiag;
 };
 
 async function parseGeminiGenerateContentResponse(
@@ -836,14 +911,16 @@ async function parseGeminiGenerateContentResponse(
 ): Promise<GeminiParsedOk | GeminiParsedFail> {
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
+    const httpDiag = buildProviderHttpDiag(res, bodyText);
     const retryable = res.status === 400 || res.status === 429 || res.status === 503;
-    // 429는 quotaId·retryDelay 파싱을 위해 본문을 넉넉히 남긴다.
+    // ErrorMessage 호환: 429는 길게, 그 외는 짧게. 전문은 httpDiag.responseBodyText
     const keep = res.status === 429 ? 6000 : 800;
     return {
       ok: false,
       status: res.status,
-      message: bodyText.slice(0, keep) || `gemini: http_${res.status}`,
+      message: httpDiag.responseBodyText.slice(0, keep) || `gemini: http_${res.status}`,
       retryable,
+      httpDiag,
     };
   }
 
@@ -901,7 +978,7 @@ async function parseGeminiGenerateContentResponse(
   };
 }
 
-const geminiAdapter: LlmAdapter = {
+const geminiLegacyGenerateContentAdapter: LlmAdapter = {
   async stream(apiKey, modelName, history, userMessage, onDelta, options) {
     const modelPath = modelName.startsWith('models/') ? modelName : `models/${modelName}`;
     const nonStreamUrl =
@@ -932,13 +1009,13 @@ const geminiAdapter: LlmAdapter = {
       : buildGeminiContents(history, userMessage);
     const thinkingConfig = getGeminiThinkingConfig(modelName);
     const modernMaxOutputTokens = getGeminiMaxOutputTokens(modelName);
-    const needsWebSearch =
-      !enableDownloadTools && !toolContinue && options?.enableWebSearch === true;
+    /** 웹 검색(google_search) 전면 비활성 */
+    const needsWebSearch = false;
     const systemInstructionText = resolveAdapterSystemInstruction(options?.adminSystemInstruction, {
       enableWebSearch: needsWebSearch,
       enableTools: !!(enableDownloadTools || toolContinue || needsWebSearch),
     });
-    // 다운로드 FC ↔ google_search 배타. Intent needSearch면 Gemini 네이티브 google_search.
+    // 다운로드 FC만. google_search는 전면 비활성.
     const attempts = enableDownloadTools || toolContinue
       ? [
           {
@@ -949,25 +1026,15 @@ const geminiAdapter: LlmAdapter = {
             timeoutMs: GEMINI_PLAIN_ATTEMPT_MS,
           } satisfies GeminiAttempt,
         ]
-      : needsWebSearch
-        ? [
-            {
-              label: 'google_search',
-              withSearch: true,
-              useThinking: false,
-              maxOutputTokens: modernMaxOutputTokens,
-              timeoutMs: GEMINI_SEARCH_ATTEMPT_MS,
-            } satisfies GeminiAttempt,
-          ]
-        : [
-            {
-              label: 'plain',
-              withSearch: false,
-              useThinking: false,
-              maxOutputTokens: modernMaxOutputTokens,
-              timeoutMs: GEMINI_PLAIN_ATTEMPT_MS,
-            } satisfies GeminiAttempt,
-          ];
+      : [
+          {
+            label: 'plain',
+            withSearch: false,
+            useThinking: false,
+            maxOutputTokens: modernMaxOutputTokens,
+            timeoutMs: GEMINI_PLAIN_ATTEMPT_MS,
+          } satisfies GeminiAttempt,
+        ];
     const attemptDiags: GeminiAttemptDiag[] = [];
 
     const buildBody = (attempt: GeminiAttempt) => {
@@ -986,7 +1053,7 @@ const geminiAdapter: LlmAdapter = {
       if (enableDownloadTools || toolContinue) {
         body.tools = [{ functionDeclarations: GEMINI_DOWNLOAD_FUNCTION_DECLARATIONS }];
       } else if (attempt.withSearch) {
-        body.tools = [GEMINI_GOOGLE_SEARCH_TOOL];
+        body.tools = [GEMINI_GOOGLE_SEARCH_TOOL_LEGACY];
       }
       return body;
     };
@@ -1003,15 +1070,21 @@ const geminiAdapter: LlmAdapter = {
     for (let i = 0; i < attempts.length; i += 1) {
       const attempt = attempts[i]!;
       const attemptStarted = Date.now();
+      const requestBody = buildBody(attempt);
       let res: Response;
       try {
-        res = await doFetch(attempt, 'sse');
+        res = await fetchGeminiWithTimeout(
+          streamUrl,
+          requestBody,
+          attempt.timeoutMs,
+        );
       } catch (e) {
         const aborted =
           (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) ||
           (typeof e === 'object' && e != null && 'name' in e && (e as { name?: string }).name === 'AbortError');
         const errorMessage = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
         const diag: GeminiAttemptDiag = {
+          ...emptyAttemptHttpFields(),
           attemptIndex: i + 1,
           attemptLabel: attempt.label,
           withSearch: attempt.withSearch,
@@ -1025,6 +1098,7 @@ const geminiAdapter: LlmAdapter = {
           groundedQueryCount: 0,
           elapsedMs: Date.now() - attemptStarted,
         };
+        await attachRequestSnapshot(diag, requestBody, true);
         attemptDiags.push(diag);
         lastFail = {
           ok: false,
@@ -1042,6 +1116,7 @@ const geminiAdapter: LlmAdapter = {
             withSearch: attempt.withSearch,
             elapsedMs: diag.elapsedMs,
             message: diag.errorMessage,
+            requestBodySha256: diag.requestBodySha256,
           }),
         );
         if (i < attempts.length - 1) continue;
@@ -1058,6 +1133,7 @@ const geminiAdapter: LlmAdapter = {
               ? 'rate_limit'
               : 'other';
           const diag: GeminiAttemptDiag = {
+            ...emptyAttemptHttpFields(),
             attemptIndex: i + 1,
             attemptLabel: attempt.label,
             withSearch: attempt.withSearch,
@@ -1071,6 +1147,9 @@ const geminiAdapter: LlmAdapter = {
             groundedQueryCount: parsed.groundedQueryCount ?? 0,
             elapsedMs: Date.now() - attemptStarted,
           };
+          if (parsed.httpDiag) attachHttpDiag(diag, parsed.httpDiag, parsed.status);
+          await attachRequestSnapshot(diag, requestBody, true);
+          if (rateLimited) logQuotaDiagEvent(modelName, attempt, diag, requestBody);
           attemptDiags.push(diag);
           lastFail = {
             ok: false,
@@ -1093,6 +1172,9 @@ const geminiAdapter: LlmAdapter = {
               finishReason: diag.finishReason,
               blockReason: diag.blockReason,
               rateLimited,
+              quotaClass: diag.quotaClass,
+              quotaEvidence: diag.quotaEvidence,
+              providerRequestId: diag.providerRequestId,
             }),
           );
           if (lastFail.kind === 'auth') return lastFail;
@@ -1210,7 +1292,8 @@ const geminiAdapter: LlmAdapter = {
               : rateLimited
                 ? 'rate_limit'
                 : 'other';
-            attemptDiags.push({
+            const diagFb: GeminiAttemptDiag = {
+              ...emptyAttemptHttpFields(),
               attemptIndex: i + 1,
               attemptLabel: `${attempt.label}_fallback`,
               withSearch: attempt.withSearch,
@@ -1223,7 +1306,11 @@ const geminiAdapter: LlmAdapter = {
               blockReason: parsed.blockReason ?? null,
               groundedQueryCount: parsed.groundedQueryCount ?? 0,
               elapsedMs: Date.now() - attemptStarted,
-            });
+            };
+            if (parsed.httpDiag) attachHttpDiag(diagFb, parsed.httpDiag, parsed.status);
+            await attachRequestSnapshot(diagFb, requestBody, true);
+            if (rateLimited) logQuotaDiagEvent(modelName, attempt, diagFb, requestBody);
+            attemptDiags.push(diagFb);
             lastFail = {
               ok: false,
               kind,
@@ -1254,6 +1341,7 @@ const geminiAdapter: LlmAdapter = {
       }
 
       const diagOk: GeminiAttemptDiag = {
+        ...emptyAttemptHttpFields(),
         attemptIndex: i + 1,
         attemptLabel: usedFallback ? `${attempt.label}_sse_fallback` : `${attempt.label}_sse`,
         withSearch: attempt.withSearch,
@@ -1266,7 +1354,10 @@ const geminiAdapter: LlmAdapter = {
         blockReason: blockReason ?? null,
         groundedQueryCount: groundedQueries.length,
         elapsedMs: Date.now() - attemptStarted,
+        providerRequestId: pickProviderRequestId(headersToRecord(res.headers)),
       };
+      // 성공: 검색 시도는 body 스냅샷 보관, plain 성공은 해시만(용량 절약)
+      await attachRequestSnapshot(diagOk, requestBody, attempt.withSearch === true);
       attemptDiags.push(diagOk);
 
       console.log(
@@ -1363,6 +1454,39 @@ const geminiAdapter: LlmAdapter = {
     } catch {
       return null;
     }
+  },
+};
+
+/**
+ * Google Gemini 어댑터 디스패치.
+ * 기본: Interactions API. Feature Flag/env로 Legacy generateContent 유지.
+ */
+const geminiAdapter: LlmAdapter = {
+  async stream(apiKey, modelName, history, userMessage, onDelta, options) {
+    if (shouldUseGeminiInteractionsApi()) {
+      return await streamGeminiInteractions(
+        apiKey,
+        modelName,
+        history,
+        userMessage,
+        onDelta,
+        options,
+      );
+    }
+    return await geminiLegacyGenerateContentAdapter.stream(
+      apiKey,
+      modelName,
+      history,
+      userMessage,
+      onDelta,
+      options,
+    );
+  },
+  async generateTitle(apiKey, modelName, userMessage) {
+    if (shouldUseGeminiInteractionsApi()) {
+      return await generateTitleGeminiInteractions(apiKey, modelName, userMessage);
+    }
+    return await geminiLegacyGenerateContentAdapter.generateTitle(apiKey, modelName, userMessage);
   },
 };
 
@@ -1617,14 +1741,7 @@ async function readSseDataLines(
 }
 
 function groqToolsOpenAi(_mode: 'download' | 'web_search' = 'download'): Array<Record<string, unknown>> {
-  return DOWNLOAD_FUNCTION_DECLARATIONS.map((d) => ({
-    type: 'function',
-    function: {
-      name: d.name,
-      description: d.description,
-      parameters: d.parameters,
-    },
-  }));
+  return toOpenAiFunctionTools();
 }
 
 /** @deprecated */
@@ -1808,23 +1925,16 @@ function parseGroqChatCompletion(json: Record<string, unknown> | null): {
 const groqAdapter: LlmAdapter = {
   async stream(apiKey, modelName, history, userMessage, onDelta, options) {
     const enableDownloadTools = options?.enableDownloadTools === true;
-    const enableWebSearch = options?.enableWebSearch === true && !enableDownloadTools;
+    /** 웹 검색(browser_search) 전면 비활성 */
+    const enableWebSearch = false;
     const toolContinue = options?.toolContinue;
-    const needsWebSearch = enableWebSearch;
-    // 다운로드 FC ↔ 네이티브 웹검색 ↔ 없음 — Intent/AgentPlan이 배타적으로 결정.
+    const needsWebSearch = false;
     const toolMode: 'download' | 'web_search' | 'none' = enableDownloadTools || toolContinue
       ? 'download'
-      : enableWebSearch
-        ? 'web_search'
-        : 'none';
+      : 'none';
 
-    const useBrowserSearch = toolMode === 'web_search';
-    const effectiveModelName =
-      toolMode === 'web_search'
-        ? groqModelSupportsBrowserSearch(modelName)
-          ? modelName
-          : GROQ_BROWSER_SEARCH_MODEL
-        : modelName;
+    const useBrowserSearch = false;
+    const effectiveModelName = modelName;
 
     let systemText = resolveAdapterSystemInstruction(options?.adminSystemInstruction, {
       enableWebSearch: useBrowserSearch,
@@ -1836,9 +1946,7 @@ const groqAdapter: LlmAdapter = {
         ? toolContinue
           ? 'download_tools_continue'
           : 'download_tools'
-        : toolMode === 'web_search'
-          ? 'browser_search'
-          : 'plain';
+        : 'plain';
     const attemptStarted = Date.now();
     const attemptDiags: GeminiAttemptDiag[] = [];
 
@@ -2318,9 +2426,44 @@ const groqAdapter: LlmAdapter = {
     };
   },
 
-  async generateTitle() {
-    // 채팅 제목은 휴리스틱 전용(LLM 제목 호출 생략). Groq도 동일.
-    return null;
+  async generateTitle(apiKey, modelName, userMessage) {
+    const prompt =
+      '다음은 사용자가 채팅에서 처음 보낸 메시지다. 이 대화를 대표하는 아주 짧은 한국어 제목을 만들어라.\n' +
+      '규칙: 명사형으로 12자 이내. 설명·따옴표·마침표 없이 제목 한 줄만 출력. 메시지를 그대로 베끼지 말고 핵심 주제만 요약.\n\n' +
+      `사용자 메시지:\n${userMessage}`;
+    try {
+      const res = await fetch(GROQ_CHAT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 40,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(GEMINI_TITLE_TIMEOUT_MS),
+      });
+      if (!res.ok) return null;
+      // deno-lint-ignore no-explicit-any
+      const json: any = await res.json().catch(() => null);
+      if (!json) return null;
+      const raw = String(json?.choices?.[0]?.message?.content ?? '');
+      const title = sanitizeGeneratedTitle(raw);
+      if (!title) return null;
+      const usage = json?.usage ?? {};
+      return {
+        title,
+        inputTokens: Number(usage.prompt_tokens ?? 0),
+        outputTokens: Number(usage.completion_tokens ?? 0),
+        totalTokens: Number(usage.total_tokens ?? 0),
+      };
+    } catch {
+      return null;
+    }
   },
 };
 
@@ -2424,6 +2567,8 @@ Deno.serve(async (req: Request) => {
         args?: Record<string, unknown>;
         response?: Record<string, unknown>;
       }>;
+      /** Gemini Interactions FC continue: previous_interaction_id */
+      previousInteractionId?: string | null;
       musicPlatformId?: string | null;
       musicPlatformLabel?: string | null;
       musicPlatformBlocked?: boolean;
@@ -2462,6 +2607,7 @@ Deno.serve(async (req: Request) => {
         };
       })
       .filter((r): r is NonNullable<typeof r> => r != null);
+    const previousInteractionId = String(payload.previousInteractionId ?? '').trim() || null;
 
     if (!serialNo || !Number.isFinite(modelId)) {
       logWarn(requestId, 'invalid_params', {
@@ -2499,6 +2645,7 @@ Deno.serve(async (req: Request) => {
       legacyEnableWebSearchIgnored: payload.enableWebSearch === true,
       toolContinue: isToolContinue,
       toolResultCount: toolResults.length,
+      previousInteractionId: previousInteractionId ? 'set' : null,
     });
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -2657,13 +2804,67 @@ Deno.serve(async (req: Request) => {
       else void task;
     };
 
-    /** 새 세션 제목은 prepare_turn 휴리스틱만 사용 — 추가 Gemini 호출로 free-tier를 쓰지 않는다. */
-    const scheduleTitleGeneration = () => {
-      if (!isNewSession) return;
-      logInfo(requestId, 'title_generate_skipped', {
-        sessionId: resolvedSessionId,
-        reason: 'heuristic_only_quota_save',
+    /** 새 세션: 본문 LLM과 병렬로 짧은 요약 제목 생성. 성공 시 DB 갱신 + title_updated 이벤트. */
+    const titleGenerationPromise: Promise<TitleResult | null> =
+      isNewSession && model
+        ? (() => {
+            const adapter = ADAPTERS[model.providerName];
+            if (!adapter?.generateTitle) return Promise.resolve(null);
+            return adapter
+              .generateTitle(model.apiKey, model.modelName, message)
+              .catch((e) => {
+                logErr(requestId, 'title_generate_threw', e, { sessionId: resolvedSessionId });
+                return null;
+              });
+          })()
+        : Promise.resolve(null);
+
+    const applyGeneratedTitle = async (
+      sendFn: (obj: Record<string, unknown>) => void,
+    ): Promise<void> => {
+      if (!isNewSession || !model) return;
+      const titleResult = await titleGenerationPromise;
+      if (!titleResult?.title) {
+        logInfo(requestId, 'title_generate_skipped', {
+          sessionId: resolvedSessionId,
+          reason: 'empty_or_failed',
+        });
+        return;
+      }
+      const { error } = await supabase.rpc('nrm_rpc_chat_update_session_title', {
+        p_session_id: resolvedSessionId,
+        p_serial_no: serialNo,
+        p_title: titleResult.title,
       });
+      if (error) {
+        logErr(requestId, 'title_update_failed', error, { sessionId: resolvedSessionId });
+        return;
+      }
+      logInfo(requestId, 'title_update_ok', {
+        sessionId: resolvedSessionId,
+        title: titleResult.title,
+      });
+      sendFn({
+        type: 'title_updated',
+        requestId,
+        sessionId: resolvedSessionId,
+        title: titleResult.title,
+      });
+      if (titleResult.totalTokens > 0) {
+        const { error: quotaError } = await supabase.rpc('nrm_rpc_increment_llm_user_quota', {
+          p_serial_no: serialNo,
+          p_provider_id: model.providerId,
+          p_target_month: targetMonth,
+          p_input_token: titleResult.inputTokens,
+          p_output_token: titleResult.outputTokens,
+          p_total_token: titleResult.totalTokens,
+        });
+        if (quotaError) {
+          logErr(requestId, 'title_quota_increment_failed', quotaError, {
+            sessionId: resolvedSessionId,
+          });
+        }
+      }
     };
 
     const scheduleQuotaIncrement = (inputTokens: number, outputTokens: number, totalTokens: number) => {
@@ -2702,6 +2903,7 @@ Deno.serve(async (req: Request) => {
           }
         };
         const closeStream = () => {
+          setGeminiInteractionsApiOverride(null);
           try {
             controller.close();
           } catch {
@@ -2779,8 +2981,8 @@ Deno.serve(async (req: Request) => {
               isNewSession,
               ...(diag ? { diagSummary: { outcome, attemptCount: Array.isArray(diag.attempts) ? (diag.attempts as unknown[]).length : 0, lastError: diag.lastError ?? null } } : {}),
             });
+            await applyGeneratedTitle(send);
             closeStream();
-            scheduleTitleGeneration();
           };
 
           if (!model || !model.isActive) {
@@ -2836,7 +3038,7 @@ Deno.serve(async (req: Request) => {
           try {
             const { data: promptRows, error: promptError } = await supabase
               .from('LLMSystemPrompt')
-              .select('Content')
+              .select('Title, Content')
               .eq('IsActive', true)
               .order('SortOrder', { ascending: true })
               .order('PromptID', { ascending: true });
@@ -2844,6 +3046,11 @@ Deno.serve(async (req: Request) => {
               logWarn(requestId, 'system_prompt_fetch_failed', { message: promptError.message });
             } else if (Array.isArray(promptRows)) {
               const texts = promptRows
+                .filter((r: { Title?: string }) => {
+                  const title = String(r?.Title ?? '').trim();
+                  // 학습/최신정보 범위 규칙은 systemInstruction에 넣지 않음(DB IsActive=false와 이중 방어)
+                  return title !== '학습 범위 규칙' && title !== '학습 컷오프 규칙';
+                })
                 .map((r: { Content?: string }) => String(r?.Content ?? '').trim())
                 .filter((t: string) => t.length > 0);
               adminPromptCount = texts.length;
@@ -2855,6 +3062,7 @@ Deno.serve(async (req: Request) => {
 
           // ── Production: FeatureFlag / Experiment / Guard / Cache / AgentRequest
           const featureFlags = await resolveFeatureFlags(serialNo);
+          setGeminiInteractionsApiOverride(featureFlags.geminiInteractionsApi);
           const experiment = await assignExperiment(serialNo);
           const promptVersion =
             experiment?.overrides?.promptVersion ?? getActivePromptVersion();
@@ -2934,7 +3142,7 @@ Deno.serve(async (req: Request) => {
 
           const bridge = executePlanToAdapterOptions(agentPlan);
           const enableDownloadTools = bridge.enableDownloadTools;
-          const enableWebSearch = bridge.enableWebSearch;
+          const enableWebSearch = false;
           const adminSystemInstruction = bridge.systemInstruction;
 
           logAgentStateSnapshot(requestId, plannedState);
@@ -2977,6 +3185,7 @@ Deno.serve(async (req: Request) => {
                   name: t.name,
                   response: t.response,
                 })),
+                previousInteractionId,
               }
             : undefined;
 
@@ -3015,6 +3224,7 @@ Deno.serve(async (req: Request) => {
             groundedQueryCount?: number;
             functionCalls?: Array<{ callId: string; name: string; args: Record<string, unknown> }>;
             needsWebSearch: boolean;
+            interactionId?: string | null;
             // deno-lint-ignore no-explicit-any
             attempts: any[];
           };
@@ -3057,6 +3267,9 @@ Deno.serve(async (req: Request) => {
               String(result.kind ?? 'other'),
             );
             getCircuitBreaker().onFailure(model.providerName);
+            const lastAttempt = Array.isArray(result.attempts)
+              ? result.attempts[result.attempts.length - 1]
+              : null;
             const replyText =
               result.kind === 'auth'
                 ? MSG_TOKEN_EXPIRED
@@ -3064,7 +3277,7 @@ Deno.serve(async (req: Request) => {
                   ? MSG_NETWORK_PROBLEM
                   : result.kind === 'rate_limit'
                     ? buildMsgLlmRateLimit(String(result.message ?? ''), model.modelDisplayName, {
-                        wasWebSearch: enableWebSearch,
+                        quotaClass: lastAttempt?.quotaClass ?? null,
                       })
                     : MSG_LLM_UNAVAILABLE;
             await finishWithSystem(replyText, true, 'llm_call_failed', diag);
@@ -3100,12 +3313,15 @@ Deno.serve(async (req: Request) => {
               isNewSession,
               title,
               partialText: result.text || '',
+              /** Gemini Interactions: 클라이언트가 toolContinue 시 previousInteractionId로 반환 */
+              previousInteractionId: result.interactionId ?? null,
             });
             logInfo(requestId, 'request_done', {
               outcome: 'tool_turn',
               totalElapsedMs: Date.now() - startedAt,
               sessionId: resolvedSessionId,
               functionCallCount: functionCalls.length,
+              previousInteractionId: result.interactionId ? 'set' : null,
             });
             closeStream();
             scheduleQuotaIncrement(result.inputTokens, result.outputTokens, result.totalTokens);
@@ -3279,9 +3495,9 @@ Deno.serve(async (req: Request) => {
             sessionId: resolvedSessionId,
             isNewSession,
           });
+          await applyGeneratedTitle(send);
           closeStream();
           scheduleQuotaIncrement(result.inputTokens, result.outputTokens, result.totalTokens);
-          scheduleTitleGeneration();
           return;
         } catch (e) {
           logErr(requestId, 'stream_unhandled_error', e, { totalElapsedMs: Date.now() - startedAt });

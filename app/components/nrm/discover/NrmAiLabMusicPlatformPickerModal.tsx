@@ -20,7 +20,8 @@ import {
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
   getAiLabMusicPlatformLabel,
-  listAiLabMusicPlatformRows,  loadAiLabMusicPlatformAvailabilityMap,
+  listAiLabMusicPlatformRows,
+  loadAiLabMusicPlatformAvailabilityMap,
   type MusicPlatformId,
 } from '@/lib/nrmAiLabMusicPlatform';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
@@ -104,9 +105,6 @@ export function NrmAiLabMusicPlatformPickerModal({
               style={styles.list}
               contentContainerStyle={styles.listContent}
               keyboardShouldPersistTaps="handled">
-              <Text style={[styles.hint, { color: bodyColor }]}>
-                곡 검색·다운로드 플랫폼입니다. 이번 버전에서는 Melon만 선택할 수 있습니다.
-              </Text>
               {rows.map((row) => {
                 const ok = available[row.id] === true;
                 const selected = value === row.id;
@@ -138,11 +136,6 @@ export function NrmAiLabMusicPlatformPickerModal({
                         ]}>
                         {row.label}
                       </Text>
-                      {!ok ? (
-                        <Text style={[styles.rowSub, { color: bodyColor }]}>
-                          이번 버전 미지원
-                        </Text>
-                      ) : null}
                     </View>
                     {selected && ok ? (
                       <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
@@ -215,11 +208,6 @@ const styles = StyleSheet.create({
     gap: nrmTokens.space.sm,
     paddingBottom: nrmTokens.space.lg,
   },
-  hint: {
-    fontSize: nrmTokens.font.caption,
-    lineHeight: 18,
-    marginBottom: 4,
-  },
   row: {
     minHeight: 52,
     flexDirection: 'row',
@@ -243,9 +231,5 @@ const styles = StyleSheet.create({
   },
   rowLabelDisabled: {
     fontWeight: '500',
-  },
-  rowSub: {
-    fontSize: 11,
-    lineHeight: 14,
   },
 });

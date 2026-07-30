@@ -13,7 +13,6 @@ export function buildExecutionGraph(params: {
 }): ExecutionGraph {
   const { intent, tools, isToolContinue } = params;
   const downloadTools = tools.filter((t) => t.kind === 'download_fc').map((t) => t.id);
-  const hasGrounding = tools.some((t) => t.kind === 'native_grounding');
 
   if (isToolContinue || intent.needsDownloadTool || downloadTools.length > 0) {
     return linearGraph([
@@ -23,27 +22,7 @@ export function buildExecutionGraph(params: {
     ]);
   }
 
-  if (intent.intent === 'latest' || intent.needsWebSearch || hasGrounding) {
-    // FAQ∥History(optional) → Search(serial) → Merge → LLM
-    return dagGraph(
-      [
-        { id: 'faq', type: 'context', ref: 'faq', parallel: true, timeoutMs: 5_000 },
-        { id: 'hist', type: 'context', ref: 'user_music_history', parallel: true, timeoutMs: 5_000 },
-        { id: 'search', type: 'native_search', parallel: false, timeoutMs: 30_000, retry: 2 },
-        { id: 'merge', type: 'merge_context', parallel: false },
-        { id: 'llm', type: 'llm', timeoutMs: 30_000, retry: 1, parallel: false },
-        { id: 'end', type: 'end', parallel: false },
-      ],
-      [
-        { from: 'faq', to: 'search' },
-        { from: 'hist', to: 'search' },
-        { from: 'search', to: 'merge' },
-        { from: 'merge', to: 'llm' },
-        { from: 'llm', to: 'end' },
-      ],
-      'faq',
-    );
-  }
+  // 웹 검색(native_search) 전면 비활성 — latest/needsWebSearch는 index에서 LLM 호출 전 경고로 종료.
 
   if (intent.intent === 'recommendation') {
     /*

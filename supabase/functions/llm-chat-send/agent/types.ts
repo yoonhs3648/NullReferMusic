@@ -131,7 +131,8 @@ export const PROVIDER_CAPABILITIES: Record<string, LlmProviderCapabilities> = {
     supportsThinking: true,
     supportsJsonMode: true,
     supportsFunctionCalling: true,
-    supportsGrounding: true,
+    /** 웹 검색(google_search) 전면 비활성 — 2026-07-29 */
+    supportsGrounding: false,
     supportsEmbeddings: true,
     supportsReasoning: true,
     supportsImageGeneration: true,
@@ -141,7 +142,7 @@ export const PROVIDER_CAPABILITIES: Record<string, LlmProviderCapabilities> = {
     supportsSystemInstruction: true,
     supportsParallelTools: true,
     supportsStreamingFunctionCall: true,
-    supportsSearch: true,
+    supportsSearch: false,
     supportsTools: true,
   }),
   Groq: caps({
@@ -150,10 +151,11 @@ export const PROVIDER_CAPABILITIES: Record<string, LlmProviderCapabilities> = {
     supportsThinking: false,
     supportsJsonMode: true,
     supportsFunctionCalling: true,
-    supportsGrounding: true,
+    /** 웹 검색(browser_search) 전면 비활성 — 2026-07-29 */
+    supportsGrounding: false,
     supportsEmbeddings: false,
     supportsReasoning: false,
-    supportsSearch: true,
+    supportsSearch: false,
     supportsTools: true,
     supportsSystemInstruction: true,
     supportsStreamingFunctionCall: true,

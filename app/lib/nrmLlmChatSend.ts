@@ -6,6 +6,7 @@
  *   delta       → 어시스턴트 답변 조각
  *   tool_request→ 클라이언트가 실행할 function call
  *   tool_turn_end → tool_request 후 스트림 종료(이어서 toolResults로 재호출)
+ *                 (+ optional previousInteractionId: Gemini Interactions FC)
  *   final       → 최종 메시지 (+ optional choices 칩)
  *   error       → 복구 불가 오류
  */
@@ -77,9 +78,11 @@ export type NrmLlmChatSendHandlers = {
   onDelta?: (text: string) => void;
   onToolRequest?: (event: NrmLlmToolRequestEvent) => void;
   onFinal?: (event: NrmLlmChatFinalEvent) => void;
+  /** 새 세션 LLM 요약 제목 — 좌측 대화 목록 갱신 */
+  onTitleUpdated?: (event: { sessionId: string; title: string }) => void;
 };
 
-type ParseType = 'meta' | 'delta' | 'final' | 'error' | 'tool_request' | 'tool_turn_end';
+type ParseType = 'meta' | 'delta' | 'final' | 'error' | 'tool_request' | 'tool_turn_end' | 'title_updated';
 
 function parseLine(line: string): { type: ParseType; raw: Record<string, unknown> } | null {
   const trimmed = line.trim();
@@ -105,6 +108,8 @@ export async function sendLlmChatMessageStream(
     enableWebSearch?: boolean;
     toolContinue?: boolean;
     toolResults?: NrmLlmToolResultPayload[];
+    /** Gemini Interactions: toolContinue 시 previous_interaction_id */
+    previousInteractionId?: string | null;
     /** AI Lab 선택/명시 음악 플랫폼 */
     musicPlatformId?: string;
     musicPlatformLabel?: string;
@@ -112,7 +117,12 @@ export async function sendLlmChatMessageStream(
     musicPlatformExplicit?: boolean;
   },
   handlers: NrmLlmChatSendHandlers,
-): Promise<{ kind: 'final' | 'tool_turn'; requestId?: string }> {
+): Promise<{
+  kind: 'final' | 'tool_turn';
+  requestId?: string;
+  /** tool_turn 시 Gemini Interactions previous_interaction_id */
+  previousInteractionId?: string | null;
+}> {
   const {
     serialNo,
     modelId,
@@ -120,6 +130,7 @@ export async function sendLlmChatMessageStream(
     message,
     toolContinue,
     toolResults,
+    previousInteractionId,
     musicPlatformId,
     musicPlatformLabel,
     musicPlatformBlocked,
@@ -161,6 +172,8 @@ export async function sendLlmChatMessageStream(
         message: isToolContinue ? '' : message,
         toolContinue: isToolContinue,
         toolResults: isToolContinue ? toolResults : undefined,
+        previousInteractionId:
+          isToolContinue && previousInteractionId ? previousInteractionId : undefined,
         musicPlatformId: musicPlatformId ?? null,
         musicPlatformLabel: musicPlatformLabel ?? null,
         musicPlatformBlocked: musicPlatformBlocked === true,
@@ -216,6 +229,7 @@ export async function sendLlmChatMessageStream(
   let sawToolTurnEnd = false;
   let gotAnyEvent = false;
   let finalRequestId: string | undefined;
+  let toolTurnPreviousInteractionId: string | null = null;
 
   const dispatch = (parsed: { type: ParseType; raw: Record<string, unknown> }) => {
     gotAnyEvent = true;
@@ -262,6 +276,16 @@ export async function sendLlmChatMessageStream(
     if (parsed.type === 'tool_turn_end') {
       sawToolTurnEnd = true;
       finalRequestId = String(parsed.raw.requestId ?? finalRequestId ?? '');
+      const pid = String(parsed.raw.previousInteractionId ?? '').trim();
+      toolTurnPreviousInteractionId = pid || null;
+      return;
+    }
+    if (parsed.type === 'title_updated') {
+      const sid = String(parsed.raw.sessionId ?? '').trim();
+      const title = String(parsed.raw.title ?? '').trim();
+      if (sid && title) {
+        handlers.onTitleUpdated?.({ sessionId: sid, title });
+      }
       return;
     }
     if (parsed.type === 'final') {
@@ -378,5 +402,7 @@ export async function sendLlmChatMessageStream(
   return {
     kind: sawToolTurnEnd && !sawFinal ? 'tool_turn' : 'final',
     requestId: finalRequestId,
+    previousInteractionId:
+      sawToolTurnEnd && !sawFinal ? toolTurnPreviousInteractionId : undefined,
   };
 }

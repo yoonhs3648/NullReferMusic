@@ -41,7 +41,7 @@ export class PromptBuilder {
       'role',
       10,
       content ??
-        `[ROLE]\n너는 NullRefer Music 앱의 AI Lab 어시스턴트다.\n음악·차트·다운로드·앱 이용을 돕는 것이 우선이다. 한국어로 자연스럽게 답한다.`,
+        `[ROLE]\n너는 NullRefer Music 앱의 AI Lab 어시스턴트다.\n일반 질문과 음악·앱 이용을 모두 돕는다. 한국어로 자연스럽게 답한다.`,
     );
   }
 
@@ -82,16 +82,9 @@ export class PromptBuilder {
     );
   }
 
-  addSearch(enabled: boolean): this {
-    if (!enabled) return this;
-    return this.addOptional(
-      'web_search',
-      50,
-      `[WEB_SEARCH_RULES]\n` +
-        `이번 턴은 최신/시사 정보가 필요하다.\n` +
-        `- 제공된 웹 검색(그라운딩)으로 확인한 뒤, 결과를 질문 의도에 맞게 한국어로 재정리해 답한다.\n` +
-        `- 원문 붙여넣기·출처 URL 나열 금지. 불확실하면 한계를 밝힌다.`,
-    );
+  /** 웹 검색 전면 비활성 — `[WEB_SEARCH_RULES]` 섹션을 주입하지 않는다. */
+  addSearch(_enabled: boolean): this {
+    return this;
   }
 
   addDownload(enabled: boolean): this {

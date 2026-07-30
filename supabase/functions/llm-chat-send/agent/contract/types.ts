@@ -133,7 +133,7 @@ export function buildAgentRequest(partial: Omit<AgentRequest, 'featureFlags'> & 
       summary: false,
       recommendation: true,
       reasoning: false,
-      webSearch: true,
+      webSearch: false,
       evaluation: true,
       questionCache: false,
       semanticCache: false,

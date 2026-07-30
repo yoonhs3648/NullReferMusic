@@ -409,6 +409,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
       void (async () => {
         let toolContinue = false;
         let toolResults: NrmLlmToolResultPayload[] | undefined;
+        let previousInteractionId: string | null = null;
         let lastToolChoices: NrmAiLabChoice[] | undefined;
         let sessionIdForApi: string | null = targetId;
 
@@ -473,6 +474,7 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                 message: toolContinue ? '' : text,
                 toolContinue,
                 toolResults: toolContinue ? toolResults : undefined,
+                previousInteractionId: toolContinue ? previousInteractionId : undefined,
                 musicPlatformId: resolvedPlatform.platformId,
                 musicPlatformLabel: resolvedPlatform.label,
                 musicPlatformBlocked,
@@ -556,12 +558,23 @@ export function NrmDiscoverAiLabScreen({ isDark }: Props) {
                     }),
                   );
                 },
+                onTitleUpdated: ({ sessionId, title: newTitle }) => {
+                  setConversations((prev) =>
+                    prev.map((c) =>
+                      c.id === sessionId || c.id === currentConvId
+                        ? { ...c, title: newTitle }
+                        : c,
+                    ),
+                  );
+                },
               },
             );
 
             if (outcome.kind !== 'tool_turn') {
               break;
             }
+
+            previousInteractionId = outcome.previousInteractionId ?? null;
 
             const nextResults: NrmLlmToolResultPayload[] = [];
             for (const call of pendingToolCalls) {

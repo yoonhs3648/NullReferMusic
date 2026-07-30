@@ -14,6 +14,12 @@ export type FeatureFlags = {
   semanticCache: boolean;
   inputGuard: boolean;
   outputGuard: boolean;
+  /**
+   * Google Gemini: true → Interactions API(`/v1beta/interactions`),
+   * false → Legacy generateContent/streamGenerateContent.
+   * env `GEMINI_API_MODE` / `GEMINI_USE_INTERACTIONS_API`가 있으면 그쪽이 우선.
+   */
+  geminiInteractionsApi: boolean;
 };
 
 /** 점진 롤아웃용 정의(원격 Config/DB 매핑) */
@@ -32,12 +38,13 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   summary: false,
   recommendation: true,
   reasoning: false,
-  webSearch: true,
+  webSearch: false,
   evaluation: true,
   questionCache: false,
   semanticCache: false,
   inputGuard: true,
   outputGuard: true,
+  geminiInteractionsApi: true,
 };
 
 export interface FeatureFlagProvider {

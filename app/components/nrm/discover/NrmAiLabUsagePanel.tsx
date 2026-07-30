@@ -165,12 +165,22 @@ export function NrmAiLabUsagePanel({ isDark, serialNo, preferredModelId = null }
   }, [options, searchQuery]);
 
   const showPickerSearch = options.length > 6;
-  /** NrmAdminLlmProviderPickerModal 과 동일 — maxHeight만 주면 Android에서 FlatList가 0px로 접힌다. */
+  /**
+   * 고정 height 필수 — maxHeight만 주면 Android에서 FlatList가 0px로 접힌다.
+   * 행은 라벨+할당 힌트+paddingVertical(md)이라 실제 ~72~80. 헤더(닫기 버튼 36+패딩)도 ~56.
+   * Google/Groq 2개만 있어도 잘리지 않게 최소·행 추정치를 넉넉히 잡는다.
+   */
+  const pickerHeaderH = 56;
+  const pickerSearchH = showPickerSearch ? 52 : 0;
+  const pickerRowH = 78;
   const pickerCardHeight = Math.min(
-    windowHeight * 0.55,
+    windowHeight * 0.72,
     Math.max(
-      200,
-      52 + (showPickerSearch ? 48 : 0) + filteredOptions.length * 64 + nrmTokens.space.md,
+      280,
+      pickerHeaderH +
+        pickerSearchH +
+        Math.max(filteredOptions.length, 1) * pickerRowH +
+        nrmTokens.space.lg,
     ),
   );
 

@@ -39,6 +39,8 @@ export type NormalizedResponse =
     grounded?: boolean;
     groundedQueryCount?: number;
     needsWebSearch: boolean;
+    /** Gemini Interactions FC continue용 interaction.id */
+    interactionId?: string | null;
     /** 원본 Provider payload (디버그) */
     // deno-lint-ignore no-explicit-any
     raw?: any;
@@ -51,6 +53,7 @@ export type NormalizedResponse =
     status?: number;
     message: string;
     needsWebSearch: boolean;
+    interactionId?: string | null;
     // deno-lint-ignore no-explicit-any
     attempts?: any[];
     // deno-lint-ignore no-explicit-any
@@ -112,6 +115,7 @@ export function normalizeProviderResult(
       grounded: result.grounded === true,
       groundedQueryCount: Number(result.groundedQueryCount ?? 0),
       needsWebSearch: result.needsWebSearch === true,
+      interactionId: typeof result.interactionId === 'string' ? result.interactionId : null,
       attempts: result.attempts,
       raw: result,
     };
@@ -133,6 +137,7 @@ export function normalizeProviderResult(
     status: typeof result.status === 'number' ? result.status : undefined,
     message: String(result.message ?? 'provider_error'),
     needsWebSearch: result.needsWebSearch === true,
+    interactionId: typeof result.interactionId === 'string' ? result.interactionId : null,
     attempts: result.attempts,
     raw: result,
   };
@@ -153,6 +158,7 @@ export function denormalizeToLegacyAdapterShape(n: NormalizedResponse): Record<s
       groundedQueryCount: n.groundedQueryCount,
       functionCalls: n.toolCalls,
       needsWebSearch: n.needsWebSearch,
+      interactionId: n.interactionId ?? null,
       attempts: n.attempts ?? [],
     };
   }
@@ -162,6 +168,7 @@ export function denormalizeToLegacyAdapterShape(n: NormalizedResponse): Record<s
     status: n.status,
     message: n.message,
     needsWebSearch: n.needsWebSearch,
+    interactionId: n.interactionId ?? null,
     attempts: n.attempts ?? [],
   };
 }

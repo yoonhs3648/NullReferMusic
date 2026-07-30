@@ -110,16 +110,16 @@ registerContextProvider({
 
 registerContextProvider({
   id: 'web_search',
-  enabled: true,
+  enabled: false,
   defaultPriority: 40,
   cost: 20,
   estimatedCost: 20,
   estimatedLatencyMs: 900,
   supportsParallelExecution: false,
-  supports: (intent: IntentResult) => intent.needsWebSearch || intent.intent === 'latest',
+  supports: () => false,
   async execute(req: ContextRequest) {
     return baseResult('web_search', 40, 20, 900, '', req.intent.confidence, {
-      mode: 'native_grounding_preferred',
+      mode: 'disabled',
       queryHint: req.userMessage.slice(0, 200),
       stubExternalSearch: true,
     });

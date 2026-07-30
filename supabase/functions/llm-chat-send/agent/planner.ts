@@ -278,11 +278,14 @@ export async function runPlanner(input: PlannerInput): Promise<{
   const allowDownloadPrompt =
     toolMode === 'download' || intent.needsDownloadTool || intent.needsMusicSearch;
   const platformCaps = edgeMusicPlatformCapabilities(musicPlatform.id);
-  const builder = new PromptBuilder()
-    .addDatetime(buildLiveCurrentDatetimeBlock())
-    .addRole()
+  // 역할·답변 원칙·Tool 일반 규칙은 DB LLMSystemPrompt(확정본)가 SSOT.
+  // 코드는 [CURRENT_DATETIME]·Intent·다운로드 FC 상세·도구 목록 등 런타임만 보강.
+  const builder = new PromptBuilder().addDatetime(buildLiveCurrentDatetimeBlock());
+  if (!input.adminDbPrompt.trim()) {
+    builder.addRole().addRules();
+  }
+  builder
     .addAdminPrompt(input.adminDbPrompt)
-    .addRules()
     .addIntent(intent)
     .addMusicPlatform({
       id: musicPlatform.id,
@@ -290,7 +293,7 @@ export async function runPlanner(input: PlannerInput): Promise<{
       blocked: musicPlatform.blocked,
       capabilities: platformCaps,
     })
-    .addSearch(toolMode === 'web_search' || intent.needsWebSearch)
+    .addSearch(false)
     .addDownload(allowDownloadPrompt)
     .addRag(intent.needsVectorSearch)
     .addRecommendation(intent.intent === 'recommendation')

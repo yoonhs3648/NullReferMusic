@@ -127,16 +127,13 @@ registerTool(
     definition: {
       id: 'native_web_grounding',
       name: 'native_web_grounding',
-      description: 'Provider 네이티브 웹 검색(google_search / browser_search).',
+      description: 'Provider 네이티브 웹 검색(Interactions google_search / Groq browser_search).',
       kind: 'native_grounding',
       priority: 5,
       parameters: emptyObjectParams,
       examples: [{ user: '이번주 빌보드 차트', args: {} }],
     },
-    supports: (ctx) =>
-      !ctx.isToolContinue &&
-      ctx.supportsGrounding &&
-      (ctx.intent.needsWebSearch || ctx.intent.intent === 'latest') &&
-      !ctx.intent.needsDownloadTool,
+    /** 웹 검색 전면 비활성 — 도구 선택에서 제외 */
+    supports: () => false,
   }),
 );

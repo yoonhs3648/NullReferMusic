@@ -27,6 +27,8 @@ export type ProviderStreamOptions = {
       args: Record<string, unknown>;
     }>;
     functionResponses: Array<{ name: string; response: Record<string, unknown> }>;
+    /** Gemini Interactions: previous_interaction_id */
+    previousInteractionId?: string | null;
   };
 };
 

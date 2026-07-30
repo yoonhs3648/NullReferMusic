@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   LayoutChangeEvent,
   PanResponder,
+  PixelRatio,
   Pressable,
   StyleSheet,
   Text,
@@ -15,7 +16,6 @@ import {
 } from '@/lib/nrmDownloadSettings';
 
 const STEPS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
-const TICK_W = 28;
 
 type Props = {
   value: number;
@@ -23,9 +23,20 @@ type Props = {
   titleColor: string;
 };
 
+/** 접근성 글자 크기 반영(과도 확대는 상한). */
+function layoutScale(): number {
+  return Math.min(Math.max(PixelRatio.getFontScale(), 1), 1.45);
+}
+
 /** 비트레이트 0(최고) ~ 9(최저) — 눈금 탭 + 트랙 드래그 */
 export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props) {
   const q = clampAudioQuality(value);
+  const scale = layoutScale();
+  const tickW = Math.ceil(28 * scale);
+  const tickRowH = Math.ceil(28 * scale);
+  const edgeHintFs = Math.max(10, Math.round(10 * scale));
+  const edgeHintLh = Math.ceil(edgeHintFs * 1.35);
+
   const [trackWidth, setTrackWidth] = useState(0);
   const trackWidthRef = useRef(0);
   const grantXRef = useRef(0);
@@ -69,14 +80,19 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
   const thumbLeft = trackWidth > 0 ? (q / 9) * trackWidth - 11 : 0;
   const kbps = audioQualityBitrateKbps(q);
 
+  /** 눈금이 트랙 밖으로 나가 잘리지 않도록 left를 [0, trackW-cellW]로 클램프 */
+  const tickLeft = (n: number, cellW: number) => {
+    if (trackWidth <= 0) return 0;
+    const centerX = (n / 9) * trackWidth;
+    return Math.max(0, Math.min(trackWidth - cellW, centerX - cellW / 2));
+  };
+
   return (
     <View style={styles.wrap}>
       <Text style={[styles.kbpsHint, { color: titleColor }]}>
         CBR 모드 기준 mp3 · m4a {kbps} kbps
       </Text>
-      <View
-        style={[styles.sliderColumn, trackWidth > 0 ? { width: trackWidth } : null]}
-        onLayout={onLayout}>
+      <View style={styles.sliderColumn} onLayout={onLayout}>
         <View style={styles.trackArea} {...panHandlers.panHandlers}>
           <View style={styles.trackBg} />
           <View style={[styles.trackFill, { width: fillWidth }]} />
@@ -84,56 +100,87 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
         </View>
 
         {trackWidth > 0 ? (
-          <View style={[styles.tickRow, { width: trackWidth, height: 44 }]} pointerEvents="box-none">
-            {STEPS.map((n) => {
-              const active = n === q;
-              const edgeHint = n === 0 ? '최고' : n === 9 ? '최저' : null;
-              const centerX = (n / 9) * trackWidth;
-              return (
-                <Pressable
-                  key={n}
-                  onPress={() => onChange(n)}
-                  style={({ pressed }) => [
-                    styles.tickCell,
-                    {
-                      left: centerX - TICK_W / 2,
-                      width: TICK_W,
-                    },
-                    active && styles.tickCellActive,
-                    pressed && styles.tickCellPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={
-                    edgeHint ? `비트레이트 ${n} ${edgeHint}` : `비트레이트 ${n}`
-                  }>
-                  <Text
-                    style={[
-                      styles.tickLabel,
-                      { color: active ? nrmTokens.color.primary : titleColor },
-                      active && styles.tickLabelActive,
-                    ]}>
-                    {n}
-                  </Text>
-                  {edgeHint ? (
+          <>
+            <View
+              style={[styles.tickRow, { height: tickRowH }]}
+              pointerEvents="box-none">
+              {STEPS.map((n) => {
+                const active = n === q;
+                return (
+                  <Pressable
+                    key={n}
+                    onPress={() => onChange(n)}
+                    style={({ pressed }) => [
+                      styles.tickCell,
+                      {
+                        left: tickLeft(n, tickW),
+                        width: tickW,
+                        height: tickRowH,
+                      },
+                      active && styles.tickCellActive,
+                      pressed && styles.tickCellPressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={
+                      n === 0
+                        ? '비트레이트 0 최고'
+                        : n === 9
+                          ? '비트레이트 9 최저'
+                          : `비트레이트 ${n}`
+                    }>
                     <Text
                       style={[
-                        styles.edgeHint,
+                        styles.tickLabel,
                         {
-                          color: active
-                            ? nrmTokens.color.primary
-                            : 'rgba(128,128,128,0.75)',
+                          color: active ? nrmTokens.color.primary : titleColor,
+                          fontSize: Math.round(nrmTokens.font.caption * Math.min(scale, 1.2)),
+                          lineHeight: Math.ceil(18 * Math.min(scale, 1.2)),
                         },
+                        active && styles.tickLabelActive,
                       ]}>
-                      {edgeHint}
+                      {n}
                     </Text>
-                  ) : (
-                    <View style={styles.edgeHintSpacer} />
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* 최고/최저는 좁은 눈금 셀 밖 — 전체 폭 space-between으로 잘림 방지 */}
+            <View
+              style={[styles.edgeHintRow, { minHeight: edgeHintLh + 4 }]}
+              pointerEvents="none">
+              <Text
+                style={[
+                  styles.edgeHint,
+                  {
+                    fontSize: edgeHintFs,
+                    lineHeight: edgeHintLh,
+                    color:
+                      q === 0 ? nrmTokens.color.primary : 'rgba(128,128,128,0.75)',
+                    fontWeight: q === 0 ? '700' : '600',
+                  },
+                ]}
+                numberOfLines={1}>
+                최고
+              </Text>
+              <Text
+                style={[
+                  styles.edgeHint,
+                  {
+                    fontSize: edgeHintFs,
+                    lineHeight: edgeHintLh,
+                    color:
+                      q === 9 ? nrmTokens.color.primary : 'rgba(128,128,128,0.75)',
+                    fontWeight: q === 9 ? '700' : '600',
+                    textAlign: 'right',
+                  },
+                ]}
+                numberOfLines={1}>
+                최저
+              </Text>
+            </View>
+          </>
         ) : null}
       </View>
     </View>
@@ -143,8 +190,9 @@ export function NrmDownloadQualitySlider({ value, onChange, titleColor }: Props)
 const styles = StyleSheet.create({
   wrap: {
     paddingTop: nrmTokens.space.xxs,
-    paddingBottom: nrmTokens.space.xxs,
+    paddingBottom: nrmTokens.space.sm,
     alignItems: 'stretch',
+    overflow: 'visible',
   },
   kbpsHint: {
     fontSize: nrmTokens.font.caption,
@@ -154,7 +202,9 @@ const styles = StyleSheet.create({
   },
   sliderColumn: {
     alignSelf: 'stretch',
+    width: '100%',
     maxWidth: '100%',
+    overflow: 'visible',
   },
   trackArea: {
     height: 40,
@@ -190,16 +240,16 @@ const styles = StyleSheet.create({
   },
   tickRow: {
     position: 'relative',
+    width: '100%',
     marginTop: nrmTokens.space.xxs,
+    overflow: 'visible',
   },
   tickCell: {
     position: 'absolute',
     top: 0,
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: nrmTokens.radius.sm,
-    paddingTop: 2,
   },
   tickCellActive: {
     backgroundColor: 'rgba(0,102,204,0.12)',
@@ -208,23 +258,23 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   tickLabel: {
-    fontSize: nrmTokens.font.caption,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
-    lineHeight: 18,
     textAlign: 'center',
   },
   tickLabelActive: {
     fontWeight: '700',
   },
-  edgeHint: {
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 14,
-    marginTop: 1,
-    textAlign: 'center',
+  edgeHintRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 2,
+    paddingHorizontal: 0,
   },
-  edgeHintSpacer: {
-    height: 15,
+  edgeHint: {
+    flexShrink: 0,
+    includeFontPadding: false,
   },
 });

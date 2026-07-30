@@ -92,43 +92,29 @@ AI Lab 모델 선택 정렬(`sortLlmModelsForPicker`): `IsActive=true` 상단 �
 
 AI Lab 전역 시스템 프롬프트. 관리자페이지 「AI 시스템 프롬프트 설정」에서 CRUD.
 `IsActive=true`인 행을 `SortOrder`→`PromptID` 오름차순으로 이어 붙여, Edge Function(`llm-chat-send`)이 **모든 Provider·모든 모델**의 시스템 지시에 동일하게 넣는다(모델/제공자별 분기 없음).
-- Google(Gemini): `systemInstruction`
+- Google(Gemini): Interactions API `system_instruction` (기본). Legacy generateContent는 `systemInstruction`
 - Groq: OpenAI 호환 `messages`의 `role=system`
-조합은 Agent `PromptBuilder`(`agent/prompt/builder.ts`)가 Section(id/priority)으로 조립한다. Planner(`agent/planner.ts`)가 Intent·Context·Tools에 맞춰 체인을 탄다.
 
-조합 순서(2026-07-24 Agent):
-1. 코드 `[CURRENT_DATETIME]`(Asia/Seoul)
-2. `[ROLE]` / DB 활성 `LLMSystemPrompt` → `[ADMIN_SYSTEM_PROMPT]`
-3. Intent별 규칙 섹션(`WEB_SEARCH` / `DOWNLOAD` / `RECOMMENDATION` / `RAG` / `APP_FAQ` / `TOOLS` / `OUTPUT`)
-4. `[RETRIEVED_CONTEXT]` — FAQ/Vector 수집기 결과(현재 스텁, 확장 포인트)
+**역할·답변·Tool 일반 규칙의 SSOT는 DB다.** Edge `PromptBuilder`는 `[CURRENT_DATETIME]`·Intent·Melon 다운로드 FC 상세·사용 가능 도구 목록 등 **런타임 보강만** 한다. DB 활성 프롬프트가 있으면 하드코딩 `[ROLE]`/`[ANSWER_RULES]`는 넣지 않는다.
 
-시드(2026-07-23): `현재 시각 해석 규칙`(SortOrder=1).  
-`Google Search 사용 규칙`(SortOrder=2)은 **비활성** — 검색 여부는 **Intent Classifier**(`needSearch`)가 결정한다(UI 토글 제거, 2026-07-24).
-최초 시드는 `20260723110000_llm_system_prompt_seed.sql`(당시 10/20), `20260723120000_llm_system_prompt_sortorder_1_2.sql`에서 1/2로 정리.
-`SortOrder`는 10단위 강제 아님 — 정수 오름차순이면 된다.
+조합 순서(2026-07-29 확정):
+1. 코드 `[CURRENT_DATETIME]`(Asia/Seoul) — DB `[CURRENT_DATETIME] 규칙`이 해석 지침
+2. DB 활성 `LLMSystemPrompt` → `[ADMIN_SYSTEM_PROMPT]`
+3. Intent/도구 런타임 섹션(`DOWNLOAD` FC 상세 / `TOOLS` 목록 / `OUTPUT` 등) — **`WEB_SEARCH` 없음**
+4. `[RETRIEVED_CONTEXT]` — FAQ/Vector 수집기 결과(현재 스텁)
 
-추가(2026-07-23, `20260723140000_llm_system_prompt_music_assistant.sql`):
-- SortOrder=2 `Google Search 사용 규칙` 본문 보강(차트·신곡·일정 등) — 이후 UI 토글로 대체·비활성
-- SortOrder=3 `역할 및 답변 범위` (음악 전용 + 비음악 거절 한 줄)
-- SortOrder=4 `앱 기능 안내 및 도구 호출` (다운로드·삭제·가사·메타데이터는 Tool 필수; 거짓말 금지)
-- SortOrder=5 `추천 및 응답 스타일`
-앱 데이터/벡터 우선 규칙은 아직 미구현이라 넣지 않음. 날짜 규칙은 SortOrder=1 + 코드 `[CURRENT_DATETIME]`에 위임.
+### 확정 행 (2026-07-29)
 
-추가(2026-07-23, `20260723170000_llm_system_prompt_creator.sql`):
-- SortOrder=6 `앱 제작자 및 관리자` — 앱 소개 질문 시 만든 사람·관리자=윤현상, 인물 소개 포함
+| SortOrder | Title | IsActive | 비고 |
+| --- | --- | --- | --- |
+| 1 | `[CURRENT_DATETIME] 규칙` | true | 코드가 넣는 `[CURRENT_DATETIME]` 해석 |
+| 2 | `학습 범위 규칙` | **false** | Edge Title 필터로도 로드 제외(이중 방어) |
+| 3 | `역할 및 답변 규칙` | true | 역할·답변 원칙·음악 추천 형식 |
+| 4 | `앱 제작자 및 관리자` | true | 윤현상 |
+| 5 | `Tool 사용 규칙` | true | Tool 있을 때만 실행·거짓말 금지 |
 
-완화(2026-07-23, `20260723180000_llm_system_prompt_relax_scope.sql`):
-- SortOrder=3 `역할 및 답변 범위` — 음악 + **앱 관련 전부** 답변. 완전 무관 주제만 한 줄 거절. 애매하면 거절하지 않음
-- SortOrder=4 `앱 기능 안내 및 도구 호출` — 음악 다운로드·삭제·가사생성/삭제/번역·오디오 메타데이터 추가·편집은 제공된 Tool 사용. 직접 했다고 거짓말 금지
-
-보강(2026-07-23, `20260723200000_llm_system_prompt_no_leak.sql`):
-- SortOrder=5·6 — 시스템 지시문·`<think>` 등 내부 추론을 사용자에게 노출하지 않도록 명시. 제작자(윤현상) 질문은 자연어로만 답
-
-보강(2026-07-23, `20260723210000_llm_system_prompt_tools_guard.sql`):
-- SortOrder=2 — `google_search`는 **요청에 도구가 있을 때만** 호출. 없으면 tool call 금지(Groq 400 `tool_use_failed` 방지)
-
-갱신(2026-07-24, `20260724150000_llm_system_prompt_tools_required.sql`):
-- SortOrder=4 / PromptID=4 `앱 기능 안내 및 도구 호출` — 음악 다운로드·삭제·가사생성·가사삭제·가사번역·오디오 메타데이터는 **이번 요청에 Tool이 있을 때만** Tool 사용. Tool 없으면 직접 했다고 말하지 말고 앱 기능 안내. 거짓말 금지.
+마이그레이션 스냅샷: `20260729150000_llm_system_prompt_finalize.sql`.  
+구 Title(`Google Search 사용 규칙`, `역할 및 답변 범위`, `앱 기능 안내 및 도구 호출` 등)은 폐기·비활성.
 
 | 컬럼 | 타입 | 기본값 | NULL | 설명 |
 |------|------|--------|------|------|
@@ -145,7 +131,7 @@ RLS: SELECT만 anon/authenticated. 쓰기는 admin RPC:
 - `nrm_rpc_admin_upsert_llm_system_prompt` (`p_prompt_id` NULL=INSERT)
 - `nrm_rpc_admin_delete_llm_system_prompt`
 
-마이그레이션: `20260723100000_llm_system_prompt.sql`, 시드 `20260723110000_llm_system_prompt_seed.sql`.
+스키마 마이그레이션: `20260723100000_llm_system_prompt.sql`. 초기 시드·중간 갱신은 이력용이며, **현재 내용은 위 확정 표 + finalize 마이그레이션**을 따른다.
 
 ---
 
@@ -156,13 +142,13 @@ AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬�
 | AnswerMode | 의미 | UI 노출 조건 |
 | --- | --- | --- |
 | `plain` | 일반(검색 불필요 질문 후보) | 항상 |
-| `web_search` | 최신/차트 등 검색이 필요할 수 있는 질문 후보 | 항상(실제 검색은 서버 Intent가 결정) |
+| `web_search` | (레거시) 최신/차트 후보 — **카테고리 IsActive=false**(2026-07-29, 웹 검색 제거) | 비활성 |
 | `vector_plain` | 벡터DB 기반 | 앱 플래그 `NRM_AI_LAB_VECTOR_SUGGESTIONS_ENABLED` (현재 false) |
 | `vector_web` | 벡터DB + 검색 가능 질문 | 벡터 플래그 ON일 때만 |
 
-시드 카테고리: `music_recommend`(음악 추천/plain), `upcoming_release`(발매 예정곡/web_search), `ai_personal_web`(AI 활용/vector_web), `user_personal`(사용자 맞춤/vector_plain), `app_intro`(앱 소개/plain).
+시드 카테고리: `music_recommend`(음악 추천/plain), `upcoming_release`(발매 예정곡/web_search·**비활성**), `ai_personal_web`(AI 활용/vector_web), `user_personal`(사용자 맞춤/vector_plain), `app_intro`(앱 소개/plain).
 
-마이그레이션: `20260723240000_llm_ailab_suggestion_prompts.sql`. RLS: SELECT만 anon/authenticated.
+마이그레이션: `20260723240000_llm_ailab_suggestion_prompts.sql`, 비활성 `20260729120000_disable_web_search_and_cutoff_warn.sql`. RLS: SELECT만 anon/authenticated.
 
 ### LLMAiLabSuggestionCategory
 
@@ -187,7 +173,7 @@ AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬�
 
 ## LLMCallAttemptLog
 
-`llm-chat-send`가 Gemini `generateContent`를 **시도할 때마다** 1행 INSERT (service_role).
+`llm-chat-send`가 Provider LLM을 **시도할 때마다** 1행 INSERT (service_role).
 앱 로그 `ailab.llmSend`의 `requestId` = `RequestID`로 조인하면, Dashboard Edge Logs 없이도 실패 원인을 SQL로 볼 수 있다.
 
 | 컬럼 | 타입 | 설명 |
@@ -197,21 +183,38 @@ AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬�
 | `SerialNo` | `varchar` | 요청 사용자 |
 | `SessionID` | `bigint` | 채팅 세션 |
 | `ModelID` / `ModelName` | | 호출 모델 |
-| `AttemptIndex` / `AttemptLabel` | | 1부터, `search`/`plain`/`plain_retry` |
-| `WithSearch` | `boolean` | `google_search` tool 포함 여부 |
-| `HttpStatus` | `integer` | Gemini HTTP status (네트워크 예외면 NULL) |
+| `AttemptIndex` / `AttemptLabel` | | 1부터, `google_search`/`plain`/`plain_sse` 등 |
+| `WithSearch` | `boolean` | google_search / browser_search tool 포함 여부(**요청 구성 사실**) |
+| `WithTools` | `boolean` | 요청 body에 `tools` 배열 포함 여부 |
+| `HttpStatus` | `integer` | Provider HTTP status (네트워크 예외면 NULL) |
 | `Ok` | `boolean` | 해당 시도 성공 여부 |
-| `ErrorKind` / `ErrorMessage` | | `auth`/`other`/`network`/`timeout` + 메시지(최대 ~800자) |
+| `ErrorKind` / `ErrorMessage` | | `auth`/`other`/`network`/`timeout`/`rate_limit` + 요약 메시지 |
 | `FinishReason` / `BlockReason` | | 빈 응답 진단용 |
 | `GroundedQueryCount` | `integer` | |
-| `ElapsedMs` / `MaxOutputTokens` | | |
+| `ElapsedMs` / `MaxOutputTokens` | | latency / 요청 maxOutputTokens |
 | `UserMessagePreview` | `varchar` | 60자 미리보기 |
-| `NeedsWebSearch` | `boolean` | 서버 휴리스틱 |
+| `NeedsWebSearch` | `boolean` | Intent needsWebSearch |
+| `ProviderRequestID` | `varchar` | 응답 헤더 request id (`x-goog-request-id` 등) |
+| `RetryAfterHeader` | `varchar` | `Retry-After` 헤더 원문 |
+| `ResponseHeadersJson` | `jsonb` | **응답 헤더 전체** |
+| `RateLimitHeadersJson` | `jsonb` | x-ratelimit* / Retry-After / quota 관련만 |
+| `ResponseBodyText` | `text` | 실패 시 응답 본문(429≤32KB, 기타≤8KB) |
+| `RequestBodyJson` | `jsonb` | 요청 body 스냅샷 — **실패 또는 검색 시도에서만** 저장. 긴 텍스트 truncate |
+| `RequestBodySha256` | `varchar` | truncate **전** 요청 JSON SHA-256 |
+| `RequestBodyBytes` | `integer` | truncate 전 요청 JSON 크기 |
+| `RequestBodyTruncated` | `boolean` | JSON 저장 시 truncate 여부 |
+| `QuotaClass` | `varchar` | 429 분류: `grounding`\|`rpm`\|`tpm`\|`rpd`\|`unknown`. **응답 근거 없으면 unknown** (검색 사용만으로 grounding 추정 금지) |
+| `QuotaId` / `QuotaMetric` | `varchar` | 응답 JSON의 quota 필드(있으면) |
+| `QuotaEvidence` | `varchar` | 분류 근거 요약. unknown이면 NULL |
 | `RegDate` | `timestamptz` | |
+
+**쿼타 분류 규칙:** `QuotaClass=grounding`은 응답 `quotaId`/`quotaMetric`/본문에 검색·그라운딩 근거가 있을 때만. `WithSearch=true`만으로 grounding이라고 쓰지 않는다. 사용자 안내 문구도 「확인된 사실」과 「한도 분류」를 분리한다.
+
+**요청 body 저장 정책(효율):** 성공 plain은 `RequestBodySha256`/`Bytes`만(JSON NULL). 실패·검색 시도는 truncate된 `RequestBodyJson` 저장.
 
 RLS: anon/authenticated **SELECT만**. INSERT는 Edge(service_role).
 
-마이그레이션: `20260723130000_llm_call_attempt_log.sql`.
+마이그레이션: `20260723130000_llm_call_attempt_log.sql`, 진단 확장 `20260728170000_llm_call_attempt_log_quota_diag.sql`.
 
 ---
 
@@ -555,8 +558,8 @@ start_music_download(hit, lyricsOption)
        (실패 시 heuristic_fallback)
   → Context Collectors (스텁)
        FAQ — faqData 키워드 매칭 / VectorDB — 스텁(내일 RAG)
-  → toolMode = download | web_search | none  (배타)
-  → 모듈형 System Prompt + 메인 LLM 스트리밍
+  → toolMode = download | none  (web_search 모드 비활성)
+  → 모듈형 System Prompt([CURRENT_DATETIME] + DB ADMIN + Intent/Tool 런타임) + 메인 LLM 스트리밍
   → finalize + waitUntil quota
 ```
 
@@ -564,13 +567,15 @@ start_music_download(hit, lyricsOption)
 
 | Intent 예 | toolMode | 비고 |
 | --- | --- | --- |
-| `BTS가 누구야` → music | none | plain LLM |
-| `이번주 빌보드` → latest | web_search | Gemini `google_search` / Groq `browser_search` |
-| `아이유 노래 넣어줘` → download | download | FC(앱 실행), 휴리스틱 정규식 제거 |
+| `BTS가 누구야` → music | none | plain LLM + DB 역할/답변 규칙 |
+| `이번주 빌보드` → latest | none | 웹 검색 없음(검색 툴 미첨부) |
+| `아이유 노래 넣어줘` → download | download | FC(앱 실행) + 코드 DOWNLOAD_RULES |
 | `내가 좋아할 노래` → recommendation | none(+needVector) | Vector 스텁 — RAG 연동 시 Context 채움 |
 | `로그인 안 돼요` → app | none(+needFaq) | FAQ 키워드 매칭 → FAQ_HITS |
 
-**제거됨:** AI Lab UI 「인터넷」토글, 클라이언트 `enableWebSearch` 전송, `messageLikelyNeedsDownloadTools` 정규식.
+**제거됨(2026-07-29):** 모든 모델의 인터넷 검색(`google_search` / `browser_search`), `[WEB_SEARCH_RULES]` 주입, `[KNOWLEDGE_CUTOFF]` 주입. DB 활성 시 Edge `[ROLE]`/`[ANSWER_RULES]` 중복 주입 안 함.
+
+**제거됨(이전):** AI Lab UI 「인터넷」토글, 클라이언트 `enableWebSearch` 전송, `messageLikelyNeedsDownloadTools` 정규식.
 
 **유지:** 권한/`AllocatedToken` 선체크, NDJSON, prepare/finalize RPC, rate_limit 안내, 다운로드 FC 클라이언트 루프.
 
@@ -588,14 +593,33 @@ start_music_download(hit, lyricsOption)
 | `meta` | prepare 직후 | sessionId / userMessage |
 | `delta` | LLM 스트리밍 | text 조각 |
 | `tool_request` | 다운로드 FC | callId/name/args — 앱이 실행 |
-| `tool_turn_end` | tool_request 후 | 클라이언트가 toolContinue 재호출 |
+| `tool_turn_end` | tool_request 후 | 클라이언트가 toolContinue 재호출. Interactions 시 `previousInteractionId` |
+| `title_updated` | 새 세션 제목 LLM 요약 후(final 직전) | `sessionId` / `title` — 좌측 메뉴 갱신 |
 | `final` | 확정 | assistant 또는 system |
 | `error` | 복구 불가 | message |
 
 도구 모드(Intent 배타):
-- **download** → 다운로드 functionDeclarations만. LLM이 `list_ready_download_platforms` 등을 호출
-- **web_search** → Gemini `google_search` / Groq `browser_search`(필요 시 gpt-oss-120b). 제공자 grounding이 검색→재작성
+- **download** → 다운로드 function tools만. LLM이 `list_ready_download_platforms` 등을 호출. Interactions는 `{type:"function",…}` + `previous_interaction_id`/`function_result`
+- **web_search** → **비활성**(2026-07-29). Gemini `google_search` / Groq `browser_search` 미첨부
 - **none** → tools 없음
+
+### Gemini API 모드 (2026-07-29) — Interactions 기본 / Legacy Feature Flag
+
+공식 문서([Interactions API](https://ai.google.dev/api/interactions-api)) 기준 **기본은 Interactions API**. **Google Search grounding은 사용하지 않음.**
+
+| 항목 | Interactions (기본) | Legacy (비교 테스트) |
+| --- | --- | --- |
+| Endpoint | `POST /v1beta/interactions` (`?alt=sse` 스트리밍) | `…:streamGenerateContent?alt=sse` / `…:generateContent` |
+| 입력 | `input` | `contents` |
+| 검색 툴 | **미사용** (전면 비활성) | **미사용** |
+| FC 툴 | `{ "type": "function", "name", "parameters", … }` | `{ "functionDeclarations": […] }` |
+| FC 이어가기 | `previous_interaction_id` + `function_result` | model `functionCall` + user `functionResponse` |
+| 헤더 | `x-goog-api-key`, `Api-Revision: 2026-05-20` | `?key=` 쿼리 |
+| SSE 이벤트 | `interaction.created` / `step.delta` / `interaction.completed` 등 | candidates SSE |
+| generation_config | `max_output_tokens` + `thinking_level`만. **temperature/top_p/top_k·thinking_summaries 미전송**(3.5-flash-lite/3.6+ Deprecated·Unrecognized 방지) | Legacy `generationConfig.temperature` 등(Flag off 시) |
+
+**Feature Flag / env:** `FeatureFlags.geminiInteractionsApi`(기본 true). env `GEMINI_API_MODE=interactions|legacy` 또는 `GEMINI_USE_INTERACTIONS_API=0|1`이 우선. Legacy `geminiLegacyGenerateContentAdapter`는 제거하지 않음.
+구현: `agent/providers/geminiInteractions.ts`, `agent/ops/geminiApiMode.ts`, `agent/tools/downloadDeclarations.ts`. 앱↔Edge NDJSON 유지, toolContinue 시 `previousInteractionId` 왕복.
 
 클라이언트(`nrmLlmChatSend.ts`)는 `expo/fetch` NDJSON. 화면(`NrmDiscoverAiLabScreen`)은 검색 토글 없이 typing placeholder + markdown 렌더.
 
@@ -677,9 +701,9 @@ start_music_download(hit, lyricsOption)
 
 논스트리밍 `generateContent` + `emitAsTypingDeltas` 재생은 LLM 완료 전까지 첫 글자가 오지 않아 "한 번에 그려지는" 체감이 났다. **다시 제공자 SSE를 릴레이**한다.
 
-- Gemini: `streamGenerateContent?alt=sse`. `finishReason` 없이 조기 종료되면 같은 요청을 논스트리밍 `generateContent`로 한 번 더 받아 확정(과거 SSE 이슈 안전장치).
+- Gemini (2026-07-29~): 기본 **Interactions** `POST /v1beta/interactions?alt=sse`. Legacy Flag off 시 `streamGenerateContent?alt=sse` + 조기종료 시 `generateContent` 폴백.
 - Groq: `stream: true` + OpenAI SSE. 검색 시 `citation_options: disabled`로 출처/인라인 인용을 요청하지 않음. 본문에 남는 `【n†…】`는 sanitize로 제거.
-- 출처 UI·파싱·저장 없음. Gemini `google_search`는 검색 자체에 grounding 메타가 따라오지만 Edge는 URI 목록을 파싱·전달하지 않는다.
+- 출처 UI·파싱·저장 없음. **웹 검색(google_search/browser_search)은 2026-07-29부터 전면 비활성.**
 
 #### 후속 수정 2 — chat도 스트리밍(SSE) 대신 논스트리밍 `generateContent` + 서버 재생으로 전환 (2026-07-22, 근본 수정)
 
@@ -691,19 +715,21 @@ start_music_download(hit, lyricsOption)
 - 수정 후 실제 테스트(자기소개 5문장/피보나치 함수/전통음식 3가지 소개 등 이전에 2~13 토큰에서 끊겼던 프롬프트들)에서 149~616 output tokens의 완전하고 자연스러운 답변이 생성됨을 확인.
 - 위 "알려진 이슈"(`gemini-flash-latest`)의 근본 원인도 이 문서 작성 시점 기준 사실상 동일한 SSE 조기 종료 계열 문제였을 가능성이 높다(다만 그쪽은 thinking 토큰이 커서 시간이 더 걸렸을 뿐) — 이번 수정으로 `stream()`을 쓰는 모든 모델이 함께 개선된다.
 
-### 대화 제목 (휴리스틱 전용, 2026-07-23 변경)
+### 대화 제목 (LLM 요약, 2026-07-29 복구)
 
-`nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 "사용자 메시지를 28자로 자른" 제목을 즉시 넣는다. **추가 Gemini 호출로 제목을 다시 쓰지 않는다**(free-tier `generateContent` 요청 횟수를 채팅 본문과 나눠 쓰지 않기 위함). 예전(2026-07-22)에는 응답 후 백그라운드에서 제목용 `generateContent` 1회를 더 호출했다.
+`nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 **임시 제목**(사용자 메시지 28자 절단)을 즉시 넣는다.  
+본문 LLM 스트리밍과 **병렬**로 Edge가 짧은 제목용 LLM 호출 1회를 하고, 응답 종료 직전 `nrm_rpc_chat_update_session_title`로 덮어쓴 뒤 NDJSON `title_updated`를 보낸다. 앱 좌측 메뉴가 즉시 반영한다.  
+실패 시 임시 제목이 유지된다. (2026-07-23~29 사이에는 쿼터 절약으로 LLM 제목을 끄고 휴리스틱만 썼음)
 
 ### Gemini 호출 횟수 최적화 (2026-07-23)
 
 채팅 1턴당 Edge→LLM 본문 호출은 **원칙적으로 1회**(다운로드 toolContinue 제외).
 
-- Intent `needSearch`: Gemini `google_search` / Groq `browser_search` — 제공자 서버사이드 검색 포함 **1회**
-- Intent `needDownloadTools`: 다운로드 FC — 도구 턴마다 클라이언트가 Edge를 다시 부르므로 그때만 추가 1회
+- Intent `needSearch`/latest: **웹 검색 없음**(검색 툴 미첨부). 학습 컷오프는 system prompt로 주입하지 않음
+- Intent `needDownloadTools`: 다운로드 FC — 도구 턴마다 클라이언트가 Edge를 다시 부르므로 그때만 추가 1회 (`previousInteractionId` 왕복)
 - 429: 대기 재시도 없이 즉시 `rate_limit` 반환
 - 대화 history: 최근 **15**턴 (향후 Summary 메모리 확장 포인트)
-- Intent 분류: Google `gemini-2.0-flash-lite` 별도 1회(실패 시 휴리스틱, 메인 쿼터와 분리 가능)
+- Intent 분류: Google `gemini-2.0-flash-lite` 별도 1회(Interactions 우선, 실패 시 Legacy → 휴리스틱)
 
 **현재 활성 LLM 모델 (2026-07-23 기준)**: Groq(`ProviderID=2`) 활성 — `openai/gpt-oss-120b`(`ModelID=1002`), `qwen/qwen3.6-27b`(`1001`), `llama-3.3-70b-versatile`(`1000`)이 피커 상단(ModelID DESC). Google `Type='LLM'` 활성 — `models/gemini-3.1-flash-lite`(`21`), `models/gemini-3.5-flash`(`28`), `models/gemini-3.5-flash-lite`(`55`), `models/gemini-3.6-flash`(`56`). Groq 시드: `20260723190000_llm_provider_groq.sql`. 2026-07-23 Gemini 목록 재조회 시 기존 행은 유지하고 없던 `models/gemini-3.5-flash-lite`·`models/gemini-3.6-flash`만 추가한 뒤(`20260723090000_llm_model_append_gemini36.sql`), `gemini-3.5-flash-lite`도 활성화했다(`20260723093000_llm_model_activate_gemini35_flash_lite.sql`). `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖는다(`scripts/seed-llm-admin-permissions-all.mjs`, Groq는 마이그레이션에서 `ProviderID=2` 권한도 INSERT). `LLMModel.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다.
 
@@ -726,7 +752,8 @@ start_music_download(hit, lyricsOption)
 | `attempt_log_insert_ok` / `attempt_log_insert_failed` | `LLMCallAttemptLog` INSERT 결과 |
 | `finalize_turn_ok` / `finalize_turn_failed` | 2번 RPC 결과 |
 | `quota_increment_ok` / `quota_increment_failed` / `quota_increment_threw` | 백그라운드(`waitUntil`) 쿼터 누적 결과 — 응답 반환 **후** 로그이므로 클라이언트 응답 시점보다 늦게 찍힐 수 있음(정상) |
-| `title_generate_skipped` | 새 세션에서도 LLM 제목 생성 생략(휴리스틱 유지, 쿼터 절약) |
+| `title_generate_skipped` | 제목 LLM 실패·빈 결과 — 임시(휴리스틱) 제목 유지 |
+| `title_update_ok` | `nrm_rpc_chat_update_session_title` 성공 + `title_updated` 전송 |
 | `stream_cancelled_by_client` | 클라이언트가 스트림 읽기를 중단(앱 종료·화면 이탈 등) — `ReadableStream.cancel` |
 | `stream_unhandled_error` | 스트림 `start()` 콜백 내부에서 위 어디에도 안 걸린 예외 — `error` 이벤트 전송 후 스트림 종료 |
 | `request_done` | 요청 종료 요약 1줄 — `outcome`(`success`/`provider_daily_limit_exceeded`/`provider_monthly_limit_exceeded`/`permission_denied`/`quota_exceeded`/`llm_call_failed`/`provider_unavailable`/`adapter_missing`/`finalize_failed`) + `totalElapsedMs`. 세부 값은 위 단계별 로그에만 있고 여기서는 반복하지 않음(중복 방지) |

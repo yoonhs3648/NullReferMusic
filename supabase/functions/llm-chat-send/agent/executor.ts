@@ -44,7 +44,8 @@ export function executePlanToAdapterOptions(plan: AgentPlan): ExecutorBridge {
   return {
     systemInstruction: plan.systemPrompt,
     enableDownloadTools: plan.toolMode === 'download',
-    enableWebSearch: plan.toolMode === 'web_search',
+    /** 웹 검색 전면 비활성 */
+    enableWebSearch: false,
     toolMode: plan.toolMode,
     model: plan.model,
     temperature: plan.temperature,
@@ -72,6 +73,7 @@ export type RunGraphParams = {
       args: Record<string, unknown>;
     }>;
     functionResponses: Array<{ name: string; response: Record<string, unknown> }>;
+    previousInteractionId?: string | null;
   };
 };
 
@@ -97,7 +99,8 @@ export async function runExecutionGraph(
   state.timings.waveMs = [];
 
   let enableDownloadTools = plan.toolMode === 'download';
-  let enableWebSearch = plan.toolMode === 'web_search';
+  /** 웹 검색 전면 비활성 — native_search 노드가 남아도 켜지 않음 */
+  const enableWebSearch = false;
   let lastNorm: NormalizedResponse | null = null;
 
   const runNode = async (node: (typeof waves)[0][0]) => {
@@ -143,7 +146,6 @@ export async function runExecutionGraph(
     }
 
     if (node.type === 'native_search') {
-      enableWebSearch = true;
       enableDownloadTools = false;
       state.timings.graphNodeMs![node.id] = Date.now() - t0;
       return;

@@ -169,7 +169,7 @@ ON public."ChatMessage" ("RegDate");
 
 - `ChatSession`/`ChatMessage`는 RLS `SELECT`만 anon/authenticated에 열려 있다(`20260721120000_llm_chat_security_harden.sql`). **직접 INSERT/UPDATE 불가.**
 - 메시지 저장·세션 생성·`UpdateDate` 갱신은 전부 Edge Function(`llm-chat-send`, service_role)이 `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`을 통해서만 수행한다. 상세: [`llm.md`](./llm.md#ai-lab-채팅-전송--edge-function--rpc-실제-구현).
-- `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM이 생성한 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-자동-생성-2026-07-22).
+- `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM 요약 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-llm-요약-2026-07-29-복구).
 - 세션 삭제(소프트 삭제, `IsDeleted=true`)는 앱이 `nrm_rpc_chat_delete_session(p_serial_no, p_session_id)`을 직접 호출한다(anon/authenticated에 GRANT). 본인 `SerialNo` 소유 세션만 삭제 가능.
 
 ## 구현 시 참고
