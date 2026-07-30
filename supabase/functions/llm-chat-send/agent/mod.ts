@@ -164,7 +164,14 @@ export {
   MelonProvider,
 } from './music/metadataProvider.ts';
 
-export { analyzeUserIntent, classifyIntentHeuristic, isBeyondKnowledgeCutoffIntent } from './intent.ts';
+export {
+  analyzeUserIntent,
+  applyIntentMessageGuards,
+  classifyIntentHeuristic,
+  isBeyondKnowledgeCutoffIntent,
+  messageLooksLikeDownload,
+  messageLooksLikeMusicSearch,
+} from './intent.ts';
 export { INTENT_CLASSIFIER_MODEL } from './intent.ts';
 
 /** @deprecated */

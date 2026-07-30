@@ -66,8 +66,11 @@ import {
 import {
   aiLabOneDownloadPerRequestResult,
   executeAiLabDownloadTool,
+  hitFromAiLabTrackChoice,
   isAiLabStartDownloadToolName,
+  isAiLabTrackChoiceId,
   type NrmAiLabChoice,
+  type NrmAiLabTrackHit,
 } from '@/lib/nrmAiLabDownloadTools';
 import { setAiLabLyricsFollowupHooks } from '@/lib/nrmAiLabLyricsFollowup';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
@@ -159,6 +162,62 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const greetingName = useNrmMainLogoDisplayName();
   const [keyboardInset, setKeyboardInset] = useState(0);
   const listRef = useRef<FlatList<NrmAiLabMessage>>(null);
+  /** 사용자가 위로 올려 두면 false — 스트리밍/완료 시 자동 스크롤 안 함 */
+  const stickToBottomRef = useRef(true);
+  const scrollPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearScrollPinTimers = useCallback(() => {
+    for (const t of scrollPinTimersRef.current) clearTimeout(t);
+    scrollPinTimersRef.current = [];
+  }, []);
+
+  const pinListToBottom = useCallback(
+    (opts?: { force?: boolean; animated?: boolean; settle?: boolean }) => {
+      if (!opts?.force && !stickToBottomRef.current) return;
+      const animated = opts?.animated === true;
+      const run = () => {
+        if (!opts?.force && !stickToBottomRef.current) return;
+        listRef.current?.scrollToEnd({ animated });
+      };
+      run();
+      requestAnimationFrame(run);
+      if (opts?.settle === false) return;
+      // 칩·마크다운·말풍선 레이아웃이 늦게 늘어나도 최하단에 붙도록 재핀
+      clearScrollPinTimers();
+      for (const ms of [32, 100, 220, 400]) {
+        scrollPinTimersRef.current.push(setTimeout(run, ms));
+      }
+    },
+    [clearScrollPinTimers],
+  );
+
+  /** 스트리밍 중 매 프레임 — sticky일 때만 즉시 하단 (settle 타이머 없음) */
+  const pinListToBottomWhileStreaming = useCallback(() => {
+    if (!stickToBottomRef.current) return;
+    requestAnimationFrame(() => {
+      if (!stickToBottomRef.current) return;
+      listRef.current?.scrollToEnd({ animated: false });
+    });
+  }, []);
+
+  const onChatListScroll = useCallback(
+    (e: {
+      nativeEvent: {
+        contentOffset: { y: number };
+        contentSize: { height: number };
+        layoutMeasurement: { height: number };
+      };
+    }) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const viewport = layoutMeasurement.height;
+      const contentH = contentSize.height;
+      if (viewport <= 0 || contentH <= 0) return;
+      const distanceFromBottom = contentH - viewport - contentOffset.y;
+      // 하단 근처면 sticky, 위로 올리면 해제
+      stickToBottomRef.current = distanceFromBottom <= 72;
+    },
+    [],
+  );
 
   const persistActiveSessionId = useCallback((sessionId: string | null) => {
     if (!sessionId || sessionId.startsWith('c-')) {
@@ -219,12 +278,13 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             c.id === convId ? { ...c, messages: [...c.messages, msg] } : c,
           ),
         );
+        pinListToBottom({ animated: false });
       },
     });
     return () => {
       setAiLabLyricsFollowupHooks({});
     };
-  }, []);
+  }, [pinListToBottom]);
 
   // 사용자가 마지막으로 직접 고른 모델을 기기에서 복원 — 로드 전에는 피커가
   // pickDefault로 AsyncStorage를 덮어쓰지 않도록 prefReady를 기다린다.
@@ -400,9 +460,19 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
 
   useEffect(() => {
     if (messages.length === 0) return;
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-    return () => clearTimeout(t);
-  }, [messages.length, activeId]);
+    // 세션 전환·메시지 개수 변화: sticky일 때만 하단 고정
+    pinListToBottom({ animated: false });
+  }, [messages.length, activeId, pinListToBottom]);
+
+  useEffect(() => {
+    return () => clearScrollPinTimers();
+  }, [clearScrollPinTimers]);
+
+  // 키보드가 올라오면 sticky일 때 다시 하단으로
+  useEffect(() => {
+    if (keyboardInset <= 0) return;
+    pinListToBottom({ animated: false });
+  }, [keyboardInset, pinListToBottom]);
 
   const openMenu = useCallback(() => {
     // setMenuOpen 전에 화면 밖 위치 고정 → 첫 프레임 깜빡임 방지
@@ -451,6 +521,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const handleNewChat = useCallback(() => {
     setActiveId(null);
     setDraft('');
+    stickToBottomRef.current = true;
     persistActiveSessionId(null);
     closeMenu();
   }, [closeMenu, persistActiveSessionId]);
@@ -459,6 +530,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     (id: string) => {
       setActiveId(id);
       setDraft('');
+      stickToBottomRef.current = true;
       persistActiveSessionId(id);
       closeMenu();
       const target = conversations.find((c) => c.id === id);
@@ -505,12 +577,24 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   );
 
   const sendUserText = useCallback(
-    (text: string) => {
+    (text: string, opts?: { displayText?: string; trackSelectHit?: NrmAiLabTrackHit }) => {
       if (!text || sending || !serialNo || llmModelId == null) return;
+
+      const displayText = (opts?.displayText ?? text).trim() || text;
+      const apiText = displayText;
+      const selectedHit = opts?.trackSelectHit ?? null;
+
+      stickToBottomRef.current = true;
+      pinListToBottom({ force: true, animated: false });
 
       const tempUserId = nextTempId('u');
       const tempAssistantId = nextTempId('a');
-      const userMsg: NrmAiLabMessage = { id: tempUserId, role: 'user', content: text, pending: true };
+      const userMsg: NrmAiLabMessage = {
+        id: tempUserId,
+        role: 'user',
+        content: displayText,
+        pending: true,
+      };
       const targetId = activeId;
       const sourceConvId = targetId ?? nextTempId('c');
 
@@ -519,7 +603,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       if (!targetId) {
         const created: NrmAiLabConversation = {
           id: sourceConvId,
-          title: nrmAiLabTitleFromPrompt(text),
+          title: nrmAiLabTitleFromPrompt(displayText),
           updatedAtLabel: '지금',
           updatedAtIso: new Date().toISOString(),
           modelId: llmModelId,
@@ -531,7 +615,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         setActiveId(sourceConvId);
       } else {
         setConversations((prev) =>
-          prev.map((c) => (c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c)),
+          prev.map((c) =>
+            c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c,
+          ),
         );
       }
 
@@ -545,7 +631,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         typing: true,
       };
       setConversations((prev) =>
-        prev.map((c) => (c.id === currentConvId ? { ...c, messages: [...c.messages, typingPlaceholder] } : c)),
+        prev.map((c) =>
+          c.id === currentConvId ? { ...c, messages: [...c.messages, typingPlaceholder] } : c,
+        ),
       );
 
       void (async () => {
@@ -556,7 +644,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         let sessionIdForApi: string | null = targetId;
 
         const resolvedPlatform = await resolveAiLabMusicPlatformForMessage(
-          text,
+          displayText,
           musicPlatformId,
         );
         const musicPlatformBlocked =
@@ -588,6 +676,77 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         try {
           /** 사용자 메시지 1회당 오디오 다운로드 시작은 최대 1회 */
           let downloadsStartedThisSend = 0;
+          /** 검색 1건 / 칩 선택 hit — 모델이 텍스트만 하고 FC를 안 할 때 강제 다운로드 */
+          let pendingAutoDownloadHit: NrmAiLabTrackHit | null = selectedHit;
+          let lastAssistantText = '';
+          const userLikelyWantsDownload =
+            selectedHit != null ||
+            /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(displayText);
+
+          // 칩으로 곡이 확정되면 LLM FC를 기다리지 않고 즉시 다운로드 시작(알림·파일)
+          let preforcedLyricsChoices: NrmAiLabChoice[] | undefined;
+          if (selectedHit) {
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === currentConvId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === tempAssistantId
+                          ? {
+                              ...m,
+                              content: '다운로드를 진행합니다.',
+                              typing: true,
+                              choices: undefined,
+                            }
+                          : m,
+                      ),
+                    }
+                  : c,
+              ),
+            );
+            lastAssistantText = '다운로드를 진행합니다.';
+            const pre = await executeAiLabDownloadTool(
+              'start_music_download',
+              { hit: selectedHit, lyricsOption: 'none' },
+              { musicPlatformId: resolvedPlatform.platformId },
+            );
+            downloadsStartedThisSend = 1;
+            pendingAutoDownloadHit = null;
+            const preOk = (pre.result as { ok?: boolean }).ok === true;
+            if (!preOk) {
+              const err = String((pre.result as { error?: unknown }).error ?? 'unknown');
+              const errMsg = String((pre.result as { message?: unknown }).message ?? '');
+              const failText =
+                errMsg || `다운로드를 시작하지 못했습니다 (${err}).`;
+              lastAssistantText = `다운로드를 진행합니다.\n\n${failText}`;
+              logNrmRunError('ailab.preforce_download', new Error(err), {
+                ref: selectedHit.ref,
+                title: selectedHit.title,
+              });
+              setConversations((prev) =>
+                prev.map((c) =>
+                  c.id === currentConvId
+                    ? {
+                        ...c,
+                        messages: c.messages.map((m) =>
+                          m.id === tempAssistantId
+                            ? { ...m, content: lastAssistantText, typing: false }
+                            : m,
+                        ),
+                      }
+                    : c,
+                ),
+              );
+              setSending(false);
+              return;
+            }
+            if (pre.choices && pre.choices.length > 0) {
+              preforcedLyricsChoices = pre.choices;
+            }
+          }
+
+          // DB/화면에는 사용자 라벨만. 선택 hit·다운로드 완료 여부는 body 필드로만 전달.
           for (let round = 0; round < MAX_AI_LAB_TOOL_ROUNDS; round += 1) {
             const pendingToolCalls: NrmLlmToolRequestEvent[] = [];
             let roundChoices: NrmAiLabChoice[] | undefined;
@@ -615,7 +774,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 serialNo,
                 modelId: llmModelId,
                 sessionId: sessionIdForApi,
-                message: toolContinue ? '' : text,
+                message: toolContinue ? '' : displayText,
                 toolContinue,
                 toolResults: toolContinue ? toolResults : undefined,
                 previousInteractionId: toolContinue ? previousInteractionId : undefined,
@@ -623,6 +782,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 musicPlatformLabel: resolvedPlatform.label,
                 musicPlatformBlocked,
                 musicPlatformExplicit: resolvedPlatform.explicit,
+                trackSelectHit: !toolContinue ? selectedHit : undefined,
+                downloadAlreadyStarted:
+                  !toolContinue && selectedHit != null && downloadsStartedThisSend >= 1,
               },
               {
                 onMeta: (meta) => {
@@ -640,7 +802,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                     if (idx === -1) return prev;
                     const conv = prev[idx];
                     const finalizedMessages = conv.messages.map((m) =>
-                      m.id === tempUserId ? meta.userMessage : m,
+                      m.id === tempUserId
+                        ? { ...meta.userMessage, content: displayText, pending: false }
+                        : m,
                     );
                     const updatedConv: NrmAiLabConversation = {
                       ...conv,
@@ -669,15 +833,17 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                       c.id === convId
                         ? {
                             ...c,
-                            messages: c.messages.map((m) =>
-                              m.id === tempAssistantId
-                                ? { ...m, content: m.content + chunk, typing: false }
-                                : m,
-                            ),
+                            messages: c.messages.map((m) => {
+                              if (m.id !== tempAssistantId) return m;
+                              const next = m.content + chunk;
+                              lastAssistantText = next;
+                              return { ...m, content: next, typing: false };
+                            }),
                           }
                         : c,
                     ),
                   );
+                  pinListToBottomWhileStreaming();
                 },
                 onToolRequest: (ev) => {
                   pendingToolCalls.push(ev);
@@ -687,9 +853,19 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                     (final.choices && final.choices.length > 0
                       ? final.choices
                       : lastToolChoices) ?? undefined;
+                  const filteredChoices =
+                    selectedHit && choices?.length
+                      ? choices.filter((ch) => !isAiLabTrackChoiceId(ch.id))
+                      : choices;
+                  const mergedChoices =
+                    (filteredChoices && filteredChoices.length > 0
+                      ? filteredChoices
+                      : preforcedLyricsChoices) ?? undefined;
                   const agentUi = parseAgentUiFromDiag(final.diag);
                   const convId = currentConvId;
                   const finalSessionId = String(final.sessionId ?? '').trim();
+                  const finalContent = String(final.message.content ?? '');
+                  if (finalContent) lastAssistantText = finalContent;
                   setConversations((prev) =>
                     prev.map((c) => {
                       if (c.id !== convId && c.id !== finalSessionId) return c;
@@ -699,14 +875,17 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                               // FlatList key를 유지해 MessageEnter가 opacity 0으로 재마운트되지 않게 함
                               ...final.message,
                               id: tempAssistantId,
-                              content: String(final.message.content ?? m.content ?? ''),
-                              choices,
+                              content: finalContent || m.content || '',
+                              choices:
+                                mergedChoices && mergedChoices.length > 0
+                                  ? mergedChoices
+                                  : undefined,
                               agentUi,
                               typing: false,
                               pending: false,
                             }
                           : m.id === tempUserId
-                            ? { ...m, pending: false }
+                            ? { ...m, content: displayText, pending: false }
                             : m,
                       );
                       return {
@@ -725,6 +904,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                       () => {},
                     );
                   }
+                  pinListToBottom({ animated: false });
                 },
                 onTitleUpdated: ({ sessionId, title: newTitle }) => {
                   setConversations((prev) =>
@@ -759,11 +939,66 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 });
                 continue;
               }
-              const out = await executeAiLabDownloadTool(call.name, call.args, {
+
+              // 트랙 칩 선택 후 모델이 재검색하면 → 선택 hit 1건으로 바꿔 루프 차단
+              if (
+                selectedHit &&
+                (call.name === 'search_music' ||
+                  call.name === 'search_track_on_platform' ||
+                  call.name === 'search_music_artist' ||
+                  call.name === 'search_music_album')
+              ) {
+                nextResults.push({
+                  callId: call.callId,
+                  name: call.name,
+                  args: call.args,
+                  response: {
+                    ok: true,
+                    hits: [selectedHit],
+                    count: 1,
+                    kind: 'track',
+                    redirectedFromSearch: true,
+                    nextHint:
+                      '이미 사용자가 곡을 선택함. start_music_download(이 hit, lyricsOption=none) 필수. 재검색·choices 금지.',
+                  },
+                });
+                continue;
+              }
+
+              let callArgs = call.args;
+              if (selectedHit && isAiLabStartDownloadToolName(call.name)) {
+                callArgs = {
+                  ...call.args,
+                  hit: selectedHit,
+                  lyricsOption:
+                    call.args.lyricsOption != null ? call.args.lyricsOption : 'none',
+                };
+              }
+
+              const out = await executeAiLabDownloadTool(call.name, callArgs, {
                 musicPlatformId: resolvedPlatform.platformId,
               });
+              if (
+                (call.name === 'search_music' || call.name === 'search_track_on_platform') &&
+                !selectedHit
+              ) {
+                const hits = (out.result as { hits?: NrmAiLabTrackHit[]; count?: number }).hits;
+                const count = Number(
+                  (out.result as { count?: number }).count ?? hits?.length ?? 0,
+                );
+                if (count === 1 && hits?.[0]?.title && hits[0]?.artist) {
+                  pendingAutoDownloadHit = hits[0];
+                } else if (count > 1) {
+                  pendingAutoDownloadHit = null;
+                }
+              }
               if (out.choices && out.choices.length > 0) {
-                roundChoices = out.choices;
+                if (selectedHit) {
+                  const nonTrack = out.choices.filter((ch) => !isAiLabTrackChoiceId(ch.id));
+                  if (nonTrack.length > 0) roundChoices = nonTrack;
+                } else {
+                  roundChoices = out.choices;
+                }
               }
               if (isAiLabStartDownloadToolName(call.name)) {
                 const err = String(
@@ -777,7 +1012,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               nextResults.push({
                 callId: call.callId,
                 name: call.name,
-                args: call.args,
+                args: callArgs,
                 response: out.result,
               });
             }
@@ -791,12 +1026,67 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               throw new NrmLlmChatSendError('stream_error', 'llm-chat-send: tool_rounds_exceeded');
             }
           }
+
+          // 모델이 「다운로드를 진행합니다」만 말하고 start_music_download를 안 부른 경우 강제 시작
+          const shouldForceDownload =
+            downloadsStartedThisSend === 0 &&
+            pendingAutoDownloadHit != null &&
+            (selectedHit != null ||
+              userLikelyWantsDownload ||
+              /다운로드를 진행/.test(lastAssistantText));
+          if (shouldForceDownload && pendingAutoDownloadHit) {
+            const forcedHit = pendingAutoDownloadHit;
+            const out = await executeAiLabDownloadTool(
+              'start_music_download',
+              { hit: forcedHit, lyricsOption: 'none' },
+              { musicPlatformId: resolvedPlatform.platformId },
+            );
+            downloadsStartedThisSend = 1;
+            const ok = (out.result as { ok?: boolean }).ok === true;
+            const err = String((out.result as { error?: unknown }).error ?? '');
+            const errMsg = String((out.result as { message?: unknown }).message ?? '');
+            let extra = '';
+            let forceChoices: NrmAiLabChoice[] | undefined;
+            if (!ok) {
+              extra =
+                errMsg || `다운로드를 시작하지 못했습니다 (${err || 'unknown'}).`;
+              logNrmRunError('ailab.force_download', new Error(err || 'force_download_failed'), {
+                ref: forcedHit.ref,
+                title: forcedHit.title,
+              });
+            } else if (out.choices && out.choices.length > 0) {
+              extra = '가사도 생성을 할까요?';
+              forceChoices = out.choices;
+            }
+            setConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== currentConvId) return c;
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id !== tempAssistantId) return m;
+                    const base = (m.content || '').trim() || '다운로드를 진행합니다.';
+                    const withAnnounce = /다운로드를 진행/.test(base)
+                      ? base
+                      : `다운로드를 진행합니다.\n\n${base}`;
+                    return {
+                      ...m,
+                      content: extra ? `${withAnnounce}\n\n${extra}` : withAnnounce,
+                      typing: false,
+                      choices: forceChoices ?? m.choices,
+                    };
+                  }),
+                };
+              }),
+            );
+            pinListToBottom({ animated: false });
+          }
         } catch (e) {
           logNrmRunError('ailab.send', e, {
             sourceConvId,
             isNewConversation: !targetId,
             modelId: llmModelId,
-            messageLength: text.length,
+            messageLength: apiText.length,
             gotFirstDelta,
           });
           const sysMsg: NrmAiLabMessage = {
@@ -819,10 +1109,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           );
         } finally {
           setSending(false);
+          pinListToBottom({ animated: false });
         }
       })();
     },
-    [activeId, llmModelId, musicPlatformId, sending, serialNo],
+    [activeId, llmModelId, musicPlatformId, pinListToBottom, pinListToBottomWhileStreaming, sending, serialNo],
   );
 
   const handleSend = useCallback(() => {
@@ -835,6 +1126,16 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const handleChoicePress = useCallback(
     (choice: NrmAiLabChoice) => {
       if (sending || !serialNo || llmModelId == null) return;
+      const hit: NrmAiLabTrackHit | undefined = isAiLabTrackChoiceId(choice.id)
+        ? hitFromAiLabTrackChoice(choice)
+        : undefined;
+      if (hit) {
+        sendUserText(choice.label, {
+          displayText: choice.label,
+          trackSelectHit: hit,
+        });
+        return;
+      }
       sendUserText(choice.label);
     },
     [llmModelId, sendUserText, sending, serialNo],
@@ -1038,8 +1339,15 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={Platform.OS === 'web'}
+        onScroll={onChatListScroll}
+        scrollEventThrottle={16}
         onContentSizeChange={() => {
-          if (messages.length > 0) listRef.current?.scrollToEnd({ animated: false });
+          if (messages.length === 0) return;
+          pinListToBottomWhileStreaming();
+        }}
+        onLayout={() => {
+          if (messages.length === 0) return;
+          pinListToBottom({ animated: false, settle: false });
         }}
       />
       {messagesLoading && messages.length === 0 ? (
@@ -1137,7 +1445,7 @@ const styles = StyleSheet.create({
   msgList: { flex: 1 },
   msgListContent: {
     paddingTop: nrmTokens.space.lg,
-    paddingBottom: nrmTokens.space.md,
+    paddingBottom: nrmTokens.space.lg,
   },
   msgListContentEmpty: {
     flexGrow: 1,

@@ -1,11 +1,18 @@
 /**
  * 기본 Tool 등록 (schema/examples 포함).
  * 이번 버전: Melon 전용 검색·다운로드.
+ *
+ * download_fc는 Intent와 무관하게, Function Calling을 지원하는 모든 모델에 항상 노출한다.
+ * (칩 클릭·후속 메시지에 「다운로드」 키워드가 없어도 도구를 쓸 수 있어야 함)
  */
 
 import { createTool, registerTool } from './registry.ts';
 
 const emptyObjectParams = { type: 'object', properties: {} };
+
+/** Melon 검색·다운로드·가사 FC — FC 지원 모델이면 항상 사용 가능 */
+const supportsDownloadFc = (ctx: { supportsFunctionCalling: boolean }) =>
+  ctx.supportsFunctionCalling === true;
 
 registerTool(
   createTool({
@@ -19,11 +26,7 @@ registerTool(
       parameters: emptyObjectParams,
       examples: [{ user: '음악 다운로드하고 싶어', args: {} }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue ||
-      ctx.intent.needsDownloadTool ||
-      ctx.intent.needsMusicSearch ||
-      ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -52,11 +55,7 @@ registerTool(
         { user: 'blooming 알려줘', args: { query: 'blooming' } },
       ],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue ||
-      ctx.intent.needsMusicSearch ||
-      ctx.intent.needsDownloadTool ||
-      ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -77,11 +76,7 @@ registerTool(
       },
       examples: [{ user: '아이유 가수 정보', args: { query: '아이유' } }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue ||
-      ctx.intent.needsMusicSearch ||
-      ctx.intent.needsDownloadTool ||
-      ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -102,11 +97,7 @@ registerTool(
       },
       examples: [{ user: 'Love poem 앨범 알려줘', args: { query: 'Love poem' } }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue ||
-      ctx.intent.needsMusicSearch ||
-      ctx.intent.needsDownloadTool ||
-      ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -122,8 +113,7 @@ registerTool(
       parameters: emptyObjectParams,
       examples: [{ user: '좋은날 다운로드해줘', args: {} }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -138,8 +128,7 @@ registerTool(
       parameters: emptyObjectParams,
       examples: [{ user: '가사 생성할 수 있어?', args: {} }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -184,8 +173,7 @@ registerTool(
         },
       ],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -207,8 +195,7 @@ registerTool(
       },
       examples: [{ user: '예, 가사 생성', args: { videoId: 'abc' } }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 
@@ -228,8 +215,7 @@ registerTool(
       },
       examples: [{ user: '예, 번역해주세요', args: { videoId: 'abc' } }],
     },
-    supports: (ctx) =>
-      ctx.isToolContinue || ctx.intent.needsDownloadTool || ctx.intent.intent === 'download',
+    supports: supportsDownloadFc,
   }),
 );
 

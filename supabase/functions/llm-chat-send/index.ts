@@ -1623,10 +1623,121 @@ function sanitizeAssistantVisibleText(text: string): string {
   t = t.replace(/\[WEB_SEARCH_ENABLED\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
   t = t.replace(/\[CURRENT_DATETIME\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
   t = t.replace(/\[TOOLS\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
+  t = t.replace(/\[DOWNLOAD_RULES\][\s\S]*?(?=\n\[[A-Z_]+\]|\n*$)/g, '');
+  t = t.replace(/\[TOOL_USAGE_RULES\][\s\S]*?(?=\n\[[A-Z_]+\]|\n*$)/g, '');
+  t = t.replace(/\[INTERNAL_CLIENT_STATE\][\s\S]*$/g, '');
+  t = t.replace(/\[INTERNAL\][\s\S]*$/g, '');
+  t = t.replace(/\[AI_LAB_[A-Z0-9_]+\][\s\S]*$/g, '');
   t = t.replace(/[ \t]{2,}/g, ' ');
   t = t.replace(/ ?\n/g, '\n');
   t = t.replace(/\n{3,}/g, '\n\n');
   return t.replace(/^\s+|\s+$/g, '').trim();
+}
+
+/** DB에 잘못 저장된 내부 마커·칩 API 전문 → 사용자 표시/히스토리용으로 정리 */
+function sanitizeStoredChatContent(raw: string): string {
+  let t = stripLegacySourcesMarker(raw ?? '');
+  if (!t.trim()) return '';
+  if (/\[AI_LAB_TRACK_SELECT\]/.test(t)) {
+    const labelLine = t.match(/사용자가 곡을 선택했다:\s*(.+)/);
+    const label = labelLine?.[1]?.trim().split(/\r?\n/)[0]?.trim();
+    if (label) return label;
+    const jsonMatch = t.match(/\[AI_LAB_TRACK_SELECT\](\{[\s\S]*?\})/);
+    if (jsonMatch?.[1]) {
+      try {
+        const obj = JSON.parse(jsonMatch[1]) as {
+          artist?: string;
+          title?: string;
+          album?: string;
+        };
+        const artist = String(obj.artist ?? '').trim();
+        const title = String(obj.title ?? '').trim();
+        const album = String(obj.album ?? '').trim();
+        if (artist && title) {
+          return album ? `${artist} - ${title} (${album})` : `${artist} - ${title}`;
+        }
+        if (title) return title;
+      } catch {
+        // ignore
+      }
+    }
+    return '선택한 곡';
+  }
+  if (/\[AI_LAB_DOWNLOAD_STARTED\]/.test(t)) {
+    const artist = t.match(/\bartist=([^\n]+)/)?.[1]?.trim();
+    const title = t.match(/\btitle=([^\n]+?)(?:\s+artist=|$)/)?.[1]?.trim();
+    if (artist && title) return `${artist} - ${title}`;
+    if (title) return title;
+    return '선택한 곡';
+  }
+  return sanitizeAssistantVisibleText(t);
+}
+
+function parseTrackSelectHitPayload(raw: unknown): {
+  ref: string;
+  platform: string;
+  title: string;
+  artist: string;
+  album: string;
+  imageUrl: string;
+  externalUrl: string;
+  releaseDate: string;
+  genre: string;
+} | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const ref = String(o.ref ?? '').trim();
+  const title = String(o.title ?? '').trim();
+  const artist = String(o.artist ?? '').trim();
+  if (!ref || !title || !artist) return null;
+  return {
+    ref,
+    platform: String(o.platform ?? 'melon').trim() || 'melon',
+    title,
+    artist,
+    album: String(o.album ?? ''),
+    imageUrl: String(o.imageUrl ?? ''),
+    externalUrl: String(o.externalUrl ?? ''),
+    releaseDate: String(o.releaseDate ?? ''),
+    genre: String(o.genre ?? ''),
+  };
+}
+
+function buildUserTextForLlmFromClientHints(params: {
+  displayMessage: string;
+  trackSelectHit: ReturnType<typeof parseTrackSelectHitPayload>;
+  downloadAlreadyStarted: boolean;
+}): string {
+  const display = params.displayMessage.trim();
+  const hit = params.trackSelectHit;
+  if (!hit) return display;
+  const hitJson = JSON.stringify({
+    ref: hit.ref,
+    platform: hit.platform,
+    title: hit.title,
+    artist: hit.artist,
+    album: hit.album,
+    imageUrl: hit.imageUrl,
+    externalUrl: hit.externalUrl,
+    releaseDate: hit.releaseDate,
+    genre: hit.genre,
+  });
+  if (params.downloadAlreadyStarted) {
+    return (
+      `${display}\n\n` +
+      `[INTERNAL_CLIENT_STATE]\n` +
+      `오디오 다운로드는 앱이 이미 시작했다. search_music/start_music_download 호출 금지.\n` +
+      `가사 생성이 가능하면 「가사도 생성을 할까요?」만 덧붙인다.\n` +
+      `hit=${hitJson}`
+    );
+  }
+  return (
+    `${display}\n\n` +
+    `[INTERNAL_CLIENT_STATE]\n` +
+    `사용자가 곡을 선택했다. search_* 금지.\n` +
+    `start_music_download(hit, lyricsOption=none) function call 필수.\n` +
+    `hit=${hitJson}`
+  );
 }
 
 /** 과거에 Content에 붙였던 출처 마커만 제거(더 이상 저장하지 않음). */
@@ -2591,6 +2702,8 @@ Deno.serve(async (req: Request) => {
       String(payload.musicPlatformLabel ?? '').trim() || musicPlatformId;
     const musicPlatformBlocked = payload.musicPlatformBlocked === true;
     const musicPlatformExplicit = payload.musicPlatformExplicit === true;
+    const trackSelectHit = parseTrackSelectHitPayload(payload.trackSelectHit);
+    const downloadAlreadyStarted = payload.downloadAlreadyStarted === true;
     const toolResultsRaw = Array.isArray(payload.toolResults) ? payload.toolResults : [];
     const toolResults = toolResultsRaw
       .map((r) => {
@@ -2719,7 +2832,7 @@ Deno.serve(async (req: Request) => {
         .reverse()
         .map((h: { Role?: string; Content?: string }) => ({
           role: String(h.Role ?? ''),
-          content: stripLegacySourcesMarker(String(h.Content ?? '')),
+          content: sanitizeStoredChatContent(String(h.Content ?? '')),
         }));
       prepared = {
         sessionId: Number(sessionRow.SessionID),
@@ -3029,7 +3142,7 @@ Deno.serve(async (req: Request) => {
 
           const chatHistory: ChatTurn[] = (Array.isArray(history) ? history : []).map((h) => ({
             role: h.role === 'assistant' ? 'assistant' : 'user',
-            content: stripLegacySourcesMarker(String(h.content ?? '')),
+            content: sanitizeStoredChatContent(String(h.content ?? '')),
           }));
 
           // 관리자 DB 시스템 프롬프트 — Agent 조립의 ADMIN_SYSTEM_PROMPT 섹션으로 편입
@@ -3067,7 +3180,13 @@ Deno.serve(async (req: Request) => {
           const promptVersion =
             experiment?.overrides?.promptVersion ?? getActivePromptVersion();
 
-          let userTextForLlm = isToolContinue ? '' : message;
+          let userTextForLlm = isToolContinue
+            ? ''
+            : buildUserTextForLlmFromClientHints({
+                displayMessage: message,
+                trackSelectHit,
+                downloadAlreadyStarted,
+              });
           if (!isToolContinue && featureFlags.inputGuard) {
             const guarded = await getInputGuard().check(userTextForLlm);
             if (!guarded.allowed) {

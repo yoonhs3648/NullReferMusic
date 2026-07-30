@@ -531,7 +531,8 @@ start_music_download(hit, lyricsOption)
 - Spotify/Apple Music 등 요청 시: Function Call 없이 미지원 안내 + Melon 제안
 - **요청당 1곡**: 사용자 메시지 1회당 `start_music_download` 성공은 최대 1회(클라이언트 하드 가드).
 - **검색**: `search_music`(트랙) / `search_music_artist` / `search_music_album` — Melon 언급 없이도 자동 호출. 트랙 칩: `가수 - 노래제목 (앨범명)`
-- **다운로드 선응답**: 먼저 「다운로드를 진행합니다.」 텍스트 → `start_music_download(lyricsOption=none)` (완료 대기 금지)
+- **다운로드 선응답**: 곡이 **1건으로 확정**되었거나 사용자가 칩으로 고른 뒤에만 「다운로드를 진행합니다.」→ `start_music_download(lyricsOption=none)`. **복수 후보 선택 대기 중에는 이 문구 금지**(「아래 목록에서 받을 곡을 선택해 주세요.」).
+- **트랙 칩 선택**: 클라이언트가 hit를 캐시/`[AI_LAB_TRACK_SELECT]`로 전달. 재검색·선택 루프 차단.
 - **가사 기본 없음**. 미요청 + `lyricsAskEligible`이면 「가사도 생성을 할까요?」. 모델(wav2vec2-base + en-kotransliterator) 미설치면 되묻기 자체를 하지 않음
 - 후속: `start_ai_lab_lyrics` → (영문만) 번역 질문 → `translate_ai_lab_lyrics`(Google 고정)
 - `lyricsOption`: `none|auto` (번역은 download에 넣지 않음)
@@ -559,10 +560,11 @@ start_music_download(hit, lyricsOption)
   → Intent Classifier (Gemini Flash Lite JSON)
        intent: general|music|latest|download|app|recommendation
        needSearch / needDownloadTools / needVector / needFaq
-       (Classifier 실패·API 키 없음 → source=`classifier_failed`, 도구 비활성. 휴리스틱 폴백 없음)
+       (Classifier 후 **다운로드/검색 키워드 가드** — DOWNLOAD_RULES·Context용.
+        Melon `download_fc`는 Intent와 무관하게 FC 지원 모델에 **항상** 첨부.)
   → Context Collectors (스텁)
        FAQ — faqData 키워드 매칭 / VectorDB — 스텁(내일 RAG)
-  → toolMode = download | none  (web_search 모드 비활성)
+  → toolMode = download(FC 지원) | none(FC 미지원)  (web_search 모드 비활성)
   → 모듈형 System Prompt([CURRENT_DATETIME] + DB ADMIN + Intent/Tool 런타임) + 메인 LLM 스트리밍
   → finalize + waitUntil quota
 ```
@@ -571,11 +573,14 @@ start_music_download(hit, lyricsOption)
 
 | Intent 예 | toolMode | 비고 |
 | --- | --- | --- |
-| `BTS가 누구야` → music | none | plain LLM + DB 역할/답변 규칙 |
-| `이번주 빌보드` → latest | none | 웹 검색 없음(검색 툴 미첨부) |
+| `BTS가 누구야` → music | **download** (FC 지원 모델) | Melon `download_fc` **항상 첨부**. Intent로 도구를 끄지 않음 |
+| `이번주 빌보드` → latest | **download** (FC 지원 모델) | 웹 검색 없음. Melon FC는 첨부(모델이 안 쓸 수 있음) |
 | `아이유 노래 넣어줘` → download | download | FC(앱 실행) + 코드 DOWNLOAD_RULES |
-| `내가 좋아할 노래` → recommendation | none(+needVector) | Vector 스텁 — RAG 연동 시 Context 채움 |
-| `로그인 안 돼요` → app | none(+needFaq) | FAQ 키워드 매칭 → FAQ_HITS |
+| 칩 클릭 `가수 - 제목 (앨범)` | download | 키워드 없어도 Melon FC ON (후속 다운로드) |
+| `내가 좋아할 노래` → recommendation | download(+needVector) | Vector 스텁 — RAG 연동 시 Context 채움 |
+| `로그인 안 돼요` → app | download(+needFaq) | FAQ 키워드 매칭 → FAQ_HITS |
+
+**정책(2026-07-30):** Function Calling을 지원하는 제공자(Google/Groq 등)에서는 Melon 검색·다운로드·가사 `download_fc`를 **Intent와 무관하게 매 턴 첨부**한다. Intent는 Context(FAQ/RAG)와 프롬프트 보강용이며 도구 ON/OFF 게이트가 아니다. FC 미지원 모델만 `toolMode=none`.
 
 **제거됨(2026-07-29):** 모든 모델의 인터넷 검색(`google_search` / `browser_search`), `[WEB_SEARCH_RULES]` 주입, `[KNOWLEDGE_CUTOFF]` 주입. DB 활성 시 Edge `[ROLE]`/`[ANSWER_RULES]` 중복 주입 안 함.
 
@@ -602,10 +607,10 @@ start_music_download(hit, lyricsOption)
 | `final` | 확정 | assistant 또는 system |
 | `error` | 복구 불가 | message |
 
-도구 모드(Intent 배타):
-- **download** → 다운로드 function tools만. LLM이 `list_ready_download_platforms` 등을 호출. Interactions는 `{type:"function",…}` + `previous_interaction_id`/`function_result`
+도구 모드:
+- **download** → FC 지원 모델이면 **항상**. Melon function tools. Interactions는 `{type:"function",…}` + `previous_interaction_id`/`function_result`
 - **web_search** → **비활성**(2026-07-29). Gemini `google_search` / Groq `browser_search` 미첨부
-- **none** → tools 없음
+- **none** → FC 미지원 제공자/모델만. (Intent가 general이어도 FC 모델은 none이 아님)
 
 ### Gemini API 모드 (2026-07-29) — Interactions 기본 / Legacy Feature Flag
 

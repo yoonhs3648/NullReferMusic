@@ -100,17 +100,25 @@ export class PromptBuilder {
         `- 여러 곡 요청이면 1곡만 진행하고 나머지는 새 메시지로 안내.\n` +
         `\n` +
         `## 검색 (Melon 자동 — 「멜론에서」 불필요)\n` +
-        `- 곡/트랙 정보·다운로드: search_music(query)\n` +
+        `- 곡/트랙 정보·다운로드: 반드시 search_music(query)부터.\n` +
         `- 가수 정보: search_music_artist(query)\n` +
         `- 앨범 정보: search_music_album(query)\n` +
+        `- 「이센스 독을 다운로드해줘」→ search_music(\"이센스 독\") → (선택) → start_music_download.\n` +
         `- 「blooming 알려줘」→ search_music. Spotify 등 다른 플랫폼 요청 시 FC 없이 미지원 안내.\n` +
         `- 결과 복수면 choices로 확인. 트랙 칩 포맷: 「가수 - 노래제목 (앨범명)」\n` +
+        `- 다운로드 요청인데 검색 없이 start_music_download만 호출하지 않는다(단, [AI_LAB_TRACK_SELECT] 제외).\n` +
         `\n` +
-        `## 다운로드 선응답 (필수)\n` +
-        `1) Melon 검색 → 필요 시 사용자 선택\n` +
-        `2) 다운로드 확정 시 먼저 텍스트로 「다운로드를 진행합니다.」를 말한 뒤\n` +
-        `   start_music_download(hit, lyricsOption=none) 호출. 완료를 기다리지 않는다.\n` +
-        `3) YouTube는 Melon artist+title로만 (사용자 원문 직접 검색 가정 금지)\n` +
+        `## 복수 후보 = 선택 대기 (필수)\n` +
+        `- search_music 결과가 2건 이상이면 「다운로드를 진행합니다.」를 절대 말하지 않는다.\n` +
+        `- 텍스트는 「아래 목록에서 받을 곡을 선택해 주세요.」처럼 선택 안내만.\n` +
+        `- 이 턴에 start_music_download 호출 금지. 재검색 금지. choices만 기다린다.\n` +
+        `\n` +
+        `## 곡 확정 후 다운로드 (필수 — 텍스트만 금지)\n` +
+        `- 결과 1건이거나 사용자가 곡을 고른 뒤: function call start_music_download(hit, lyricsOption=none)가 필수다.\n` +
+        `- 「다운로드를 진행합니다.」텍스트만 하고 도구를 안 부르면 실패다.\n` +
+        `- 메시지에 [AI_LAB_TRACK_SELECT]{...hit...}가 있으면 search_* 금지.\n` +
+        `  같은 응답에서 start_music_download(JSON hit)를 반드시 호출.\n` +
+        `- YouTube는 Melon artist+title로만 (사용자 원문 직접 검색 가정 금지)\n` +
         `\n` +
         `## 가사 (기본 생성 안 함)\n` +
         `- 「아이유 blooming 다운로드해줘」→ 가사 없이 오디오만.\n` +
@@ -123,7 +131,12 @@ export class PromptBuilder {
         `- 정렬은 항상 wav2vec2-base + 다국어 발음 전처리. 한국어팩/영어팩/번역지원 선택지 금지.\n` +
         `- 영문 가사 완료 후 번역 질문(또는 「예, 번역해주세요」)→ translate_ai_lab_lyrics.\n` +
         `  번역기는 항상 Google Translator(DeepL 설정 무시).\n` +
-        `- lyricsOption: none|auto 만 사용. 번역은 start_music_download에 넣지 않는다.`,
+        `- lyricsOption: none|auto 만 사용. 번역은 start_music_download에 넣지 않는다.\n` +
+        `\n` +
+        `## 금지\n` +
+        `- 도구가 있는데 「앱에서 직접 다운로드하세요」「다운로드 도구가 없다」고 거절하지 않는다.\n` +
+        `- 선택 대기 중에 「다운로드를 진행합니다.」를 말하지 않는다.\n` +
+        `- [AI_LAB_TRACK_SELECT] 이후 search_* 재호출·choices 재제시 금지.`,
     );
   }
 
@@ -197,14 +210,16 @@ export class PromptBuilder {
       return this.addRequired(
         'tools',
         70,
-        `[TOOLS]\n이번 요청에는 호출 가능한 도구가 없다.\n텍스트로만 답한다.`,
+        `[TOOLS]\n이번 요청에는 Function Calling 도구가 없다(제공자/모델이 FC 미지원).\n텍스트로만 답한다.`,
       );
     }
     const names = tools.map((t) => t.name).join(', ');
     return this.addRequired(
       'tools',
       70,
-      `[TOOL_USAGE_RULES]\n사용 가능 도구: ${names}\n스키마에 맞는 인자만 넘긴다.`,
+      `[TOOL_USAGE_RULES]\n사용 가능 도구(항상 호출 가능): ${names}\n` +
+        `스키마에 맞는 인자만 넘긴다.\n` +
+        `다운로드·곡 찾기·가사 요청이면 반드시 해당 도구를 쓴다. 「도구 없음」「앱에서 직접」거절 금지.`,
     );
   }
 

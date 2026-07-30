@@ -3,6 +3,7 @@
 import type { NrmAiLabConversation, NrmAiLabMessage } from '@/lib/nrmAiLabChatUi';
 import { nrmAiLabRelativeTimeLabel } from '@/lib/nrmAiLabChatUi';
 import { stripNrmAiLabSourcesMarker } from '@/lib/nrmAiLabWebSources';
+import { sanitizeAiLabUserVisibleContent } from '@/lib/nrmAiLabVisibleContent';
 import { NRM_SUPABASE_TABLES } from '@/lib/nrmSupabaseConfig';
 import { nrmSbRpc, nrmSbSelect } from '@/lib/nrmSupabaseCrud';
 import type {
@@ -30,7 +31,9 @@ export function mapMessageRow(row: NrmSupabaseChatMessageRow): NrmAiLabMessage {
   return {
     id: String(row.MessageID),
     role,
-    content: stripNrmAiLabSourcesMarker(String(row.Content ?? '')),
+    content: sanitizeAiLabUserVisibleContent(
+      stripNrmAiLabSourcesMarker(String(row.Content ?? '')),
+    ),
   };
 }
 

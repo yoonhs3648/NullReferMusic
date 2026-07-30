@@ -275,8 +275,8 @@ export async function runPlanner(input: PlannerInput): Promise<{
   const toolMode = deriveToolMode(tools, input.isToolContinue);
 
   const tPrompt = Date.now();
-  const allowDownloadPrompt =
-    toolMode === 'download' || intent.needsDownloadTool || intent.needsMusicSearch;
+  /** download_fc가 붙은 모든 요청에 DOWNLOAD_RULES 포함 (Intent 무관) */
+  const allowDownloadPrompt = tools.some((t) => t.kind === 'download_fc');
   const platformCaps = edgeMusicPlatformCapabilities(musicPlatform.id);
   // 역할·답변 원칙·Tool 일반 규칙은 DB LLMSystemPrompt(확정본)가 SSOT.
   // 코드는 [CURRENT_DATETIME]·Intent·다운로드 FC 상세·도구 목록 등 런타임만 보강.

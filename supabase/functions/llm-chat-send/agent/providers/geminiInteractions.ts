@@ -353,6 +353,11 @@ function sanitizeAssistantVisibleText(text: string): string {
   t = t.replace(/\[WEB_SEARCH_ENABLED\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
   t = t.replace(/\[CURRENT_DATETIME\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
   t = t.replace(/\[TOOLS\][^\n]*(?:\n(?!\[[A-Z_]+)[^\n]*)*/g, '');
+  t = t.replace(/\[DOWNLOAD_RULES\][\s\S]*?(?=\n\[[A-Z_]+\]|\n*$)/g, '');
+  t = t.replace(/\[TOOL_USAGE_RULES\][\s\S]*?(?=\n\[[A-Z_]+\]|\n*$)/g, '');
+  t = t.replace(/\[INTERNAL_CLIENT_STATE\][\s\S]*$/g, '');
+  t = t.replace(/\[INTERNAL\][\s\S]*$/g, '');
+  t = t.replace(/\[AI_LAB_[A-Z0-9_]+\][\s\S]*$/g, '');
   t = t.replace(/[ \t]{2,}/g, ' ');
   t = t.replace(/ ?\n/g, '\n');
   t = t.replace(/\n{3,}/g, '\n\n');

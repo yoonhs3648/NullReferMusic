@@ -84,6 +84,132 @@ export type NrmAiLabTrackHit = {
 
 export type NrmAiLabChoice = { id: string; label: string };
 
+const TRACK_HIT_CACHE_MAX = 48;
+const recentTrackHitsByRef = new Map<string, NrmAiLabTrackHit>();
+
+/** 검색 hits를 칩 선택용으로 캐시 (앱 프로세스 내) */
+export function cacheAiLabTrackHits(hits: NrmAiLabTrackHit[]): void {
+  for (const h of hits) {
+    const ref = String(h?.ref ?? '').trim();
+    if (!ref || !h.title || !h.artist) continue;
+    recentTrackHitsByRef.set(ref, h);
+  }
+  while (recentTrackHitsByRef.size > TRACK_HIT_CACHE_MAX) {
+    const first = recentTrackHitsByRef.keys().next().value;
+    if (first == null) break;
+    recentTrackHitsByRef.delete(first);
+  }
+}
+
+export function getCachedAiLabTrackHit(ref: string): NrmAiLabTrackHit | undefined {
+  const key = String(ref ?? '').trim();
+  if (!key) return undefined;
+  return recentTrackHitsByRef.get(key);
+}
+
+/** 트랙 칩(id=melon ref)인지 — 가사 예/아니요 등과 구분 */
+export function isAiLabTrackChoiceId(id: string): boolean {
+  const key = String(id ?? '').trim();
+  if (!key) return false;
+  if (key === 'lyrics_yes' || key === 'lyrics_no') return false;
+  if (key === 'translate_yes' || key === 'translate_no') return false;
+  return key.startsWith('melon:') || recentTrackHitsByRef.has(key);
+}
+
+/** 칩 label 「가수 - 제목 (앨범)」에서 hit 복원 (캐시 미스 시) */
+export function hitFromAiLabTrackChoice(
+  choice: NrmAiLabChoice,
+): NrmAiLabTrackHit | undefined {
+  const cached = getCachedAiLabTrackHit(choice.id);
+  if (cached) return cached;
+  const id = String(choice.id ?? '').trim();
+  if (!id.startsWith('melon:')) return undefined;
+  const label = String(choice.label ?? '').trim();
+  if (!label) return undefined;
+  let artist = '';
+  let title = '';
+  let album = '';
+  const albumMatch = label.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+  const main = albumMatch ? albumMatch[1]!.trim() : label;
+  album = albumMatch ? albumMatch[2]!.trim() : '';
+  const dash = main.indexOf(' - ');
+  if (dash >= 0) {
+    artist = main.slice(0, dash).trim();
+    title = main.slice(dash + 3).trim();
+  } else {
+    title = main;
+  }
+  if (!title) return undefined;
+  const hit: NrmAiLabTrackHit = {
+    ref: id,
+    platform: 'melon',
+    title,
+    artist: artist || 'Unknown',
+    album,
+    imageUrl: '',
+    externalUrl: '',
+    releaseDate: '',
+    genre: '',
+  };
+  cacheAiLabTrackHits([hit]);
+  return hit;
+}
+
+/**
+ * 트랙 선택 후 LLM에 넘기는 메시지(히트 JSON 포함).
+ * 화면 표시는 choice.label만 쓰고, API에는 이 문자열을 보낸다.
+ */
+export function buildAiLabTrackSelectApiMessage(
+  hit: NrmAiLabTrackHit,
+  label: string,
+): string {
+  const payload = JSON.stringify({
+    ref: hit.ref,
+    platform: hit.platform || 'melon',
+    title: hit.title,
+    artist: hit.artist,
+    album: hit.album ?? '',
+    imageUrl: hit.imageUrl ?? '',
+    externalUrl: hit.externalUrl ?? '',
+    releaseDate: hit.releaseDate ?? '',
+    genre: hit.genre ?? '',
+  });
+  return (
+    `[AI_LAB_TRACK_SELECT]${payload}\n` +
+    `사용자가 곡을 선택했다: ${label}\n` +
+    `search_music/search_music_artist/search_music_album 호출 금지.\n` +
+    `반드시 function call로 start_music_download(hit=위 JSON, lyricsOption=none)를 호출한다.\n` +
+    `텍스트만 「다운로드를 진행합니다.」하고 끝내면 실패다. 도구 호출이 필수다.`
+  );
+}
+
+export function parseAiLabTrackSelectHit(message: string): NrmAiLabTrackHit | null {
+  const m = String(message ?? '').match(/\[AI_LAB_TRACK_SELECT\](\{[\s\S]*?\})\n/);
+  if (!m?.[1]) return null;
+  try {
+    const obj = JSON.parse(m[1]) as Partial<NrmAiLabTrackHit>;
+    const ref = String(obj.ref ?? '').trim();
+    const title = String(obj.title ?? '').trim();
+    const artist = String(obj.artist ?? '').trim();
+    if (!ref || !title || !artist) return null;
+    const hit: NrmAiLabTrackHit = {
+      ref,
+      platform: (obj.platform as NrmAiLabDownloadPlatformId) || 'melon',
+      title,
+      artist,
+      album: String(obj.album ?? ''),
+      imageUrl: String(obj.imageUrl ?? ''),
+      externalUrl: String(obj.externalUrl ?? ''),
+      releaseDate: String(obj.releaseDate ?? ''),
+      genre: String(obj.genre ?? ''),
+    };
+    cacheAiLabTrackHits([hit]);
+    return hit;
+  } catch {
+    return null;
+  }
+}
+
 /** AI Lab lyricsOption (FC) — 기본 none. 번역은 후속 translate_ai_lab_lyrics */
 export type AiLabLyricsOption =
   | 'none'
@@ -231,6 +357,7 @@ async function searchMusicTool(
 
   const out = await searchViaMusicMetadataProvider(query, MusicPlatformId.MELON);
   const count = out.hits.length;
+  if (count > 0) cacheAiLabTrackHits(out.hits);
   return {
     result: {
       ok: !out.error && count > 0,
@@ -246,7 +373,7 @@ async function searchMusicTool(
         count === 1
           ? '검색 결과 1건. 다운로드면 먼저 「다운로드를 진행합니다.」를 말한 뒤 start_music_download(hit, lyricsOption=none). 가사 미요청이면 capability로 되묻기. 요청당 1곡.'
           : count > 1
-            ? '여러 후보 — choices(가수 - 제목 (앨범))로 사용자 선택 후 진행. 요청당 다운로드 1곡만.'
+            ? '여러 후보. 텍스트는 「아래 목록에서 받을 곡을 선택해 주세요.」만. 「다운로드를 진행합니다」금지. start_music_download·재검색 금지. choices 대기.'
             : out.error
               ? null
               : '검색 결과 없음',
@@ -605,6 +732,7 @@ export async function executeAiLabDownloadTool(
       };
     }
     const out = await searchTrackOnPlatform('melon', query);
+    if (out.hits.length > 0) cacheAiLabTrackHits(out.hits);
     return {
       result: {
         hits: out.hits,

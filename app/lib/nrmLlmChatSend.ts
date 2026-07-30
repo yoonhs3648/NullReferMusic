@@ -115,6 +115,20 @@ export async function sendLlmChatMessageStream(
     musicPlatformLabel?: string;
     musicPlatformBlocked?: boolean;
     musicPlatformExplicit?: boolean;
+    /** 트랙 칩 선택 hit — DB Content가 아니라 LLM 전용 힌트 */
+    trackSelectHit?: {
+      ref: string;
+      platform?: string;
+      title: string;
+      artist: string;
+      album?: string;
+      imageUrl?: string;
+      externalUrl?: string;
+      releaseDate?: string;
+      genre?: string;
+    } | null;
+    /** 앱이 이미 start_music_download를 실행함 */
+    downloadAlreadyStarted?: boolean;
   },
   handlers: NrmLlmChatSendHandlers,
 ): Promise<{
@@ -135,6 +149,8 @@ export async function sendLlmChatMessageStream(
     musicPlatformLabel,
     musicPlatformBlocked,
     musicPlatformExplicit,
+    trackSelectHit,
+    downloadAlreadyStarted,
   } = params;
   const startedAt = Date.now();
   const isToolContinue = toolContinue === true && (toolResults?.length ?? 0) > 0;
@@ -146,6 +162,8 @@ export async function sendLlmChatMessageStream(
     messageLength: message.length,
     toolContinue: isToolContinue,
     toolResultCount: toolResults?.length ?? 0,
+    hasTrackSelectHit: Boolean(trackSelectHit?.ref),
+    downloadAlreadyStarted: downloadAlreadyStarted === true,
   });
 
   if (!isToolContinue && !message.trim()) {
@@ -178,6 +196,22 @@ export async function sendLlmChatMessageStream(
         musicPlatformLabel: musicPlatformLabel ?? null,
         musicPlatformBlocked: musicPlatformBlocked === true,
         musicPlatformExplicit: musicPlatformExplicit === true,
+        trackSelectHit:
+          !isToolContinue && trackSelectHit?.ref && trackSelectHit.title && trackSelectHit.artist
+            ? {
+                ref: trackSelectHit.ref,
+                platform: trackSelectHit.platform ?? 'melon',
+                title: trackSelectHit.title,
+                artist: trackSelectHit.artist,
+                album: trackSelectHit.album ?? '',
+                imageUrl: trackSelectHit.imageUrl ?? '',
+                externalUrl: trackSelectHit.externalUrl ?? '',
+                releaseDate: trackSelectHit.releaseDate ?? '',
+                genre: trackSelectHit.genre ?? '',
+              }
+            : undefined,
+        downloadAlreadyStarted:
+          !isToolContinue && downloadAlreadyStarted === true ? true : undefined,
       }),
     });
   } catch (e) {

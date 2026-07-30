@@ -14,9 +14,13 @@ export type AiLabIntentKind =
 
 export type IntentSource =
   | 'classifier'
+  /** Classifier 결과에 다운로드/검색 키워드 가드를 적용함 */
+  | 'classifier_guarded'
   | 'classifier_failed'
+  /** Classifier 실패·없음이지만 다운로드/검색 키워드로 도구 ON */
+  | 'keyword_guard'
   | 'tool_continue'
-  /** @deprecated analyzeUserIntent에서는 더 이상 사용하지 않음 */
+  /** @deprecated 전체 휴리스틱 폴백은 사용하지 않음 */
   | 'heuristic_fallback';
 
 export type IntentResult = {
