@@ -346,6 +346,11 @@ export function isAiLabTranslateChoiceId(id: string): boolean {
   return id === 'translate_yes' || id === 'translate_no';
 }
 
+/** 다운로드 후 「예, 가사 생성」/「아니요」칩 — LLM 없이 앱 로컬 처리 */
+export function isAiLabLyricsChoiceId(id: string): boolean {
+  return id === 'lyrics_yes' || id === 'lyrics_no';
+}
+
 export async function startAiLabLyrics(params: {
   videoId?: string;
   hit?: NrmAiLabTrackHit;

@@ -68,9 +68,13 @@ const RE_DOWNLOAD =
 const RE_MUSIC_SEARCH =
   /찾아\s*줘|찾아줘|검색해|검색\s*해|search|알려\s*줘|알려줘|정보\s*알려|곡\s*정보|노래\s*정보|스포티파이에서|spotify에서|멜론에서|유튜브에서/i;
 
-/** Melon 차트·순위 조회 (search_melon_chart) */
+/** Melon 차트·순위 조회 (search_melon_chart) — 빌보드 등 미지원 차트 폴백 포함 */
 const RE_MELON_CHART =
-  /차트|순위|1위|일간|주간|월간|연간|핫\s*100|hot\s*100|top\s*100|톱\s*100|멜론\s*1|오늘\s*.*1위|실시간\s*차트/i;
+  /차트|순위|1위|일간|주간|월간|연간|핫\s*100|hot\s*100|top\s*100|톱\s*100|멜론\s*1|오늘\s*.*1위|실시간\s*차트|빌보드|billboard/i;
+
+/** Melon 폴백 수락 (클라이언트 rewrite) */
+const RE_MELON_FALLBACK =
+  /\[AI_LAB_MELON_FALLBACK\]|Melon으로\s*검색해서\s*진행|멜론으로\s*검색해서\s*진행/i;
 
 /** 가수/앨범 쪽 힌트 (프롬프트·가드용, intent 강제에는 보조) */
 const RE_ARTIST_HINT = /가수|아티스트|artist|누구야|멤버/i;
@@ -116,6 +120,7 @@ export function messageLooksLikeMusicSearch(userMessage: string): boolean {
   const t = userMessage.trim();
   if (RE_MUSIC_SEARCH.test(t)) return true;
   if (RE_MELON_CHART.test(t)) return true;
+  if (RE_MELON_FALLBACK.test(t)) return true;
   // 「이센스 독」처럼 짧은 곡명만 있어도 다운로드 가드와 결합될 때 검색 필요
   return false;
 }
@@ -187,7 +192,9 @@ export function applyIntentMessageGuards(
 
   const wantsDownload = messageLooksLikeDownload(t);
   const wantsChart = messageLooksLikeMelonChart(t);
-  const wantsSearch = messageLooksLikeMusicSearch(t) || wantsDownload || wantsChart;
+  const melonFallback = RE_MELON_FALLBACK.test(t);
+  const wantsSearch =
+    messageLooksLikeMusicSearch(t) || wantsDownload || wantsChart || melonFallback;
 
   if (wantsDownload) {
     if (
@@ -211,12 +218,20 @@ export function applyIntentMessageGuards(
     if (!next.needsMusicSearch || (wantsChart && next.needsWebSearch)) guarded = true;
     next = {
       ...next,
-      intent: wantsChart && next.intent === 'latest' ? 'music' : next.intent,
+      intent:
+        (wantsChart || melonFallback) && next.intent === 'latest' ? 'music' : next.intent,
       needsMusicSearch: true,
-      needsWebSearch: wantsChart ? false : next.needsWebSearch,
+      needsWebSearch: wantsChart || melonFallback ? false : next.needsWebSearch,
       // 곡 찾기만 해도 Melon FC가 필요 — download intent까지는 강제하지 않음
-      confidence: Math.max(next.confidence, wantsChart ? 0.85 : 0.75),
-      reasoning: [next.reasoning, wantsChart ? 'guard:melon_chart' : 'guard:music_search']
+      confidence: Math.max(next.confidence, wantsChart || melonFallback ? 0.85 : 0.75),
+      reasoning: [
+        next.reasoning,
+        melonFallback
+          ? 'guard:melon_fallback'
+          : wantsChart
+            ? 'guard:melon_chart'
+            : 'guard:music_search',
+      ]
         .filter(Boolean)
         .join('|')
         .slice(0, 160),

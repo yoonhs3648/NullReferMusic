@@ -44,10 +44,15 @@ import {
 import {
   aiLabMusicPlatformUnavailableMessage,
   DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
+  isAiLabMelonSearchChoiceId,
+  isAiLabMelonSearchChoiceUserText,
   loadAiLabSelectedMusicPlatformId,
+  MELON_SEARCH_YES_NO_CHOICES,
+  MusicPlatformId,
   resolveAiLabMusicPlatformForMessage,
+  rewriteAiLabQueryForMelonFallback,
   saveAiLabSelectedMusicPlatformId,
-  type MusicPlatformId,
+  type MusicPlatformId as MusicPlatformIdT,
 } from '@/lib/nrmAiLabMusicPlatform';
 import {
   fetchAiLabSuggestionCatalog,
@@ -80,9 +85,12 @@ import {
 import {
   acceptAiLabTranslation,
   declineAiLabTranslation,
+  isAiLabLyricsChoiceId,
   isAiLabTranslateChoiceId,
   LYRICS_YES_NO_CHOICES,
   setAiLabLyricsFollowupHooks,
+  startAiLabLyrics,
+  TRANSLATE_YES_NO_CHOICES,
 } from '@/lib/nrmAiLabLyricsFollowup';
 import {
   AI_LAB_YOUTUBE_EXHAUSTED_MESSAGE,
@@ -174,7 +182,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const suggestionCatalogRef = useRef<Awaited<ReturnType<typeof fetchAiLabSuggestionCatalog>>>([]);
   /** AsyncStorage 선호 모델 로드 완료 전엔 기본값으로 저장을 덮어쓰지 않음 */
   const [llmModelPrefReady, setLlmModelPrefReady] = useState(false);
-  const [musicPlatformId, setMusicPlatformId] = useState<MusicPlatformId>(
+  const [musicPlatformId, setMusicPlatformId] = useState<MusicPlatformIdT>(
     DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
   );
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -356,7 +364,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     setLlmModelId((prev) => (prev == null ? modelId : prev));
   }, []);
 
-  const handleMusicPlatformChange = useCallback((id: MusicPlatformId) => {
+  const handleMusicPlatformChange = useCallback((id: MusicPlatformIdT) => {
     setMusicPlatformId(id);
     void saveAiLabSelectedMusicPlatformId(id);
   }, []);
@@ -596,12 +604,19 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   );
 
   const sendUserText = useCallback(
-    (text: string, opts?: { displayText?: string; trackSelectHit?: NrmAiLabTrackHit }) => {
+    (text: string, opts?: {
+      displayText?: string;
+      apiMessage?: string;
+      trackSelectHit?: NrmAiLabTrackHit;
+      /** Melon 폴백 수락 등 — 플랫폼 탐지 결과를 Melon으로 강제 */
+      forceMusicPlatformId?: MusicPlatformIdT;
+    }) => {
       if (!text || sending || !serialNo || llmModelId == null) return;
 
       const displayText = (opts?.displayText ?? text).trim() || text;
-      const apiText = displayText;
+      const apiText = (opts?.apiMessage ?? displayText).trim() || displayText;
       const selectedHit = opts?.trackSelectHit ?? null;
+      const forceMusicPlatformId = opts?.forceMusicPlatformId ?? null;
 
       stickToBottomRef.current = true;
       pinListToBottom({ force: true, animated: false });
@@ -663,17 +678,19 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         let sessionIdForApi: string | null = targetId;
 
         const resolvedPlatform = await resolveAiLabMusicPlatformForMessage(
-          displayText,
+          apiText,
           musicPlatformId,
+          forceMusicPlatformId ? { forcePlatformId: forceMusicPlatformId } : undefined,
         );
         const musicPlatformBlocked =
           !resolvedPlatform.available || !resolvedPlatform.searchSupported;
 
         if (resolvedPlatform.explicit && !resolvedPlatform.available) {
-          const sysMsg: NrmAiLabMessage = {
-            id: nextTempId('s'),
-            role: 'system',
+          const assistantMsg: NrmAiLabMessage = {
+            id: nextTempId('a'),
+            role: 'assistant',
             content: aiLabMusicPlatformUnavailableMessage(resolvedPlatform.label),
+            choices: MELON_SEARCH_YES_NO_CHOICES,
           };
           setConversations((prev) =>
             prev.map((c) =>
@@ -683,7 +700,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                     messages: c.messages
                       .filter((m) => m.id !== tempAssistantId)
                       .map((m) => (m.id === tempUserId ? { ...m, pending: false } : m))
-                      .concat(sysMsg),
+                      .concat(assistantMsg),
                   }
                 : c,
             ),
@@ -700,7 +717,8 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           let lastAssistantText = '';
           const userLikelyWantsDownload =
             selectedHit != null ||
-            /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(displayText);
+            /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(displayText) ||
+            /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(apiText);
 
           // 칩으로 곡이 확정되면 YouTube 후보 확인(미리듣기)부터 — 다운로드는 「맞다」후
           let preforcedLyricsChoices: NrmAiLabChoice[] | undefined;
@@ -955,7 +973,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 serialNo,
                 modelId: llmModelId,
                 sessionId: sessionIdForApi,
-                message: toolContinue ? '' : displayText,
+                message: toolContinue ? '' : apiText,
                 toolContinue,
                 toolResults: toolContinue ? toolResults : undefined,
                 previousInteractionId: toolContinue ? previousInteractionId : undefined,
@@ -1432,7 +1450,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   }, [draft, llmModelId, sendUserText, sending, serialNo]);
 
   const handleChoicePress = useCallback(
-    (choice: NrmAiLabChoice) => {
+    (choice: NrmAiLabChoice, messageId?: string) => {
       if (sending || !serialNo || llmModelId == null) return;
       if (isAiLabMoreMusicListChoiceId(choice.id)) {
         const convId = activeIdRef.current;
@@ -1462,6 +1480,67 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 ? {
                     ...c,
                     messages: [...c.messages, userMsg, assistantMsg],
+                    updatedAtLabel: '지금',
+                    updatedAtIso: new Date().toISOString(),
+                  }
+                : c,
+            ),
+          );
+          stickToBottomRef.current = true;
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          });
+        })();
+        return;
+      }
+      if (isAiLabLyricsChoiceId(choice.id)) {
+        const convId = activeIdRef.current;
+        if (!convId) return;
+        const userMsg: NrmAiLabMessage = {
+          id: nextTempId('u'),
+          role: 'user',
+          content: choice.label,
+        };
+        void (async () => {
+          let assistantContent: string;
+          let assistantChoices: NrmAiLabChoice[] | undefined;
+          if (choice.id === 'lyrics_yes') {
+            const out = await startAiLabLyrics({});
+            if (out.ok !== true) {
+              assistantContent = String(
+                out.message ?? '가사 생성을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+              );
+            } else if (out.askTranslation === true) {
+              assistantContent =
+                '가사 생성을 시작했습니다. 영문 가사로 보여 번역도 할까요? 완료되면 알림으로 알려 드릴게요.';
+              assistantChoices = TRANSLATE_YES_NO_CHOICES;
+            } else {
+              assistantContent =
+                '가사 생성을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
+            }
+          } else {
+            assistantContent = '알겠습니다. 가사 생성은 진행하지 않습니다.';
+          }
+          const assistantMsg: NrmAiLabMessage = {
+            id: nextTempId('a'),
+            role: 'assistant',
+            content: assistantContent,
+            choices: assistantChoices,
+          };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: [
+                      ...c.messages.map((m) =>
+                        m.choices?.some((ch) => isAiLabLyricsChoiceId(ch.id))
+                          ? { ...m, choices: undefined }
+                          : m,
+                      ),
+                      userMsg,
+                      assistantMsg,
+                    ],
                     updatedAtLabel: '지금',
                     updatedAtIso: new Date().toISOString(),
                   }
@@ -1532,6 +1611,81 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             listRef.current?.scrollToEnd({ animated: true });
           });
         })();
+        return;
+      }
+      if (isAiLabMelonSearchChoiceId(choice.id)) {
+        const convId = activeIdRef.current;
+        if (!convId) return;
+        const stripMelonChoicesOn = (messages: NrmAiLabMessage[], hostId?: string) =>
+          messages.map((m) => {
+            if (hostId && m.id !== hostId) return m;
+            if (!m.choices?.some((ch) => isAiLabMelonSearchChoiceId(ch.id))) return m;
+            return { ...m, choices: undefined };
+          });
+        if (choice.id === 'melon_search_no') {
+          const userMsg: NrmAiLabMessage = {
+            id: nextTempId('u'),
+            role: 'user',
+            content: choice.label,
+          };
+          const assistantMsg: NrmAiLabMessage = {
+            id: nextTempId('a'),
+            role: 'assistant',
+            content: '알겠습니다. Melon 검색은 진행하지 않습니다.',
+          };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: [
+                      ...stripMelonChoicesOn(c.messages, messageId),
+                      userMsg,
+                      assistantMsg,
+                    ],
+                    updatedAtLabel: '지금',
+                    updatedAtIso: new Date().toISOString(),
+                  }
+                : c,
+            ),
+          );
+          stickToBottomRef.current = true;
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          });
+          return;
+        }
+        let original = '';
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== convId) return c;
+            const idx = messageId
+              ? c.messages.findIndex((m) => m.id === messageId)
+              : c.messages.findIndex((m) =>
+                  m.choices?.some((ch) => isAiLabMelonSearchChoiceId(ch.id)),
+                );
+            if (idx > 0) {
+              for (let i = idx - 1; i >= 0; i -= 1) {
+                const prevMsg = c.messages[i];
+                if (prevMsg?.role !== 'user') continue;
+                const content = prevMsg.content.trim();
+                // 이전 「예, Melon으로 검색」 칩 클릭·폴백 재전송은 건너뛰고 진짜 원요청을 찾는다
+                if (isAiLabMelonSearchChoiceUserText(content)) continue;
+                original = content;
+                break;
+              }
+            }
+            return {
+              ...c,
+              messages: stripMelonChoicesOn(c.messages, messageId ?? c.messages[idx]?.id),
+            };
+          }),
+        );
+        sendUserText(choice.label, {
+          displayText: choice.label,
+          apiMessage: rewriteAiLabQueryForMelonFallback(original || choice.label),
+          forceMusicPlatformId: MusicPlatformId.MELON,
+        });
         return;
       }
       const hit: NrmAiLabTrackHit | undefined = isAiLabTrackChoiceId(choice.id)
@@ -1775,7 +1929,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                   <Pressable
                     key={ch.id}
                     disabled={sending}
-                    onPress={() => handleChoicePress(ch)}
+                    onPress={() => handleChoicePress(ch, item.id)}
                     style={({ pressed }) => [
                       styles.choiceChip,
                       {

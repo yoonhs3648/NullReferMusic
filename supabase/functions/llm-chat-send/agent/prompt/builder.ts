@@ -109,6 +109,10 @@ export class PromptBuilder {
         `  · 「이번주/월간/연간 차트」→ period=weekly|monthly|yearly + date\n` +
         `- 「이센스 독을 다운로드해줘」→ search_music(\"이센스 독\") → (선택) → start_music_download.\n` +
         `- 「blooming 알려줘」→ search_music. Spotify 등 다른 플랫폼 요청 시 FC 없이 미지원 안내.\n` +
+        `- [AI_LAB_MELON_FALLBACK] 또는 「Melon으로 검색해서 진행」: 사용자가 Melon 폴백을 수락한 것이다.\n` +
+        `  곡명·가수를 다시 묻지 말고 원요청을 Melon 도구로 즉시 처리한다.\n` +
+        `  · 차트·1위·순위·빌보드/스포티파이 차트 언급 → search_melon_chart(Melon 차트로 대체)\n` +
+        `  · 곡명·가수 검색/다운로드 → search_music 후(필요 시) start_music_download\n` +
         `- 결과 복수면 choices로 확인(한 페이지 최대 5개). 항상 「다른 목록 보기」칩이 있으면 사용자가 눌러 다음 목록을 본다(앱이 처리, 재검색 FC 금지).\n` +
         `- 트랙 칩 포맷: 「가수 - 노래제목 (앨범명)」, 차트는 「#순위 가수 - 제목 (앨범)」\n` +
         `- 다운로드 요청인데 검색/차트 없이 start_music_download만 호출하지 않는다(단, [AI_LAB_TRACK_SELECT] 제외).\n` +
@@ -176,7 +180,10 @@ export class PromptBuilder {
         `\n\n[MUSIC_PLATFORM_BLOCKED]\n` +
         `요청 플랫폼(${label})은 이번 버전에서 검색을 지원하지 않는다.\n` +
         `- search_music을 해당 platform으로 호출하지 않는다.\n` +
-        `- 「${label} 검색은 현재 지원하지 않습니다. Melon으로 검색할까요?」를 안내한다.`;
+        `- 「${label} 검색은 현재 지원하지 않습니다. Melon으로 검색할까요?」를 안내한다.\n` +
+        `- Melon 검색 여부는 UI choices(예/아니요)로 확인한다. 텍스트로만 묻지 않는다.\n` +
+        `- 단, 메시지에 [AI_LAB_MELON_FALLBACK]/「Melon으로 검색해서 진행」이 있으면 이미 수락된 것이다.\n` +
+        `  다시 묻지 말고 Melon 도구로 원요청을 즉시 처리한다.`;
     }
     return this.addRequired('music_platform', 45, body);
   }

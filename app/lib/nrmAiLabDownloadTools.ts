@@ -8,6 +8,7 @@ import {
   aiLabNonMelonSearchMessage,
   DEFAULT_AI_LAB_MUSIC_PLATFORM_ID,
   getAiLabMusicPlatformLabel,
+  MELON_SEARCH_YES_NO_CHOICES,
   MusicPlatformId,
   normalizeMusicPlatformArg,
   type MusicPlatformId as MusicPlatformIdType,
@@ -125,6 +126,7 @@ export function isAiLabTrackChoiceId(id: string): boolean {
   if (!key) return false;
   if (key === 'lyrics_yes' || key === 'lyrics_no') return false;
   if (key === 'translate_yes' || key === 'translate_no') return false;
+  if (key === 'melon_search_yes' || key === 'melon_search_no') return false;
   if (key === 'ailab_more_music_list') return false;
   if (key.startsWith('melon-artist:') || key.startsWith('melon-album:')) return false;
   return key.startsWith('melon:') || recentTrackHitsByRef.has(key);
@@ -364,8 +366,10 @@ async function searchMusicTool(
         platformId: requested,
         message: aiLabNonMelonSearchMessage(label),
         suggestMelon: true,
-        nextHint: 'Melon으로 검색할지 사용자에게 확인한 뒤 search_music(query)만 호출.',
+        nextHint:
+          '안내 문구만 짧게. Melon 검색 여부는 choices(예/아니요)로 확인. search_music 재호출 금지. 사용자가 Melon을 수락하면 앱이 원요청+[ [AI_LAB_MELON_FALLBACK]로 다시 보낸다.',
       },
+      choices: MELON_SEARCH_YES_NO_CHOICES,
     };
   }
 
@@ -841,8 +845,12 @@ export async function executeAiLabDownloadTool(
           hits: [],
           error: 'platform_unsupported',
           message: aiLabNonMelonSearchMessage(label),
+          suggestMelon: true,
           count: 0,
+          nextHint:
+            '안내 문구만 짧게. Melon 검색 여부는 choices(예/아니요)로 확인. 재검색 금지.',
         },
+        choices: MELON_SEARCH_YES_NO_CHOICES,
       };
     }
     const out = await searchTrackOnPlatform('melon', query);
