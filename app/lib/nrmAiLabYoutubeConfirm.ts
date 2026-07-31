@@ -350,5 +350,65 @@ export function disposeAiLabYoutubeConfirmSession(sessionId: string): void {
   listeners.delete(sessionId);
 }
 
+/** DB UiMeta 스냅샷으로 미리듣기 세션을 복원한다. 이미 있으면 갱신만. */
+export function hydrateAiLabYoutubeConfirmFromSnapshot(snap: {
+  sessionId: string;
+  displayLabel: string;
+  hit: AiLabYoutubeConfirmHit;
+  meta: NrmAudioFileMetadata;
+  fileName: string;
+  lyricsMode: NrmLyricsUiMode;
+  lyricsQueued: boolean;
+  lyricsAskEligible: boolean;
+  lyricsSkippedReason?: string;
+  explicitLyricsRequest: boolean;
+  ytQuery: string;
+  candidates: YoutubeSearchItem[];
+  index: number;
+  exhausted: boolean;
+  confirmed: boolean;
+}): AiLabYoutubeConfirmSession {
+  const candidates = snap.candidates.slice(0, AI_LAB_YOUTUBE_CONFIRM_MAX);
+  const index = Math.min(Math.max(0, snap.index), Math.max(0, candidates.length - 1));
+  const exhausted = snap.exhausted || candidates.length === 0 || index >= candidates.length;
+  const confirmed = snap.confirmed === true;
+  const prev = sessions.get(snap.sessionId);
+  const session: AiLabYoutubeConfirmSession = {
+    sessionId: snap.sessionId,
+    displayLabel: snap.displayLabel,
+    hit: snap.hit,
+    meta: snap.meta,
+    fileName: snap.fileName,
+    lyricsMode: snap.lyricsMode,
+    lyricsQueued: snap.lyricsQueued,
+    lyricsAskEligible: snap.lyricsAskEligible,
+    lyricsSkippedReason: snap.lyricsSkippedReason,
+    explicitLyricsRequest: snap.explicitLyricsRequest,
+    ytQuery: snap.ytQuery,
+    candidates,
+    index,
+    uiStatus: confirmed || exhausted ? 'PAUSED' : 'PREPARING',
+    streamUrl: null,
+    durationMs: null,
+    prepareError: null,
+    prepareGeneration: (prev?.prepareGeneration ?? 0) + 1,
+    exhausted,
+    confirmed,
+  };
+  sessions.set(snap.sessionId, session);
+  logNrmDev(LOG, {
+    event: 'session_hydrated',
+    sessionId: snap.sessionId,
+    index,
+    exhausted,
+    confirmed,
+    candidateCount: candidates.length,
+  });
+  if (!confirmed && !exhausted) {
+    prepareAiLabYoutubeConfirmStream(snap.sessionId);
+  }
+  return { ...session, candidates: [...candidates] };
+}
+
 export const AI_LAB_YOUTUBE_EXHAUSTED_MESSAGE =
   '자동 YouTube 후보를 더 제공할 수 없습니다. YouTube 홈에서 직접 검색·다운로드하거나 다른 곡을 요청해 주세요.';

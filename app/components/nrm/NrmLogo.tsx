@@ -72,9 +72,8 @@ export function NrmLogo({
   const mark = (
     <View style={[styles.markSlot, { width: markSize, height: markSize }]}>
       <Image
-        source={require('@/assets/images/icon.png')}
+        source={require('@/assets/images/logo-mark.png')}
         style={[
-          styles.markImage,
           { width: markSize, height: markSize },
           disabled && styles.markDisabled,
         ]}
@@ -167,9 +166,6 @@ const styles = StyleSheet.create({
   markSlot: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  markImage: {
-    borderRadius: nrmTokens.radius.sm,
   },
   markDisabled: {
     opacity: 0.35,

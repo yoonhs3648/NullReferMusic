@@ -201,6 +201,8 @@ export type NrmSupabaseChatMessageRow = {
   OutputToken: number;
   TotalToken: number;
   RegDate: string;
+  /** choices / agentUi / youtubeConfirm 스냅샷 */
+  UiMeta?: unknown | null;
 };
 
 /** JSON 필드명 ↔ DB snake_case 매핑 참고 */

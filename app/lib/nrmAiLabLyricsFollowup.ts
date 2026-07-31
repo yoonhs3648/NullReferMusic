@@ -36,6 +36,10 @@ import { isEmbeddedSyncLyricsText } from '@/lib/nrmLrcUiMode';
 
 const LOG = 'ailab.lyricsFollowup';
 
+/** 오디오 저장 대기 — 가사 큐 레인을 막지 않도록 큐 밖에서 기다린다. */
+const AUDIO_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+const AUDIO_WAIT_INTERVAL_MS = 1500;
+
 export type AiLabLyricsCapability = {
   ok: boolean;
   wav2vec2BaseInstalled: boolean;
@@ -235,6 +239,23 @@ async function resolveTrackForRecord(
   );
 }
 
+/**
+ * 오디오 저장이 끝나 정렬에 쓸 로컬 파일이 생길 때까지 기다린다.
+ * 가사 큐는 오디오 큐가 빈 뒤에만 돌기 때문에, 이 대기를 큐 안에서 하면 서로 막힌다.
+ */
+async function waitForRecordAudioTrack(
+  record: AiLabDownloadRecord,
+): Promise<NrmDownloadTrackItem | null> {
+  const deadline = Date.now() + AUDIO_WAIT_TIMEOUT_MS;
+  for (;;) {
+    const latest = getAiLabDownloadRecord(record.videoId) ?? record;
+    const track = await resolveTrackForRecord(latest);
+    if (track && track.location.kind !== 'web') return track;
+    if (Date.now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, AUDIO_WAIT_INTERVAL_MS));
+  }
+}
+
 async function readExistingLrc(track: NrmDownloadTrackItem): Promise<string | null> {
   if (track.lrcUri) {
     try {
@@ -390,16 +411,6 @@ export async function startAiLabLyrics(params: {
     };
   }
 
-  const track = await resolveTrackForRecord(record);
-  if (!track || track.location.kind === 'web') {
-    return {
-      ok: false,
-      error: 'audio_not_ready',
-      message: '오디오 다운로드가 아직 끝나지 않았습니다. 완료 후 다시 요청해 주세요.',
-      videoId: record.videoId,
-    };
-  }
-
   const website =
     record.website?.trim() ||
     normalizeMelonTrackWebsite(record.hit.externalUrl) ||
@@ -424,44 +435,56 @@ export async function startAiLabLyrics(params: {
   nrmNotifyDownloadStarted(videoId, displayLabel, 'lyrics');
   nrmBackgroundWorkAcquire(nrmLyricsBackgroundWorkToken(videoId));
 
-  void enqueueLyricsDownloadWork(jobId, displayLabel, async () => {
+  void (async () => {
     try {
-      const workUri = await materializeTrackAudioToCache(track.audioUri, track.fileName);
-      const ext = track.extension.replace(/^\./, '') || 'm4a';
-      const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
-      const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
-      const melon = await runWhisperTranscribeSerial(displayLabel, () =>
-        transcribeMelonLyricsLrc(
-          workUri,
-          'melon',
-          ext,
-          plain,
-          'ko',
-          AI_LAB_MELON_LYRICS_PRELOAD,
-        ),
-      );
-      await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
-
-      if (melon.lyricsMelonMemoryInsufficient) {
-        void nrmNotifyLyricsFailed(displayLabel, videoId, '메모리가 부족합니다.');
+      const track = await waitForRecordAudioTrack(record);
+      if (!track) {
+        void nrmNotifyLyricsFailed(
+          displayLabel,
+          videoId,
+          '오디오 다운로드를 확인할 수 없습니다.',
+        );
         nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
         return;
       }
-      if (!melon.lrcFull?.trim()) {
-        void nrmNotifyLyricsFailed(displayLabel, videoId, '가사 정렬에 실패했습니다.');
-        nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
-        return;
-      }
+      await enqueueLyricsDownloadWork(jobId, displayLabel, async () => {
+        const workUri = await materializeTrackAudioToCache(track.audioUri, track.fileName);
+        const ext = track.extension.replace(/^\./, '') || 'm4a';
+        const { runWhisperTranscribeSerial } = await import('@/lib/nrmWhisperSerialGate');
+        const { transcribeMelonLyricsLrc } = await import('@/lib/nrmMelonLyricsLrcStage');
+        const melon = await runWhisperTranscribeSerial(displayLabel, () =>
+          transcribeMelonLyricsLrc(
+            workUri,
+            'melon',
+            ext,
+            plain,
+            'ko',
+            AI_LAB_MELON_LYRICS_PRELOAD,
+          ),
+        );
+        await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
 
-      if (track.location.kind !== 'web') {
-        const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
-        // 번역 대기열이 LRC를 읽어야 하므로 AI Lab 가사는 sidecar를 항상 남긴다.
-        await persistLrcForSavedAudio(track.location, melon.lrcFull);
-      }
-      nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
-      if (englishOnly) {
-        await afterEnglishLyricsReady({ ...record, plainLyrics: plain });
-      }
+        if (melon.lyricsMelonMemoryInsufficient) {
+          void nrmNotifyLyricsFailed(displayLabel, videoId, '메모리가 부족합니다.');
+          nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+          return;
+        }
+        if (!melon.lrcFull?.trim()) {
+          void nrmNotifyLyricsFailed(displayLabel, videoId, '가사 정렬에 실패했습니다.');
+          nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
+          return;
+        }
+
+        if (track.location.kind !== 'web') {
+          const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
+          // 번역 대기열이 LRC를 읽어야 하므로 AI Lab 가사는 sidecar를 항상 남긴다.
+          await persistLrcForSavedAudio(track.location, melon.lrcFull);
+        }
+        nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
+        if (englishOnly) {
+          await afterEnglishLyricsReady({ ...record, plainLyrics: plain });
+        }
+      });
     } catch (e) {
       logNrmRunError(LOG, e, { event: 'ailab_lyrics_failed', videoId });
       void nrmNotifyLyricsFailed(displayLabel, videoId);
@@ -469,10 +492,7 @@ export async function startAiLabLyrics(params: {
     } finally {
       nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
     }
-  }).catch((e) => {
-    nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
-    logNrmRunError(LOG, e, { event: 'ailab_lyrics_enqueue_failed', videoId });
-  });
+  })();
 
   return {
     ok: true,
@@ -482,8 +502,8 @@ export async function startAiLabLyrics(params: {
     englishOnlyLikely: englishOnly,
     askTranslation: englishOnly,
     nextHint: englishOnly
-      ? '가사 생성 큐에 넣음. 앱이 번역 여부 choices(예/아니요)를 붙인다. 마크다운 목록으로 예/아니요를 쓰지 말 것. 사용자가 칩을 고를 때까지 translate_ai_lab_lyrics 호출 금지.'
-      : '가사 생성 큐에 넣음. 번역은 요청하지 않는다(일반 Melon 정렬만).',
+      ? '가사 생성 큐에 넣음(오디오가 아직 내려받는 중이면 끝난 뒤 자동 진행. 다시 요청하라고 안내하지 말 것). 앱이 번역 여부 choices(예/아니요)를 붙인다. 마크다운 목록으로 예/아니요를 쓰지 말 것. 사용자가 칩을 고를 때까지 translate_ai_lab_lyrics 호출 금지.'
+      : '가사 생성 큐에 넣음(오디오가 아직 내려받는 중이면 끝난 뒤 자동 진행. 다시 요청하라고 안내하지 말 것). 번역은 요청하지 않는다(일반 Melon 정렬만).',
   };
 }
 

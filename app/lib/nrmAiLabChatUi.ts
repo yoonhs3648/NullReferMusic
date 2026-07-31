@@ -32,6 +32,8 @@ export type NrmAiLabAgentUiHints = {
 
 export type NrmAiLabMessage = {
   id: string;
+  /** DB MessageID. FlatList key용 id가 temp일 때 patch/clear에 사용 */
+  persistId?: string;
   role: NrmAiLabMessageRole;
   content: string;
   pending?: boolean;

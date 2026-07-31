@@ -5,7 +5,7 @@ import brandConfig from './nrm-brand.config.json';
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.3.5',
+  version: '3.3.8',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'nullreferencemusic',
@@ -14,7 +14,7 @@ const config: ExpoConfig = {
   splash: {
     image: './assets/images/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#f5f5f7',
+    backgroundColor: '#0c0c12',
   },
   ios: {
     supportsTablet: true,
@@ -27,7 +27,7 @@ const config: ExpoConfig = {
   android: {
     adaptiveIcon: {
       foregroundImage: './assets/images/adaptive-icon.png',
-      backgroundColor: '#0066cc',
+      backgroundColor: '#0c0c12',
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,

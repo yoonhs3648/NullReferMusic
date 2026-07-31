@@ -104,6 +104,7 @@ LLM 대화 메시지. 세션 내 말풍선에 대응.
 | `OutputToken` | `integer` | `0` | NO | 이번 응답의 출력 토큰 |
 | `TotalToken` | `integer` | `0` | NO | 이번 요청의 총 토큰 |
 | `RegDate` | `timestamptz` | `now()` | NO | 메시지 생성 일시 |
+| `UiMeta` | `jsonb` | — | YES | AI Lab UI 복원 메타. `choices` / `agentUi` / `youtubeConfirm`(미리듣기 세션 스냅샷). NULL이면 텍스트만 |
 
 ### PK·인덱스
 
@@ -126,6 +127,7 @@ CREATE TABLE public."ChatMessage"
     "TotalToken"     integer NOT NULL DEFAULT 0,
 
     "RegDate"        timestamptz NOT NULL DEFAULT now(),
+    "UiMeta"         jsonb NULL,
     CONSTRAINT "PK_ChatMessage" PRIMARY KEY ("MessageID", "SessionID")
 );
 
@@ -156,6 +158,9 @@ IS '이번 요청의 총 토큰';
 COMMENT ON COLUMN public."ChatMessage"."RegDate"
 IS '메시지 생성 일시';
 
+COMMENT ON COLUMN public."ChatMessage"."UiMeta"
+IS 'AI Lab UI 복원 메타(choices/agentUi/youtubeConfirm 스냅샷). NULL이면 텍스트만';
+
 CREATE INDEX "IX_ChatMessage_SessionID"
 ON public."ChatMessage" ("SessionID");
 
@@ -169,6 +174,7 @@ ON public."ChatMessage" ("RegDate");
 
 - `ChatSession`/`ChatMessage`는 RLS `SELECT`만 anon/authenticated에 열려 있다(`20260721120000_llm_chat_security_harden.sql`). **직접 INSERT/UPDATE 불가.**
 - 메시지 저장·세션 생성·`UpdateDate` 갱신은 전부 Edge Function(`llm-chat-send`, service_role)이 `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`을 통해서만 수행한다. 상세: [`llm.md`](./llm.md#ai-lab-채팅-전송--edge-function--rpc-실제-구현).
+- 칩·YouTube 미리듣기·로컬 말풍선 UI 메타는 앱이 `nrm_rpc_chat_append_ui_messages` / `nrm_rpc_chat_patch_message_ui_meta`로 `ChatMessage.UiMeta`에 저장한다(anon/authenticated GRANT, 본인 세션만). 마이그레이션: `20260731170000_chat_message_ui_meta.sql`.
 - `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM 요약 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-llm-요약-2026-07-29-복구).
 - 세션 삭제(소프트 삭제, `IsDeleted=true`)는 앱이 `nrm_rpc_chat_delete_session(p_serial_no, p_session_id)`을 직접 호출한다(anon/authenticated에 GRANT). 본인 `SerialNo` 소유 세션만 삭제 가능.
 

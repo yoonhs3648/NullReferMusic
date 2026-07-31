@@ -207,7 +207,8 @@ PAT 권한: 대상 저장소 `data/` 및 문의 첨부 경로 **Contents write**
 |------|--------|------|
 | 앱 표시명 | `versionInfoProductName` / 제품명 고정 | `app.config.ts` → `name`, `strings.xml` → `app_name` (sync 후) |
 | 앱 아이콘 | `assets/images/icon.png` 기반 NRM CI 로고 | `mipmap-*/ic_launcher*.webp` |
-| Adaptive foreground | 투명 배경 + 흰색 로고 (`밝기→알파` 변환) | `mipmap-*/ic_launcher_foreground.webp` |
+| 인앱 CI 마크 | 배경·테두리 없는 풀컬러 로고 | `assets/images/logo-mark.png` |
+| Adaptive foreground | 투명 배경 안전 영역에 배치한 풀컬러 CI 로고 | `mipmap-*/ic_launcher_foreground.webp` |
 | Adaptive 배경색 | `#0c0c12` (검정) | `android/app/src/main/res/values/colors.xml` → `iconBackground` |
 
 **아이콘 재생성이 필요한 경우** (icon.png 변경 등):

@@ -25,18 +25,21 @@ async function makeRoundIcon(destPath, size) {
 }
 
 async function makeForeground(destPath, size) {
-  // icon.png(검정 배경+흰 로고) → 밝기를 알파로: 투명배경+흰 로고
-  const { data, info } = await sharp(src).resize(size, size).raw().toBuffer({ resolveWithObject: true });
-  const out = Buffer.alloc(info.width * info.height * 4);
-  for (let i = 0; i < info.width * info.height; i++) {
-    const r = data[i * 3];
-    const g = data[i * 3 + 1];
-    const b = data[i * 3 + 2];
-    const alpha = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
-    out[i * 4] = 255; out[i * 4 + 1] = 255; out[i * 4 + 2] = 255;
-    out[i * 4 + 3] = alpha;
-  }
-  await sharp(out, { raw: { width: info.width, height: info.height, channels: 4 } })
+  // 풀컬러 CI를 adaptive icon의 안전 영역에 맞춰 투명 캔버스 중앙에 배치한다.
+  const foregroundSize = Math.round(size * 0.68);
+  const foreground = await sharp(src)
+    .resize(foregroundSize, foregroundSize)
+    .png()
+    .toBuffer();
+  await sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: foreground, gravity: 'center' }])
     .webp({ lossless: true })
     .toFile(destPath);
   console.log('fg:', destPath);
