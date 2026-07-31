@@ -723,7 +723,9 @@ export function NrmYoutubeHome({
           await cleanupAudioExtraction(extraction);
           return;
         }
-        const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata);
+        const out = await finalizeAudioDownloadParallel(extraction, fileName, metadata, {
+          youtubeVideoId: videoId,
+        });
         applyLyricsWarningsToUi(out);
       } catch (e) {
         logNrmRunError('download.web', e, { videoId });

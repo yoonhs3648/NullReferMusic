@@ -32,7 +32,6 @@ import {
 } from '@/lib/nrmMobileDownloadNotifications';
 import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
-import { loadLyricsOutputMode } from '@/lib/nrmDownloadSettings';
 import { isEmbeddedSyncLyricsText } from '@/lib/nrmLrcUiMode';
 
 const LOG = 'ailab.lyricsFollowup';
@@ -72,6 +71,10 @@ type FollowupHooks = {
 };
 
 const recordsByVideoId = new Map<string, AiLabDownloadRecord>();
+/** 사용자가 번역 yes/no를 이미 골랐는지 (가사 완료 전 선선택 포함) */
+const translationDecisionByVideoId = new Map<string, 'yes' | 'no'>();
+/** 가사 LRC가 아직 없어 번역을 보류 중인 videoId */
+const pendingTranslationVideoIds = new Set<string>();
 let lastDownloadVideoId: string | null = null;
 let followupHooks: FollowupHooks = {};
 
@@ -258,6 +261,9 @@ function isEnglishOnlyPlain(plain: string): boolean {
 }
 
 function emitTranslationAsk(record: AiLabDownloadRecord): void {
+  const decided = translationDecisionByVideoId.get(record.videoId);
+  if (decided === 'yes' || decided === 'no') return;
+  if (pendingTranslationVideoIds.has(record.videoId)) return;
   followupHooks.onAskTranslation?.({
     videoId: record.videoId,
     displayLabel: record.displayLabel,
@@ -265,6 +271,24 @@ function emitTranslationAsk(record: AiLabDownloadRecord): void {
     message:
       '가사가 영어로만 되어 있습니다. 한국어로 번역할까요? (Google Translator)',
   });
+}
+
+function resolveVideoIdForFollowup(videoId?: string | null): string | null {
+  const id = (videoId ?? lastDownloadVideoId ?? '').trim();
+  return id || null;
+}
+
+/** 가사 LRC 준비 후 — 선선택 번역 실행 또는(미선택이면) 번역 질문 */
+async function afterEnglishLyricsReady(record: AiLabDownloadRecord): Promise<void> {
+  const videoId = record.videoId;
+  const decision = translationDecisionByVideoId.get(videoId);
+  if (decision === 'no') return;
+  if (decision === 'yes' || pendingTranslationVideoIds.has(videoId)) {
+    pendingTranslationVideoIds.delete(videoId);
+    await translateAiLabLyrics({ videoId });
+    return;
+  }
+  emitTranslationAsk(record);
 }
 
 /** 다운로드에 가사가 같이 큐된 경우 완료 후 영문이면 번역 질문 */
@@ -285,8 +309,41 @@ export async function maybeAskTranslationAfterAiLabLyrics(
     }
   }
   if (plain && isEnglishOnlyPlain(plain)) {
-    emitTranslationAsk(getAiLabDownloadRecord(videoId) ?? record);
+    await afterEnglishLyricsReady(getAiLabDownloadRecord(videoId) ?? record);
   }
+}
+
+/** 칩 「예, 번역해주세요」— LRC 없으면 대기 큐, 있으면 즉시 번역 */
+export async function acceptAiLabTranslation(params?: {
+  videoId?: string;
+}): Promise<Record<string, unknown>> {
+  const videoId = resolveVideoIdForFollowup(params?.videoId);
+  if (!videoId) {
+    return {
+      ok: false,
+      error: 'download_not_found',
+      message: '번역할 다운로드 곡을 찾을 수 없습니다.',
+    };
+  }
+  translationDecisionByVideoId.set(videoId, 'yes');
+  return translateAiLabLyrics({ videoId });
+}
+
+/** 칩 「아니요」(번역) */
+export function declineAiLabTranslation(params?: { videoId?: string }): {
+  ok: true;
+  videoId: string | null;
+} {
+  const videoId = resolveVideoIdForFollowup(params?.videoId);
+  if (videoId) {
+    translationDecisionByVideoId.set(videoId, 'no');
+    pendingTranslationVideoIds.delete(videoId);
+  }
+  return { ok: true, videoId };
+}
+
+export function isAiLabTranslateChoiceId(id: string): boolean {
+  return id === 'translate_yes' || id === 'translate_no';
 }
 
 export async function startAiLabLyrics(params: {
@@ -391,14 +448,14 @@ export async function startAiLabLyrics(params: {
         return;
       }
 
-      const lyricsOutputMode = await loadLyricsOutputMode();
-      if (lyricsOutputMode === 'sidecar' && track.location.kind !== 'web') {
+      if (track.location.kind !== 'web') {
         const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
+        // 번역 대기열이 LRC를 읽어야 하므로 AI Lab 가사는 sidecar를 항상 남긴다.
         await persistLrcForSavedAudio(track.location, melon.lrcFull);
       }
       nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
       if (englishOnly) {
-        emitTranslationAsk({ ...record, plainLyrics: plain });
+        await afterEnglishLyricsReady({ ...record, plainLyrics: plain });
       }
     } catch (e) {
       logNrmRunError(LOG, e, { event: 'ailab_lyrics_failed', videoId });
@@ -418,8 +475,9 @@ export async function startAiLabLyrics(params: {
     videoId,
     label: displayLabel,
     englishOnlyLikely: englishOnly,
+    askTranslation: englishOnly,
     nextHint: englishOnly
-      ? '가사 생성 큐에 넣음. 완료 후 영문이면 번역 여부를 사용자에게 묻는다.'
+      ? '가사 생성 큐에 넣음. 앱이 번역 여부 choices(예/아니요)를 붙인다. 마크다운 목록으로 예/아니요를 쓰지 말 것. 사용자가 칩을 고를 때까지 translate_ai_lab_lyrics 호출 금지.'
       : '가사 생성 큐에 넣음. 번역은 요청하지 않는다(일반 Melon 정렬만).',
   };
 }
@@ -438,23 +496,37 @@ export async function translateAiLabLyrics(params: {
       message: '번역할 다운로드 곡을 찾을 수 없습니다.',
     };
   }
+  translationDecisionByVideoId.set(record.videoId, 'yes');
+
   const track = await resolveTrackForRecord(record);
   if (!track || track.location.kind === 'web') {
+    pendingTranslationVideoIds.add(record.videoId);
     return {
-      ok: false,
-      error: 'audio_not_ready',
-      message: '오디오/가사 파일을 찾을 수 없습니다.',
+      ok: true,
+      queued: true,
+      waitingForLyrics: true,
+      videoId: record.videoId,
+      nextHint:
+        '오디오/가사가 아직 준비되지 않음. 번역 요청을 대기열에 넣었다. 가사 완료 후 자동 번역한다.',
+      message: '가사 생성이 끝나면 자동으로 번역을 시작합니다.',
     };
   }
 
   const existing = await readExistingLrc(track);
   if (!existing) {
+    pendingTranslationVideoIds.add(record.videoId);
     return {
-      ok: false,
-      error: 'lrc_not_found',
-      message: '번역할 가사 파일이 없습니다. 먼저 가사를 생성해 주세요.',
+      ok: true,
+      queued: true,
+      waitingForLyrics: true,
+      videoId: record.videoId,
+      nextHint:
+        'LRC가 아직 없음. 번역 요청을 대기열에 넣었다. 가사 정렬 완료 후 자동 번역한다.',
+      message: '가사 생성이 끝나면 자동으로 번역을 시작합니다.',
     };
   }
+
+  pendingTranslationVideoIds.delete(record.videoId);
 
   const videoId = record.videoId;
   const displayLabel = record.displayLabel;
@@ -466,10 +538,13 @@ export async function translateAiLabLyrics(params: {
 
   void enqueueLyricsDownloadWork(jobId, displayLabel, async () => {
     try {
+      // 대기 중에 파일이 갱신됐을 수 있어 다시 읽는다
+      const latestTrack = (await resolveTrackForRecord(record)) ?? track;
+      const lrc = (await readExistingLrc(latestTrack)) ?? existing;
       const { translateLrcToKoreanWithGoogleTranslate } = await import(
         '@/lib/nrmGoogleTranslateClient'
       );
-      const translated = await translateLrcToKoreanWithGoogleTranslate(existing);
+      const translated = await translateLrcToKoreanWithGoogleTranslate(lrc);
       if (!translated.ok) {
         void nrmNotifyLyricsFailed(
           displayLabel,
@@ -479,10 +554,9 @@ export async function translateAiLabLyrics(params: {
         nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
         return;
       }
-      const lyricsOutputMode = await loadLyricsOutputMode();
-      if (lyricsOutputMode === 'sidecar' && track.location.kind !== 'web') {
+      if (latestTrack.location.kind !== 'web') {
         const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
-        await persistLrcForSavedAudio(track.location, translated.lrc);
+        await persistLrcForSavedAudio(latestTrack.location, translated.lrc);
       }
       nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
     } catch (e) {

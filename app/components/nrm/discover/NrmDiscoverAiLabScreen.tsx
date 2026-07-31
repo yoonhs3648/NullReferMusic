@@ -65,6 +65,7 @@ import {
 } from '@/lib/nrmLlmChatSend';
 import {
   aiLabOneDownloadPerRequestResult,
+  confirmAiLabYoutubeCandidateAndDownload,
   executeAiLabDownloadTool,
   hitFromAiLabTrackChoice,
   isAiLabStartDownloadToolName,
@@ -72,9 +73,29 @@ import {
   type NrmAiLabChoice,
   type NrmAiLabTrackHit,
 } from '@/lib/nrmAiLabDownloadTools';
-import { setAiLabLyricsFollowupHooks } from '@/lib/nrmAiLabLyricsFollowup';
+import {
+  advanceAiLabMusicListPage,
+  isAiLabMoreMusicListChoiceId,
+} from '@/lib/nrmAiLabMusicChoicePager';
+import {
+  acceptAiLabTranslation,
+  declineAiLabTranslation,
+  isAiLabTranslateChoiceId,
+  LYRICS_YES_NO_CHOICES,
+  setAiLabLyricsFollowupHooks,
+} from '@/lib/nrmAiLabLyricsFollowup';
+import {
+  AI_LAB_YOUTUBE_EXHAUSTED_MESSAGE,
+  rejectAiLabYoutubeCandidate,
+} from '@/lib/nrmAiLabYoutubeConfirm';
+import {
+  aiLabMelonChartCheckingMessage,
+  aiLabMelonChartDownloadStartedMessage,
+  aiLabMelonChartIdentifiedMessage,
+} from '@/lib/nrmAiLabMelonChartAnnounce';
+import { NrmAiLabYoutubeConfirmCard } from '@/components/nrm/discover/NrmAiLabYoutubeConfirmCard';
 import { getNrmModalScrimColor, getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
-import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
+import { useNrmUserDisplayName } from '@/lib/nrmUserDisplayNameSettings';
 
 type Props = {
   isDark: boolean;
@@ -111,6 +132,10 @@ function aiLabSendErrorText(e: unknown): string {
 
 function nextTempId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** AI Lab — 앱 상단바·메뉴 패턴에 맞춘 대화 UI. ChatSession/ChatMessage 기반 실 LLM 연동. */
@@ -158,8 +183,8 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const pendingLocalConversationRef = useRef<NrmAiLabConversation | null>(null);
   /** isActive false→true 감지용 */
   const wasActiveRef = useRef(isActive);
-  /** 앱 설정 > 앱 이름 변경 값 우선, 없으면 APK 내장 AppName */
-  const greetingName = useNrmMainLogoDisplayName();
+  /** 앱 설정 > 사용자 이름 변경 값 우선, 없으면 bake userName */
+  const greetingName = useNrmUserDisplayName();
   const [keyboardInset, setKeyboardInset] = useState(0);
   const listRef = useRef<FlatList<NrmAiLabMessage>>(null);
   /** 사용자가 위로 올려 두면 false — 스트리밍/완료 시 자동 스크롤 안 함 */
@@ -219,12 +244,8 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     [],
   );
 
-  const persistActiveSessionId = useCallback((sessionId: string | null) => {
-    if (!sessionId || sessionId.startsWith('c-')) {
-      void AsyncStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY).catch(() => {});
-      return;
-    }
-    void AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId).catch(() => {});
+  const clearPersistedActiveSessionId = useCallback(() => {
+    void AsyncStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY).catch(() => {});
   }, []);
 
   const reloadSessionMessages = useCallback(async (sessionId: string) => {
@@ -344,12 +365,6 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     if (!serialNo) return;
     try {
       const rows = await fetchChatSessions(serialNo);
-      let restoredId: string | null = null;
-      try {
-        restoredId = (await AsyncStorage.getItem(ACTIVE_SESSION_STORAGE_KEY))?.trim() || null;
-      } catch {
-        restoredId = null;
-      }
       setConversations((prev) => {
         const prevById = new Map(prev.map((c) => [c.id, c]));
         const pendingLocal = pendingLocalConversationRef.current;
@@ -372,10 +387,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         }
         return withLocals;
       });
-      // 재진입 시 마지막 대화를 다시 연다(목록에 있을 때만)
-      if (restoredId && rows.some((r) => r.id === restoredId)) {
-        setActiveId((cur) => cur ?? restoredId);
-      }
+      // 재진입/앱 재실행 시에는 항상 AI Lab 메인(새 대화). 사이드바에서만 세션을 연다.
     } catch (e) {
       logNrmRunError('ailab.sessions', e, { serialNo });
     }
@@ -417,21 +429,29 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     };
   }, [activeId, conversations, sending]);
 
-  /** 탭 복귀 시 DB와 재동기화 — 이탈 중 서버에 확정된 assistant 메시지를 UI에 반영 */
+  /** AI Lab을 벗어나면 메인으로 리셋. 복귀·앱 재실행 시에도 이전 세션을 자동으로 열지 않는다. */
   useEffect(() => {
-    const becameActive = isActive && !wasActiveRef.current;
+    const wasActive = wasActiveRef.current;
+    const becameActive = isActive && !wasActive;
+    const becameInactive = !isActive && wasActive;
     wasActiveRef.current = isActive;
+
+    if (becameInactive) {
+      setActiveId(null);
+      clearPersistedActiveSessionId();
+      return;
+    }
+
     if (!becameActive || sending) return;
-    const sid = activeId;
+    const sid = activeIdRef.current;
     if (!sid || sid.startsWith('c-')) return;
     void reloadSessionMessages(sid);
-  }, [activeId, isActive, reloadSessionMessages, sending]);
+  }, [clearPersistedActiveSessionId, isActive, reloadSessionMessages, sending]);
 
+  // 예전 기기 저장값이 남아 있어도 자동 복원하지 않도록 기동 시 제거
   useEffect(() => {
-    if (activeId && !activeId.startsWith('c-')) {
-      persistActiveSessionId(activeId);
-    }
-  }, [activeId, persistActiveSessionId]);
+    clearPersistedActiveSessionId();
+  }, [clearPersistedActiveSessionId]);
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -522,16 +542,15 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     setActiveId(null);
     setDraft('');
     stickToBottomRef.current = true;
-    persistActiveSessionId(null);
+    clearPersistedActiveSessionId();
     closeMenu();
-  }, [closeMenu, persistActiveSessionId]);
+  }, [clearPersistedActiveSessionId, closeMenu]);
 
   const handleSelect = useCallback(
     (id: string) => {
       setActiveId(id);
       setDraft('');
       stickToBottomRef.current = true;
-      persistActiveSessionId(id);
       closeMenu();
       const target = conversations.find((c) => c.id === id);
       if (target) {
@@ -559,7 +578,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         }
       }
     },
-    [closeMenu, conversations, persistActiveSessionId, sending],
+    [closeMenu, conversations, sending],
   );
 
   const handleDelete = useCallback(
@@ -683,8 +702,124 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             selectedHit != null ||
             /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(displayText);
 
-          // 칩으로 곡이 확정되면 LLM FC를 기다리지 않고 즉시 다운로드 시작(알림·파일)
+          // 칩으로 곡이 확정되면 YouTube 후보 확인(미리듣기)부터 — 다운로드는 「맞다」후
           let preforcedLyricsChoices: NrmAiLabChoice[] | undefined;
+          let youtubeConfirmSessionIdFromTools: string | undefined;
+
+          /** 멜론 차트 다운로드: LLM 호출 수 유지 + 단계별 로컬 말풍선 */
+          let activeAssistantId = tempAssistantId;
+          let melonChartCheckingShown = false;
+          let melonChartUiActive = false;
+          let melonChartHit: NrmAiLabTrackHit | null = null;
+          let melonChartPeriod: string | null = null;
+          let melonChartPlayerShown = false;
+          /** 플레이어까지 로컬로 냈으면 LLM 최종 문구로 UI를 덮지 않음(호출은 그대로) */
+          let suppressLlmAssistantUi = false;
+
+          const patchAssistant = (id: string, patch: Partial<NrmAiLabMessage>) => {
+            const convId = currentConvId;
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
+                    }
+                  : c,
+              ),
+            );
+          };
+
+          const removeEmptyAssistant = (id: string) => {
+            const convId = currentConvId;
+            setConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== convId) return c;
+                const target = c.messages.find((m) => m.id === id);
+                if (
+                  !target ||
+                  target.content.trim() ||
+                  target.youtubeConfirm ||
+                  (target.choices && target.choices.length > 0)
+                ) {
+                  return c;
+                }
+                return { ...c, messages: c.messages.filter((m) => m.id !== id) };
+              }),
+            );
+          };
+
+          const appendAssistant = (msg: {
+            content: string;
+            typing?: boolean;
+            youtubeConfirm?: { sessionId: string };
+            choices?: NrmAiLabChoice[];
+          }): string => {
+            const id = nextTempId('a');
+            const full: NrmAiLabMessage = {
+              id,
+              role: 'assistant',
+              content: msg.content,
+              typing: msg.typing === true,
+              youtubeConfirm: msg.youtubeConfirm,
+              choices: msg.choices,
+            };
+            const convId = currentConvId;
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId ? { ...c, messages: [...c.messages, full] } : c,
+              ),
+            );
+            activeAssistantId = id;
+            pinListToBottom({ animated: false });
+            return id;
+          };
+
+          const dropLeftoverStreamingAssistant = () => {
+            const id = activeAssistantId;
+            const convId = currentConvId;
+            setConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== convId) return c;
+                const target = c.messages.find((m) => m.id === id);
+                if (!target || target.youtubeConfirm) return c;
+                const content = target.content.trim();
+                const keepProgress =
+                  content === aiLabMelonChartCheckingMessage() ||
+                  content.startsWith('해당 곡은') ||
+                  content.startsWith('우선 ');
+                if (keepProgress) return c;
+                return { ...c, messages: c.messages.filter((m) => m.id !== id) };
+              }),
+            );
+          };
+
+          const presentMelonChartYoutubeUi = async (ytSessionId: string) => {
+            if (!melonChartHit || melonChartPlayerShown) return;
+            dropLeftoverStreamingAssistant();
+            removeEmptyAssistant(activeAssistantId);
+            await sleepMs(280);
+            appendAssistant({
+              content: aiLabMelonChartDownloadStartedMessage({
+                hit: melonChartHit,
+                period: melonChartPeriod,
+              }),
+              typing: false,
+            });
+            await sleepMs(380);
+            appendAssistant({
+              content: '',
+              typing: false,
+              youtubeConfirm: { sessionId: ytSessionId },
+            });
+            melonChartPlayerShown = true;
+            suppressLlmAssistantUi = true;
+            lastAssistantText = aiLabMelonChartDownloadStartedMessage({
+              hit: melonChartHit,
+              period: melonChartPeriod,
+            });
+            pinListToBottom({ animated: false });
+          };
           if (selectedHit) {
             setConversations((prev) =>
               prev.map((c) =>
@@ -695,9 +830,10 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                         m.id === tempAssistantId
                           ? {
                               ...m,
-                              content: '다운로드를 진행합니다.',
+                              content: '음원을 확인하고 있습니다…',
                               typing: true,
                               choices: undefined,
+                              youtubeConfirm: undefined,
                             }
                           : m,
                       ),
@@ -705,21 +841,20 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                   : c,
               ),
             );
-            lastAssistantText = '다운로드를 진행합니다.';
+            lastAssistantText = '음원을 확인하고 있습니다…';
             const pre = await executeAiLabDownloadTool(
               'start_music_download',
               { hit: selectedHit, lyricsOption: 'none' },
               { musicPlatformId: resolvedPlatform.platformId },
             );
-            downloadsStartedThisSend = 1;
             pendingAutoDownloadHit = null;
             const preOk = (pre.result as { ok?: boolean }).ok === true;
             if (!preOk) {
               const err = String((pre.result as { error?: unknown }).error ?? 'unknown');
               const errMsg = String((pre.result as { message?: unknown }).message ?? '');
               const failText =
-                errMsg || `다운로드를 시작하지 못했습니다 (${err}).`;
-              lastAssistantText = `다운로드를 진행합니다.\n\n${failText}`;
+                errMsg || `음원 후보를 찾지 못했습니다 (${err}).`;
+              lastAssistantText = failText;
               logNrmRunError('ailab.preforce_download', new Error(err), {
                 ref: selectedHit.ref,
                 title: selectedHit.title,
@@ -741,6 +876,44 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               setSending(false);
               return;
             }
+            const needsYt =
+              (pre.result as { needsYoutubeConfirm?: boolean }).needsYoutubeConfirm === true;
+            const ytSessionId = String(
+              (pre.result as { youtubeConfirmSessionId?: unknown }).youtubeConfirmSessionId ??
+                '',
+            ).trim();
+            if (needsYt && ytSessionId) {
+              const label = String(
+                (pre.result as { label?: unknown }).label ?? selectedHit.title,
+              );
+              lastAssistantText =
+                '이 음원이 맞는지 확인해 주세요. 미리듣기 후 「맞다」또는 「아니다」를 선택해 주세요.';
+              setConversations((prev) =>
+                prev.map((c) =>
+                  c.id === currentConvId
+                    ? {
+                        ...c,
+                        messages: c.messages.map((m) =>
+                          m.id === tempAssistantId
+                            ? {
+                                ...m,
+                                content: lastAssistantText,
+                                typing: false,
+                                choices: undefined,
+                                youtubeConfirm: { sessionId: ytSessionId },
+                              }
+                            : m,
+                        ),
+                      }
+                    : c,
+                ),
+              );
+              setSending(false);
+              pinListToBottom({ animated: false });
+              return;
+            }
+            // 하위 호환: 확인 없이 바로 다운로드된 경우
+            downloadsStartedThisSend = 1;
             if (pre.choices && pre.choices.length > 0) {
               preforcedLyricsChoices = pre.choices;
             }
@@ -752,20 +925,28 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             let roundChoices: NrmAiLabChoice[] | undefined;
 
             if (toolContinue) {
-              setConversations((prev) =>
-                prev.map((c) =>
-                  c.id === currentConvId
-                    ? {
-                        ...c,
-                        messages: c.messages.map((m) =>
-                          m.id === tempAssistantId
-                            ? { ...m, content: '', typing: true, choices: undefined }
-                            : m,
-                        ),
-                      }
-                    : c,
-                ),
-              );
+              if (!suppressLlmAssistantUi) {
+                setConversations((prev) =>
+                  prev.map((c) =>
+                    c.id === currentConvId
+                      ? {
+                          ...c,
+                          messages: c.messages.map((m) =>
+                            m.id === activeAssistantId
+                              ? {
+                                  ...m,
+                                  content: '',
+                                  typing: true,
+                                  choices: undefined,
+                                  youtubeConfirm: undefined,
+                                }
+                              : m,
+                          ),
+                        }
+                      : c,
+                  ),
+                );
+              }
               gotFirstDelta = false;
             }
 
@@ -827,14 +1008,16 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 },
                 onDelta: (chunk) => {
                   gotFirstDelta = true;
+                  if (suppressLlmAssistantUi) return;
                   const convId = currentConvId;
+                  const assistantId = activeAssistantId;
                   setConversations((prev) =>
                     prev.map((c) =>
                       c.id === convId
                         ? {
                             ...c,
                             messages: c.messages.map((m) => {
-                              if (m.id !== tempAssistantId) return m;
+                              if (m.id !== assistantId) return m;
                               const next = m.content + chunk;
                               lastAssistantText = next;
                               return { ...m, content: next, typing: false };
@@ -864,22 +1047,55 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                   const agentUi = parseAgentUiFromDiag(final.diag);
                   const convId = currentConvId;
                   const finalSessionId = String(final.sessionId ?? '').trim();
-                  const finalContent = String(final.message.content ?? '');
+                  let finalContent = String(final.message.content ?? '');
+                  if (youtubeConfirmSessionIdFromTools && !finalContent.trim()) {
+                    finalContent =
+                      '이 음원이 맞는지 확인해 주세요. 미리듣기 후 「맞다」또는 「아니다」를 선택해 주세요.';
+                  }
                   if (finalContent) lastAssistantText = finalContent;
+
+                  if (suppressLlmAssistantUi || melonChartPlayerShown) {
+                    removeEmptyAssistant(activeAssistantId);
+                    setConversations((prev) =>
+                      prev.map((c) => {
+                        if (c.id !== convId && c.id !== finalSessionId) return c;
+                        return {
+                          ...c,
+                          id: finalSessionId || c.id,
+                          modelId: llmModelId,
+                          updatedAtLabel: '지금',
+                          updatedAtIso: new Date().toISOString(),
+                          messagesLoaded: true,
+                          messages: c.messages.map((m) =>
+                            m.id === tempUserId
+                              ? { ...m, content: displayText, pending: false }
+                              : m,
+                          ),
+                        };
+                      }),
+                    );
+                    pinListToBottom({ animated: false });
+                    return;
+                  }
+
+                  const assistantId = activeAssistantId;
                   setConversations((prev) =>
                     prev.map((c) => {
                       if (c.id !== convId && c.id !== finalSessionId) return c;
                       const messages = c.messages.map((m) =>
-                        m.id === tempAssistantId
+                        m.id === assistantId
                           ? {
                               // FlatList key를 유지해 MessageEnter가 opacity 0으로 재마운트되지 않게 함
                               ...final.message,
-                              id: tempAssistantId,
+                              id: assistantId,
                               content: finalContent || m.content || '',
                               choices:
                                 mergedChoices && mergedChoices.length > 0
                                   ? mergedChoices
                                   : undefined,
+                              youtubeConfirm: youtubeConfirmSessionIdFromTools
+                                ? { sessionId: youtubeConfirmSessionIdFromTools }
+                                : m.youtubeConfirm,
                               agentUi,
                               typing: false,
                               pending: false,
@@ -899,11 +1115,6 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                       };
                     }),
                   );
-                  if (finalSessionId) {
-                    void AsyncStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, finalSessionId).catch(
-                      () => {},
-                    );
-                  }
                   pinListToBottom({ animated: false });
                 },
                 onTitleUpdated: ({ sessionId, title: newTitle }) => {
@@ -928,7 +1139,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             for (const call of pendingToolCalls) {
               if (
                 isAiLabStartDownloadToolName(call.name) &&
-                downloadsStartedThisSend >= 1
+                (downloadsStartedThisSend >= 1 ||
+                  melonChartPlayerShown ||
+                  Boolean(youtubeConfirmSessionIdFromTools))
               ) {
                 const blocked = aiLabOneDownloadPerRequestResult();
                 nextResults.push({
@@ -975,11 +1188,26 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 };
               }
 
+              if (call.name === 'search_melon_chart' && userLikelyWantsDownload) {
+                patchAssistant(activeAssistantId, {
+                  content: aiLabMelonChartCheckingMessage(),
+                  typing: false,
+                  choices: undefined,
+                  youtubeConfirm: undefined,
+                });
+                lastAssistantText = aiLabMelonChartCheckingMessage();
+                melonChartCheckingShown = true;
+                await sleepMs(280);
+                activeAssistantId = appendAssistant({ content: '', typing: true });
+              }
+
               const out = await executeAiLabDownloadTool(call.name, callArgs, {
                 musicPlatformId: resolvedPlatform.platformId,
               });
               if (
-                (call.name === 'search_music' || call.name === 'search_track_on_platform') &&
+                (call.name === 'search_music' ||
+                  call.name === 'search_track_on_platform' ||
+                  call.name === 'search_melon_chart') &&
                 !selectedHit
               ) {
                 const hits = (out.result as { hits?: NrmAiLabTrackHit[]; count?: number }).hits;
@@ -992,6 +1220,34 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                   pendingAutoDownloadHit = null;
                 }
               }
+              if (call.name === 'search_melon_chart' && melonChartCheckingShown) {
+                const hits = (out.result as { hits?: NrmAiLabTrackHit[] }).hits;
+                const count = Number(
+                  (out.result as { count?: number }).count ?? hits?.length ?? 0,
+                );
+                const period = String(
+                  (out.result as { period?: unknown }).period ??
+                    (out.result as { resolvedPeriod?: unknown }).resolvedPeriod ??
+                    callArgs.period ??
+                    '',
+                ).trim();
+                if (count === 1 && hits?.[0]?.title && hits[0]?.artist) {
+                  melonChartUiActive = true;
+                  melonChartHit = hits[0];
+                  melonChartPeriod = period || 'realtime';
+                  removeEmptyAssistant(activeAssistantId);
+                  await sleepMs(320);
+                  appendAssistant({
+                    content: aiLabMelonChartIdentifiedMessage(hits[0]),
+                    typing: false,
+                  });
+                  lastAssistantText = aiLabMelonChartIdentifiedMessage(hits[0]);
+                  activeAssistantId = appendAssistant({ content: '', typing: true });
+                } else {
+                  melonChartUiActive = false;
+                  melonChartHit = null;
+                }
+              }
               if (out.choices && out.choices.length > 0) {
                 if (selectedHit) {
                   const nonTrack = out.choices.filter((ch) => !isAiLabTrackChoiceId(ch.id));
@@ -1001,12 +1257,26 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 }
               }
               if (isAiLabStartDownloadToolName(call.name)) {
-                const err = String(
-                  (out.result as { error?: unknown } | undefined)?.error ?? '',
-                );
-                // 가사 미선택·hit 누락은 아직 다운로드 시도가 아님
-                if (err !== 'lyrics_option_required' && err !== 'missing_hit') {
-                  downloadsStartedThisSend += 1;
+                const needsYt =
+                  (out.result as { needsYoutubeConfirm?: boolean }).needsYoutubeConfirm ===
+                  true;
+                const ytSid = String(
+                  (out.result as { youtubeConfirmSessionId?: unknown })
+                    .youtubeConfirmSessionId ?? '',
+                ).trim();
+                if (needsYt && ytSid) {
+                  youtubeConfirmSessionIdFromTools = ytSid;
+                  if (melonChartUiActive && melonChartHit) {
+                    await presentMelonChartYoutubeUi(ytSid);
+                  }
+                } else {
+                  const err = String(
+                    (out.result as { error?: unknown } | undefined)?.error ?? '',
+                  );
+                  // 가사 미선택·hit 누락은 아직 다운로드 시도가 아님
+                  if (err !== 'lyrics_option_required' && err !== 'missing_hit') {
+                    downloadsStartedThisSend += 1;
+                  }
                 }
               }
               nextResults.push({
@@ -1027,9 +1297,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             }
           }
 
-          // 모델이 「다운로드를 진행합니다」만 말하고 start_music_download를 안 부른 경우 강제 시작
+          // 모델이 「다운로드를 진행합니다」만 말하고 start_music_download를 안 부른 경우
+          // → YouTube 확인 단계부터 강제 시작
           const shouldForceDownload =
             downloadsStartedThisSend === 0 &&
+            !youtubeConfirmSessionIdFromTools &&
             pendingAutoDownloadHit != null &&
             (selectedHit != null ||
               userLikelyWantsDownload ||
@@ -1041,45 +1313,81 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               { hit: forcedHit, lyricsOption: 'none' },
               { musicPlatformId: resolvedPlatform.platformId },
             );
-            downloadsStartedThisSend = 1;
             const ok = (out.result as { ok?: boolean }).ok === true;
             const err = String((out.result as { error?: unknown }).error ?? '');
             const errMsg = String((out.result as { message?: unknown }).message ?? '');
-            let extra = '';
-            let forceChoices: NrmAiLabChoice[] | undefined;
-            if (!ok) {
-              extra =
-                errMsg || `다운로드를 시작하지 못했습니다 (${err || 'unknown'}).`;
-              logNrmRunError('ailab.force_download', new Error(err || 'force_download_failed'), {
-                ref: forcedHit.ref,
-                title: forcedHit.title,
-              });
-            } else if (out.choices && out.choices.length > 0) {
-              extra = '가사도 생성을 할까요?';
-              forceChoices = out.choices;
-            }
-            setConversations((prev) =>
-              prev.map((c) => {
-                if (c.id !== currentConvId) return c;
-                return {
-                  ...c,
-                  messages: c.messages.map((m) => {
-                    if (m.id !== tempAssistantId) return m;
-                    const base = (m.content || '').trim() || '다운로드를 진행합니다.';
-                    const withAnnounce = /다운로드를 진행/.test(base)
-                      ? base
-                      : `다운로드를 진행합니다.\n\n${base}`;
+            const needsYt =
+              (out.result as { needsYoutubeConfirm?: boolean }).needsYoutubeConfirm === true;
+            const ytSid = String(
+              (out.result as { youtubeConfirmSessionId?: unknown }).youtubeConfirmSessionId ??
+                '',
+            ).trim();
+            if (ok && needsYt && ytSid) {
+              if (melonChartUiActive && melonChartHit) {
+                await presentMelonChartYoutubeUi(ytSid);
+              } else {
+                const confirmText =
+                  '이 음원이 맞는지 확인해 주세요. 미리듣기 후 「맞다」또는 「아니다」를 선택해 주세요.';
+                const assistantId = activeAssistantId;
+                setConversations((prev) =>
+                  prev.map((c) => {
+                    if (c.id !== currentConvId) return c;
                     return {
-                      ...m,
-                      content: extra ? `${withAnnounce}\n\n${extra}` : withAnnounce,
-                      typing: false,
-                      choices: forceChoices ?? m.choices,
+                      ...c,
+                      messages: c.messages.map((m) => {
+                        if (m.id !== assistantId) return m;
+                        return {
+                          ...m,
+                          content: confirmText,
+                          typing: false,
+                          choices: undefined,
+                          youtubeConfirm: { sessionId: ytSid },
+                        };
+                      }),
                     };
                   }),
-                };
-              }),
-            );
-            pinListToBottom({ animated: false });
+                );
+                pinListToBottom({ animated: false });
+              }
+            } else {
+              downloadsStartedThisSend = 1;
+              let extra = '';
+              let forceChoices: NrmAiLabChoice[] | undefined;
+              if (!ok) {
+                extra =
+                  errMsg || `다운로드를 시작하지 못했습니다 (${err || 'unknown'}).`;
+                logNrmRunError('ailab.force_download', new Error(err || 'force_download_failed'), {
+                  ref: forcedHit.ref,
+                  title: forcedHit.title,
+                });
+              } else if (out.choices && out.choices.length > 0) {
+                extra = '가사도 생성을 할까요?';
+                forceChoices = out.choices;
+              }
+              const assistantId = activeAssistantId;
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== currentConvId) return c;
+                  return {
+                    ...c,
+                    messages: c.messages.map((m) => {
+                      if (m.id !== assistantId) return m;
+                      const base = (m.content || '').trim() || '다운로드를 진행합니다.';
+                      const withAnnounce = /다운로드를 진행/.test(base)
+                        ? base
+                        : `다운로드를 진행합니다.\n\n${base}`;
+                      return {
+                        ...m,
+                        content: extra ? `${withAnnounce}\n\n${extra}` : withAnnounce,
+                        typing: false,
+                        choices: forceChoices ?? m.choices,
+                      };
+                    }),
+                  };
+                }),
+              );
+              pinListToBottom({ animated: false });
+            }
           }
         } catch (e) {
           logNrmRunError('ailab.send', e, {
@@ -1126,6 +1434,106 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const handleChoicePress = useCallback(
     (choice: NrmAiLabChoice) => {
       if (sending || !serialNo || llmModelId == null) return;
+      if (isAiLabMoreMusicListChoiceId(choice.id)) {
+        const convId = activeIdRef.current;
+        if (!convId) return;
+        const userMsg: NrmAiLabMessage = {
+          id: nextTempId('u'),
+          role: 'user',
+          content: choice.label,
+        };
+        void (async () => {
+          const next = await advanceAiLabMusicListPage();
+          const assistantMsg: NrmAiLabMessage = next.ok
+            ? {
+                id: nextTempId('a'),
+                role: 'assistant',
+                content: next.prompt,
+                choices: next.choices,
+              }
+            : {
+                id: nextTempId('a'),
+                role: 'assistant',
+                content: next.message,
+              };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: [...c.messages, userMsg, assistantMsg],
+                    updatedAtLabel: '지금',
+                    updatedAtIso: new Date().toISOString(),
+                  }
+                : c,
+            ),
+          );
+          stickToBottomRef.current = true;
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          });
+        })();
+        return;
+      }
+      if (isAiLabTranslateChoiceId(choice.id)) {
+        const convId = activeIdRef.current;
+        if (!convId) return;
+        const userMsg: NrmAiLabMessage = {
+          id: nextTempId('u'),
+          role: 'user',
+          content: choice.label,
+        };
+        void (async () => {
+          let assistantContent: string;
+          if (choice.id === 'translate_yes') {
+            const out = await acceptAiLabTranslation();
+            if (out.ok !== true) {
+              assistantContent = String(
+                out.message ?? '번역을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+              );
+            } else if (out.waitingForLyrics === true) {
+              assistantContent =
+                '알겠습니다. 가사 생성이 끝나는 대로 Google Translator로 한국어 번역을 진행합니다.';
+            } else {
+              assistantContent =
+                '한국어 번역을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
+            }
+          } else {
+            declineAiLabTranslation();
+            assistantContent = '알겠습니다. 번역 없이 영문 가사만 유지합니다.';
+          }
+          const assistantMsg: NrmAiLabMessage = {
+            id: nextTempId('a'),
+            role: 'assistant',
+            content: assistantContent,
+          };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: [
+                      ...c.messages.map((m) =>
+                        m.choices?.some((ch) => isAiLabTranslateChoiceId(ch.id))
+                          ? { ...m, choices: undefined }
+                          : m,
+                      ),
+                      userMsg,
+                      assistantMsg,
+                    ],
+                    updatedAtLabel: '지금',
+                    updatedAtIso: new Date().toISOString(),
+                  }
+                : c,
+            ),
+          );
+          stickToBottomRef.current = true;
+          requestAnimationFrame(() => {
+            listRef.current?.scrollToEnd({ animated: true });
+          });
+        })();
+        return;
+      }
       const hit: NrmAiLabTrackHit | undefined = isAiLabTrackChoiceId(choice.id)
         ? hitFromAiLabTrackChoice(choice)
         : undefined;
@@ -1139,6 +1547,130 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       sendUserText(choice.label);
     },
     [llmModelId, sendUserText, sending, serialNo],
+  );
+
+  const handleYoutubeConfirmAccept = useCallback(
+    (sessionId: string) => {
+      const convId = activeIdRef.current;
+      // LLM toolContinue가 아직 끝나지 않아도 미리듣기 확인은 진행 가능
+      if (!convId) return;
+      void (async () => {
+        const out = await confirmAiLabYoutubeCandidateAndDownload(sessionId);
+        const userMsg: NrmAiLabMessage = {
+          id: nextTempId('u'),
+          role: 'user',
+          content: '맞다',
+        };
+        let assistantMsg: NrmAiLabMessage;
+        if (!out.ok) {
+          assistantMsg = {
+            id: nextTempId('a'),
+            role: 'assistant',
+            content:
+              out.message ||
+              `다운로드를 시작하지 못했습니다 (${out.error}).`,
+          };
+        } else {
+          const lines = [
+            `선택하신 **${out.label}** 곡의 다운로드를 시작했습니다.`,
+          ];
+          if (out.lyricsAskEligible) {
+            lines.push('', '가사도 함께 생성할까요?');
+          }
+          assistantMsg = {
+            id: nextTempId('a'),
+            role: 'assistant',
+            content: lines.join('\n'),
+            choices: out.lyricsAskEligible ? LYRICS_YES_NO_CHOICES : undefined,
+          };
+        }
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId
+              ? {
+                  ...c,
+                  messages: [
+                    ...c.messages.map((m) =>
+                      m.youtubeConfirm?.sessionId === sessionId
+                        ? { ...m, youtubeConfirm: undefined }
+                        : m,
+                    ),
+                    userMsg,
+                    assistantMsg,
+                  ],
+                  updatedAtLabel: '지금',
+                  updatedAtIso: new Date().toISOString(),
+                }
+              : c,
+          ),
+        );
+        stickToBottomRef.current = true;
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: true });
+        });
+      })();
+    },
+    [],
+  );
+
+  const handleYoutubeConfirmReject = useCallback(
+    (sessionId: string) => {
+      const convId = activeIdRef.current;
+      if (!convId) return;
+      const result = rejectAiLabYoutubeCandidate(sessionId);
+      const userMsg: NrmAiLabMessage = {
+        id: nextTempId('u'),
+        role: 'user',
+        content: '아니다',
+      };
+      const stripConfirm = (messages: NrmAiLabMessage[]) =>
+        messages.map((m) =>
+          m.youtubeConfirm?.sessionId === sessionId
+            ? { ...m, youtubeConfirm: undefined }
+            : m,
+        );
+      let assistantMsg: NrmAiLabMessage;
+      if (!result.ok) {
+        assistantMsg = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content:
+            '음원 후보 확인 세션이 만료되었습니다. 같은 곡으로 다시 다운로드를 요청해 주세요.',
+        };
+      } else if (result.exhausted) {
+        assistantMsg = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content: result.message || AI_LAB_YOUTUBE_EXHAUSTED_MESSAGE,
+        };
+      } else {
+        // 다음 후보는 새 말풍선+카드로 붙여, 「아니다」아래에 반응이 보이게 한다
+        assistantMsg = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content:
+            '다른 후보로 다시 확인해 주세요. 미리듣기 후 「맞다」또는 「아니다」를 선택해 주세요.',
+          youtubeConfirm: { sessionId },
+        };
+      }
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === convId
+            ? {
+                ...c,
+                messages: [...stripConfirm(c.messages), userMsg, assistantMsg],
+                updatedAtLabel: '지금',
+                updatedAtIso: new Date().toISOString(),
+              }
+            : c,
+        ),
+      );
+      stickToBottomRef.current = true;
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+      });
+    },
+    [],
   );
 
   const renderMessage = useCallback(
@@ -1174,9 +1706,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               <NrmAiLabTypingDots color={systemTextColor} />
             ) : isUser ? (
               <Text style={[styles.msgText, { color: titleColor }]}>{item.content}</Text>
-            ) : (
+            ) : item.content.trim() ? (
               <NrmAiLabMarkdown content={item.content} color={titleColor} isDark={isDark} />
-            )}
+            ) : null}
             {!isUser && item.agentUi && !item.typing ? (
               <View style={styles.agentMetaBlock}>
                 {item.agentUi.warnings.length > 0 ? (
@@ -1229,6 +1761,14 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 ) : null}
               </View>
             ) : null}
+            {!isUser && item.youtubeConfirm?.sessionId && !item.typing ? (
+              <NrmAiLabYoutubeConfirmCard
+                sessionId={item.youtubeConfirm.sessionId}
+                isDark={isDark}
+                onConfirm={handleYoutubeConfirmAccept}
+                onReject={handleYoutubeConfirmReject}
+              />
+            ) : null}
             {!isUser && item.choices && item.choices.length > 0 && !item.typing ? (
               <View style={styles.choiceRow}>
                 {item.choices.map((ch) => (
@@ -1258,6 +1798,8 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     [
       hairline,
       handleChoicePress,
+      handleYoutubeConfirmAccept,
+      handleYoutubeConfirmReject,
       isDark,
       sending,
       systemBubbleBg,

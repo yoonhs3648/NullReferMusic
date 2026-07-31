@@ -1058,7 +1058,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     pressed && { backgroundColor: rowHover },
                   ]}>
                   <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    앱 이름 변경
+                    사용자 이름 변경
                   </Text>
                   <Ionicons
                     name="chevron-forward"

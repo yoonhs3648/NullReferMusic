@@ -346,8 +346,7 @@ if ($doCustomize) {
 
     $buildArgs['Customize'] = $true
 
-    $buildArgs['DisplayName'] = $appName
-
+    # appName은 user_list legacy 등록용. APK displayName bake에는 넣지 않음.
     $buildArgs['UserName'] = $userName
 
     $buildArgs['SerialNo'] = $serialNo

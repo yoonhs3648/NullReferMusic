@@ -77,6 +77,15 @@ function songFieldsFromMetadata(
   };
 }
 
+/** YouTube videoId만 남긴다. local: URI·빈 값은 제외. */
+export function normalizeYoutubeVideoIdForHistory(
+  videoId: string | undefined | null,
+): string | undefined {
+  const id = String(videoId ?? '').trim();
+  if (!id || id.startsWith('local:')) return undefined;
+  return id;
+}
+
 /** 다운로드 성공/실패 기록. 성공 시에만 앨범 커버를 Storage에 업로드해 AlbumCoverPath를 채운다. */
 export async function logDownloadTrackHistory(params: {
   metadata: NrmAudioFileMetadata | undefined;
@@ -84,8 +93,11 @@ export async function logDownloadTrackHistory(params: {
   audioUri: string;
   isSuccess: boolean;
   failReason?: string;
+  /** 실제 오디오를 받은 YouTube videoId */
+  youtubeVideoId?: string;
 }): Promise<void> {
   const song = songFieldsFromMetadata(params.metadata, params.fileName, params.audioUri);
+  song.youtubeVideoId = normalizeYoutubeVideoIdForHistory(params.youtubeVideoId);
 
   if (params.isSuccess && params.metadata?.coverUrl) {
     try {

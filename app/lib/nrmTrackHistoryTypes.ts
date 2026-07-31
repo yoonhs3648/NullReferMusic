@@ -39,6 +39,8 @@ export type NrmTrackHistorySongFields = {
   lyrics?: string;
   lyricsMode?: string;
   albumCoverPath?: string;
+  /** 다운로드에 사용한 YouTube videoId (watch?v=). Melon Website와 별개 */
+  youtubeVideoId?: string;
 };
 
 export type NrmTrackHistoryLogParams = {
@@ -77,6 +79,7 @@ export type NrmTrackHistoryRow = {
   Lyrics: string | null;
   LyricsMode: string | null;
   AlbumCoverPath: string | null;
+  YoutubeVideoId: string | null;
   FailReason: string | null;
   IsSuccess: boolean;
   DownloadDate: string;

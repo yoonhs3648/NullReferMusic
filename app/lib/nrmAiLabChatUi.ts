@@ -38,6 +38,8 @@ export type NrmAiLabMessage = {
   typing?: boolean;
   choices?: NrmAiLabChoice[];
   agentUi?: NrmAiLabAgentUiHints;
+  /** YouTube 후보 확인·미리듣기 카드 */
+  youtubeConfirm?: { sessionId: string };
 };
 
 export type NrmAiLabConversation = {

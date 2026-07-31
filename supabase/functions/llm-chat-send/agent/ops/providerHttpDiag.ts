@@ -432,3 +432,69 @@ export function detectToolsInRequestBody(body: Record<string, unknown>): {
   }
   return { withTools: true, withGoogleSearch };
 }
+
+const TOOL_LOG_SOFT_MAX_CHARS = 32_000;
+
+/**
+ * 성공 plain은 JSON 생략. 실패·웹검색·다운로드 tools·응답 FC 가 있으면 RequestBodyJson 보관.
+ */
+export function shouldPersistRequestBodyJson(opts: {
+  ok: boolean;
+  withSearch: boolean;
+  withTools: boolean;
+  hasFunctionCalls: boolean;
+}): boolean {
+  return !opts.ok || opts.withSearch || opts.withTools || opts.hasFunctionCalls;
+}
+
+function softTruncateJsonValue(value: unknown, maxChars: number): unknown {
+  const raw = JSON.stringify(value);
+  if (raw.length <= maxChars) return value;
+  return {
+    _truncated: true,
+    _note: `json ${raw.length} chars exceeded soft max ${maxChars}`,
+    preview: raw.slice(0, Math.min(4_000, maxChars)),
+  };
+}
+
+/** LLM 응답 function call → DB FunctionCallsJson */
+export function compactFunctionCallsForLog(
+  calls: Array<{ callId?: string; name: string; args?: Record<string, unknown> }>,
+): Array<{ callId: string | null; name: string; args: unknown }> | null {
+  if (!Array.isArray(calls) || calls.length === 0) return null;
+  const rows = calls.map((c) => ({
+    callId: typeof c.callId === 'string' && c.callId.trim() ? c.callId : null,
+    name: String(c.name ?? ''),
+    args: softTruncateJsonValue(
+      c.args && typeof c.args === 'object' && !Array.isArray(c.args) ? c.args : {},
+      TOOL_LOG_SOFT_MAX_CHARS,
+    ),
+  }));
+  return rows;
+}
+
+/** toolContinue 클라이언트 실행 결과 → DB ToolResultsJson */
+export function compactToolResultsForLog(
+  results: Array<{
+    callId?: string;
+    name: string;
+    args?: Record<string, unknown>;
+    response?: Record<string, unknown>;
+  }>,
+): Array<{ callId: string | null; name: string; args: unknown; response: unknown }> | null {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  return results.map((r) => ({
+    callId: typeof r.callId === 'string' && r.callId.trim() ? r.callId : null,
+    name: String(r.name ?? ''),
+    args: softTruncateJsonValue(
+      r.args && typeof r.args === 'object' && !Array.isArray(r.args) ? r.args : {},
+      TOOL_LOG_SOFT_MAX_CHARS,
+    ),
+    response: softTruncateJsonValue(
+      r.response && typeof r.response === 'object' && !Array.isArray(r.response)
+        ? r.response
+        : {},
+      TOOL_LOG_SOFT_MAX_CHARS,
+    ),
+  }));
+}

@@ -34,14 +34,15 @@ JSON만 출력. 설명·마크다운·코드펜스 금지.
 
 ## 최우선 규칙 (반드시)
 - 문장에 다운로드/받아줘/넣어줘/저장/download/mp3/flac 이 있으면 → intent=download, needsDownloadTool=true, needsMusicSearch=true, needsWebSearch=false
-  예: "이센스 독을 다운로드해줘", "아이유 blooming 다운로드", "좋은날 받아줘"
+  예: "이센스 독을 다운로드해줘", "아이유 blooming 다운로드", "좋은날 받아줘", "오늘 멜론 1위 다운로드"
 - 곡·가수·앨범을 찾아/검색/알려줘 → needsMusicSearch=true
   · 다운로드도 같이면 download + 위 플래그
   · 찾기만이면 intent는 download 또는 music, needsMusicSearch=true (Melon 검색 도구 필요)
+- 멜론/차트/순위/1위/일간/주간/월간/연간 → needsMusicSearch=true, needsWebSearch=false (search_melon_chart 사용). 「멜론에서」라고 안 해도 동일
 - 「멜론에서」라고 안 해도 Melon 검색 도구가 필요하면 needsMusicSearch=true
 
 ## 기타
-- latest(차트/오늘/이번주/최신/뉴스/순위) → needsWebSearch=true (단, 다운로드 문장이면 download 우선)
+- latest(일반 뉴스·시사만) → needsWebSearch=true (단, 다운로드·멜론차트 문장이면 download/music 우선, needsWebSearch=false)
 - recommendation(취향 추천) → needsVectorSearch/needsUserProfile/needsHistory=true
 - faq(앱 사용/로그인/결제/오류) → needsFaqSearch=true
 - music(아티스트 설명만, 검색·다운로드 없음) → 플래그 대부분 false
@@ -55,7 +56,9 @@ JSON만 출력. 설명·마크다운·코드펜스 금지.
 - "아이유 가수 정보" → music, needsMusicSearch=true
 - "Love poem 앨범 알려줘" → music, needsMusicSearch=true
 - "비틀즈가 누구야" → music, needsMusicSearch=false
-- "이번주 멜론 차트" → latest, needsWebSearch=true`;
+- "오늘 멜론 1위 다운로드해" → download, needsDownloadTool=true, needsMusicSearch=true, needsWebSearch=false
+- "이번주 멜론 차트" → music, needsMusicSearch=true, needsWebSearch=false
+- "2026-05-23 멜론 순위" → music, needsMusicSearch=true, needsWebSearch=false`;
 
 /** 다운로드·저장 요청 */
 const RE_DOWNLOAD =
@@ -64,6 +67,10 @@ const RE_DOWNLOAD =
 /** Melon 트랙/메타 검색이 필요한 요청 */
 const RE_MUSIC_SEARCH =
   /찾아\s*줘|찾아줘|검색해|검색\s*해|search|알려\s*줘|알려줘|정보\s*알려|곡\s*정보|노래\s*정보|스포티파이에서|spotify에서|멜론에서|유튜브에서/i;
+
+/** Melon 차트·순위 조회 (search_melon_chart) */
+const RE_MELON_CHART =
+  /차트|순위|1위|일간|주간|월간|연간|핫\s*100|hot\s*100|top\s*100|톱\s*100|멜론\s*1|오늘\s*.*1위|실시간\s*차트/i;
 
 /** 가수/앨범 쪽 힌트 (프롬프트·가드용, intent 강제에는 보조) */
 const RE_ARTIST_HINT = /가수|아티스트|artist|누구야|멤버/i;
@@ -108,8 +115,13 @@ export function messageLooksLikeDownload(userMessage: string): boolean {
 export function messageLooksLikeMusicSearch(userMessage: string): boolean {
   const t = userMessage.trim();
   if (RE_MUSIC_SEARCH.test(t)) return true;
+  if (RE_MELON_CHART.test(t)) return true;
   // 「이센스 독」처럼 짧은 곡명만 있어도 다운로드 가드와 결합될 때 검색 필요
   return false;
+}
+
+export function messageLooksLikeMelonChart(userMessage: string): boolean {
+  return RE_MELON_CHART.test(userMessage.trim());
 }
 
 function normalizeFlags(r: IntentResult): IntentResult {
@@ -129,6 +141,10 @@ function normalizeFlags(r: IntentResult): IntentResult {
     needsWebSearch = false;
     // 다운로드면 Melon 검색부터 이어져야 함
     needsMusicSearch = true;
+  }
+  // Melon 차트/검색이 켜진 music intent는 웹검색과 배타
+  if (needsMusicSearch && r.intent === 'music') {
+    needsWebSearch = false;
   }
   if (r.intent === 'recommendation') {
     needsVectorSearch = true;
@@ -170,7 +186,8 @@ export function applyIntentMessageGuards(
   let guarded = false;
 
   const wantsDownload = messageLooksLikeDownload(t);
-  const wantsSearch = messageLooksLikeMusicSearch(t) || wantsDownload;
+  const wantsChart = messageLooksLikeMelonChart(t);
+  const wantsSearch = messageLooksLikeMusicSearch(t) || wantsDownload || wantsChart;
 
   if (wantsDownload) {
     if (
@@ -191,13 +208,18 @@ export function applyIntentMessageGuards(
       reasoning: [next.reasoning, 'guard:download'].filter(Boolean).join('|').slice(0, 160),
     };
   } else if (wantsSearch) {
-    if (!next.needsMusicSearch) guarded = true;
+    if (!next.needsMusicSearch || (wantsChart && next.needsWebSearch)) guarded = true;
     next = {
       ...next,
+      intent: wantsChart && next.intent === 'latest' ? 'music' : next.intent,
       needsMusicSearch: true,
+      needsWebSearch: wantsChart ? false : next.needsWebSearch,
       // 곡 찾기만 해도 Melon FC가 필요 — download intent까지는 강제하지 않음
-      confidence: Math.max(next.confidence, 0.75),
-      reasoning: [next.reasoning, 'guard:music_search'].filter(Boolean).join('|').slice(0, 160),
+      confidence: Math.max(next.confidence, wantsChart ? 0.85 : 0.75),
+      reasoning: [next.reasoning, wantsChart ? 'guard:melon_chart' : 'guard:music_search']
+        .filter(Boolean)
+        .join('|')
+        .slice(0, 160),
     };
     // 가수/앨범 힌트가 있어도 needsMusicSearch만으로 search_music_* 도구가 노출됨
     void RE_ARTIST_HINT;

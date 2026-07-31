@@ -15,7 +15,7 @@ import type { NrmTrackHistoryRow } from '@/lib/nrmTrackHistoryTypes';
 const TRACK_HISTORY_SELECT_COLUMNS =
   'ID,SerialNo,Kind,Platform,FileName,AudioUri,Title,Artist,Album,AlbumArtist,Genre,' +
   'ReleaseDate,TrackNumber,DiscNumber,Composer,Bpm,Copyright,Website,Producer,Remixer,' +
-  'Lyrics,LyricsMode,AlbumCoverPath,FailReason,IsSuccess,DownloadDate';
+  'Lyrics,LyricsMode,AlbumCoverPath,YoutubeVideoId,FailReason,IsSuccess,DownloadDate';
 
 const TRACK_HISTORY_FETCH_LIMIT = 500;
 

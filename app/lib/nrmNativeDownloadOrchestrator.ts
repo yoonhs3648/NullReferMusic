@@ -120,6 +120,7 @@ export function scheduleNativeDownloadJob(
                 throw new Error('DOWNLOAD_ABORTED');
               }
               const audioStage = await finalizeNativeAudioStage(fileUri, fileName, postMeta, {
+                youtubeVideoId: videoId,
                 onAudioPersisted: (label) => {
                   savedLabel = label;
                   options?.onAudioPersisted?.(label);

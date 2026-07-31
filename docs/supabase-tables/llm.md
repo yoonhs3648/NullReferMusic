@@ -76,13 +76,17 @@ CREATE TABLE public."LLMProvider"
 | `Version` | `varchar` | — | NO | 모델 버전 |
 | `Description` | `text` | — | YES | 설명 |
 | `IsActive` | `boolean` | `true` | NO | 사용 여부 |
+| `preference` | `integer` | — | YES | AI Lab 모델 선택 오버레이 정렬 우선순위(**낮을수록 상단**). NULL이면 후순위 |
+| `isRecommand` | `boolean` | `false` | NO | AI Lab 피커에서 모델명 옆「추천 👍」배지 |
 | `RegDate` | `timestamptz` | `now()` | NO | 등록일시 |
 
 **제거된 컬럼(정규화):** `ApiKey`, `DailyLimit`, `MonthlyLimit`, `ProviderName` — 제공자 정보는 `LLMProvider` join.
 
-**현재 활성 채팅 모델 (2026-07-23):** Groq 우선 — `openai/gpt-oss-120b`(`ModelID=1002`), `qwen/qwen3.6-27b`(`1001`), `llama-3.3-70b-versatile`(`1000`) + Google Gemini `models/gemini-3.1-flash-lite`(`21`), `models/gemini-3.5-flash`(`28`), `models/gemini-3.5-flash-lite`(`55`), `models/gemini-3.6-flash`(`56`).
+**현재 활성 채팅 모델 (2026-07-31):** Google/Groq — `models/gemini-3.5-flash-lite`(`55`, preference=1·추천), `models/gemini-3.1-flash-lite`(`21`, 2), `openai/gpt-oss-120b`(`1002`, 3), `qwen/qwen3.6-27b`(`1001`, 4), `models/gemini-3.6-flash`(`56`, 5), `models/gemini-3.5-flash`(`28`, 6). `llama-3.3-70b-versatile`(`1000`)은 `IsActive=false`.
 
-AI Lab 모델 선택 정렬(`sortLlmModelsForPicker`): `IsActive=true` 상단 → `ModelID` 내림차순 → `ProviderID` 내림차순. (Groq 활성 3종이 1002→1000이라 피커 최상단)
+AI Lab Melon 도구(모든 FC 지원 모델 공통): `search_music` / `search_music_artist` / `search_music_album` / **`search_melon_chart`**(일·주·월·년·realtime) / `start_music_download` …. 과거 특정일 일간은 Melon이 미제공 → 앱이 해당 주간 차트로 폴백(`resolvedPeriod`·`note`).
+
+AI Lab 모델 선택 정렬(`sortLlmModelsForPicker`): **`preference` ASC(NULL 후순위)** → `IsActive=true` 상단 → `ModelID` 내림차순 → `ProviderID` 내림차순. 마이그레이션: `20260731120000_llm_model_preference_recommend.sql`.
 
 관리자 시드 RPC: `nrm_rpc_admin_replace_llm_models` (구 `nrm_rpc_admin_replace_llm_providers` DROP).
 
@@ -199,10 +203,12 @@ AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬�
 | `ResponseHeadersJson` | `jsonb` | **응답 헤더 전체** |
 | `RateLimitHeadersJson` | `jsonb` | x-ratelimit* / Retry-After / quota 관련만 |
 | `ResponseBodyText` | `text` | 실패 시 응답 본문(429≤32KB, 기타≤8KB) |
-| `RequestBodyJson` | `jsonb` | 요청 body 스냅샷 — **실패 또는 검색 시도에서만** 저장. 긴 텍스트 truncate |
+| `RequestBodyJson` | `jsonb` | 요청 body 스냅샷 — **실패·웹검색·다운로드 tools·응답 FC** 시도에서 저장. 긴 텍스트 truncate |
 | `RequestBodySha256` | `varchar` | truncate **전** 요청 JSON SHA-256 |
 | `RequestBodyBytes` | `integer` | truncate 전 요청 JSON 크기 |
 | `RequestBodyTruncated` | `boolean` | JSON 저장 시 truncate 여부 |
+| `FunctionCallsJson` | `jsonb` | LLM 응답 function call 원문 `[{callId,name,args},…]` — `search_music` query 등 |
+| `ToolResultsJson` | `jsonb` | toolContinue 시 클라이언트 실행 결과 `[{callId,name,args,response},…]` — Melon hits 등 |
 | `QuotaClass` | `varchar` | 429 분류: `grounding`\|`rpm`\|`tpm`\|`rpd`\|`unknown`. **응답 근거 없으면 unknown** (검색 사용만으로 grounding 추정 금지) |
 | `QuotaId` / `QuotaMetric` | `varchar` | 응답 JSON의 quota 필드(있으면) |
 | `QuotaEvidence` | `varchar` | 분류 근거 요약. unknown이면 NULL |
@@ -210,11 +216,11 @@ AI Lab **빈 대화 화면** 추천 질문. 앱이 활성 카테고리·프롬�
 
 **쿼타 분류 규칙:** `QuotaClass=grounding`은 응답 `quotaId`/`quotaMetric`/본문에 검색·그라운딩 근거가 있을 때만. `WithSearch=true`만으로 grounding이라고 쓰지 않는다. 사용자 안내 문구도 「확인된 사실」과 「한도 분류」를 분리한다.
 
-**요청 body 저장 정책(효율):** 성공 plain은 `RequestBodySha256`/`Bytes`만(JSON NULL). 실패·검색 시도는 truncate된 `RequestBodyJson` 저장.
+**요청 body 저장 정책(효율):** 성공 plain은 `RequestBodySha256`/`Bytes`만(JSON NULL). 실패·검색·다운로드 tools·function call 응답은 truncate된 `RequestBodyJson` + `FunctionCallsJson` 저장. toolContinue면 `ToolResultsJson`도 저장.
 
 RLS: anon/authenticated **SELECT만**. INSERT는 Edge(service_role).
 
-마이그레이션: `20260723130000_llm_call_attempt_log.sql`, 진단 확장 `20260728170000_llm_call_attempt_log_quota_diag.sql`.
+마이그레이션: `20260723130000_llm_call_attempt_log.sql`, 진단 확장 `20260728170000_llm_call_attempt_log_quota_diag.sql`, tool 인자 `20260730170000_llm_call_attempt_log_function_calls.sql`.
 
 ---
 
@@ -742,7 +748,7 @@ Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠S
 - 대화 history: 최근 **15**턴 (향후 Summary 메모리 확장 포인트)
 - Intent 분류: Google `gemini-2.0-flash-lite` 별도 1회(Interactions 우선, 실패 시 Legacy → 휴리스틱)
 
-**현재 활성 LLM 모델 (2026-07-23 기준)**: Groq(`ProviderID=2`) 활성 — `openai/gpt-oss-120b`(`ModelID=1002`), `qwen/qwen3.6-27b`(`1001`), `llama-3.3-70b-versatile`(`1000`)이 피커 상단(ModelID DESC). Google `Type='LLM'` 활성 — `models/gemini-3.1-flash-lite`(`21`), `models/gemini-3.5-flash`(`28`), `models/gemini-3.5-flash-lite`(`55`), `models/gemini-3.6-flash`(`56`). Groq 시드: `20260723190000_llm_provider_groq.sql`. 2026-07-23 Gemini 목록 재조회 시 기존 행은 유지하고 없던 `models/gemini-3.5-flash-lite`·`models/gemini-3.6-flash`만 추가한 뒤(`20260723090000_llm_model_append_gemini36.sql`), `gemini-3.5-flash-lite`도 활성화했다(`20260723093000_llm_model_activate_gemini35_flash_lite.sql`). `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖는다(`scripts/seed-llm-admin-permissions-all.mjs`, Groq는 마이그레이션에서 `ProviderID=2` 권한도 INSERT). `LLMModel.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다.
+**현재 활성 LLM 모델 (2026-07-31 기준)**: 피커는 `preference` 1→6 — `gemini-3.5-flash-lite`(`55`, 추천), `gemini-3.1-flash-lite`(`21`), `openai/gpt-oss-120b`(`1002`), `qwen/qwen3.6-27b`(`1001`), `gemini-3.6-flash`(`56`), `gemini-3.5-flash`(`28`). `llama-3.3-70b-versatile`(`1000`)은 `IsActive=false`. Groq 시드: `20260723190000_llm_provider_groq.sql`. Gemini 추가/활성: `20260723090000_llm_model_append_gemini36.sql`, `20260723093000_llm_model_activate_gemini35_flash_lite.sql`. 정렬·추천 컬럼: `20260731120000_llm_model_preference_recommend.sql`. `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖는다(`scripts/seed-llm-admin-permissions-all.mjs`, Groq는 마이그레이션에서 `ProviderID=2` 권한도 INSERT). `LLMModel.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다.
 
 ### 로깅 — 서버(Edge Function) + 앱(client)
 

@@ -104,6 +104,49 @@ registerTool(
 registerTool(
   createTool({
     definition: {
+      id: 'search_melon_chart',
+      name: 'search_melon_chart',
+      description:
+        'Melon 차트(일/주/월/년/실시간). 오늘 1위·특정일·주간/월간/연간 순위. 곡명 검색이 아니면 이 도구.',
+      kind: 'download_fc',
+      priority: 14,
+      parameters: {
+        type: 'object',
+        properties: {
+          period: {
+            type: 'string',
+            description: 'daily|weekly|monthly|yearly|realtime',
+          },
+          date: { type: 'string', description: 'YYYY-MM-DD KST' },
+          rank: { type: 'number', description: '1~100 optional' },
+          limit: { type: 'number', description: '상위 N, 기본 10' },
+          genre: { type: 'string', description: 'classCd 또는 장르명' },
+          chart: { type: 'string', description: 'realtime: top100|hot100' },
+        },
+        required: ['period'],
+      },
+      examples: [
+        {
+          user: '오늘 멜론 1위 다운로드해',
+          args: { period: 'realtime', date: '2026-07-30', rank: 1, chart: 'top100' },
+        },
+        {
+          user: '2026-05-23 멜론 차트 알려줘',
+          args: { period: 'daily', date: '2026-05-23', limit: 10 },
+        },
+        {
+          user: '이번 주 멜론 주간 차트',
+          args: { period: 'weekly', date: '2026-07-30', limit: 10 },
+        },
+      ],
+    },
+    supports: supportsDownloadFc,
+  }),
+);
+
+registerTool(
+  createTool({
+    definition: {
       id: 'get_ai_lab_lyrics_capability',
       name: 'get_ai_lab_lyrics_capability',
       description:

@@ -100,18 +100,25 @@ export class PromptBuilder {
         `- 여러 곡 요청이면 1곡만 진행하고 나머지는 새 메시지로 안내.\n` +
         `\n` +
         `## 검색 (Melon 자동 — 「멜론에서」 불필요)\n` +
-        `- 곡/트랙 정보·다운로드: 반드시 search_music(query)부터.\n` +
+        `- 곡/트랙 정보·다운로드(곡명·가수명 알 때): 반드시 search_music(query)부터.\n` +
         `- 가수 정보: search_music_artist(query)\n` +
         `- 앨범 정보: search_music_album(query)\n` +
+        `- 차트·순위·1위·일간/주간/월간/연간/오늘 차트: search_melon_chart(period, date, rank?). search_music으로 추측 금지.\n` +
+        `  · 「오늘 멜론 1위 다운로드」→ search_melon_chart(period=realtime, date=오늘YYYY-MM-DD, rank=1)\n` +
+        `  · 「2026-05-23 차트」→ search_melon_chart(period=daily, date=2026-05-23). 과거 일간 미지원 시 tool이 주간으로 대체(note 확인).\n` +
+        `  · 「이번주/월간/연간 차트」→ period=weekly|monthly|yearly + date\n` +
         `- 「이센스 독을 다운로드해줘」→ search_music(\"이센스 독\") → (선택) → start_music_download.\n` +
         `- 「blooming 알려줘」→ search_music. Spotify 등 다른 플랫폼 요청 시 FC 없이 미지원 안내.\n` +
-        `- 결과 복수면 choices로 확인. 트랙 칩 포맷: 「가수 - 노래제목 (앨범명)」\n` +
-        `- 다운로드 요청인데 검색 없이 start_music_download만 호출하지 않는다(단, [AI_LAB_TRACK_SELECT] 제외).\n` +
+        `- 결과 복수면 choices로 확인(한 페이지 최대 5개). 항상 「다른 목록 보기」칩이 있으면 사용자가 눌러 다음 목록을 본다(앱이 처리, 재검색 FC 금지).\n` +
+        `- 트랙 칩 포맷: 「가수 - 노래제목 (앨범명)」, 차트는 「#순위 가수 - 제목 (앨범)」\n` +
+        `- 다운로드 요청인데 검색/차트 없이 start_music_download만 호출하지 않는다(단, [AI_LAB_TRACK_SELECT] 제외).\n` +
         `\n` +
         `## 복수 후보 = 선택 대기 (필수)\n` +
-        `- search_music 결과가 2건 이상이면 「다운로드를 진행합니다.」를 절대 말하지 않는다.\n` +
+        `- search_music·search_melon_chart 결과가 2건 이상이면 「다운로드를 진행합니다.」를 절대 말하지 않는다.\n` +
         `- 텍스트는 「아래 목록에서 받을 곡을 선택해 주세요.」처럼 선택 안내만.\n` +
         `- 이 턴에 start_music_download 호출 금지. 재검색 금지. choices만 기다린다.\n` +
+        `- 사용자가 「다른 목록 보기」를 고르면 앱이 다음 목록을 붙인다. 모델은 같은 검색을 다시 호출하지 않는다.\n` +
+        `- 더 이상 목록이 없으면 앱/모델이 「더 이상 표시할 목록이 없습니다」라고 안내한다.\n` +
         `\n` +
         `## 곡 확정 후 다운로드 (필수 — 텍스트만 금지)\n` +
         `- 결과 1건이거나 사용자가 곡을 고른 뒤: function call start_music_download(hit, lyricsOption=none)가 필수다.\n` +
@@ -119,6 +126,8 @@ export class PromptBuilder {
         `- 메시지에 [AI_LAB_TRACK_SELECT]{...hit...}가 있으면 search_* 금지.\n` +
         `  같은 응답에서 start_music_download(JSON hit)를 반드시 호출.\n` +
         `- YouTube는 Melon artist+title로만 (사용자 원문 직접 검색 가정 금지)\n` +
+        `- YouTube 후보 확인(미리듣기·맞다/아니다)은 앱 UI가 처리한다.\n` +
+        `  needsYoutubeConfirm이면 다운로드 완료/가사 질문을 하지 말고 확인 UI를 기다린다.\n` +
         `\n` +
         `## 가사 (기본 생성 안 함)\n` +
         `- 「아이유 blooming 다운로드해줘」→ 가사 없이 오디오만.\n` +
@@ -129,7 +138,10 @@ export class PromptBuilder {
         `  모델 미설치면 오디오만 하고 설치 안내(tool 결과 lyricsSkippedReason).\n` +
         `- 사용자가 「예, 가사 생성」→ start_ai_lab_lyrics(videoId).\n` +
         `- 정렬은 항상 wav2vec2-base + 다국어 발음 전처리. 한국어팩/영어팩/번역지원 선택지 금지.\n` +
-        `- 영문 가사 완료 후 번역 질문(또는 「예, 번역해주세요」)→ translate_ai_lab_lyrics.\n` +
+        `- start_ai_lab_lyrics 결과 askTranslation=true이면 앱이 번역 여부 choices를 붙인다.\n` +
+        `  텍스트는 「영문 가사 예정. 번역도 할까요?」정도만. 마크다운으로 예/아니요 목록을 쓰지 말 것.\n` +
+        `  translate_ai_lab_lyrics는 사용자가 칩(예, 번역해주세요)을 고른 뒤에만.\n` +
+        `- 영문 가사 완료 후 앱이 따로 번역 질문을 띄울 수 있다. 같은 규칙.\n` +
         `  번역기는 항상 Google Translator(DeepL 설정 무시).\n` +
         `- lyricsOption: none|auto 만 사용. 번역은 start_music_download에 넣지 않는다.\n` +
         `\n` +

@@ -69,9 +69,12 @@ import {
   runPlanner,
   buildProviderHttpDiag,
   classifyQuotaFromResponse,
+  compactFunctionCallsForLog,
+  compactToolResultsForLog,
   detectToolsInRequestBody,
   headersToRecord,
   pickProviderRequestId,
+  shouldPersistRequestBodyJson,
   snapshotRequestBody,
   shouldUseGeminiInteractionsApi,
   setGeminiInteractionsApiOverride,
@@ -404,6 +407,8 @@ async function persistLlmCallAttemptLogs(
     RequestBodySha256: a.requestBodySha256 ?? null,
     RequestBodyBytes: a.requestBodyBytes ?? null,
     RequestBodyTruncated: a.requestBodyTruncated === true,
+    FunctionCallsJson: a.functionCallsJson ?? null,
+    ToolResultsJson: a.toolResultsJson ?? null,
     QuotaClass: a.quotaClass ?? null,
     QuotaId: a.quotaId ?? null,
     QuotaMetric: a.quotaMetric ?? null,
@@ -443,6 +448,10 @@ type GeminiAttemptDiag = {
   requestBodySha256?: string | null;
   requestBodyBytes?: number | null;
   requestBodyTruncated?: boolean;
+  /** LLM 응답 function call 원문 (search_music query 등) */
+  functionCallsJson?: ReturnType<typeof compactFunctionCallsForLog>;
+  /** toolContinue 클라이언트 실행 결과 */
+  toolResultsJson?: ReturnType<typeof compactToolResultsForLog>;
   quotaClass?: QuotaClass | null;
   quotaId?: string | null;
   quotaMetric?: string | null;
@@ -461,6 +470,8 @@ function emptyAttemptHttpFields(): Pick<
   | 'requestBodySha256'
   | 'requestBodyBytes'
   | 'requestBodyTruncated'
+  | 'functionCallsJson'
+  | 'toolResultsJson'
   | 'quotaClass'
   | 'quotaId'
   | 'quotaMetric'
@@ -477,6 +488,8 @@ function emptyAttemptHttpFields(): Pick<
     requestBodySha256: null,
     requestBodyBytes: null,
     requestBodyTruncated: false,
+    functionCallsJson: null,
+    toolResultsJson: null,
     quotaClass: null,
     quotaId: null,
     quotaMetric: null,
@@ -1356,8 +1369,18 @@ const geminiLegacyGenerateContentAdapter: LlmAdapter = {
         elapsedMs: Date.now() - attemptStarted,
         providerRequestId: pickProviderRequestId(headersToRecord(res.headers)),
       };
-      // 성공: 검색 시도는 body 스냅샷 보관, plain 성공은 해시만(용량 절약)
-      await attachRequestSnapshot(diagOk, requestBody, attempt.withSearch === true);
+      // 성공: 검색·다운로드 tools·FC 응답은 body 스냅샷 보관, plain 성공은 해시만
+      await attachRequestSnapshot(
+        diagOk,
+        requestBody,
+        shouldPersistRequestBodyJson({
+          ok: true,
+          withSearch: attempt.withSearch,
+          withTools: detectToolsInRequestBody(requestBody).withTools,
+          hasFunctionCalls: functionCalls.length > 0,
+        }),
+      );
+      diagOk.functionCallsJson = compactFunctionCallsForLog(functionCalls);
       attemptDiags.push(diagOk);
 
       console.log(
@@ -1371,6 +1394,7 @@ const geminiLegacyGenerateContentAdapter: LlmAdapter = {
           elapsedMs: diagOk.elapsedMs,
           textLen: fullText.length,
           finishReason: diagOk.finishReason,
+          functionCallCount: functionCalls.length,
           usedFallback,
         }),
       );
@@ -2516,6 +2540,9 @@ const groqAdapter: LlmAdapter = {
       blockReason: null,
       groundedQueryCount: needsWebSearch ? 1 : 0,
       elapsedMs: Date.now() - attemptStarted,
+      functionCallsJson: compactFunctionCallsForLog(
+        toolMode === 'download' ? parsed.functionCalls : [],
+      ),
     });
 
     if (parsed.text) {
@@ -3356,7 +3383,16 @@ Deno.serve(async (req: Request) => {
             modelName: model.modelName,
             userMessage: isToolContinue ? `[tool_continue x${toolResults.length}]` : message,
             needsWebSearch: result.needsWebSearch,
-            attempts: result.attempts,
+            attempts: (() => {
+              const toolResultsJson = isToolContinue
+                ? compactToolResultsForLog(toolResults)
+                : null;
+              if (!toolResultsJson) return result.attempts;
+              return result.attempts.map((a) => ({
+                ...a,
+                toolResultsJson: a.toolResultsJson ?? toolResultsJson,
+              }));
+            })(),
           });
 
           if (!result.ok) {

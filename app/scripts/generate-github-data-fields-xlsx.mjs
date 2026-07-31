@@ -62,7 +62,7 @@ const SCHEMAS = {
     description: '커스텀 APK 빌드 등록 이력 (data/custom-apk/userList.json)',
     fields: [
       { name: 'id', type: 'number', required: '필수', description: '등록 고유 ID' },
-      { name: 'appName', type: 'string', required: '필수', description: '커스텀 APK displayName (앱 설치명)' },
+      { name: 'appName', type: 'string', required: '필수', description: '커스텀 APK legacy 기록명 (앱 상호/브랜딩과 무관, user_list 전용)' },
       { name: 'userName', type: 'string', required: '필수', description: '수신자 이름' },
       { name: 'SerialNo', type: 'string', required: '필수', description: '커스텀 APK에 내장된 시리얼' },
       { name: 'version', type: 'string', required: '필수', description: '빌드 시점 APK 버전' },

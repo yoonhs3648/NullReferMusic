@@ -31,6 +31,7 @@
 | `Lyrics` | `text` | — | YES | 가사 **원문(plain, 타임스탬프 제거)**. 향후 벡터화 대상. |
 | `LyricsMode` | `varchar` | — | YES | `configured`/`translation`/`melon`/`melon_translation` |
 | `AlbumCoverPath` | `text` | — | YES | Storage `album-covers` 버킷 내 오브젝트 경로(공개 URL 아님) |
+| `YoutubeVideoId` | `varchar` | — | YES | 다운로드에 사용한 YouTube `videoId` (`watch?v=`). Melon `Website`(songId)와 별개. `down`/`downFail` 등 오디오 추출 경로에서만 채움 |
 | `FailReason` | `text` | — | YES | 실패 이벤트의 짧은 원인 문구 |
 | `IsSuccess` | `boolean` | `true` | NO | 이벤트 성공 여부 |
 | `DownloadDate` | `timestamptz` | `now()` | NO | 이벤트 발생 일시 (다운로드가 아닌 이벤트도 이 컬럼을 씀) |
@@ -60,13 +61,14 @@ DB에는 `CK_TrackHistory_Kind` CHECK 제약으로 위 10개 값만 허용한다
 - `IX_TrackHistory_SerialNo` (`SerialNo`)
 - `IX_TrackHistory_DownloadDate` (`DownloadDate` DESC) — History 탭 최신순 조회용
 - `IX_TrackHistory_Kind` (`Kind`)
+- `IX_TrackHistory_YoutubeVideoId` (`YoutubeVideoId`) — NULL 제외 partial index (다운로드 소스 영상 조회용)
 
 ## RLS·쓰기 경로
 
 - `ENABLE ROW LEVEL SECURITY` + `SELECT` 정책만 `anon`/`authenticated`에 허용(`USING (true)`). **쓰기 정책 없음.**
 - 쓰기는 `nrm_rpc_track_history_insert(p_serial_no varchar, p_row jsonb)` (SECURITY DEFINER) 하나로 통일.
   - 컬럼이 늘어나도(예: 향후 벡터 컬럼) RPC 시그니처를 바꾸지 않도록 필드를 JSONB로 받는다.
-  - `p_row` 키: `kind`(필수), `platform`, `fileName`, `audioUri`, `title`, `artist`, `album`, `albumArtist`, `genre`, `releaseDate`, `trackNumber`, `discNumber`, `composer`, `bpm`, `copyright`, `website`, `producer`, `remixer`, `lyrics`, `lyricsMode`, `albumCoverPath`, `failReason`, `isSuccess`(기본 `true`), `downloadDate`(기본 `now()`).
+  - `p_row` 키: `kind`(필수), `platform`, `fileName`, `audioUri`, `title`, `artist`, `album`, `albumArtist`, `genre`, `releaseDate`, `trackNumber`, `discNumber`, `composer`, `bpm`, `copyright`, `website`, `producer`, `remixer`, `lyrics`, `lyricsMode`, `albumCoverPath`, `youtubeVideoId`, `failReason`, `isSuccess`(기본 `true`), `downloadDate`(기본 `now()`).
   - `GRANT EXECUTE ... TO anon, authenticated` — 앱이 publishable key로 직접 호출.
 - 앱 클라이언트: `app/lib/nrmTrackHistoryRemote.ts`의 `logTrackHistory()`가 이 RPC를 감싼다. 모든 호출은 **fire-and-forget으로 감싸 실패해도 앱 기능(다운로드/편집/삭제)을 막지 않는다** — 실패는 `logNrmRunError`로만 남긴다.
 
@@ -95,6 +97,8 @@ DB에는 `CK_TrackHistory_Kind` CHECK 제약으로 위 10개 값만 허용한다
 **가사 원문 컬럼(`Lyrics`)** 은 항상 타임스탬프를 제거한 plain 텍스트로 저장한다(`extractPlainLyricsFromLrcText`, `app/lib/nrmMelonLyrics.ts`). LRC 사이드카·내장 가사 어느 쪽이든 이 함수를 거쳐 plain으로 변환한다.
 
 **다운로드 플랫폼(`downloadPlatform`)**: `NrmAudioFileMetadata`에 파이프라인 전용 필드로 추가(`app/lib/nrmDownloadAudioMetadata.ts`) — ffmpeg/파일 태그에는 기록하지 않고(`splitMetadataForDownloadStages`에서 제외), `TrackHistory.Platform`에만 쓴다.
+
+**YouTube videoId (`YoutubeVideoId`)**: 네이티브 다운로드 오케스트레이터·실패 보고가 `scheduleNativeDownloadJob`/`reportNativeDownloadExtractFailure`의 `videoId`를 `logDownloadTrackHistory({ youtubeVideoId })`로 넘긴다. Melon 메타 검색 후 YouTube로 오디오를 받는 AI Lab 경로에서도 동일하다. `local:` 접두 URI는 저장하지 않는다.
 
 ## History 탭 조회
 

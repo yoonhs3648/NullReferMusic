@@ -49,18 +49,18 @@ $buildFailed = $false
 try {
     $cfg = $originalBrandJson | ConvertFrom-Json
 
+    # displayName(앱 상호·런처)는 항상 제품명. 커스텀 appName은 user_list legacy 기록용.
+    $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
+    $cfg.displayName = $adminDefaults.displayName.Trim()
     if ($Customize) {
-        if (-not $DisplayName -or -not $UserName -or -not $SerialNo) {
+        if (-not $UserName -or -not $SerialNo) {
             throw 'Custom branding values are missing.'
         }
-        $cfg.displayName = $DisplayName.Trim()
         $cfg.serialNo = $SerialNo.Trim()
         $cfg.userName = $UserName.Trim()
         $cfg.versionInfoAdminBuild = $false
     }
     else {
-        $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
-        $cfg.displayName = $adminDefaults.displayName.Trim()
         $cfg.serialNo = $adminDefaults.serialNo.Trim()
         $cfg.userName = $adminDefaults.userName.Trim()
         $cfg.versionInfoAdminBuild = $true

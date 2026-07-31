@@ -51,6 +51,8 @@ import type { NrmMelonLyricsMode } from '@/lib/nrmMelonLyrics';
 import type { NrmWhisperLyricsMode } from '@/lib/nrmWhisperLyrics';
 
 export type FinalizeParallelOptions = {
+  /** TrackHistory.YoutubeVideoId — 실제 추출에 쓴 videoId */
+  youtubeVideoId?: string;
   /** APK: 오디오 큐 작업이 실제 시작될 때 (추출 직전, 알림·FGS dl 토큰) */
   onAudioDownloadStarted?: () => void;
   /** APK: 오디오가 저장 경로에 쓰인 직후 (알림용) */
@@ -248,7 +250,7 @@ export async function finalizeNativeAudioStage(
   extractionUri: string,
   fileName: string,
   embedMetadata: NrmAudioFileMetadata | undefined,
-  options?: Pick<FinalizeParallelOptions, 'onAudioPersisted'>,
+  options?: Pick<FinalizeParallelOptions, 'onAudioPersisted' | 'youtubeVideoId'>,
 ): Promise<NativeAudioStageResult> {
   const encode = await loadDownloadEncodeSettings();
   const { whisperMode, melonMode, melonLyricsPlain, melonAlignLang, ffmpegMetadata } = embedMetadata
@@ -358,6 +360,7 @@ export async function finalizeNativeAudioStage(
     fileName: safeName,
     audioUri: audioSaved.location.audioUri,
     isSuccess: true,
+    youtubeVideoId: options?.youtubeVideoId,
   });
 
   logDownloadStage('pipeline', 'finalize_audio_ok', { fileName: safeName, extension });
@@ -642,6 +645,7 @@ async function finalizeNativeParallel(
   });
   const audioStage = await finalizeNativeAudioStage(extractionUri, fileName, embedMetadata, {
     onAudioPersisted: options?.onAudioPersisted,
+    youtubeVideoId: options?.youtubeVideoId,
   });
   if (!audioStage.lyricsModeActive) {
     await deleteLocalAudioTemps(audioStage.temps);

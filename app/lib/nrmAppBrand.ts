@@ -1,6 +1,5 @@
 import brandConfig from '../nrm-brand.config.json';
 import {
-  getResolvedNrmBrandDisplayName,
   getResolvedNrmBrandStorageFolderName,
   getResolvedNrmBrandUserName,
   isNrmAdminBuild,
@@ -8,25 +7,30 @@ import {
 
 /**
  * 앱 브랜드 문자열 단일 출처.
- * 친구용 커스텀 빌드: `app/nrm-brand.config.json` 만 수정 후 `npm run sync:brand` (APK 빌드 시 자동).
+ * 앱 내 상호(로고·약관·종료·런처)는 항상 NullReference Music.
+ * 커스텀 빌드의 appName은 user_list legacy 기록용이며 displayName bake에 쓰지 않는다.
  */
-export const NRM_BRAND_DISPLAY_NAME = brandConfig.displayName.trim();
+/** 버전 정보 오버레이·앱 상호 공통 제품명 */
+export const NRM_VERSION_INFO_PRODUCT_NAME = (
+  brandConfig.versionInfoProductName ?? 'NullReference Music'
+).trim() || 'NullReference Music';
+
+export const NRM_BRAND_DISPLAY_NAME = NRM_VERSION_INFO_PRODUCT_NAME;
 export const NRM_BRAND_STORAGE_FOLDER_NAME = brandConfig.storageFolderName.trim();
 
-/** 런타임 identity(업데이트 후 복원) 우선 — UI·경로 표시용 */
+/** 앱 내 상호(로고·약관·종료 확인)용 제품명 — 커스텀 appName과 무관 */
+export function getNrmProductDisplayName(): string {
+  return NRM_VERSION_INFO_PRODUCT_NAME;
+}
+
+/** @deprecated getNrmProductDisplayName() 사용 */
 export function getNrmBrandDisplayNameForUi(): string {
-  return getResolvedNrmBrandDisplayName();
+  return getNrmProductDisplayName();
 }
 
 export function getNrmBrandStorageFolderForPaths(): string {
   return getResolvedNrmBrandStorageFolderName();
 }
-
-/** 버전 정보 오버레이 상단 제품명 — 커스텀 displayName과 무관 */
-export const NRM_VERSION_INFO_PRODUCT_NAME = (
-  brandConfig.versionInfoProductName ?? 'NullReference Music'
-).trim() || 'NullReference Music';
-
 /** 친구용 APK 빌드 시에만 설정 (build-release-apk-custom.bat Y) */
 export function getNrmVersionInfoCustomizingLine(): string | null {
   if (isNrmAdminBuild()) return null;
@@ -46,7 +50,7 @@ export function shouldShowVersionInfoSerialNumber(): boolean {
 
 /** 로고 워드마크 — 마지막 단어를 accent 색으로 분리 */
 export function splitNrmLogoWordmark(displayName: string): { primary: string; accent: string } {
-  const normalized = displayName.trim() || NRM_BRAND_DISPLAY_NAME;
+  const normalized = displayName.trim() || getNrmProductDisplayName();
   const parts = normalized.split(/\s+/).filter(Boolean);
   if (parts.length <= 1) {
     return { primary: normalized, accent: '' };
@@ -56,7 +60,7 @@ export function splitNrmLogoWordmark(displayName: string): { primary: string; ac
 }
 
 export function getNrmLogoWordmark(): { primary: string; accent: string } {
-  return splitNrmLogoWordmark(getNrmBrandDisplayNameForUi());
+  return splitNrmLogoWordmark(getNrmProductDisplayName());
 }
 
 export function getNrmFileLogFolderDisplayPath(): string {
@@ -68,7 +72,7 @@ export function getNrmDownloadsFolderDisplayPath(): string {
 }
 
 export function getNrmAppExitConfirmMessage(): string {
-  return `${getNrmBrandDisplayNameForUi()}을 종료할까요?`;
+  return `${getNrmProductDisplayName()}을 종료할까요?`;
 }
 
 export function getNrmUserAgent(appVersion: string): string {

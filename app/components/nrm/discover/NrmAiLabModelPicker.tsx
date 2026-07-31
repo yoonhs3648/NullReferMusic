@@ -42,8 +42,9 @@ const ROW_MIN_HEIGHT = 52;
 /**
  * AI Lab — LLMModel(Type=LLM) 모델 선택.
  *
- * 정책(유지):
- * - 목록: fetchLlmModelsForAiLab (IsActive 우선 → ModelID DESC; Groq 활성 1002/1001/1000이 상단)
+ * 정책:
+ * - 목록: preference ASC(null 후순위) → IsActive 우선 → ModelID DESC → ProviderID DESC
+ * - isRecommand면 모델명 옆「추천 👍」
  * - value===null이고 allowAutoDefault면 pickDefaultLlmModelId (onDefaultSelect 우선, 저장은 부모 책임)
  * - IsActive=false는 표시만, 선택 불가
  * - presentation: chip | menuRow
@@ -225,6 +226,9 @@ export function NrmAiLabModelPicker({
                 {models.map((item) => {
                   const isSelected = item.modelId === value;
                   const disabled = !item.isActive;
+                  const a11yLabel = item.isRecommand
+                    ? `${item.modelDisplayName} 추천`
+                    : item.modelDisplayName;
                   return (
                     <Pressable
                       key={item.modelId}
@@ -238,16 +242,28 @@ export function NrmAiLabModelPicker({
                       ]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: isSelected, disabled }}
-                      accessibilityLabel={item.modelDisplayName}>
-                      <Text
-                        style={[
-                          styles.rowLabel,
-                          { color: disabled ? bodyColor : titleColor },
-                          isSelected && !disabled && styles.rowLabelSelected,
-                        ]}
-                        numberOfLines={2}>
-                        {item.modelDisplayName}
-                      </Text>
+                      accessibilityLabel={a11yLabel}>
+                      <View style={styles.rowLabelWrap}>
+                        <Text
+                          style={[
+                            styles.rowLabel,
+                            { color: disabled ? bodyColor : titleColor },
+                            isSelected && !disabled && styles.rowLabelSelected,
+                          ]}
+                          numberOfLines={2}>
+                          {item.modelDisplayName}
+                        </Text>
+                        {item.isRecommand ? (
+                          <Text
+                            style={[
+                              styles.recommendBadge,
+                              { color: disabled ? bodyColor : nrmTokens.color.primary },
+                            ]}
+                            numberOfLines={1}>
+                            추천 {'\uD83D\uDC4D'}
+                          </Text>
+                        ) : null}
+                      </View>
                       {isSelected && !disabled ? (
                         <Ionicons name="checkmark" size={20} color={nrmTokens.color.primary} />
                       ) : null}
@@ -374,10 +390,22 @@ const styles = StyleSheet.create({
   rowDisabled: {
     opacity: 0.42,
   },
-  rowLabel: {
+  rowLabelWrap: {
     flex: 1,
     minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  rowLabel: {
+    flexShrink: 1,
     fontSize: nrmTokens.font.body,
+  },
+  recommendBadge: {
+    flexShrink: 0,
+    fontSize: nrmTokens.font.caption,
+    fontWeight: '700',
   },
   rowLabelSelected: {
     fontWeight: '600',

@@ -64,7 +64,7 @@ import { NrmHomeHistoryScreen } from '@/components/nrm/NrmHomeHistoryScreen';
 import { NrmTrackMetadataSettingsHome } from '@/components/nrm/NrmTrackMetadataSettingsHome';
 import { nrmHasActiveDownloadOrLyricsWork } from '@/lib/nrmBackgroundWork';
 import { confirmUser } from '@/lib/nrmUserNotify';
-import { formatNrmAppExitConfirmMessage, useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
+import { getNrmAppExitConfirmMessage } from '@/lib/nrmAppBrand';
 
 import { NrmHomeChartCarousel, homeChartStageMetrics } from '@/components/nrm/NrmHomeChartCarousel';
 import { homeChartPodiumTier } from '@/components/nrm/NrmHomeChartRankCrown';
@@ -161,7 +161,6 @@ async function formatYoutubeDisplayQuery(artist?: string | null, title?: string 
 export default function HomeScreen() {
 
   const { isDark } = useNrmUiAppearance();
-  const mainLogoDisplayName = useNrmMainLogoDisplayName();
 
   const { width } = useWindowDimensions();
 
@@ -796,7 +795,7 @@ export default function HomeScreen() {
           return;
         }
         exitPromptOpenRef.current = true;
-        const ok = await confirmUser(formatNrmAppExitConfirmMessage(mainLogoDisplayName), {
+        const ok = await confirmUser(getNrmAppExitConfirmMessage(), {
           cancelLabel: '취소',
           confirmLabel: '종료',
         });
@@ -816,7 +815,6 @@ export default function HomeScreen() {
     isLastfmSearchView,
     isMelonSearchView,
     layoutPhase,
-    mainLogoDisplayName,
     resetToYoutubeHome,
     youtubeOverlay,
   ]);

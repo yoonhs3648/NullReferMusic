@@ -19,11 +19,11 @@ import {
 } from '@/lib/nrmApiSettingsUi';
 import { notifyUserError } from '@/lib/nrmDevLog';
 import {
-  getNrmMainLogoDefaultDisplayName,
-  loadMainLogoDisplayNameOverride,
-  saveMainLogoDisplayNameOverride,
-  validateMainLogoDisplayNameInput,
-} from '@/lib/nrmMainLogoDisplayNameSettings';
+  getNrmUserDisplayNameDefault,
+  loadUserDisplayNameOverride,
+  saveUserDisplayNameOverride,
+  validateUserDisplayNameInput,
+} from '@/lib/nrmUserDisplayNameSettings';
 import { confirmUser, notifyUser } from '@/lib/nrmUserNotify';
 
 const PANEL_INPUT_BORDER = Platform.OS === 'web' ? StyleSheet.hairlineWidth : 1;
@@ -52,7 +52,7 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
 }
 
 function effectiveNameFromOverride(override: string | null): string {
-  return override ?? getNrmMainLogoDefaultDisplayName();
+  return override ?? getNrmUserDisplayNameDefault();
 }
 
 export function NrmMainLogoDisplayNameSettingsPanel({
@@ -64,7 +64,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
   registerBackHandler,
   registerDrawerDismiss,
 }: Props) {
-  const defaultName = getNrmMainLogoDefaultDisplayName();
+  const defaultName = getNrmUserDisplayNameDefault();
   const [draft, setDraft] = useState(defaultName);
   const [savedOverride, setSavedOverride] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,13 +77,13 @@ export function NrmMainLogoDisplayNameSettingsPanel({
 
   const isDirty = useMemo(() => draft.trim() !== savedEffective, [draft, savedEffective]);
 
-  const validationHint = useMemo(() => validateMainLogoDisplayNameInput(draft), [draft]);
+  const validationHint = useMemo(() => validateUserDisplayNameInput(draft), [draft]);
 
   const canSave = isDirty && !validationHint && !saving;
 
   useEffect(() => {
     let cancelled = false;
-    void loadMainLogoDisplayNameOverride().then((override) => {
+    void loadUserDisplayNameOverride().then((override) => {
       if (cancelled) return;
       setSavedOverride(override);
       setDraft(effectiveNameFromOverride(override));
@@ -99,14 +99,14 @@ export function NrmMainLogoDisplayNameSettingsPanel({
   }, [savedEffective]);
 
   const persistDraft = useCallback(async (): Promise<boolean> => {
-    const validationError = validateMainLogoDisplayNameInput(draft);
+    const validationError = validateUserDisplayNameInput(draft);
     if (validationError) {
       notifyUser(validationError);
       return false;
     }
     const trimmed = draft.trim();
     const override = trimmed === defaultName ? null : trimmed;
-    await saveMainLogoDisplayNameOverride(override);
+    await saveUserDisplayNameOverride(override);
     setSavedOverride(override);
     setDraft(effectiveNameFromOverride(override));
     return true;
@@ -119,7 +119,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
       const saved = await persistDraft();
       if (saved) void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
     } catch (e) {
-      notifyUserError('settings.mainLogoDisplayNameSave', e, '저장하지 못했습니다.');
+      notifyUserError('settings.userDisplayNameSave', e, '저장하지 못했습니다.');
     } finally {
       setSaving(false);
     }
@@ -128,15 +128,15 @@ export function NrmMainLogoDisplayNameSettingsPanel({
   const handleReset = useCallback(async () => {
     setSaving(true);
     try {
-      await saveMainLogoDisplayNameOverride(null);
+      await saveUserDisplayNameOverride(null);
       setSavedOverride(null);
-      setDraft(defaultName);
+      setDraft(getNrmUserDisplayNameDefault());
     } catch (e) {
-      notifyUserError('settings.mainLogoDisplayNameReset', e, '초기화하지 못했습니다.');
+      notifyUserError('settings.userDisplayNameReset', e, '초기화하지 못했습니다.');
     } finally {
       setSaving(false);
     }
-  }, [defaultName]);
+  }, []);
 
   const handleLeave = useCallback(
     async (target: 'settings' | 'closeDrawer') => {
@@ -156,7 +156,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
           if (!saved) return;
           void notifyUser(NRM_API_SETTINGS_SAVED_MESSAGE);
         } catch (e) {
-          notifyUserError('settings.mainLogoDisplayNameSave', e, '저장하지 못했습니다.');
+          notifyUserError('settings.userDisplayNameSave', e, '저장하지 못했습니다.');
           return;
         } finally {
           setSaving(false);
@@ -207,7 +207,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
     return (
       <View style={styles.root}>
         <MenuBackRow onPress={() => void handleLeave('settings')} />
-        <Text style={[styles.fieldTitle, { color: titleColor }]}>앱 이름</Text>
+        <Text style={[styles.fieldTitle, { color: titleColor }]}>사용자 이름</Text>
         <ActivityIndicator color={nrmTokens.color.primary} style={styles.loader} />
       </View>
     );
@@ -216,7 +216,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
   return (
     <View style={styles.root}>
       <MenuBackRow onPress={() => void handleLeave('settings')} />
-      <Text style={[styles.fieldTitle, { color: titleColor }]}>앱 이름</Text>
+      <Text style={[styles.fieldTitle, { color: titleColor }]}>사용자 이름</Text>
       <TextInput
         value={draft}
         onChangeText={setDraft}
@@ -235,7 +235,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
         editable={!saving}
       />
 
-      {validationHint === '앱이름이 너무 길어요' ? (
+      {validationHint === '사용자 이름이 너무 길어요' ? (
         <Text style={styles.validationHint}>{validationHint}</Text>
       ) : null}
 

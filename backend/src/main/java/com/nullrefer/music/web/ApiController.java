@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nullrefer.music.chart.AppleMusicRssChartService;
 import com.nullrefer.music.chart.LastfmChartService;
+import com.nullrefer.music.chart.MelonDailyChartResult;
+import com.nullrefer.music.chart.MelonDailyChartService;
 import com.nullrefer.music.chart.MelonGenreChartService;
 import com.nullrefer.music.chart.MelonRealtimeChartService;
 import com.nullrefer.music.search.LastfmSearchService;
@@ -74,6 +76,7 @@ public class ApiController {
   private final AppleMusicRssChartService appleMusicRssChartService;
   private final MelonGenreChartService melonGenreChartService;
   private final MelonRealtimeChartService melonRealtimeChartService;
+  private final MelonDailyChartService melonDailyChartService;
   private final MelonSearchService melonSearchService;
   private final SpotifyTokenProvider spotifyTokenProvider;
   private final NrmSettings settings;
@@ -94,6 +97,7 @@ public class ApiController {
       AppleMusicRssChartService appleMusicRssChartService,
       MelonGenreChartService melonGenreChartService,
       MelonRealtimeChartService melonRealtimeChartService,
+      MelonDailyChartService melonDailyChartService,
       MelonSearchService melonSearchService,
       SpotifyTokenProvider spotifyTokenProvider,
       NrmSettings settings,
@@ -112,6 +116,7 @@ public class ApiController {
     this.appleMusicRssChartService = appleMusicRssChartService;
     this.melonGenreChartService = melonGenreChartService;
     this.melonRealtimeChartService = melonRealtimeChartService;
+    this.melonDailyChartService = melonDailyChartService;
     this.melonSearchService = melonSearchService;
     this.spotifyTokenProvider = spotifyTokenProvider;
     this.settings = settings;
@@ -534,6 +539,30 @@ public class ApiController {
                 "KR",
                 java.time.Instant.now(),
                 List.of()));
+      }
+      return ResponseEntity.status(502).body(Map.of("error", code));
+    }
+  }
+
+  @GetMapping("/api/charts/melon/daily")
+  public ResponseEntity<?> melonDailyChart(
+      @RequestParam(value = "classCd", defaultValue = "GN0000") String classCd) {
+    try {
+      return ResponseEntity.ok(melonDailyChartService.fetchLatest(classCd));
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
+    } catch (IllegalStateException e) {
+      String code = e.getMessage() != null ? e.getMessage() : "melon_fetch_failed";
+      if ("melon_empty".equals(code)) {
+        return ResponseEntity.ok(
+            new MelonDailyChartResult(
+                "melon",
+                "daily:" + classCd,
+                "Melon 일간",
+                "KR",
+                java.time.Instant.now(),
+                List.of(),
+                null));
       }
       return ResponseEntity.status(502).body(Map.of("error", code));
     }

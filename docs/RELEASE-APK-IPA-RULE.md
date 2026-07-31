@@ -152,13 +152,14 @@ npm run generate:music-quotes
 
 **AI 에이전트:** APK 빌드·`assembleRelease` 실행 전 `generate:music-quotes`가 성공했는지 확인한다. 실패 시 빌드를 진행하지 않고 원인을 수정한다.
 
-### 6-1-c. 앱 브랜드(표시명) 동기화 (친구용 APK)
+### 6-1-c. 앱 브랜드 동기화
 
-앱 로고·런처 이름·다운로드 폴더·APK 파일명 접두를 바꿀 때는 **`app/nrm-brand.config.json`만** 수정한다.
+앱 상호(로고·약관·종료·런처)는 항상 **NullReference Music**. 커스텀 `appName`은 `user_list` legacy만.
 
 | 필드 | 용도 |
 |------|------|
-| `displayName` | 메인 로고, 앱 이름, 종료 확인, 버전/저작권, 알림 제목 |
+| `displayName` / `versionInfoProductName` | 제품명(고정). 커스텀 빌드가 appName으로 덮지 않음 |
+| `userName` | 문의·Custom 줄·「사용자 이름 변경」기본값·AI Lab 인사 기본 |
 | `storageFolderName` | `Download/…` 폴더, 로그 경로, APK 파일명, User-Agent (공백 없음) |
 
 ```bash
@@ -204,7 +205,7 @@ PAT 권한: 대상 저장소 `data/` 및 문의 첨부 경로 **Contents write**
 ### 6-2. 앱 메타데이터 확인
 | 항목 | 기준값 | 위치 |
 |------|--------|------|
-| 앱 표시명 | `nrm-brand.config.json` → `displayName` | `app.config.ts` → `name`, `strings.xml` → `app_name` (sync 후) |
+| 앱 표시명 | `versionInfoProductName` / 제품명 고정 | `app.config.ts` → `name`, `strings.xml` → `app_name` (sync 후) |
 | 앱 아이콘 | `assets/images/icon.png` 기반 NRM CI 로고 | `mipmap-*/ic_launcher*.webp` |
 | Adaptive foreground | 투명 배경 + 흰색 로고 (`밝기→알파` 변환) | `mipmap-*/ic_launcher_foreground.webp` |
 | Adaptive 배경색 | `#0c0c12` (검정) | `android/app/src/main/res/values/colors.xml` → `iconBackground` |

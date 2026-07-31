@@ -106,10 +106,15 @@ async function tryRecoverBrandIdentityFromDeviceBinding(
 
     const storageFolder =
       snapshot.storageFolderName.trim() || bakedIdentity().storageFolderName;
+    // displayName(앱 상호)은 항상 제품명. appName은 user_list legacy일 뿐 브랜딩에 쓰지 않음.
+    const productDisplayName =
+      String(brandConfig.versionInfoProductName ?? '').trim() ||
+      bakedIdentity().displayName ||
+      'NullReference Music';
     const recovered = await mod.overwriteBrandIdentity(
       entry.SerialNo.trim(),
       entry.userName.trim(),
-      entry.appName.trim() || bakedIdentity().displayName,
+      productDisplayName,
       storageFolder,
       false,
     );

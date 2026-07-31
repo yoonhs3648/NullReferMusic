@@ -140,6 +140,54 @@ export function melonWeekRange(
   return { startDay: formatYmdCompact(start), endDay: formatYmdCompact(end) };
 }
 
+/** YYYY-MM-DD → 해당 일이 속한 Melon 주간 슬롯(월요일 시작) */
+export function melonWeekSlotContainingYmd(
+  ymd: string,
+): { year: number; month: number; weekOfMonth: number; startDay: string; endDay: string } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!y || !mo || !d) return null;
+  const target = Date.UTC(y, mo - 1, d);
+  // 해당 월·인접 월 슬롯에서 검색
+  for (const month of [mo - 1, mo, mo + 1]) {
+    let yy = y;
+    let mm = month;
+    if (mm < 1) {
+      yy -= 1;
+      mm = 12;
+    } else if (mm > 12) {
+      yy += 1;
+      mm = 1;
+    }
+    for (const slot of listSpotifyWeekSlotsInMonth(yy, mm, MELON_WEEK_ANCHOR_DOW)) {
+      const range = melonWeekRange(yy, mm, slot.weekIndex);
+      const start = Date.UTC(
+        Number(range.startDay.slice(0, 4)),
+        Number(range.startDay.slice(4, 6)) - 1,
+        Number(range.startDay.slice(6, 8)),
+      );
+      const end = Date.UTC(
+        Number(range.endDay.slice(0, 4)),
+        Number(range.endDay.slice(4, 6)) - 1,
+        Number(range.endDay.slice(6, 8)),
+      );
+      if (target >= start && target <= end) {
+        return {
+          year: yy,
+          month: mm,
+          weekOfMonth: slot.weekIndex,
+          startDay: range.startDay,
+          endDay: range.endDay,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function utcToday(now: Date = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }

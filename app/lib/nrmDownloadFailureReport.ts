@@ -39,5 +39,6 @@ export async function reportNativeDownloadExtractFailure(
     audioUri: '',
     isSuccess: false,
     failReason: causeMessage.slice(0, 200) || 'extract_failed',
+    youtubeVideoId: videoId,
   });
 }

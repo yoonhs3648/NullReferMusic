@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import { useNrmUiAppearance } from '@/context/NrmUiAppearanceContext';
-import { useNrmMainLogoDisplayName } from '@/lib/nrmMainLogoDisplayNameSettings';
+import { getNrmProductDisplayName } from '@/lib/nrmAppBrand';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 
 const INNER_SCROLL_HEIGHT = 248;
@@ -299,7 +299,7 @@ type Props = {
 };
 
 export function NrmTermsConsentGate({ onAgreed }: Props) {
-  const appName = useNrmMainLogoDisplayName();
+  const appName = getNrmProductDisplayName();
   const { isDark } = useNrmUiAppearance();
   const insets = useSafeAreaInsets();
 

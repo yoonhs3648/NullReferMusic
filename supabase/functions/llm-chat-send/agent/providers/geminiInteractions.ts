@@ -14,9 +14,11 @@
 
 import {
   buildProviderHttpDiag,
+  compactFunctionCallsForLog,
   detectToolsInRequestBody,
   headersToRecord,
   pickProviderRequestId,
+  shouldPersistRequestBodyJson,
   snapshotRequestBody,
   type ProviderHttpDiag,
   type QuotaClass,
@@ -72,10 +74,12 @@ export type GeminiAttemptDiag = {
   responseHeaders?: Record<string, string> | null;
   rateLimitHeaders?: Record<string, string> | null;
   responseBodyText?: string | null;
-  requestBodyJson?: string | null;
+  requestBodyJson?: Record<string, unknown> | null;
   requestBodySha256?: string | null;
   requestBodyBytes?: number | null;
   requestBodyTruncated?: boolean;
+  functionCallsJson?: ReturnType<typeof compactFunctionCallsForLog>;
+  toolResultsJson?: unknown;
   quotaClass?: QuotaClass | null;
   quotaId?: string | null;
   quotaMetric?: string | null;
@@ -143,6 +147,8 @@ function emptyAttemptHttpFields(): Pick<
   | 'requestBodySha256'
   | 'requestBodyBytes'
   | 'requestBodyTruncated'
+  | 'functionCallsJson'
+  | 'toolResultsJson'
   | 'quotaClass'
   | 'quotaId'
   | 'quotaMetric'
@@ -159,6 +165,8 @@ function emptyAttemptHttpFields(): Pick<
     requestBodySha256: null,
     requestBodyBytes: null,
     requestBodyTruncated: false,
+    functionCallsJson: null,
+    toolResultsJson: null,
     quotaClass: null,
     quotaId: null,
     quotaMetric: null,
@@ -1324,7 +1332,17 @@ export async function streamGeminiInteractions(
       elapsedMs: Date.now() - attemptStarted,
       providerRequestId: pickProviderRequestId(headersToRecord(res.headers)) ?? interactionId,
     };
-    await attachRequestSnapshot(diagOk, requestBody, attempt.withSearch === true);
+    await attachRequestSnapshot(
+      diagOk,
+      requestBody,
+      shouldPersistRequestBodyJson({
+        ok: true,
+        withSearch: attempt.withSearch,
+        withTools: detectToolsInRequestBody(requestBody).withTools,
+        hasFunctionCalls: functionCalls.length > 0,
+      }),
+    );
+    diagOk.functionCallsJson = compactFunctionCallsForLog(functionCalls);
     attemptDiags.push(diagOk);
 
     console.log(

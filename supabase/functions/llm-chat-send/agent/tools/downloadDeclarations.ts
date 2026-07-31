@@ -50,6 +50,41 @@ export const DOWNLOAD_FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: 'search_melon_chart',
+    description:
+      'Melon 차트 조회(일/주/월/년/실시간). 「오늘 1위」「2026-05-23 차트」「주간 차트」등. 곡명 search_music 대신 이 도구. 과거 특정 일간은 Melon 미지원 시 해당 주간으로 대체될 수 있음.',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          description: 'daily|weekly|monthly|yearly|realtime',
+        },
+        date: {
+          type: 'string',
+          description: 'YYYY-MM-DD (KST). realtime은 생략 가능. 오늘이면 오늘 날짜.',
+        },
+        rank: {
+          type: 'number',
+          description: '1~100. 있으면 해당 순위 1곡만. 없으면 상위 limit곡.',
+        },
+        limit: {
+          type: 'number',
+          description: 'rank 없을 때 상위 N (기본 10, 최대 20)',
+        },
+        genre: {
+          type: 'string',
+          description: 'optional Melon classCd 또는 장르명. 기본 장르종합(GN0000)',
+        },
+        chart: {
+          type: 'string',
+          description: 'realtime만: top100|hot100 (기본 top100)',
+        },
+      },
+      required: ['period'],
+    },
+  },
+  {
     name: 'get_ai_lab_lyrics_capability',
     description:
       '가사 생성 가능 여부(wav2vec2-base + en-kotransliterator). 다운로드 후 가사 되묻기 전에 확인.',

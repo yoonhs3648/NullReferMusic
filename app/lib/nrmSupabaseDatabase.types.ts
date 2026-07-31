@@ -81,6 +81,10 @@ export type NrmSupabaseLlmModelPublicRow = {
   Version: string;
   Description: string | null;
   IsActive: boolean;
+  /** AI Lab 피커 정렬 우선순위(낮을수록 상단). NULL이면 후순위. */
+  preference: number | null;
+  /** AI Lab 피커 추천 배지. */
+  isRecommand: boolean;
 };
 
 /** LLMProvider — ApiKey는 앱에서 select 하지 않는다(컬럼 단위 GRANT로 차단됨). */

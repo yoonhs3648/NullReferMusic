@@ -133,9 +133,12 @@ export type { AgentMetrics } from './ops/metrics.ts';
 export {
   buildProviderHttpDiag,
   classifyQuotaFromResponse,
+  compactFunctionCallsForLog,
+  compactToolResultsForLog,
   detectToolsInRequestBody,
   headersToRecord,
   pickProviderRequestId,
+  shouldPersistRequestBodyJson,
   snapshotRequestBody,
 } from './ops/providerHttpDiag.ts';
 export type {
@@ -170,6 +173,7 @@ export {
   classifyIntentHeuristic,
   isBeyondKnowledgeCutoffIntent,
   messageLooksLikeDownload,
+  messageLooksLikeMelonChart,
   messageLooksLikeMusicSearch,
 } from './intent.ts';
 export { INTENT_CLASSIFIER_MODEL } from './intent.ts';

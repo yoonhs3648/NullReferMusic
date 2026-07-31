@@ -1,7 +1,7 @@
 {
   "name": "nullrefer-music-app",
   "main": "index",
-  "version": "3.2.9",
+  "version": "3.3.2",
   "scripts": {
     "start": "expo start --lan",
     "start:plain": "expo start",
@@ -29,6 +29,7 @@
     "@react-navigation/native": "^7.1.8",
     "@supabase/supabase-js": "^2.108.2",
     "expo": "~54.0.34",
+    "expo-av": "~16.0.8",
     "expo-clipboard": "~8.0.7",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.22",

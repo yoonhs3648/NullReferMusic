@@ -12,15 +12,22 @@ export type NrmLlmModelItem = {
   version: string;
   description: string | null;
   isActive: boolean;
+  /** AI Lab 피커 정렬 우선순위(낮을수록 상단). null이면 후순위. */
+  preference: number | null;
+  /** AI Lab 피커 추천 배지. */
+  isRecommand: boolean;
 };
 
 const LLM_MODEL_PUBLIC_SELECT =
-  'ModelID,ProviderID,Type,ModelName,ModelDisplayName,Version,Description,IsActive';
+  'ModelID,ProviderID,Type,ModelName,ModelDisplayName,Version,Description,IsActive,preference,isRecommand';
 
 let memoryCache: NrmLlmModelItem[] | null = null;
 let inflight: Promise<NrmLlmModelItem[]> | null = null;
 
 function mapLlmModelRow(row: NrmSupabaseLlmModelPublicRow): NrmLlmModelItem {
+  const prefRaw = row.preference;
+  const preference =
+    prefRaw == null || !Number.isFinite(Number(prefRaw)) ? null : Number(prefRaw);
   return {
     modelId: row.ModelID,
     providerId: row.ProviderID,
@@ -30,12 +37,24 @@ function mapLlmModelRow(row: NrmSupabaseLlmModelPublicRow): NrmLlmModelItem {
     version: String(row.Version ?? '').trim(),
     description: row.Description?.trim() ? row.Description.trim() : null,
     isActive: row.IsActive === true,
+    preference,
+    isRecommand: row.isRecommand === true,
   };
 }
 
-/** Type=LLM — IsActive 우선 → ModelID 높은 순 → ProviderID 높은 순. */
+/**
+ * Type=LLM 피커 정렬:
+ * 1) preference 있는 행 — 숫자 오름차순(1이 최상단)
+ * 2) 그다음 기존 정책 — IsActive 우선 → ModelID 내림차순 → ProviderID 내림차순
+ */
 export function sortLlmModelsForPicker(items: NrmLlmModelItem[]): NrmLlmModelItem[] {
   return [...items].sort((a, b) => {
+    const aPref = a.preference;
+    const bPref = b.preference;
+    const aHas = aPref != null;
+    const bHas = bPref != null;
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (aHas && bHas && aPref !== bPref) return aPref - bPref;
     if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
     if (a.modelId !== b.modelId) return b.modelId - a.modelId;
     return b.providerId - a.providerId;
