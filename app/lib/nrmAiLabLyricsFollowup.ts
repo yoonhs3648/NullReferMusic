@@ -10,16 +10,23 @@ import { isAlignModelInstalled } from '@/lib/nrmAlignModelNative';
 import { inferMelonAlignLyricsLanguage } from '@/lib/nrmAlignLyricsLang';
 import type { NrmAiLabChoice, NrmAiLabTrackHit } from '@/lib/nrmAiLabDownloadTools';
 import {
+  appendActivityHistory,
+  type NrmActivityHistoryKind,
+} from '@/lib/nrmActivityHistory';
+import {
   nrmBackgroundWorkAcquire,
   nrmBackgroundWorkRelease,
   nrmLyricsBackgroundWorkToken,
 } from '@/lib/nrmBackgroundWork';
+import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
+import { loadAlignModelPreference } from '@/lib/nrmDownloadSettings';
 import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { enqueueLyricsDownloadWork } from '@/lib/nrmDownloadWorkQueue';
 import { isEnKoTransliteratorInstalled } from '@/lib/nrmEnKoTransliteratorNative';
 import { listDownloadAudioTracks } from '@/lib/nrmListDownloadTracks';
 import type { NrmDownloadTrackItem } from '@/lib/nrmDownloadTrackTypes';
 import {
+  extractPlainLyricsFromLrcText,
   normalizeMelonTrackWebsite,
   resolveMelonPlainLyricsForEdit,
 } from '@/lib/nrmMelonLyrics';
@@ -33,6 +40,9 @@ import {
 import { readAudioFileMetadata } from '@/lib/nrmReadAudioMetadata';
 import { siblingLrcUri } from '@/lib/nrmSiblingLrc';
 import { isEmbeddedSyncLyricsText } from '@/lib/nrmLrcUiMode';
+import { logLyricsTrackHistory } from '@/lib/nrmTrackHistoryRemote';
+import type { NrmTrackHistoryKind } from '@/lib/nrmTrackHistoryTypes';
+import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
 
 const LOG = 'ailab.lyricsFollowup';
 
@@ -299,6 +309,97 @@ function resolveVideoIdForFollowup(videoId?: string | null): string | null {
   return id || null;
 }
 
+type AiLabLyricsHistoryLocalKind =
+  | 'lyrics'
+  | 'lyrics_fail'
+  | 'lyrics_add_translation'
+  | 'lyrics_translation_failed';
+
+function trackHistoryKindForAiLabLyrics(
+  kind: AiLabLyricsHistoryLocalKind,
+): NrmTrackHistoryKind {
+  switch (kind) {
+    case 'lyrics':
+      return 'lyrics';
+    case 'lyrics_fail':
+      return 'lyricsFail';
+    case 'lyrics_add_translation':
+      return 'transdLyrics';
+    case 'lyrics_translation_failed':
+      return 'transdLyricsFail';
+  }
+}
+
+function metadataFromAiLabRecord(record: AiLabDownloadRecord): NrmAudioFileMetadata {
+  return {
+    title: record.hit.title || '',
+    artist: record.hit.artist || '',
+    album: record.hit.album || '',
+    genre: record.hit.genre || '',
+    releaseDate: record.hit.releaseDate || '',
+    website:
+      record.website?.trim() ||
+      normalizeMelonTrackWebsite(record.hit.externalUrl) ||
+      record.hit.externalUrl ||
+      '',
+    coverUrl: record.hit.imageUrl || '',
+  };
+}
+
+/**
+ * AI Lab 후속 가사/번역 — finalizeNativeLyricsStage / Storage와 동일하게
+ * 로컬 활동기록 + 원격 TrackHistory를 병행 기록한다.
+ */
+function logAiLabLyricsHistory(params: {
+  record: AiLabDownloadRecord;
+  track?: NrmDownloadTrackItem | null;
+  kind: AiLabLyricsHistoryLocalKind;
+  lrcText?: string;
+  plainLyrics?: string;
+  failReason?: string;
+}): void {
+  const fileName = params.track?.fileName || params.record.fileName;
+  const audioUri = params.track?.audioUri || params.record.audioUri || '';
+  const localKind: NrmActivityHistoryKind = params.kind;
+  void appendActivityHistory({
+    fileName: displayLabelFromAudioFileName(fileName),
+    audioUri: audioUri || undefined,
+    kind: localKind,
+  });
+
+  const isTranslation =
+    params.kind === 'lyrics_add_translation' ||
+    params.kind === 'lyrics_translation_failed';
+  const lyricsMode = isTranslation ? 'melon_translation' : 'melon';
+  const plain =
+    (params.plainLyrics ?? '').trim() ||
+    extractPlainLyricsFromLrcText(params.lrcText ?? '').trim() ||
+    (params.record.plainLyrics ?? '').trim() ||
+    undefined;
+  const isSuccess =
+    params.kind === 'lyrics' || params.kind === 'lyrics_add_translation';
+
+  void (async () => {
+    let platform: string | undefined;
+    try {
+      platform = await loadAlignModelPreference();
+    } catch {
+      /* Platform은 참고용 */
+    }
+    void logLyricsTrackHistory({
+      kind: trackHistoryKindForAiLabLyrics(params.kind),
+      metadata: metadataFromAiLabRecord(params.record),
+      fileName,
+      audioUri,
+      isSuccess,
+      failReason: isSuccess ? undefined : params.failReason || 'lyrics_generation_failed',
+      platform,
+      lyricsMode,
+      plainLyrics: plain,
+    });
+  })();
+}
+
 /** 가사 LRC 준비 후 — 선선택 번역 실행 또는(미선택이면) 번역 질문 */
 async function afterEnglishLyricsReady(record: AiLabDownloadRecord): Promise<void> {
   const videoId = record.videoId;
@@ -439,6 +540,11 @@ export async function startAiLabLyrics(params: {
     try {
       const track = await waitForRecordAudioTrack(record);
       if (!track) {
+        logAiLabLyricsHistory({
+          record,
+          kind: 'lyrics_fail',
+          failReason: 'audio_download_unavailable',
+        });
         void nrmNotifyLyricsFailed(
           displayLabel,
           videoId,
@@ -465,11 +571,25 @@ export async function startAiLabLyrics(params: {
         await FileSystem.deleteAsync(workUri, { idempotent: true }).catch(() => {});
 
         if (melon.lyricsMelonMemoryInsufficient) {
+          logAiLabLyricsHistory({
+            record,
+            track,
+            kind: 'lyrics_fail',
+            plainLyrics: plain,
+            failReason: 'memory_insufficient',
+          });
           void nrmNotifyLyricsFailed(displayLabel, videoId, '메모리가 부족합니다.');
           nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
           return;
         }
         if (!melon.lrcFull?.trim()) {
+          logAiLabLyricsHistory({
+            record,
+            track,
+            kind: 'lyrics_fail',
+            plainLyrics: plain,
+            failReason: 'melon_align_failed',
+          });
           void nrmNotifyLyricsFailed(displayLabel, videoId, '가사 정렬에 실패했습니다.');
           nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
           return;
@@ -480,6 +600,13 @@ export async function startAiLabLyrics(params: {
           // 번역 대기열이 LRC를 읽어야 하므로 AI Lab 가사는 sidecar를 항상 남긴다.
           await persistLrcForSavedAudio(track.location, melon.lrcFull);
         }
+        logAiLabLyricsHistory({
+          record,
+          track,
+          kind: 'lyrics',
+          lrcText: melon.lrcFull,
+          plainLyrics: plain,
+        });
         nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
         if (englishOnly) {
           await afterEnglishLyricsReady({ ...record, plainLyrics: plain });
@@ -487,6 +614,12 @@ export async function startAiLabLyrics(params: {
       });
     } catch (e) {
       logNrmRunError(LOG, e, { event: 'ailab_lyrics_failed', videoId });
+      logAiLabLyricsHistory({
+        record,
+        kind: 'lyrics_fail',
+        plainLyrics: plain,
+        failReason: 'lyrics_generation_failed',
+      });
       void nrmNotifyLyricsFailed(displayLabel, videoId);
       nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
     } finally {
@@ -571,6 +704,13 @@ export async function translateAiLabLyrics(params: {
       );
       const translated = await translateLrcToKoreanWithGoogleTranslate(lrc);
       if (!translated.ok) {
+        logAiLabLyricsHistory({
+          record,
+          track: latestTrack,
+          kind: 'lyrics_translation_failed',
+          lrcText: lrc,
+          failReason: translated.message ?? 'translation_failed',
+        });
         void nrmNotifyLyricsFailed(
           displayLabel,
           videoId,
@@ -583,9 +723,21 @@ export async function translateAiLabLyrics(params: {
         const { persistLrcForSavedAudio } = await import('@/lib/nrmPersistDownload.native');
         await persistLrcForSavedAudio(latestTrack.location, translated.lrc);
       }
+      logAiLabLyricsHistory({
+        record,
+        track: latestTrack,
+        kind: 'lyrics_add_translation',
+        lrcText: translated.lrc,
+      });
       nrmNotifyDownloadFinished(videoId, displayLabel, true, 'lyrics');
     } catch (e) {
       logNrmRunError(LOG, e, { event: 'ailab_translate_failed', videoId });
+      logAiLabLyricsHistory({
+        record,
+        track,
+        kind: 'lyrics_translation_failed',
+        failReason: 'translation_failed',
+      });
       void nrmNotifyLyricsFailed(displayLabel, videoId, '번역에 실패했습니다.');
       nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
     } finally {

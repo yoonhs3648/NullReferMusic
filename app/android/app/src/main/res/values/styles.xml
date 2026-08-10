@@ -5,10 +5,16 @@
     <item name="colorPrimary">@color/colorPrimary</item>
     <item name="android:statusBarColor">#0c0c12</item>
   </style>
+  <!--
+    Android 12+ SplashScreen API: background는 색만, 로고는 animatedIcon.
+    (배경에 layer-list + 투명 icon 조합은 기기에서 로고가 안 그려짐)
+    API 31 미만은 androidx SplashScreen이 windowBackground 레이어로 표시.
+  -->
   <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
     <item name="windowSplashScreenBackground">@color/splashscreen_background</item>
     <item name="windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>
+    <item name="windowSplashScreenIconBackgroundColor">@color/splashscreen_background</item>
+    <item name="android:windowBackground">@drawable/splashscreen_background_layered</item>
     <item name="postSplashScreenTheme">@style/AppTheme</item>
-    <item name="android:windowSplashScreenBehavior">icon_preferred</item>
   </style>
 </resources>

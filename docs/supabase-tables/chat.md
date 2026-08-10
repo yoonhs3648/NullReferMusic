@@ -175,6 +175,9 @@ ON public."ChatMessage" ("RegDate");
 - `ChatSession`/`ChatMessage`는 RLS `SELECT`만 anon/authenticated에 열려 있다(`20260721120000_llm_chat_security_harden.sql`). **직접 INSERT/UPDATE 불가.**
 - 메시지 저장·세션 생성·`UpdateDate` 갱신은 전부 Edge Function(`llm-chat-send`, service_role)이 `nrm_rpc_chat_prepare_turn`/`nrm_rpc_chat_finalize_turn`을 통해서만 수행한다. 상세: [`llm.md`](./llm.md#ai-lab-채팅-전송--edge-function--rpc-실제-구현).
 - 칩·YouTube 미리듣기·로컬 말풍선 UI 메타는 앱이 `nrm_rpc_chat_append_ui_messages` / `nrm_rpc_chat_patch_message_ui_meta`로 `ChatMessage.UiMeta`에 저장한다(anon/authenticated GRANT, 본인 세션만). 마이그레이션: `20260731170000_chat_message_ui_meta.sql`.
+- `UiMeta.youtubeConfirm`는 미리듣기 후보 스냅샷(videoId·메타, **스트림 URL·가사 전문 제외**). 세션 재진입 시 hydrate 후 스트림만 재발급한다. 칩만 지울 때는 youtubeConfirm를 유지하고, 「맞다/아니다」후에만 제거한다.
+- Edge `llm-chat-send` finalize로 저장된 assistant 행에도 앱이 `nrm_rpc_chat_patch_message_ui_meta`로 `youtubeConfirm`를 붙인다(로컬 append만 하면 finalize 행은 텍스트만 남아 재진입 시 플레이어가 사라짐).
+- 앱은 세션 생성 시 persist 스냅샷을 캐시해, ChatMessage 저장 시 메모리 세션 조회 실패로 UiMeta가 빠지지 않게 한다.
 - `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM 요약 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-llm-요약-2026-07-29-복구).
 - 세션 삭제(소프트 삭제, `IsDeleted=true`)는 앱이 `nrm_rpc_chat_delete_session(p_serial_no, p_session_id)`을 직접 호출한다(anon/authenticated에 GRANT). 본인 `SerialNo` 소유 세션만 삭제 가능.
 

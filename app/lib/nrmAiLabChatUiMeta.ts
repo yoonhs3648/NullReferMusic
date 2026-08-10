@@ -159,11 +159,17 @@ export function buildAiLabChatUiMetaFromMessage(
 export function youtubeConfirmSnapshotFromSession(
   session: AiLabYoutubeConfirmSession,
 ): AiLabYoutubeConfirmPersistSnapshot {
-  return {
+  // 가사 전문은 jsonb를 키우고 미리듣기에 불필요 — 메타에서 제외
+  const {
+    lyrics: _lyrics,
+    melonLyricsPlain: _plain,
+    ...metaRest
+  } = session.meta;
+  const snap: AiLabYoutubeConfirmPersistSnapshot = {
     sessionId: session.sessionId,
     displayLabel: session.displayLabel,
     hit: session.hit,
-    meta: session.meta,
+    meta: metaRest as NrmAudioFileMetadata,
     fileName: session.fileName,
     lyricsMode: session.lyricsMode,
     lyricsQueued: session.lyricsQueued,
@@ -176,4 +182,5 @@ export function youtubeConfirmSnapshotFromSession(
     exhausted: session.exhausted,
     confirmed: session.confirmed,
   };
+  return snap;
 }

@@ -12,6 +12,10 @@ export function formatAiLabTrackLabel(hit: Pick<NrmAiLabTrackHit, 'artist' | 'ti
   return title || artist || '알 수 없는 곡';
 }
 
+/** YouTube 미리듣기 확인 — 사용자-facing 안내 (플레이어 카드와 같은 말풍선) */
+export const AI_LAB_YOUTUBE_CONFIRM_USER_PROMPT =
+  '이 음원이 맞는지 확인해 주세요. 미리듣기 후 「맞다」또는 「아니다」를 선택해 주세요.';
+
 /** 차트 조회 직전 */
 export function aiLabMelonChartCheckingMessage(): string {
   return '해당 곡이 어떤 곡인지 확인을 하겠습니다.';
@@ -68,4 +72,11 @@ export function aiLabMelonChartDownloadStartedMessage(params: {
     `우선 ${scope}인 **${label}** 다운로드를 시작했습니다. ` +
     `잠시 후 나타나는 화면에서 **${title}** 생성 여부를 안내해 드리겠습니다.`
   );
+}
+
+/** 차트 순위 안내 후 다운로드 여부 확인 문구 */
+export function appendDownloadAskPrompt(content: string): string {
+  const t = String(content ?? '').trim();
+  if (/다운로드(?:를|을)?\s*할까/i.test(t)) return t;
+  return t ? `${t}\n\n다운로드를 할까요?` : '다운로드를 할까요?';
 }

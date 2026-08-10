@@ -17,7 +17,9 @@ import {
 
 import { nrmTokens } from '@/constants/nrmTokens';
 import {
+  getAiLabYoutubeConfirmPersistSnapshot,
   getAiLabYoutubeConfirmSession,
+  hydrateAiLabYoutubeConfirmFromSnapshot,
   refreshAiLabYoutubeConfirmStream,
   setAiLabYoutubeConfirmDuration,
   setAiLabYoutubeConfirmUiStatus,
@@ -68,6 +70,18 @@ export function NrmAiLabYoutubeConfirmCard({
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const cardBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
   const primary = isDark ? nrmTokens.color.primaryOnDark : nrmTokens.color.primary;
+
+  // 같은 세션에서 메모리 Map이 비어도 persist 스냅샷으로 즉시 복원 (재진입 hydrate와 동일)
+  useEffect(() => {
+    if (getAiLabYoutubeConfirmSession(sessionId)) return;
+    const snap = getAiLabYoutubeConfirmPersistSnapshot(sessionId);
+    if (!snap) return;
+    try {
+      hydrateAiLabYoutubeConfirmFromSnapshot(snap);
+    } catch (e) {
+      logNrmRunError('ailab.ytConfirm.hydrate', e, { sessionId });
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     return subscribeAiLabYoutubeConfirm(sessionId, setSession);
@@ -275,7 +289,20 @@ export function NrmAiLabYoutubeConfirmCard({
     onReject(sessionId);
   }, [disabled, onReject, sessionId, unloadSound]);
 
-  if (!session || session.confirmed || session.exhausted) return null;
+  if (session?.confirmed || session?.exhausted) return null;
+
+  if (!session) {
+    return (
+      <View style={[styles.card, { backgroundColor: cardBg, borderColor: hairline }]}>
+        <View style={styles.preparingRow}>
+          <ActivityIndicator size="small" color={primary} />
+          <Text style={[styles.preparingText, { color: mutedColor }]}>
+            미리듣기 준비중...
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   const uiStatus: AiLabYoutubeConfirmUiStatus = session.uiStatus;
   const progress =

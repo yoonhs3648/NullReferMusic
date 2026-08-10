@@ -1,7 +1,7 @@
 {
   "name": "nullrefer-music-app",
   "main": "index",
-  "version": "3.3.8",
+  "version": "3.3.15",
   "scripts": {
     "start": "expo start --lan",
     "start:plain": "expo start",
@@ -17,6 +17,8 @@
     "check:youtubei-search-mobile-header": "node scripts/verify-youtubei-search-mobile-header.mjs",
     "check:apk-update-copy": "node scripts/check-apk-update-copy-ascii.mjs",
     "generate:notification-icon": "node scripts/generate-android-notification-icon.mjs",
+    "generate:app-icons": "node scripts/make-icons.mjs",
+    "generate:splash": "node scripts/make-splash.mjs",
     "generate:music-quotes": "node scripts/build-music-quotes.mjs",
     "generate:github-data-fields": "node scripts/generate-github-data-fields-xlsx.mjs",
     "generate:home-chart-assets": "node scripts/tint-home-chart-assets.mjs",

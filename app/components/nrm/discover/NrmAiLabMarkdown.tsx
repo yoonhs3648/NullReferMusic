@@ -21,22 +21,42 @@ const MONO_FONT = Platform.select({
 const markdownIt = MarkdownIt({ typographer: true, linkify: true });
 
 /**
+ * CommonMark 강조(flanking) 규칙 때문에 파싱이 실패하는 패턴을 완화.
+ * 예: `**CORTIS (코르티스)**의`, `**〈REDRED〉**입니다`, `**foo,**입니다`
+ */
+function fixEmphasisBeforeCjk(text: string): string {
+  const cjkFollow = /(?=[\p{Script=Hangul}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/u;
+  const boldAfterPunct = /([)〉])\*\*/gu;
+  const boldAfterAsciiPunct = /([,)!?:])\*\*/gu;
+  const strikeAfterPunct = /([)〉])~~/gu;
+  const strikeAfterAsciiPunct = /([,)!?:])~~/gu;
+  return text
+    .replace(new RegExp(`${boldAfterPunct.source}${cjkFollow.source}`, 'gu'), '$1\u200B**')
+    .replace(new RegExp(`${boldAfterAsciiPunct.source}${cjkFollow.source}`, 'gu'), '$1\u200B**')
+    .replace(new RegExp(`${strikeAfterPunct.source}${cjkFollow.source}`, 'gu'), '$1\u200B~~')
+    .replace(new RegExp(`${strikeAfterAsciiPunct.source}${cjkFollow.source}`, 'gu'), '$1\u200B~~');
+}
+
+/**
  * 모델이 자주 내는 MD 변형을 파서가 인식하도록 정규화.
  * - 전각 ＊～ → ASCII
  * - `** 텍스트 **` / `~~ 텍스트 ~~` 처럼 안쪽 공백이 있으면 strong/s 로 안 잡혀 마커가 그대로 보임
+ * - `**제목:**` 뒤 본문처럼 `:**` 로 닫히는 bold 는 spaced-bold 정규식에서 제외
+ * - 괄호·각괄호·구두점 뒤 `**`/`~~` + 한글이면 zero-width space 로 flanking 완화
  */
 export function normalizeAiLabMarkdown(content: string): string {
   let t = content ?? '';
   if (!t) return '';
   t = t.replace(/\uFF0A/g, '*'); // ＊
   t = t.replace(/\uFF5E/g, '~'); // ～
-  // ** spaced ** / __ spaced __
-  t = t.replace(/\*\*\s+([^*]+?)\s+\*\*/g, '**$1**');
-  t = t.replace(/__\s+([^_]+?)\s+__/g, '**$1**');
+  // ** spaced ** / __ spaced __ — `**제목:** REDRED` 의 닫는 ** 를 여는 ** 로 오인하지 않게
+  t = t.replace(/(?<![:\w])\*\*\s+([^*]+?)\s+\*\*/g, '**$1**');
+  t = t.replace(/(?<![:\w])__\s+([^_]+?)\s+__/g, '**$1**');
   // ~~ spaced ~~
   t = t.replace(/~~\s+([^~]+?)\s+~~/g, '~~$1~~');
   // * spaced * (단일 이탤릭) — 목록(*)과 충돌하지 않게 줄 중간만
   t = t.replace(/(^|[^\n*])\*\s+([^*\n]+?)\s+\*(?=[^\n*]|$)/g, '$1*$2*');
+  t = fixEmphasisBeforeCjk(t);
   return t;
 }
 

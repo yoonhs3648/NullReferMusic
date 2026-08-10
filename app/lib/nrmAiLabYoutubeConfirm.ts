@@ -64,9 +64,91 @@ type SessionListener = (session: AiLabYoutubeConfirmSession) => void;
 
 const sessions = new Map<string, AiLabYoutubeConfirmSession>();
 const listeners = new Map<string, Set<SessionListener>>();
+/**
+ * DB UiMeta용 스냅샷 캐시. 세션 Map과 별도로 두어 persist 시점에
+ * getSession 레이스/모듈 이슈가 있어도 후보·hit를 잃지 않게 한다.
+ */
+const persistSnapshotById = new Map<
+  string,
+  {
+    sessionId: string;
+    displayLabel: string;
+    hit: AiLabYoutubeConfirmHit;
+    meta: NrmAudioFileMetadata;
+    fileName: string;
+    lyricsMode: NrmLyricsUiMode;
+    lyricsQueued: boolean;
+    lyricsAskEligible: boolean;
+    lyricsSkippedReason?: string;
+    explicitLyricsRequest: boolean;
+    ytQuery: string;
+    candidates: YoutubeSearchItem[];
+    index: number;
+    exhausted: boolean;
+    confirmed: boolean;
+  }
+>();
 
 function nextSessionId(): string {
   return `ytc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function stripMetaForPersist(meta: NrmAudioFileMetadata): NrmAudioFileMetadata {
+  const {
+    lyrics: _lyrics,
+    melonLyricsPlain: _plain,
+    ...metaRest
+  } = meta;
+  return metaRest as NrmAudioFileMetadata;
+}
+
+function cachePersistSnapshot(session: AiLabYoutubeConfirmSession): void {
+  persistSnapshotById.set(session.sessionId, {
+    sessionId: session.sessionId,
+    displayLabel: session.displayLabel,
+    hit: session.hit,
+    meta: stripMetaForPersist(session.meta),
+    fileName: session.fileName,
+    lyricsMode: session.lyricsMode,
+    lyricsQueued: session.lyricsQueued,
+    lyricsAskEligible: session.lyricsAskEligible,
+    lyricsSkippedReason: session.lyricsSkippedReason,
+    explicitLyricsRequest: session.explicitLyricsRequest,
+    ytQuery: session.ytQuery,
+    candidates: session.candidates.map((c) => ({ ...c })),
+    index: session.index,
+    exhausted: session.exhausted,
+    confirmed: session.confirmed,
+  });
+}
+
+/** ChatMessage.UiMeta.youtubeConfirm 저장용 — 세션 또는 캐시에서 스냅샷. */
+export function getAiLabYoutubeConfirmPersistSnapshot(sessionId: string): {
+  sessionId: string;
+  displayLabel: string;
+  hit: AiLabYoutubeConfirmHit;
+  meta: NrmAudioFileMetadata;
+  fileName: string;
+  lyricsMode: NrmLyricsUiMode;
+  lyricsQueued: boolean;
+  lyricsAskEligible: boolean;
+  lyricsSkippedReason?: string;
+  explicitLyricsRequest: boolean;
+  ytQuery: string;
+  candidates: YoutubeSearchItem[];
+  index: number;
+  exhausted: boolean;
+  confirmed: boolean;
+} | null {
+  const id = sessionId.trim();
+  if (!id) return null;
+  const live = sessions.get(id);
+  if (live) {
+    cachePersistSnapshot(live);
+    return persistSnapshotById.get(id) ?? null;
+  }
+  const cached = persistSnapshotById.get(id);
+  return cached ? { ...cached, candidates: cached.candidates.map((c) => ({ ...c })) } : null;
 }
 
 function notify(sessionId: string): void {
@@ -91,6 +173,7 @@ function patchSession(
   if (!prev) return null;
   const next = { ...prev, ...patch };
   sessions.set(sessionId, next);
+  cachePersistSnapshot(next);
   notify(sessionId);
   return next;
 }
@@ -192,6 +275,7 @@ export function createAiLabYoutubeConfirmSession(params: {
     confirmed: false,
   };
   sessions.set(sessionId, session);
+  cachePersistSnapshot(session);
   logNrmDev(LOG, {
     event: 'session_created',
     sessionId,
@@ -346,6 +430,7 @@ export function disposeAiLabYoutubeConfirmSession(sessionId: string): void {
   if (s) {
     patchSession(sessionId, { prepareGeneration: s.prepareGeneration + 1 });
   }
+  // persist 스냅샷은 유지 — 확정 후에도 DB에 이미 쓴 UiMeta 복원·디버그에 필요
   sessions.delete(sessionId);
   listeners.delete(sessionId);
 }
@@ -396,6 +481,7 @@ export function hydrateAiLabYoutubeConfirmFromSnapshot(snap: {
     confirmed,
   };
   sessions.set(snap.sessionId, session);
+  cachePersistSnapshot(session);
   logNrmDev(LOG, {
     event: 'session_hydrated',
     sessionId: snap.sessionId,

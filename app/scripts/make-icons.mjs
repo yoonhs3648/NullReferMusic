@@ -1,13 +1,17 @@
+/**
+ * 런처 아이콘(ic_launcher*)만 생성. 소스: tempLogo.png
+ * 인앱 logo-mark / notification-icon 등은 건드리지 않는다.
+ */
 import sharp from 'sharp';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
-const src = path.join(root, 'assets', 'images', 'icon.png');
+const src = path.join(root, 'assets', 'images', 'tempLogo.png');
 
 async function makeIcon(destPath, size) {
-  await sharp(src).resize(size, size).webp({ lossless: true }).toFile(destPath);
+  await sharp(src).resize(size, size, { kernel: sharp.kernel.lanczos3 }).webp({ lossless: true }).toFile(destPath);
   console.log('icon:', destPath);
 }
 
@@ -17,7 +21,7 @@ async function makeRoundIcon(destPath, size) {
     `<svg><circle cx="${half}" cy="${half}" r="${half}"/></svg>`
   );
   await sharp(src)
-    .resize(size, size)
+    .resize(size, size, { kernel: sharp.kernel.lanczos3 })
     .composite([{ input: circle, blend: 'dest-in' }])
     .webp({ lossless: true })
     .toFile(destPath);
@@ -25,10 +29,10 @@ async function makeRoundIcon(destPath, size) {
 }
 
 async function makeForeground(destPath, size) {
-  // 풀컬러 CI를 adaptive icon의 안전 영역에 맞춰 투명 캔버스 중앙에 배치한다.
+  // adaptive icon 안전 영역(~66%)에 맞춰 투명 캔버스 중앙에 배치
   const foregroundSize = Math.round(size * 0.68);
   const foreground = await sharp(src)
-    .resize(foregroundSize, foregroundSize)
+    .resize(foregroundSize, foregroundSize, { kernel: sharp.kernel.lanczos3 })
     .png()
     .toBuffer();
   await sharp({
@@ -72,4 +76,4 @@ for (const [dir, size] of mipmapForeground) {
   await makeForeground(path.join(resBase, dir, 'ic_launcher_foreground.webp'), size);
 }
 
-console.log('All icons generated!');
+console.log('All icons generated from tempLogo.png');

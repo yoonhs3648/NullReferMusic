@@ -5,14 +5,15 @@ import brandConfig from './nrm-brand.config.json';
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.3.8',
+  version: '3.3.15',
   orientation: 'portrait',
-  icon: './assets/images/icon.png',
+  /** 런처 아이콘·스플래시만 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
+  icon: './assets/images/tempLogo.png',
   scheme: 'nullreferencemusic',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   splash: {
-    image: './assets/images/splash-icon.png',
+    image: './assets/images/tempLogo.png',
     resizeMode: 'contain',
     backgroundColor: '#0c0c12',
   },
@@ -26,7 +27,7 @@ const config: ExpoConfig = {
   },
   android: {
     adaptiveIcon: {
-      foregroundImage: './assets/images/adaptive-icon.png',
+      foregroundImage: './assets/images/tempLogo.png',
       backgroundColor: '#0c0c12',
     },
     edgeToEdgeEnabled: true,

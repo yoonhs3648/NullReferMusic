@@ -89,6 +89,7 @@ DB에는 `CK_TrackHistory_Kind` CHECK 제약으로 위 10개 값만 허용한다
 |--------|------|------|
 | 다운로드 성공/실패 | `app/lib/nrmDownloadFinalize.ts` (`finalizeNativeAudioStage`), `app/lib/nrmDownloadFailureReport.ts` | `logDownloadTrackHistory()` |
 | 가사 생성/번역 성공·실패 | `app/lib/nrmDownloadFinalize.ts` (`finalizeNativeLyricsStage`) | `logLyricsTrackHistory()` |
+| AI Lab 후속 가사/번역 | `app/lib/nrmAiLabLyricsFollowup.ts` (`startAiLabLyrics`, `translateAiLabLyrics`) | `logLyricsTrackHistory()` |
 | Storage/History에서 메타·가사 수정 | `app/lib/nrmStorageActivityHistory.ts` (`logStorageMetadataHistory`) | `logLyricsTrackHistory()` / `logMetadataEditTrackHistory()` |
 | 트랙 삭제 | `app/lib/nrmStorageActivityHistory.ts` (`logStorageTrackRemoveHistory`) | `logTrackRemoveHistory()` |
 

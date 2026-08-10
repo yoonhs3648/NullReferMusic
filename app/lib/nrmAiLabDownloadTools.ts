@@ -120,16 +120,63 @@ export function getCachedAiLabTrackHit(ref: string): NrmAiLabTrackHit | undefine
   return recentTrackHitsByRef.get(key);
 }
 
-/** 트랙 칩(id=melon ref)인지 — 가사 예/아니요·다른 목록 등과 구분 */
+/** 트랙 칩(id=melon ref)인지 — 가사 예/아니요·다운로드 예/아니요·다른 목록 등과 구분 */
 export function isAiLabTrackChoiceId(id: string): boolean {
   const key = String(id ?? '').trim();
   if (!key) return false;
+  if (isAiLabDownloadChoiceId(key)) return false;
   if (key === 'lyrics_yes' || key === 'lyrics_no') return false;
   if (key === 'translate_yes' || key === 'translate_no') return false;
   if (key === 'melon_search_yes' || key === 'melon_search_no') return false;
   if (key === 'ailab_more_music_list') return false;
   if (key.startsWith('melon-artist:') || key.startsWith('melon-album:')) return false;
   return key.startsWith('melon:') || recentTrackHitsByRef.has(key);
+}
+
+export const DOWNLOAD_NO_CHOICE: NrmAiLabChoice = { id: 'download_no', label: '아니요' };
+
+export function buildDownloadAskChoices(hitRef: string): NrmAiLabChoice[] {
+  const ref = String(hitRef ?? '').trim();
+  if (!ref) return [DOWNLOAD_NO_CHOICE];
+  return [
+    { id: `download_yes:${ref}`, label: '예' },
+    DOWNLOAD_NO_CHOICE,
+  ];
+}
+
+export function isAiLabDownloadChoiceId(id: string): boolean {
+  const key = String(id ?? '').trim();
+  return key === 'download_no' || key.startsWith('download_yes:');
+}
+
+export function isAiLabDownloadYesChoiceId(id: string): boolean {
+  return String(id ?? '').trim().startsWith('download_yes:');
+}
+
+export function hitRefFromDownloadYesChoiceId(id: string): string | null {
+  const m = /^download_yes:(.+)$/.exec(String(id ?? '').trim());
+  return m?.[1]?.trim() || null;
+}
+
+/** 멜론 차트 조회(다운로드 의도 없음) — 트랙 칩 대신 예/아니요 또는 비트랙 칩만 */
+export function resolveMelonChartInfoChoices(params: {
+  userLikelyWantsDownload: boolean;
+  hits: NrmAiLabTrackHit[];
+  toolChoices?: NrmAiLabChoice[];
+}): NrmAiLabChoice[] | undefined {
+  if (params.userLikelyWantsDownload) {
+    return params.toolChoices;
+  }
+  const hits = params.hits.filter((h) => h.title && h.artist);
+  if (hits.length === 1 && hits[0]!.ref) {
+    cacheAiLabTrackHits(hits);
+    return buildDownloadAskChoices(hits[0]!.ref);
+  }
+  if (params.toolChoices?.some((ch) => isAiLabTrackChoiceId(ch.id))) {
+    const nonTrack = params.toolChoices.filter((ch) => !isAiLabTrackChoiceId(ch.id));
+    return nonTrack.length > 0 ? nonTrack : undefined;
+  }
+  return params.toolChoices;
 }
 
 /** 칩 label 「가수 - 제목 (앨범)」에서 hit 복원 (캐시 미스 시) */
@@ -250,6 +297,41 @@ export type AiLabDownloadToolContext = {
 
 const ONE_DOWNLOAD_PER_REQUEST_MESSAGE =
   '한 번의 요청에서는 오디오 1곡만 다운로드할 수 있습니다. 추가 곡은 새 메시지로 요청해 주세요.';
+
+/** 수동 다운로드 팝업(NrmMetadataEditModal)과 동일 — 저장소 stem 충돌 시 다운로드 차단 */
+const FILE_NAME_CONFLICT_MESSAGE = '동일한 이름의 파일이 있습니다.';
+
+async function rejectIfDownloadFileNameConflicts(
+  fileName: string,
+): Promise<
+  | {
+      ok: false;
+      error: string;
+      message: string;
+      nextHint: string;
+    }
+  | null
+> {
+  if (Platform.OS === 'web') return null;
+  try {
+    const { hasConflictingFileStemInDownloadDir } = await import(
+      '@/lib/nrmPersistDownload.native'
+    );
+    const conflict = await hasConflictingFileStemInDownloadDir(fileName);
+    if (!conflict) return null;
+    logNrmDev(LOG, { event: 'file_name_conflict', fileName: fileName.slice(0, 120) });
+    return {
+      ok: false,
+      error: 'file_name_conflict',
+      message: FILE_NAME_CONFLICT_MESSAGE,
+      nextHint:
+        '저장소에 동일 파일명(확장자 제외)이 이미 있어 다운로드를 하지 않았다. 사용자에게 그 사실을 안내하고 start_music_download를 다시 호출하지 말 것.',
+    };
+  } catch (e) {
+    logNrmRunError(LOG, e, { event: 'file_name_conflict_check_failed' });
+    return null;
+  }
+}
 
 export function isAiLabStartDownloadToolName(name: string): boolean {
   return name === 'start_music_download' || name === 'download_music';
@@ -577,6 +659,15 @@ export async function startMusicDownload(params: {
     delete meta.melonAlignLang;
   }
 
+  const encode = await loadDownloadEncodeSettings();
+  const format = await loadDownloadFileNameFormat();
+  const fileName = applyDownloadExtension(
+    buildAudioFileName(meta.artist, meta.title, encode.extension, format),
+    encode.extension,
+  );
+  const conflict = await rejectIfDownloadFileNameConflicts(fileName);
+  if (conflict) return conflict;
+
   const ytQuery = `${meta.artist} ${meta.title}`.trim();
   logNrmDev(LOG, {
     event: 'youtube_search_start',
@@ -589,12 +680,6 @@ export async function startMusicDownload(params: {
     return { ok: false, error: yt.ok ? 'youtube_no_results' : yt.userMessage };
   }
 
-  const encode = await loadDownloadEncodeSettings();
-  const format = await loadDownloadFileNameFormat();
-  const fileName = applyDownloadExtension(
-    buildAudioFileName(meta.artist, meta.title, encode.extension, format),
-    encode.extension,
-  );
   const displayLabel = `${meta.artist} - ${meta.title}`.trim();
   const lyricsAskEligible =
     !params.explicitLyricsRequest && !lyricsQueued && capability.canAskLyrics;
@@ -656,6 +741,10 @@ export async function confirmAiLabYoutubeCandidateAndDownload(
   if (!videoId) {
     return { ok: false, error: 'youtube_confirm_no_candidate' };
   }
+
+  const conflict = await rejectIfDownloadFileNameConflicts(session.fileName);
+  if (conflict) return conflict;
+
   if (!markAiLabYoutubeConfirmConfirmed(sessionId)) {
     return { ok: false, error: 'youtube_confirm_already_done' };
   }
