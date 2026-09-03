@@ -1,15 +1,45 @@
 import type { ExpoConfig } from 'expo/config';
 
 import brandConfig from './nrm-brand.config.json';
+import oauthConfig from './nrm-oauth.config.json';
+
+const googleNativeSchemes = [
+  process.env.EXPO_PUBLIC_NRM_GOOGLE_ANDROID_CLIENT_ID ??
+    String(oauthConfig.googleAndroidClientId ?? ''),
+  process.env.EXPO_PUBLIC_NRM_GOOGLE_IOS_CLIENT_ID ??
+    String(oauthConfig.googleIosClientId ?? ''),
+]
+  .map((clientId) => clientId.trim())
+  .filter((clientId) => clientId.endsWith('.apps.googleusercontent.com'))
+  .map(
+    (clientId) =>
+      `com.googleusercontent.apps.${clientId.slice(0, -'.apps.googleusercontent.com'.length)}`,
+  );
+const kakaoNativeAppKey = (
+  process.env.EXPO_PUBLIC_NRM_KAKAO_NATIVE_APP_KEY ??
+  String(oauthConfig.kakaoNativeAppKey ?? '')
+).trim();
+const kakaoPlugins: NonNullable<ExpoConfig['plugins']> = kakaoNativeAppKey
+  ? [
+      [
+        '@react-native-kakao/core',
+        {
+          nativeAppKey: kakaoNativeAppKey,
+          android: { authCodeHandlerActivity: true },
+          ios: { handleKakaoOpenUrl: true },
+        },
+      ],
+    ]
+  : [];
 
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.3.15',
+  version: '3.3.19',
   orientation: 'portrait',
   /** 런처 아이콘·스플래시만 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
   icon: './assets/images/tempLogo.png',
-  scheme: 'nullreferencemusic',
+  scheme: ['nullrefermusic', ...googleNativeSchemes],
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   splash: {
@@ -32,6 +62,7 @@ const config: ExpoConfig = {
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
+    allowBackup: false,
     package: 'com.nullrefer.music',
     permissions: ['FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_MEDIA_PLAYBACK', 'RECEIVE_BOOT_COMPLETED', 'POST_NOTIFICATIONS'],
   },
@@ -43,6 +74,7 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     'expo-web-browser',
+    ...kakaoPlugins,
     [
       'expo-notifications',
       {
@@ -75,6 +107,19 @@ const config: ExpoConfig = {
     },
     apiBaseUrl:
       process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8787',
+    oauthGoogleWebClientId:
+      process.env.EXPO_PUBLIC_NRM_GOOGLE_WEB_CLIENT_ID ??
+      String(oauthConfig.googleWebClientId ?? ''),
+    oauthGoogleAndroidClientId:
+      process.env.EXPO_PUBLIC_NRM_GOOGLE_ANDROID_CLIENT_ID ??
+      String(oauthConfig.googleAndroidClientId ?? ''),
+    oauthGoogleIosClientId:
+      process.env.EXPO_PUBLIC_NRM_GOOGLE_IOS_CLIENT_ID ??
+      String(oauthConfig.googleIosClientId ?? ''),
+    oauthKakaoRestApiKey:
+      process.env.EXPO_PUBLIC_NRM_KAKAO_REST_API_KEY ??
+      String(oauthConfig.kakaoRestApiKey ?? ''),
+    oauthKakaoNativeAppKey: kakaoNativeAppKey,
   },
 };
 

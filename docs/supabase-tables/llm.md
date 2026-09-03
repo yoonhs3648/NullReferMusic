@@ -820,7 +820,7 @@ AI Lab 좌측 메뉴의 「사용량 조회」는 모델(`LLMProvider`)별 월�
 1. `LLMUserPermission`(`SerialNo`,`ProviderID`) upsert — `IsApproved`/`AllocatedToken`/`ApprovedDate`/`UpdateDate` 갱신(**실시간 적용값**).
 2. `LLMUserMonthlyAllocation`(`SerialNo`,`ProviderID`,`TargetMonth`) upsert — 그 달 설정값 이력 기록.
 
-`nrm_is_admin_caller`로 `p_caller_serial === 'admin'`이 아니면 `admin required` 예외. `anon`/`authenticated`에 `GRANT EXECUTE`(APK publishable key로 호출, 관리자 세션 게이트는 앱 UI 단 `nrmAdminAuth`가 담당 — `구현 시 참고` 항목 참고).
+`nrm_is_admin_caller`로 `nrm_user_list.is_admin='y'`인 `serial_no`가 아니면 `admin required` 예외. `anon`/`authenticated`에 `GRANT EXECUTE`(APK publishable key로 호출, 관리자 세션 게이트는 앱 UI 단 `is_admin=y` 로그인 세션이 담당).
 
 ### 관리자페이지 UI (2026-07-22)
 
@@ -840,8 +840,8 @@ AI Lab 좌측 메뉴의 「사용량 조회」는 모델(`LLMProvider`)별 월�
 - 호출 전: `LLMUserPermission`에서 `IsApproved`·`AllocatedToken`을 확인한다.
 - **`AllocatedToken = 0`** → 할당 한도 없음(무제한). (`LLMProvider`.`DailyLimit`/`MonthlyLimit`의 `0`과 동일 규칙)
 - `SerialNo`(`LLMUserQuota`/`LLMTokenHistory`/`LLMUserPermission`)는 **varchar** — 앱 `getNrmAppSerialNo()` 원문을 형 변환 없이 그대로 저장한다. 앱: `app/lib/nrmLlmSerialNo.ts`
-  - **admin APK**: text `"admin"` 그대로 저장 (과거엔 `bigint`여서 `0`으로 매핑했었으나 varchar 전환 후 더 이상 변환하지 않음)
-  - **커스텀 APK**: numeric serial도 문자열 그대로 저장 (앞자리 `0` 보존, 예: `"01092452918"`)
+  - OAuth 로그인 사용자는 등록 시 발급된 UUID를 그대로 저장
+  - 레거시 placeholder `admin` 행이 있으면 그 문자열도 그대로 저장
 - 호출 후: `LLMTokenHistory` INSERT + 해당 월 `LLMUserQuota` upsert(누적)를 함께 갱신하는 흐름을 권장.
 - **복합 PK**: `LLMUserPermission` (`PermissionID`, `SerialNo`), `LLMUserQuota` (`QuotaID`, `SerialNo`), `LLMTokenHistory` (`HistoryID`, `SerialNo`). PostgREST upsert·앱 코드에서 `onConflict` 대상 컬럼을 복합 PK에 맞출 것.
 - `DailyLimit` / `MonthlyLimit`는 **제공자** 단위 제한, `AllocatedToken`은 **사용자×제공자** 할당 한도다.

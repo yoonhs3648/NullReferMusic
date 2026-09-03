@@ -3,7 +3,7 @@
     "storageFolderName":  "NullReferenceMusic",
     "versionInfoProductName":  "NullReference Music",
     "versionInfoCustomizing":  "",
-    "versionInfoAdminBuild":  true,
-    "serialNo":  "admin",
-    "userName":  "관리자"
+    "versionInfoAdminBuild":  false,
+    "serialNo":  "",
+    "userName":  ""
 }

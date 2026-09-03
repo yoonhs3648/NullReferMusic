@@ -8,6 +8,10 @@ type Props = {
   titleColor: string;
   onDismiss: () => void;
   compactFooter?: boolean;
+  footerActionLabel?: string;
+  footerActionAccessibilityLabel?: string;
+  footerActionDisabled?: boolean;
+  onFooterAction?: () => void;
   refreshControl?: React.ComponentProps<typeof NrmMenuDrawerScroll>['refreshControl'];
   children: ReactNode;
 };
@@ -17,6 +21,10 @@ export function NrmAppDrawerShell({
   titleColor,
   onDismiss,
   compactFooter = false,
+  footerActionLabel,
+  footerActionAccessibilityLabel,
+  footerActionDisabled = false,
+  onFooterAction,
   refreshControl,
   children,
 }: Props) {
@@ -28,6 +36,26 @@ export function NrmAppDrawerShell({
         refreshControl={refreshControl}>
         {children}
       </NrmMenuDrawerScroll>
+      {footerActionLabel && onFooterAction ? (
+        <Pressable
+          onPress={onFooterAction}
+          disabled={footerActionDisabled}
+          style={({ pressed }) => [
+            styles.footerClose,
+            styles.footerAction,
+            compactFooter && styles.footerCloseCompact,
+            footerActionDisabled && styles.footerActionDisabled,
+            pressed && !footerActionDisabled && styles.footerClosePressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={
+            footerActionAccessibilityLabel ?? footerActionLabel
+          }>
+          <Text style={[styles.footerCloseLabel, { color: titleColor }]}>
+            {footerActionLabel}
+          </Text>
+        </Pressable>
+      ) : null}
       <Pressable
         onPress={onDismiss}
         style={({ pressed }) => [
@@ -83,6 +111,12 @@ const styles = StyleSheet.create({
   },
   footerCloseCompact: {
     marginTop: nrmTokens.space.xs,
+  },
+  footerAction: {
+    marginBottom: 0,
+  },
+  footerActionDisabled: {
+    opacity: 0.42,
   },
   footerClosePressed: {
     opacity: 0.92,

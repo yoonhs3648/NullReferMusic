@@ -72,7 +72,6 @@ import { enrichMelonDownloadMetadata } from '@/lib/nrmMelonMetadataEnricher';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { chartTrackDisplayLabel } from '@/lib/nrmChartsTypes';
 import { displayLabelFromAudioFileName } from '@/lib/nrmYoutubeDownloadMeta';
-import { isAdminSearchTrigger, runAdminAuthFlow } from '@/lib/nrmAdminAuth';
 import { notifyUser, confirmUser } from '@/lib/nrmUserNotify';
 import { openDownloadSettingsPanel } from '@/lib/nrmDownloadNavEvents';
 import {
@@ -197,8 +196,6 @@ type Props = {
   fillHeight?: boolean;
   /** 스크롤 헤더 상단 — 메뉴·로고·알림 (고정 FAB 대신) */
   scrollTopChrome?: ReactNode;
-  /** 관리자 히든 인증 후 메인(Home) 복귀 */
-  onAdminGateComplete?: () => void;
 };
 
 export function NrmYoutubeHome({
@@ -211,7 +208,6 @@ export function NrmYoutubeHome({
   downloadMetadataAuth,
   fillHeight = false,
   scrollTopChrome,
-  onAdminGateComplete,
 }: Props) {
   const { height: windowHeight } = useWindowDimensions();
   const mountedRef = useRef(true);
@@ -381,19 +377,12 @@ export function NrmYoutubeHome({
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
-    if (isAdminSearchTrigger(q)) {
-      setQuery('');
-      setCommittedQuery('');
-      await runAdminAuthFlow();
-      onAdminGateComplete?.();
-      return;
-    }
     onSearchCommitted?.();
     setCommittedQuery(q);
     await resolveChartMetadataOnSearch(q);
     const token = ++latestSearchTokenRef.current;
     await runSearchWithQuery(q, token);
-  }, [onAdminGateComplete, onSearchCommitted, query, resolveChartMetadataOnSearch, runSearchWithQuery]);
+  }, [onSearchCommitted, query, resolveChartMetadataOnSearch, runSearchWithQuery]);
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || !hasMore || !nextCursor || !committedQuery.trim()) {

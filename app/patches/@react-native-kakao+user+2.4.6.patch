@@ -1,0 +1,25 @@
+diff --git a/node_modules/@react-native-kakao/user/android/src/main/java/net/mjstudio/rnkakao/user/RNCKakaoUserModule.kt b/node_modules/@react-native-kakao/user/android/src/main/java/net/mjstudio/rnkakao/user/RNCKakaoUserModule.kt
+index fb3cc4c..0401bd0 100644
+--- a/node_modules/@react-native-kakao/user/android/src/main/java/net/mjstudio/rnkakao/user/RNCKakaoUserModule.kt
++++ b/node_modules/@react-native-kakao/user/android/src/main/java/net/mjstudio/rnkakao/user/RNCKakaoUserModule.kt
+@@ -106,7 +106,7 @@ class RNCKakaoUserModule internal constructor(
+         serviceTerms = serviceTerms?.filterIsInstance<String>()?.ifEmpty { null },
+         callback = callback,
+       )
+-    } else {
++    } else if (useKakaoAccountLogin) {
+       UserApiClient.instance.loginWithKakaoAccount(
+         context,
+         prompts =
+@@ -126,6 +126,11 @@ class RNCKakaoUserModule internal constructor(
+         serviceTerms = serviceTerms?.filterIsInstance<String>()?.ifEmpty { null },
+         callback = callback,
+       )
++    } else {
++      promise.reject(
++        "KAKAOTALK_NOT_AVAILABLE",
++        "KakaoTalk login is unavailable.",
++      )
+     }
+   }
+ 

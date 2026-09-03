@@ -12,7 +12,7 @@
 | `data/alarm.json` | 인앱 알림·상단 공지 |
 | `data/userBanList.json` | 사용자 차단·해제 이력 |
 | `data/inquiry.json` | 문의하기 등록 목록 |
-| `data/custom-apk/userList.json` | 커스텀 APK 빌드 등록 이력 |
+| `data/custom-apk/userList.json` | OAuth 사용자 등록 이력 (앱이 `nrm_user_list`에 직접 upsert. 빌드 시 행을 만들지 않음) |
 | **`data/nrm-github-data-fields.xlsx`** | 위 JSON들의 **필드 정의서** (시트 1개 = JSON 1개) |
 
 `data/nrm-github-data-fields.xlsx`는 **반드시 Git에 포함**한다. 로컬에서만 두지 않는다.
@@ -30,7 +30,7 @@
 | `alarm.json` | `app/lib/nrmAlarmClient.ts`, `app/lib/nrmGithubAlarmRegister.ts`, `app/components/nrm/settings/NrmAdminAlarmRegisterPanel.tsx` |
 | `userBanList.json` | `app/lib/nrmUserBanClient.ts`, `app/lib/nrmGithubUserBanRegister.ts` |
 | `inquiry.json` | `app/lib/nrmGithubInquiryRegister.ts`, `app/components/nrm/settings/NrmInquiryPanel.tsx` |
-| `userList.json` | `scripts/Register-NrmCustomApkUserList.ps1` |
+| `userList.json` | `nrm_user_list` (OAuth 등록 RPC). 레거시 `scripts/Register-NrmCustomApkUserList.ps1`는 빌드에서 호출하지 않음 |
 | 공통 | `app/lib/nrmRemoteDataConfig.ts`, `app/lib/nrmGithubContentsApi.ts` |
 
 엑셀에 없는 필드를 임의로 추가·삭제·이름 변경하지 않는다. 구조 변경이 필요하면 아래 §3 절차를 따른다.

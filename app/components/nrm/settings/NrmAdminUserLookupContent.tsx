@@ -15,7 +15,10 @@ import {
   type NrmAdminUserSearchField,
 } from '@/components/nrm/settings/NrmAdminUserSearchBar';
 import { nrmTokens } from '@/constants/nrmTokens';
-import type { NrmUserListEntry } from '@/lib/nrmUserListClient';
+import {
+  formatNrmUserListSubtitle,
+  type NrmUserListEntry,
+} from '@/lib/nrmUserListClient';
 
 export type { NrmAdminUserSearchField };
 
@@ -71,7 +74,12 @@ export function NrmAdminUserLookupContent({
     if (!searchActive || !searchText.trim()) return rows;
     const q = searchText.trim().toLowerCase();
     return rows.filter((r) => {
-      const val = searchField === 'userName' ? r.userName : r.SerialNo;
+      const val =
+        searchField === 'userName'
+          ? r.userName
+          : searchField === 'userEmail'
+            ? r.userEmail
+            : r.SerialNo;
       return val.toLowerCase().includes(q);
     });
   }, [rows, searchActive, searchField, searchText]);
@@ -87,7 +95,7 @@ export function NrmAdminUserLookupContent({
       <>
         <View style={styles.rowInfo}>
           <Text style={[styles.rowName, { color: titleColor }]}>{item.userName}</Text>
-          <Text style={[styles.rowSerial, { color: bodyColor }]}>{item.SerialNo}</Text>
+          <Text style={[styles.rowSerial, { color: bodyColor }]}>{formatNrmUserListSubtitle(item)}</Text>
         </View>
         <View
           style={[

@@ -4,7 +4,17 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { nrmTokens } from '@/constants/nrmTokens';
 
-export type NrmAdminUserSearchField = 'userName' | 'SerialNo';
+export type NrmAdminUserSearchField = 'userName' | 'userEmail' | 'SerialNo';
+
+const SEARCH_FIELD_OPTIONS: { id: NrmAdminUserSearchField; label: string }[] = [
+  { id: 'userName', label: '사용자 이름' },
+  { id: 'userEmail', label: '이메일' },
+  { id: 'SerialNo', label: '계정 ID' },
+];
+
+function searchFieldLabel(field: NrmAdminUserSearchField): string {
+  return SEARCH_FIELD_OPTIONS.find((o) => o.id === field)?.label ?? field;
+}
 
 type Props = {
   titleColor: string;
@@ -69,7 +79,7 @@ export function NrmAdminUserSearchBar({
           onPress={() => setDropdownOpen((v) => !v)}
           style={[styles.fieldDropdownBtn, { borderColor: hairline }]}>
           <Text style={[styles.fieldDropdownText, { color: titleColor }]}>
-            {searchField === 'userName' ? '사용자 이름' : '시리얼번호'}
+            {searchFieldLabel(searchField)}
           </Text>
           <Ionicons
             name={dropdownOpen ? 'chevron-up' : 'chevron-down'}
@@ -84,11 +94,11 @@ export function NrmAdminUserSearchBar({
 
       {dropdownOpen ? (
         <View style={[styles.dropdownMenu, { backgroundColor: dropdownBg, borderColor: hairline }]}>
-          {(['userName', 'SerialNo'] as NrmAdminUserSearchField[]).map((f) => (
+          {SEARCH_FIELD_OPTIONS.map((opt) => (
             <Pressable
-              key={f}
+              key={opt.id}
               onPress={() => {
-                onSearchFieldChange(f);
+                onSearchFieldChange(opt.id);
                 setDropdownOpen(false);
               }}
               style={({ pressed }) => [styles.dropdownItem, pressed && { opacity: 0.7 }]}>
@@ -96,11 +106,11 @@ export function NrmAdminUserSearchBar({
                 style={[
                   styles.dropdownItemText,
                   { color: titleColor },
-                  searchField === f && styles.dropdownItemTextActive,
+                  searchField === opt.id && styles.dropdownItemTextActive,
                 ]}>
-                {f === 'userName' ? '사용자 이름' : '시리얼번호'}
+                {opt.label}
               </Text>
-              {searchField === f ? (
+              {searchField === opt.id ? (
                 <Ionicons name="checkmark" size={15} color={nrmTokens.color.primary} />
               ) : null}
             </Pressable>

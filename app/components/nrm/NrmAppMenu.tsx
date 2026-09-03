@@ -104,6 +104,10 @@ import {
   isAdminSessionActive,
   registerAdminSessionListener,
 } from '@/lib/nrmAdminSession';
+import { logoutNrmAuthSession } from '@/lib/nrmAuthSession';
+import { resetNrmLoggedInIdentity } from '@/lib/nrmBrandIdentity';
+import { notifyUserError } from '@/lib/nrmDevLog';
+import { confirmUser } from '@/lib/nrmUserNotify';
 import {
   getYoutubeSearchSuffixMode,
   listYoutubeSearchSuffixModes,
@@ -273,6 +277,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
   );
   const panel = peekMenuPanel(panelStack);
   const [versionOverlayOpen, setVersionOverlayOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const [adminSessionActive, setAdminSessionActive] = useState(false);
   const [appSerialNo, setAppSerialNo] = useState('');
   const hasAppSerialNo = appSerialNo.trim().length > 0;
@@ -361,6 +366,27 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
     resetMenuPanels('root');
     translateX.setValue(-drawerW);
   }, [drawerW, onLogoPressHome, resetMenuPanels, translateX]);
+
+  const logout = useCallback(async () => {
+    if (logoutBusy) return;
+    const confirmed = await confirmUser('현재 계정에서 로그아웃할까요?', {
+      cancelLabel: '취소',
+      confirmLabel: '로그아웃',
+    });
+    if (!confirmed) return;
+    setLogoutBusy(true);
+    try {
+      await resetNrmLoggedInIdentity();
+      await logoutNrmAuthSession();
+      setOpen(false);
+      resetMenuPanels('root');
+      translateX.setValue(-drawerW);
+    } catch (e) {
+      notifyUserError('oauth.session.logout.ui', e, '로그아웃하지 못했습니다.');
+    } finally {
+      setLogoutBusy(false);
+    }
+  }, [drawerW, logoutBusy, resetMenuPanels, translateX]);
 
   const closeMenuAndNavigateAppleMusicCharts = useCallback(() => {
     onNavigateAppleMusicCharts?.();
@@ -770,7 +796,11 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
               <NrmAppDrawerShell
                 titleColor={titleColor}
                 onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
+                compactFooter={Platform.OS !== 'web'}
+                footerActionLabel={logoutBusy ? '로그아웃 중...' : '로그아웃'}
+                footerActionAccessibilityLabel="로그아웃"
+                footerActionDisabled={logoutBusy}
+                onFooterAction={() => void logout()}>
                 <View style={styles.menuLogoGap}>
                   <NrmLogo
                     layout="stacked"

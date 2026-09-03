@@ -2,6 +2,8 @@ import brandConfig from '../nrm-brand.config.json';
 
 import { NativeModules, Platform } from 'react-native';
 
+import { getNrmAuthSessionSerialNo, getNrmAuthSessionUserName } from '@/lib/nrmAuthSession';
+
 type NrmAppBrandNative = {
   getSerialNo: () => Promise<string>;
   getUserName: () => Promise<string>;
@@ -17,6 +19,11 @@ export function clearNrmAppSerialCache(): void {
 }
 
 export async function getNrmAppSerialNo(): Promise<string> {
+  const fromSession = await getNrmAuthSessionSerialNo();
+  if (fromSession) {
+    cachedSerialNo = fromSession;
+    return fromSession;
+  }
   if (cachedSerialNo !== null) return cachedSerialNo;
   if (Platform.OS !== 'android') {
     cachedSerialNo = '';
@@ -36,6 +43,11 @@ export async function getNrmAppSerialNo(): Promise<string> {
 }
 
 export async function getNrmAppUserName(): Promise<string> {
+  const fromSession = await getNrmAuthSessionUserName();
+  if (fromSession) {
+    cachedUserName = fromSession;
+    return fromSession;
+  }
   if (cachedUserName !== null) return cachedUserName;
   const fromConfig = String(brandConfig.userName ?? '').trim();
   if (Platform.OS !== 'android') {

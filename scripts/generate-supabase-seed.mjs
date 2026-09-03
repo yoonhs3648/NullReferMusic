@@ -58,7 +58,7 @@ lines.push('');
 const ban = readJson('data/userBanList.json');
 for (const row of ban.userBanList ?? []) {
   lines.push(
-    `INSERT INTO public.nrm_user_ban_list (id, user_name, serial_no, content, is_banned, ban_date) VALUES (${row.id}, ${sqlStr(row.userName)}, ${sqlStr(row.SerialNo)}, ${sqlStr(row.content)}, ${row.isBanned === true}, ${sqlDate(row.date)});`,
+    `INSERT INTO public.nrm_user_ban_list (id, user_name, serial_no, device_id, content, is_banned, ban_date) VALUES (${row.id}, ${sqlStr(row.userName)}, ${sqlStr(row.SerialNo)}, ${sqlStr(row.deviceId ?? '')}, ${sqlStr(row.content)}, ${row.isBanned === true}, ${sqlDate(row.date)});`,
   );
 }
 lines.push('');
@@ -76,8 +76,14 @@ for (const row of userList.userList ?? []) {
   const deviceId =
     row.deviceId === null || row.deviceId === undefined ? 'NULL' : sqlStr(row.deviceId);
   const lastAccess = row.lastAccessDate ? sqlTimestamptz(row.lastAccessDate) : 'NULL';
+  const serial = String(row.SerialNo ?? '').trim();
+  const isAdmin =
+    String(row.isAdmin ?? '').trim().toLowerCase() === 'y' || serial.toLowerCase() === 'admin'
+      ? 'y'
+      : 'n';
+  const appKind = String(row.appKind ?? '').trim().toLowerCase() === 'kakao' ? 'kakao' : 'google';
   lines.push(
-    `INSERT INTO public.nrm_user_list (id, app_name, user_name, serial_no, version, created_date, device_id, last_access_date) VALUES (${row.id}, ${sqlStr(row.appName)}, ${sqlStr(row.userName)}, ${sqlStr(row.SerialNo)}, ${sqlStr(row.version)}, ${sqlDate(row.Createddate)}, ${deviceId}, ${lastAccess});`,
+    `INSERT INTO public.nrm_user_list (id, app_kind, user_name, user_email, serial_no, version, created_date, device_id, last_access_date, is_admin) VALUES (${row.id}, ${sqlStr(appKind)}, ${sqlStr(row.userName)}, ${sqlStr(row.userEmail || '')}, ${sqlStr(serial)}, ${sqlStr(row.version)}, ${sqlDate(row.Createddate)}, ${deviceId}, ${lastAccess}, ${sqlStr(isAdmin)});`,
   );
 }
 

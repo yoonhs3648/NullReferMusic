@@ -1,5 +1,5 @@
 ---
-description: 앱 브랜드(NullReference Music 고정) · 커스텀 APK userName / legacy appName
+description: 앱 브랜드(NullReference Music 고정) · OAuth 로그인 serial/userName
 globs:
   - app/nrm-brand.config.json
   - app/lib/nrmAppBrand.ts
@@ -14,17 +14,19 @@ alwaysApply: false
 
 앱 내 로고·약관·종료 확인·런처 상호는 항상 **NullReference Music** (`versionInfoProductName` / `getNrmProductDisplayName()`).
 
-커스텀 빌드의 **appName은 branding에 쓰지 않는다.** `user_list.app_name` legacy 기록용만.
+APK에 사용자 시리얼을 bake하지 않는다. 최초 실행 Google/Kakao 로그인 후 `nrm_user_list`에 UUID `serial_no`가 생긴다.
 
-## userName
+## userName / 관리자
 
-- bake → 문의 `p_user_name`, 버전 `Custom : …`, user_list
+- 로그인 세션 → 문의 `p_user_name`, 버전 Custom 줄, user_list
 - 메뉴 **사용자 이름 변경** 기본/초기화값
 - 설정 오버라이드는 **AI Lab `~~님 안녕하세요`만** (`nrmUserDisplayNameSettings.ts`)
+- 관리자는 `nrm_user_list.is_admin=y` (검색 암호 인증 없음)
 
 ## 설정 파일
 
-`app/nrm-brand.config.json` — `displayName`은 제품명 유지. 커스텀 빌드 스크립트가 appName으로 덮지 않음.
+`app/nrm-brand.config.json` — `displayName`은 제품명 유지. `versionInfoAdminBuild`는 false.
+OAuth 키: `app/nrm-oauth.config.json` (Redirect `nullrefermusic://oauth`).
 
 ```bash
 cd app && npm run sync:brand

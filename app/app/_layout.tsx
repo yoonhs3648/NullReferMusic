@@ -3,7 +3,7 @@ import '@/lib/nrmMetroLogBootstrap';
 import '@/lib/nrmFileLogBootstrap';
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -11,6 +11,8 @@ import { NrmAppPermissionGate } from '@/components/nrm/NrmAppPermissionGate';
 import { NrmApkUpdateGate } from '@/components/nrm/NrmApkUpdateGate';
 import { NrmTermsConsentGate } from '@/components/nrm/NrmTermsConsentGate';
 import { NrmDeviceBindingGate } from '@/components/nrm/NrmDeviceBindingGate';
+import { NrmLoginGate } from '@/components/nrm/NrmLoginGate';
+import { NrmOAuthRegisterGate } from '@/components/nrm/NrmOAuthRegisterGate';
 import { NrmNotifyHost } from '@/components/nrm/NrmNotifyHost';
 import { NrmUserBanGate } from '@/components/nrm/NrmUserBanGate';
 import { NrmGoogleTranslateHost } from '@/components/nrm/NrmGoogleTranslateHost';
@@ -24,23 +26,53 @@ import { getNrmNavigationTheme } from '@/constants/nrmNavigationTheme';
 import { getNrmRootBackgroundColor } from '@/lib/nrmUiAppearanceColors';
 import { setupNrmMobileDownloadNotifications } from '@/lib/nrmMobileDownloadNotifications';
 import { isNrmTermsConsented, saveNrmTermsConsented } from '@/lib/nrmTermsConsent';
-import { initNrmBrandIdentity, isNrmAdminBuild } from '@/lib/nrmBrandIdentity';
+import { initNrmBrandIdentity } from '@/lib/nrmBrandIdentity';
+import {
+  loadNrmAuthSession,
+  loadNrmOAuthPendingProfile,
+  registerNrmAuthSessionListener,
+  syncNrmAdminSessionFromAuth,
+} from '@/lib/nrmAuthSession';
 
 export { ErrorBoundary } from 'expo-router';
 
 /**
  * 앱 진입 시 단계:
- *  checking      → AsyncStorage에서 약관 동의 여부 확인 중 (투명 화면)
- *  apk_update    → GitHub Releases APK 자동 업데이트 (Android만, identity 유지)
- *  terms         → 이용약관/개인정보처리방침 동의 화면
- *  permissions   → 앱 사용 권한 요청 화면 (Android만)
- *  device_check  → 커스텀 APK 디바이스 바인딩 검사 (SerialNo 있을 때만, Android만)
- *  ready         → 메인 앱 진입
- *
- * 약관 동의는 권한 허가 완료 이후에만 저장됩니다.
- * 권한 허가 전 앱이 종료되면 재실행 시 약관 화면부터 다시 시작합니다.
+ *  checking      → 브랜드/세션 확인
+ *  apk_update    → GitHub Releases APK 자동 업데이트 (Android)
+ *  login         → Google/Kakao 로그인
+ *  terms         → 이용약관/개인정보처리방침 동의
+ *  permissions   → 앱 사용 권한 (Android)
+ *  register      → nrm_user_list 등록
+ *  device_check  → 디바이스 바인딩
+ *  ready         → 메인 앱
  */
-type GatePhase = 'checking' | 'apk_update' | 'terms' | 'permissions' | 'device_check' | 'ready';
+type GatePhase =
+  | 'checking'
+  | 'apk_update'
+  | 'login'
+  | 'terms'
+  | 'permissions'
+  | 'register'
+  | 'device_check'
+  | 'ready';
+
+async function nextPhaseAfterLogin(): Promise<Exclude<GatePhase, 'checking' | 'apk_update' | 'login'>> {
+  const consented = await isNrmTermsConsented();
+  if (!consented) return 'terms';
+  if (Platform.OS === 'android') return 'permissions';
+  return 'register';
+}
+
+async function resolvePhaseAfterIdentity(): Promise<GatePhase> {
+  const [session, pending] = await Promise.all([
+    loadNrmAuthSession(),
+    loadNrmOAuthPendingProfile(),
+  ]);
+  await syncNrmAdminSessionFromAuth();
+  if (!session && !pending) return 'login';
+  return nextPhaseAfterLogin();
+}
 
 function RootLayoutInner() {
   const { isDark } = useNrmUiAppearance();
@@ -49,55 +81,55 @@ function RootLayoutInner() {
   const [phase, setPhase] = useState<GatePhase>('checking');
 
   useEffect(() => {
+    registerNrmAuthSessionListener((session) => {
+      if (!session) setPhase('login');
+    });
+    return () => registerNrmAuthSessionListener(null);
+  }, []);
+
+  useEffect(() => {
     void (async () => {
+      await initNrmBrandIdentity();
       if (Platform.OS === 'android') {
-        await initNrmBrandIdentity();
         setPhase('apk_update');
         return;
       }
-      await initNrmBrandIdentity();
-      const consented = await isNrmTermsConsented();
-      if (!consented) {
-        setPhase('terms');
-      } else {
-        setPhase('ready');
-      }
+      setPhase(await resolvePhaseAfterIdentity());
     })();
   }, []);
 
   const onApkUpdateComplete = useCallback(() => {
-    void isNrmTermsConsented().then((consented) => {
-      if (!consented) {
-        setPhase('terms');
-      } else if (Platform.OS === 'android') {
-        setPhase('permissions');
-      } else {
-        setPhase('ready');
-      }
-    });
+    void resolvePhaseAfterIdentity().then(setPhase);
+  }, []);
+
+  const onLoggedIn = useCallback(() => {
+    void nextPhaseAfterLogin().then(setPhase);
   }, []);
 
   const onTermsAgreed = useCallback(() => {
     if (Platform.OS === 'android') {
       setPhase('permissions');
-    } else {
-      void saveNrmTermsConsented();
-      if (Platform.OS !== 'web') {
-        void setupNrmMobileDownloadNotifications();
-      }
-      setPhase('ready');
+      return;
     }
+    void saveNrmTermsConsented();
+    if (Platform.OS !== 'web') {
+      void setupNrmMobileDownloadNotifications();
+    }
+    setPhase('register');
   }, []);
 
   const onPermissionsGranted = useCallback(() => {
     void saveNrmTermsConsented();
     void setupNrmMobileDownloadNotifications();
-    // Android 커스텀 APK는 디바이스 바인딩 검사 추가 (admin APK 제외)
-    if (Platform.OS === 'android' && !isNrmAdminBuild()) {
+    setPhase('register');
+  }, []);
+
+  const onRegistered = useCallback(() => {
+    if (Platform.OS === 'android') {
       setPhase('device_check');
-    } else {
-      setPhase('ready');
+      return;
     }
+    setPhase('ready');
   }, []);
 
   if (phase === 'checking') {
@@ -108,25 +140,23 @@ function RootLayoutInner() {
     return <NrmApkUpdateGate onComplete={onApkUpdateComplete} />;
   }
 
-  if (phase === 'terms') {
-    return <NrmTermsConsentGate onAgreed={onTermsAgreed} />;
-  }
-
-  if (phase === 'permissions') {
-    return <NrmAppPermissionGate onGranted={onPermissionsGranted} />;
-  }
-
-  if (phase === 'device_check') {
-    return <NrmDeviceBindingGate onVerified={() => setPhase('ready')} />;
-  }
-
-  return (
-    <ThemeProvider value={navigationTheme}>
-      {/* Android: YouTube 방문 → CookieManager에 쿠키 적재 → yt-dlp 403 회피 */}
-      <NrmYoutubeCookieHarvester />
-      <NrmYoutubeDecipherHost />
-      <NrmGoogleTranslateHost />
-      <NrmUserBanGate>
+  let gated: ReactNode = null;
+  if (phase === 'login') {
+    gated = <NrmLoginGate onLoggedIn={onLoggedIn} />;
+  } else if (phase === 'terms') {
+    gated = <NrmTermsConsentGate onAgreed={onTermsAgreed} />;
+  } else if (phase === 'permissions') {
+    gated = <NrmAppPermissionGate onGranted={onPermissionsGranted} />;
+  } else if (phase === 'register') {
+    gated = <NrmOAuthRegisterGate onRegistered={onRegistered} />;
+  } else if (phase === 'device_check') {
+    gated = <NrmDeviceBindingGate onVerified={() => setPhase('ready')} />;
+  } else {
+    gated = (
+      <ThemeProvider value={navigationTheme}>
+        <NrmYoutubeCookieHarvester />
+        <NrmYoutubeDecipherHost />
+        <NrmGoogleTranslateHost />
         <Stack
           screenOptions={{
             headerShown: false,
@@ -134,10 +164,15 @@ function RootLayoutInner() {
           }}>
           <Stack.Screen name="index" />
         </Stack>
-      </NrmUserBanGate>
-      {/* 마지막에 두어 웹에서 다른 Modal(메뉴 드로어)보다 알림이 위에 쌓이게 함 */}
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <>
+      <NrmUserBanGate>{gated}</NrmUserBanGate>
       <NrmNotifyHost />
-    </ThemeProvider>
+    </>
   );
 }
 

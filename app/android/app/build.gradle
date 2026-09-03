@@ -3,7 +3,28 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.chaquo.python"
 
+import groovy.json.JsonSlurper
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def oauthConfigFile = new File(projectRoot, "nrm-oauth.config.json")
+def oauthConfig = oauthConfigFile.exists() ? new JsonSlurper().parse(oauthConfigFile) : [:]
+def googleAndroidClientId = (
+    System.getenv("EXPO_PUBLIC_NRM_GOOGLE_ANDROID_CLIENT_ID")
+        ?: oauthConfig.googleAndroidClientId
+        ?: ""
+).toString().trim()
+def googleClientSuffix = ".apps.googleusercontent.com"
+def googleOAuthRedirectScheme = googleAndroidClientId.endsWith(googleClientSuffix)
+    ? "com.googleusercontent.apps.${googleAndroidClientId.substring(0, googleAndroidClientId.length() - googleClientSuffix.length())}"
+    : "nrm-google-oauth-not-configured"
+def kakaoNativeAppKey = (
+    System.getenv("EXPO_PUBLIC_NRM_KAKAO_NATIVE_APP_KEY")
+        ?: oauthConfig.kakaoNativeAppKey
+        ?: ""
+).toString().trim()
+def kakaoOAuthRedirectScheme = kakaoNativeAppKey
+    ? "kakao${kakaoNativeAppKey}"
+    : "kakao-nrm-not-configured"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -93,8 +114,10 @@ android {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 215
-        versionName "3.3.15"
+        versionCode 219
+        versionName "3.3.19"
+        manifestPlaceholders.googleOAuthRedirectScheme = googleOAuthRedirectScheme
+        manifestPlaceholders.kakaoOAuthRedirectScheme = kakaoOAuthRedirectScheme
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 

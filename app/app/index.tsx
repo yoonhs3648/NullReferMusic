@@ -1018,10 +1018,6 @@ export default function HomeScreen() {
           onOpenSpotifyTokenSettings: () =>
             menuRef.current?.openSpotifyTokenSettings(),
         }}
-        onAdminGateComplete={() => {
-          setHomeTab('home');
-          setLayoutPhase('welcome');
-        }}
       />
     );
 

@@ -1,10 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$RepoRoot,
-    [switch]$Customize,
-    [string]$DisplayName = '',
-    [string]$UserName = '',
-    [string]$SerialNo = ''
+    [string]$RepoRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,24 +44,9 @@ $buildFailed = $false
 
 try {
     $cfg = $originalBrandJson | ConvertFrom-Json
-
-    # displayName(앱 상호·런처)는 항상 제품명. 커스텀 appName은 user_list legacy 기록용.
     $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot
     $cfg.displayName = $adminDefaults.displayName.Trim()
-    if ($Customize) {
-        if (-not $UserName -or -not $SerialNo) {
-            throw 'Custom branding values are missing.'
-        }
-        $cfg.serialNo = $SerialNo.Trim()
-        $cfg.userName = $UserName.Trim()
-        $cfg.versionInfoAdminBuild = $false
-    }
-    else {
-        $cfg.serialNo = $adminDefaults.serialNo.Trim()
-        $cfg.userName = $adminDefaults.userName.Trim()
-        $cfg.versionInfoAdminBuild = $true
-    }
-
+    $cfg.versionInfoAdminBuild = $false
     Write-JsonFileUtf8 -Path $BrandConfigPath -InputObject $cfg -Depth 8
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Verify-AndroidReleaseAssets.ps1')
@@ -94,13 +75,9 @@ try {
 
     Invoke-Npm @('run', 'generate:music-quotes')
 
-    if ($Customize) {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ApkVariant 'custom' -ForceRebundle
-    }
-    else {
-        # GitHub Releases 공개 채널 — suffix 없는 NullReferenceMusic-v{version}.apk
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot -ForceRebundle
-    }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Ensure-NrmGithubDataPat.ps1') -RepoRoot $RepoRoot
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'scripts\Invoke-NrmAndroidReleaseBuild.ps1') -RepoRoot $RepoRoot
     if ($LASTEXITCODE -ne 0) {
         throw 'Gradle assembleRelease failed.'
     }

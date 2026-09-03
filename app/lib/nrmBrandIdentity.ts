@@ -3,7 +3,7 @@ import { NativeModules, Platform } from 'react-native';
 import brandConfig from '../nrm-brand.config.json';
 import { clearNrmAppSerialCache, getNrmAndroidIdSha256 } from '@/lib/nrmAppSerialNo.native';
 import { fetchUserListEntryByDeviceId } from '@/lib/nrmUserListClient';
-import { logNrmDev } from '@/lib/nrmDevLog';
+import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 
 export type NrmBrandIdentity = {
   serialNo: string;
@@ -59,6 +59,89 @@ export function getResolvedNrmBrandUserName(): string {
   return (snapshot ?? bakedIdentity()).userName.trim();
 }
 
+/** 로그인 후 serial/userName을 네이티브 identity에 반영 (브랜딩 displayName은 제품명 유지) */
+export async function applyNrmLoggedInIdentity(
+  serialNo: string,
+  userName: string,
+): Promise<void> {
+  const productDisplayName =
+    String(brandConfig.versionInfoProductName ?? '').trim() ||
+    bakedIdentity().displayName ||
+    'NullReference Music';
+  const storageFolder =
+    (snapshot ?? bakedIdentity()).storageFolderName.trim() || bakedIdentity().storageFolderName;
+
+  if (Platform.OS === 'android') {
+    const mod = NativeModules.NrmAppBrand as NrmAppBrandNative | undefined;
+    if (mod?.overwriteBrandIdentity) {
+      try {
+        const next = await mod.overwriteBrandIdentity(
+          serialNo.trim(),
+          userName.trim(),
+          productDisplayName,
+          storageFolder,
+          false,
+        );
+        snapshot = {
+          serialNo: String(next.serialNo ?? serialNo).trim(),
+          userName: String(next.userName ?? userName).trim(),
+          displayName: String(next.displayName ?? productDisplayName).trim(),
+          storageFolderName: String(next.storageFolderName ?? storageFolder).trim(),
+          versionInfoAdminBuild: false,
+        };
+        clearNrmAppSerialCache();
+        return;
+      } catch {
+        // fall through to in-memory snapshot
+      }
+    }
+  }
+
+  snapshot = {
+    serialNo: serialNo.trim(),
+    userName: userName.trim(),
+    displayName: productDisplayName,
+    storageFolderName: storageFolder,
+    versionInfoAdminBuild: false,
+  };
+  clearNrmAppSerialCache();
+}
+
+/** 로그아웃 시 로그인 사용자 identity를 APK 기본값으로 되돌린다. */
+export async function resetNrmLoggedInIdentity(): Promise<void> {
+  const target = bakedIdentity();
+  if (Platform.OS === 'android') {
+    const mod = NativeModules.NrmAppBrand as NrmAppBrandNative | undefined;
+    if (mod?.overwriteBrandIdentity) {
+      try {
+        const restored = await mod.overwriteBrandIdentity(
+          target.serialNo,
+          target.userName,
+          target.displayName,
+          target.storageFolderName,
+          target.versionInfoAdminBuild,
+        );
+        snapshot = {
+          serialNo: String(restored.serialNo ?? target.serialNo).trim(),
+          userName: String(restored.userName ?? target.userName).trim(),
+          displayName: String(restored.displayName ?? target.displayName).trim(),
+          storageFolderName: String(
+            restored.storageFolderName ?? target.storageFolderName,
+          ).trim(),
+          versionInfoAdminBuild:
+            restored.versionInfoAdminBuild === true,
+        };
+        clearNrmAppSerialCache();
+        return;
+      } catch (e) {
+        logNrmRunError('brand-identity.logout-reset', e);
+      }
+    }
+  }
+  snapshot = target;
+  clearNrmAppSerialCache();
+}
+
 /** Android: SharedPreferences에 저장된 identity 복원(최초 1회는 APK 내장값 저장). */
 export async function initNrmBrandIdentity(): Promise<NrmBrandIdentity> {
   if (snapshot) return snapshot;
@@ -106,7 +189,7 @@ async function tryRecoverBrandIdentityFromDeviceBinding(
 
     const storageFolder =
       snapshot.storageFolderName.trim() || bakedIdentity().storageFolderName;
-    // displayName(앱 상호)은 항상 제품명. appName은 user_list legacy일 뿐 브랜딩에 쓰지 않음.
+    // displayName(앱 상호)은 항상 제품명. 사용자 식별은 OAuth 세션의 serial_no.
     const productDisplayName =
       String(brandConfig.versionInfoProductName ?? '').trim() ||
       bakedIdentity().displayName ||

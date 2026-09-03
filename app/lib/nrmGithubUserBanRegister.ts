@@ -7,6 +7,7 @@ import type { NrmUserBanItem } from '@/lib/nrmUserBanClient';
 export type NrmUserBanRegisterInput = {
   userName: string;
   serialNo: string;
+  deviceId: string;
   content: string;
 };
 
@@ -16,10 +17,15 @@ export async function registerUserBanToGithub(input: NrmUserBanRegisterInput): P
   const t0 = Date.now();
   try {
     const callerSerial = await getNrmAppSerialNo();
+    const deviceId = input.deviceId.trim();
+    if (!deviceId) {
+      throw new Error('기기 미등록 사용자는 차단할 수 없습니다.');
+    }
     await nrmSbRpc<number>('nrm_rpc_insert_user_ban', {
       p_caller_serial: callerSerial ?? '',
       p_user_name: input.userName.trim(),
       p_serial_no: input.serialNo.trim(),
+      p_device_id: deviceId,
       p_content: input.content,
       p_ban_date: todayYmd(),
     });

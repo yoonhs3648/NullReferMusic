@@ -25,6 +25,7 @@ export type NrmSupabaseUserBanRow = {
   id: number;
   user_name: string;
   serial_no: string;
+  device_id: string;
   content: string;
   is_banned: boolean;
   ban_date: string;
@@ -48,13 +49,15 @@ export type NrmSupabaseInquiryRow = {
 
 export type NrmSupabaseUserListRow = {
   id: number;
-  app_name: string;
+  app_kind: string;
   user_name: string;
+  user_email: string;
   serial_no: string;
   version: string;
   created_date: string;
   device_id: string | null;
   last_access_date: string | null;
+  is_admin: string;
   inserted_at: string;
   updated_at: string;
 };
@@ -209,7 +212,9 @@ export type NrmSupabaseChatMessageRow = {
 export const NRM_SUPABASE_FIELD_MAP = {
   SerialNo: 'serial_no',
   Createddate: 'created_date',
-  appName: 'app_name',
+  appKind: 'app_kind',
+  userEmail: 'user_email',
+  isAdmin: 'is_admin',
   userName: 'user_name',
   isNoti: 'is_noti',
   isBanned: 'is_banned',

@@ -2,13 +2,13 @@ import brandConfig from '../nrm-brand.config.json';
 import {
   getResolvedNrmBrandStorageFolderName,
   getResolvedNrmBrandUserName,
-  isNrmAdminBuild,
 } from '@/lib/nrmBrandIdentity';
+import { peekAdminSessionActive } from '@/lib/nrmAdminSession';
 
 /**
  * 앱 브랜드 문자열 단일 출처.
  * 앱 내 상호(로고·약관·종료·런처)는 항상 NullReference Music.
- * 커스텀 빌드의 appName은 user_list legacy 기록용이며 displayName bake에 쓰지 않는다.
+ * 사용자 serial/userName은 OAuth 로그인 세션에서 온다.
  */
 /** 버전 정보 오버레이·앱 상호 공통 제품명 */
 export const NRM_VERSION_INFO_PRODUCT_NAME = (
@@ -18,7 +18,7 @@ export const NRM_VERSION_INFO_PRODUCT_NAME = (
 export const NRM_BRAND_DISPLAY_NAME = NRM_VERSION_INFO_PRODUCT_NAME;
 export const NRM_BRAND_STORAGE_FOLDER_NAME = brandConfig.storageFolderName.trim();
 
-/** 앱 내 상호(로고·약관·종료 확인)용 제품명 — 커스텀 appName과 무관 */
+/** 앱 내 상호(로고·약관·종료 확인)용 제품명 */
 export function getNrmProductDisplayName(): string {
   return NRM_VERSION_INFO_PRODUCT_NAME;
 }
@@ -31,21 +31,19 @@ export function getNrmBrandDisplayNameForUi(): string {
 export function getNrmBrandStorageFolderForPaths(): string {
   return getResolvedNrmBrandStorageFolderName();
 }
-/** 친구용 APK 빌드 시에만 설정 (build-release-apk-custom.bat Y) */
+/** 로그인한 사용자 이름이 있을 때 버전 정보 Custom 줄 */
 export function getNrmVersionInfoCustomizingLine(): string | null {
-  if (isNrmAdminBuild()) return null;
   const userName = getResolvedNrmBrandUserName() || String(brandConfig.userName ?? '').trim();
   return userName ? `Custom : ${userName}` : null;
 }
 
-/** admin APK 빌드 시에만 설정 (build-release-apk-custom.bat N) */
+/** 로그인한 사용자의 is_admin=y 일 때 */
 export function getNrmVersionInfoAdminLine(): string | null {
-  return isNrmAdminBuild() ? 'Admin Version' : null;
+  return peekAdminSessionActive() ? 'Admin Version' : null;
 }
 
-/** 버전 정보에 Serial Number 줄을 표시할지 (admin APK는 숨김) */
 export function shouldShowVersionInfoSerialNumber(): boolean {
-  return !isNrmAdminBuild();
+  return true;
 }
 
 /** 로고 워드마크 — 마지막 단어를 accent 색으로 분리 */

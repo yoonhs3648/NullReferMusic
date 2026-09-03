@@ -26,9 +26,11 @@ type DetailField =
 
 const DETAIL_FIELDS: DetailField[] = [
   { key: 'id', label: 'ID' },
-  { key: 'appName', label: '앱 이름' },
+  { key: 'appKind', label: '로그인' },
   { key: 'userName', label: '사용자 이름' },
+  { key: 'userEmail', label: '이메일' },
   { key: 'SerialNo', label: '시리얼번호' },
+  { key: 'isAdmin', label: '관리자' },
   { key: 'version', label: '버전' },
   { key: 'Createddate', label: '등록일' },
   { key: 'lastAccessDate', label: '마지막 접속' },

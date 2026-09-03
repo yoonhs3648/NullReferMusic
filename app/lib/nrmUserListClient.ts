@@ -3,15 +3,34 @@ import { nrmSbMaybeSingle, nrmSbSelect } from '@/lib/nrmSupabaseCrud';
 import { mapUserListRow } from '@/lib/nrmSupabaseRows';
 import type { NrmSupabaseUserListRow } from '@/lib/nrmSupabaseDatabase.types';
 
+export function formatNrmLoginKindLabel(appKind: string): string {
+  const kind = appKind.trim().toLowerCase();
+  if (kind === 'kakao') return '카카오';
+  if (kind === 'google') return 'Google';
+  return appKind.trim() || '-';
+}
+
+export function formatNrmLoginSubtitle(appKind: string, userEmail: string): string {
+  const kind = formatNrmLoginKindLabel(appKind);
+  const email = userEmail.trim();
+  return email ? `${kind} · ${email}` : kind;
+}
+
+export function formatNrmUserListSubtitle(entry: NrmUserListEntry): string {
+  return formatNrmLoginSubtitle(entry.appKind, entry.userEmail);
+}
+
 export type NrmUserListEntry = {
   id: number;
-  appName: string;
+  appKind: string;
   userName: string;
+  userEmail: string;
   SerialNo: string;
   version: string;
   Createddate: string;
   deviceId: string | null;
   lastAccessDate: string | null;
+  isAdmin: string;
 };
 
 export function dedupeUserListBySerialNo(rows: NrmUserListEntry[]): NrmUserListEntry[] {

@@ -16,20 +16,40 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { validateBanContent } from '@/lib/nrmJsonFieldValidation';
 import { registerUserBanToGithub } from '@/lib/nrmGithubUserBanRegister';
-import type { NrmUserListEntry } from '@/lib/nrmUserListClient';
+import {
+  formatNrmLoginKindLabel,
+  formatNrmUserListSubtitle,
+  type NrmUserListEntry,
+} from '@/lib/nrmUserListClient';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
 
-const DETAIL_FIELDS: { key: keyof Omit<NrmUserListEntry, 'deviceId'>; label: string }[] = [
-  { key: 'id', label: 'ID' },
-  { key: 'appName', label: '앱 이름' },
+type DetailField =
+  | { key: Exclude<keyof NrmUserListEntry, 'deviceId'>; label: string; special?: undefined }
+  | { key: 'deviceId'; label: string; special: 'device' };
+
+const DETAIL_FIELDS: DetailField[] = [
+  { key: 'appKind', label: '로그인' },
   { key: 'userName', label: '사용자 이름' },
-  { key: 'SerialNo', label: '시리얼번호' },
+  { key: 'userEmail', label: '이메일' },
+  { key: 'deviceId', label: '기기', special: 'device' },
+  { key: 'lastAccessDate', label: '마지막 접속' },
   { key: 'version', label: '버전' },
   { key: 'Createddate', label: '등록일' },
-  { key: 'lastAccessDate', label: '마지막 접속' },
 ];
+
+function resolveBanUserDetailValue(entry: NrmUserListEntry, field: DetailField): string {
+  if (field.special === 'device') {
+    const v = entry.deviceId;
+    return v !== null && v !== '' ? '등록됨' : '미등록';
+  }
+  if (field.key === 'appKind') {
+    return formatNrmLoginKindLabel(entry.appKind);
+  }
+  const raw = entry[field.key];
+  return String(raw ?? '-');
+}
 
 type Props = {
   titleColor: string;
@@ -75,11 +95,16 @@ export function NrmAdminUserBanRegisterPanel({ titleColor, bodyColor, isDark, on
       void notifyUser(contentErr);
       return;
     }
+    if (!userEntry.deviceId?.trim()) {
+      void notifyUser('기기 미등록 사용자는 차단할 수 없습니다. 해당 기기에서 앱을 한 번 실행한 뒤 다시 시도하세요.');
+      return;
+    }
     setSaving(true);
     try {
       await registerUserBanToGithub({
         userName: userEntry.userName,
         serialNo: userEntry.SerialNo,
+        deviceId: userEntry.deviceId.trim(),
         content,
       });
       setUserEntry(null);
@@ -101,7 +126,11 @@ export function NrmAdminUserBanRegisterPanel({ titleColor, bodyColor, isDark, on
       <View style={styles.userSelectRow}>
         <TextInput
           editable={false}
-          value={userEntry?.userName ?? ''}
+          value={
+            userEntry
+              ? `${userEntry.userName} · ${formatNrmUserListSubtitle(userEntry)}`
+              : ''
+          }
           placeholder="사용자 선택"
           placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'}
           style={[styles.userSelectInput, { color: titleColor, borderColor: hairline, backgroundColor: inputBg }]}
@@ -171,11 +200,11 @@ export function NrmAdminUserBanRegisterPanel({ titleColor, bodyColor, isDark, on
           <View style={[styles.detailCard, { backgroundColor: surfaceBg, borderColor: hairline }]}>
             <Text style={[styles.detailTitle, { color: titleColor }]}>사용자 상세 정보</Text>
             {userEntry !== null &&
-              DETAIL_FIELDS.map(({ key, label }) => (
-                <View key={key} style={[styles.detailRow, { borderColor: hairline }]}>
-                  <Text style={[styles.detailLabel, { color: bodyColor }]}>{label}</Text>
+              DETAIL_FIELDS.map((field) => (
+                <View key={field.key} style={[styles.detailRow, { borderColor: hairline }]}>
+                  <Text style={[styles.detailLabel, { color: bodyColor }]}>{field.label}</Text>
                   <Text style={[styles.detailValue, { color: titleColor }]} selectable>
-                    {String(userEntry[key] ?? '-')}
+                    {resolveBanUserDetailValue(userEntry, field)}
                   </Text>
                 </View>
               ))}

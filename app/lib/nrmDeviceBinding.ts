@@ -3,7 +3,6 @@ import { logNrmDev, logNrmRunError } from '@/lib/nrmDevLog';
 import { nrmSbRpc } from '@/lib/nrmSupabaseCrud';
 import { formatNrmTimestamp } from '@/lib/nrmSupabaseRows';
 import { fetchUserListEntryBySerialNo } from '@/lib/nrmUserListClient';
-import { isNrmAdminBuild } from '@/lib/nrmBrandIdentity';
 
 export type DeviceBindingResult =
   | { status: 'skip' | 'ok' | 'mismatch' | 'unregistered' }
@@ -11,11 +10,6 @@ export type DeviceBindingResult =
 
 export async function runDeviceBindingCheck(): Promise<DeviceBindingResult> {
   const tag = 'device-binding';
-
-  if (isNrmAdminBuild()) {
-    logNrmDev(tag, { event: 'skip-admin-build' });
-    return { status: 'skip' };
-  }
 
   const serialNo = await getNrmAppSerialNo();
   if (!serialNo) {

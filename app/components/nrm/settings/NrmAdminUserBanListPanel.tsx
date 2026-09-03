@@ -17,10 +17,16 @@ import { NrmMenuDrawerScroll } from '@/components/nrm/NrmMenuDrawerScroll';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { unbanUserOnGithub } from '@/lib/nrmGithubUserBanRegister';
 import {
+  enrichBanRowsForAdmin,
   fetchUserBanListViaApi,
   listCurrentlyBannedUsers,
-  type NrmUserBanItem,
+  type NrmUserBanListRow,
 } from '@/lib/nrmUserBanClient';
+import {
+  fetchDedupedUserListEntries,
+  formatNrmLoginKindLabel,
+  formatNrmLoginSubtitle,
+} from '@/lib/nrmUserListClient';
 import { getNrmModalScrimColor } from '@/lib/nrmUiAppearanceColors';
 import { notifyUserError } from '@/lib/nrmDevLog';
 import { notifyUser } from '@/lib/nrmUserNotify';
@@ -43,16 +49,26 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
-const DETAIL_FIELDS: { key: keyof Omit<NrmUserBanItem, 'isBanned'>; label: string }[] = [
-  { key: 'id', label: 'ID' },
+const DETAIL_FIELDS: { key: keyof NrmUserBanListRow; label: string }[] = [
   { key: 'userName', label: '사용자 이름' },
-  { key: 'SerialNo', label: '시리얼번호' },
+  { key: 'userEmail', label: '이메일' },
+  { key: 'appKind', label: '로그인' },
+  { key: 'deviceRegistered', label: '기기' },
   { key: 'content', label: '사유' },
   { key: 'date', label: '등록일' },
 ];
 
+function formatBanDetailValue(row: NrmUserBanListRow, key: keyof NrmUserBanListRow): string {
+  if (key === 'appKind') return formatNrmLoginKindLabel(row.appKind);
+  if (key === 'deviceRegistered') return row.deviceRegistered ? '등록됨' : '미등록';
+  const raw = row[key];
+  if (Array.isArray(raw)) return raw.join(', ') || '-';
+  if (typeof raw === 'boolean') return raw ? '예' : '아니오';
+  return String(raw ?? '-');
+}
+
 export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack }: Props) {
-  const [rows, setRows] = useState<NrmUserBanItem[]>([]);
+  const [rows, setRows] = useState<NrmUserBanListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [globalBusy, setGlobalBusy] = useState(false);
 
@@ -60,7 +76,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
   const [searchField, setSearchField] = useState<SearchField>('userName');
   const [searchText, setSearchText] = useState('');
 
-  const [detailEntry, setDetailEntry] = useState<NrmUserBanItem | null>(null);
+  const [detailEntry, setDetailEntry] = useState<NrmUserBanListRow | null>(null);
 
   const hairline = isDark ? nrmTokens.color.borderOnDark : nrmTokens.color.hairline;
   const surfaceBg = isDark ? nrmTokens.color.surfaceTile1 : nrmTokens.color.canvas;
@@ -70,8 +86,14 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
     if (!searchActive || !searchText.trim()) return rows;
     const q = searchText.trim().toLowerCase();
     return rows.filter((r) => {
-      const val = searchField === 'userName' ? r.userName : r.SerialNo;
-      return val.toLowerCase().includes(q);
+      if (searchField === 'userEmail') {
+        return (r.userEmail || '').toLowerCase().includes(q);
+      }
+      if (searchField === 'SerialNo') {
+        return r.SerialNo.toLowerCase().includes(q);
+      }
+      const nameHay = [r.userName, ...r.linkedUserNames].join(' ').toLowerCase();
+      return nameHay.includes(q);
     });
   }, [rows, searchActive, searchField, searchText]);
 
@@ -82,7 +104,8 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
     }
     try {
       const all = await fetchUserBanListViaApi();
-      setRows(listCurrentlyBannedUsers(all));
+      const users = await fetchDedupedUserListEntries();
+      setRows(enrichBanRowsForAdmin(listCurrentlyBannedUsers(all), users));
     } catch {
       if (!silent) {
         setRows([]);
@@ -100,7 +123,7 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
   }, [reload]);
 
   const onUnban = useCallback(
-    async (entry: NrmUserBanItem) => {
+    async (entry: NrmUserBanListRow) => {
       setGlobalBusy(true);
       try {
         await unbanUserOnGithub(entry);
@@ -150,6 +173,14 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
               accessibilityRole="button"
               accessibilityLabel={`${row.userName} 상세 보기`}>
               <Text style={[styles.userName, { color: titleColor }]}>{row.userName}</Text>
+              <Text style={[styles.userMeta, { color: bodyColor }]}>
+                {formatNrmLoginSubtitle(row.appKind, row.userEmail)}
+              </Text>
+              {row.linkedAccountLabels.length > 1 ? (
+                <Text style={[styles.userMeta, { color: bodyColor }]} numberOfLines={2}>
+                  {`이 기기 ${row.linkedAccountLabels.length}개 계정`}
+                </Text>
+              ) : null}
             </Pressable>
             <Pressable
               onPress={() => void onUnban(row)}
@@ -183,15 +214,26 @@ export function NrmAdminUserBanListPanel({ titleColor, bodyColor, isDark, onBack
             style={[styles.detailCard, { backgroundColor: surfaceBg, borderColor: hairline }]}
             onPress={() => {/* bubble stop */}}>
             <Text style={[styles.detailTitle, { color: titleColor }]}>차단 사용자 상세</Text>
-            {detailEntry !== null &&
-              DETAIL_FIELDS.map(({ key, label }) => (
-                <View key={key} style={[styles.detailRow, { borderColor: hairline }]}>
-                  <Text style={[styles.detailLabel, { color: bodyColor }]}>{label}</Text>
-                  <Text style={[styles.detailValue, { color: titleColor }]} selectable>
-                    {String(detailEntry[key] ?? '')}
-                  </Text>
-                </View>
-              ))}
+            {detailEntry !== null && (
+              <>
+                {DETAIL_FIELDS.map(({ key, label }) => (
+                  <View key={key} style={[styles.detailRow, { borderColor: hairline }]}>
+                    <Text style={[styles.detailLabel, { color: bodyColor }]}>{label}</Text>
+                    <Text style={[styles.detailValue, { color: titleColor }]} selectable>
+                      {formatBanDetailValue(detailEntry, key)}
+                    </Text>
+                  </View>
+                ))}
+                {detailEntry.linkedAccountLabels.length > 1 ? (
+                  <View style={[styles.detailRow, { borderColor: hairline }]}>
+                    <Text style={[styles.detailLabel, { color: bodyColor }]}>이 기기 계정</Text>
+                    <Text style={[styles.detailValue, { color: titleColor }]} selectable>
+                      {detailEntry.linkedAccountLabels.join('\n')}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
             <Pressable
               onPress={() => setDetailEntry(null)}
               style={({ pressed }) => [styles.detailCloseBtn, pressed && { opacity: 0.75 }]}
@@ -248,6 +290,10 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: nrmTokens.font.body,
     fontWeight: '600',
+  },
+  userMeta: {
+    fontSize: nrmTokens.font.caption,
+    marginTop: 2,
   },
   unbanBtn: {
     minWidth: 52,

@@ -1,7 +1,7 @@
 {
   "name": "nullrefer-music-app",
   "main": "index",
-  "version": "3.3.15",
+  "version": "3.3.19",
   "scripts": {
     "start": "expo start --lan",
     "start:plain": "expo start",
@@ -28,12 +28,17 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-google-signin/google-signin": "^16.1.4",
+    "@react-native-kakao/core": "^2.4.6",
+    "@react-native-kakao/user": "^2.4.6",
     "@react-navigation/native": "^7.1.8",
     "@supabase/supabase-js": "^2.108.2",
     "expo": "~54.0.34",
+    "expo-auth-session": "~7.0.11",
     "expo-av": "~16.0.8",
     "expo-clipboard": "~8.0.7",
     "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.9",
     "expo-file-system": "~19.0.22",
     "expo-font": "~14.0.11",
     "expo-image-picker": "~17.0.11",

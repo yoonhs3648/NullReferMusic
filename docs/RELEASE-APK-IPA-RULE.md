@@ -290,16 +290,21 @@ applicationVariants.all { variant ->
 | `app/release-notes/history.json` | 새 항목 추가 |
 | `app/release-notes/versions/{버전}.md` | 릴리즈 노트 파일 |
 
-### 6-4-a. `build-release-apk-custom.bat` — do-custom Y/N 정책
+### 6-4-a. `build-release-apk-custom.bat`
 
-| Do customizing | 결과 APK | GitHub Release 업로드 | Supabase user_list |
-|----------------|----------|----------------------|-------------------|
-| **N** | 공통 `NullReferenceMusic-v{version}.apk` (admin 빌드) | **예** — 패치 채널 | 아니오 |
-| **Y** (일반 사용자) | 커스텀 APK (`-custom-`) | **아니오** — 로컬만 | **예** (라이선스 등록) |
-| **Y** + appName=`admin` | admin APK (로컬) | **아니오** | 아니오 |
+공통 릴리스 APK를 생성합니다. 관리자/일반 사용자 구분과 `nrm_user_list` insert는 **하지 않습니다.**  
+빌드 성공 후 **예전과 같이** GitHub Release 업로드 + `nrm_apk_version` INSERT를 수행합니다. (앱 시작 시 업데이트 게이트가 이 값을 봅니다.)
 
-- **의도:** GitHub Releases에는 **공통 패치 APK(do-custom=N)만** 올린다. 커스텀·관리자 모두 이 파일로 기능 업데이트하고, SerialNo·identity는 기기에 유지 (`docs/APP-BRAND.md`).
-- **Y로 빌드한 APK는 절대 GitHub Release에 올라가지 않는다.** (과거 `appName=admin`이 N과 동일하게 업로드되던 동작은 제거됨)
+| 항목 | 동작 |
+|------|------|
+| 질문 | 현재 `version` 표시 후 `Build this version? [Y/N]` |
+| APK | `NullReferenceMusic-v{version}.apk` |
+| 사용자 식별 | 앱 최초 실행 Google/Kakao 로그인 후 UUID `serial_no` |
+| 관리자 | `nrm_user_list.is_admin = y` 인 계정만 (기본 `n`) |
+| GitHub Release 업로드 | 성공 시 `Publish-NrmApkGithubRelease.ps1` (tag `v{version}`, Supabase `nrm_apk_version`) |
+
+OAuth Redirect URI: `nullrefermusic://oauth`
+
 
 ### 6-4-b. GitHub Release 본문 한글 (UTF-8 필수)
 

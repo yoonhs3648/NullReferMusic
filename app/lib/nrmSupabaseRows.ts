@@ -81,6 +81,7 @@ export function mapUserBanRow(row: NrmSupabaseUserBanRow): NrmUserBanItem | null
     id,
     userName: String(row.user_name ?? '').trim(),
     SerialNo: String(row.serial_no ?? '').trim(),
+    deviceId: String(row.device_id ?? '').trim(),
     content: String(row.content ?? ''),
     isBanned: row.is_banned === true,
     date: String(row.ban_date ?? '').trim().slice(0, 10),
@@ -121,13 +122,15 @@ export function mapUserListRow(row: NrmSupabaseUserListRow): NrmUserListEntry | 
       : toInquiryCreatedDisplay(String(lastRaw));
   return {
     id,
-    appName: String(row.app_name ?? '').trim(),
+    appKind: String(row.app_kind ?? '').trim() || 'google',
     userName,
+    userEmail: String(row.user_email ?? '').trim(),
     SerialNo,
     version: String(row.version ?? '').trim(),
     Createddate: String(row.created_date ?? '').trim().slice(0, 10),
     deviceId,
     lastAccessDate,
+    isAdmin: String(row.is_admin ?? 'n').trim().toLowerCase() === 'y' ? 'y' : 'n',
   };
 }
 
