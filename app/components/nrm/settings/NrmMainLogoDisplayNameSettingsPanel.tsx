@@ -20,6 +20,7 @@ import {
 import { notifyUserError } from '@/lib/nrmDevLog';
 import {
   getNrmUserDisplayNameDefault,
+  loadNrmUserDisplayNameDefault,
   loadUserDisplayNameOverride,
   saveUserDisplayNameOverride,
   validateUserDisplayNameInput,
@@ -51,8 +52,11 @@ function MenuBackRow({ onPress }: { onPress: () => void }) {
   );
 }
 
-function effectiveNameFromOverride(override: string | null): string {
-  return override ?? getNrmUserDisplayNameDefault();
+function effectiveNameFromOverride(
+  override: string | null,
+  defaultName: string,
+): string {
+  return override ?? defaultName;
 }
 
 export function NrmMainLogoDisplayNameSettingsPanel({
@@ -64,15 +68,15 @@ export function NrmMainLogoDisplayNameSettingsPanel({
   registerBackHandler,
   registerDrawerDismiss,
 }: Props) {
-  const defaultName = getNrmUserDisplayNameDefault();
+  const [defaultName, setDefaultName] = useState(getNrmUserDisplayNameDefault);
   const [draft, setDraft] = useState(defaultName);
   const [savedOverride, setSavedOverride] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const savedEffective = useMemo(
-    () => effectiveNameFromOverride(savedOverride),
-    [savedOverride],
+    () => effectiveNameFromOverride(savedOverride, defaultName),
+    [defaultName, savedOverride],
   );
 
   const isDirty = useMemo(() => draft.trim() !== savedEffective, [draft, savedEffective]);
@@ -83,10 +87,14 @@ export function NrmMainLogoDisplayNameSettingsPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void loadUserDisplayNameOverride().then((override) => {
+    void Promise.all([
+      loadNrmUserDisplayNameDefault(),
+      loadUserDisplayNameOverride(),
+    ]).then(([loadedDefault, override]) => {
       if (cancelled) return;
+      setDefaultName(loadedDefault);
       setSavedOverride(override);
-      setDraft(effectiveNameFromOverride(override));
+      setDraft(effectiveNameFromOverride(override, loadedDefault));
       setLoading(false);
     });
     return () => {
@@ -108,7 +116,7 @@ export function NrmMainLogoDisplayNameSettingsPanel({
     const override = trimmed === defaultName ? null : trimmed;
     await saveUserDisplayNameOverride(override);
     setSavedOverride(override);
-    setDraft(effectiveNameFromOverride(override));
+    setDraft(effectiveNameFromOverride(override, defaultName));
     return true;
   }, [defaultName, draft]);
 
@@ -130,7 +138,9 @@ export function NrmMainLogoDisplayNameSettingsPanel({
     try {
       await saveUserDisplayNameOverride(null);
       setSavedOverride(null);
-      setDraft(getNrmUserDisplayNameDefault());
+      const loadedDefault = await loadNrmUserDisplayNameDefault();
+      setDefaultName(loadedDefault);
+      setDraft(loadedDefault);
     } catch (e) {
       notifyUserError('settings.userDisplayNameReset', e, '초기화하지 못했습니다.');
     } finally {

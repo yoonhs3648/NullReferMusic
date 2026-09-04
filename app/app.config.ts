@@ -35,10 +35,10 @@ const kakaoPlugins: NonNullable<ExpoConfig['plugins']> = kakaoNativeAppKey
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.3.19',
+  version: '3.6.2',
   orientation: 'portrait',
-  /** 런처 아이콘·스플래시만 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
-  icon: './assets/images/tempLogo.png',
+  /** 런처 아이콘은 밝은 배경, 스플래시는 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
+  icon: './assets/images/app-icon-light.png',
   scheme: ['nullrefermusic', ...googleNativeSchemes],
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
@@ -58,7 +58,7 @@ const config: ExpoConfig = {
   android: {
     adaptiveIcon: {
       foregroundImage: './assets/images/tempLogo.png',
-      backgroundColor: '#0c0c12',
+      backgroundColor: '#ffffff',
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,

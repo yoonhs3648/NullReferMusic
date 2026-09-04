@@ -1,0 +1,17 @@
+# NullReferenceMusic-Vector Supabase CLI configuration.
+project_id = "eyzutsvsqxsxhjgydgoz"
+
+[api]
+enabled = true
+port = 55321
+schemas = ["public", "storage"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 55322
+major_version = 15
+
+[studio]
+enabled = true
+port = 55323

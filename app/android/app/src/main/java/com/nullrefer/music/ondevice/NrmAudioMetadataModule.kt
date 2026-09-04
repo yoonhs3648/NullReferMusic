@@ -51,22 +51,18 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         val coverUrl = tagBundle.coverUrl
         val hasTextTags = tagBundle.hasTextTags
 
-        var coverFile: File? = null
-        var coverEmbedTemp: File? = null
-        if (coverUrl.isNotEmpty()) {
-          val rawCover = downloadCover(coverUrl, reactApplicationContext.cacheDir)
-          if (rawCover != null) {
-            coverEmbedTemp = rawCover
-            coverFile = normalizeCoverForEmbed(rawCover, reactApplicationContext.cacheDir)
-          }
-        }
-
-        if (!hasTextTags && coverFile == null) {
+        val ffmpegPaths = FfmpegExec.resolve(reactApplicationContext)
+        if (ffmpegPaths == null) {
           resolvePath(promise, inFile.absolutePath)
           return@Thread
         }
+        val resolvedCover =
+          resolveCoverForEmbed(coverUrl, reactApplicationContext.cacheDir) {
+            extractEmbeddedCoverFile(ffmpegPaths, inFile)
+          }
+        val coverFile = resolvedCover?.embedFile
 
-        if (FfmpegExec.resolve(reactApplicationContext) == null) {
+        if (!hasTextTags && coverFile == null) {
           resolvePath(promise, inFile.absolutePath)
           return@Thread
         }
@@ -122,10 +118,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
             } else {
               outFile.renameTo(inFile)
             }
-            coverFile?.delete()
-            if (coverEmbedTemp != null && coverEmbedTemp != coverFile) {
-              coverEmbedTemp.delete()
-            }
+            resolvedCover?.deleteTemps()
             val ok = com.facebook.react.bridge.Arguments.createMap()
             ok.putString("path", inFile.absolutePath)
             ok.putBoolean("coverEmbedded", strategy.withCover && coverFile != null)
@@ -146,10 +139,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           }
         }
 
-        coverFile?.delete()
-        if (coverEmbedTemp != null && coverEmbedTemp != coverFile) {
-          coverEmbedTemp.delete()
-        }
+        resolvedCover?.deleteTemps()
         throw lastError ?: Exception("메타데이터 적용에 실패했습니다.")
       } catch (t: Throwable) {
         NrmStageLog.log(
@@ -333,14 +323,13 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
 
     val coverUrl = metadata.getString("coverUrl")?.trim().orEmpty()
-    if (coverUrl.isNotEmpty()) {
-      val cover = downloadCover(coverUrl, reactApplicationContext.cacheDir)
-      if (cover != null) {
-        try {
-          trySetMediaStoreAlbumArt(uri, cover)
-        } finally {
-          cover.delete()
-        }
+    val resolvedCover =
+      resolveCoverForEmbed(coverUrl, reactApplicationContext.cacheDir)
+    if (resolvedCover != null) {
+      try {
+        trySetMediaStoreAlbumArt(uri, resolvedCover.embedFile)
+      } finally {
+        resolvedCover.deleteTemps()
       }
     }
   }
@@ -558,6 +547,75 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private data class ResolvedCover(
+    val sourceFile: File,
+    val embedFile: File,
+  ) {
+    fun deleteTemps() {
+      embedFile.delete()
+      if (sourceFile != embedFile) sourceFile.delete()
+    }
+  }
+
+  /**
+   * 원격 커버와 입력 파일의 기존 커버가 실제 이미지로 디코딩될 때만 사용한다.
+   * URL 없음·가져오기 실패·빈 데이터·이미지 디코딩 실패 시 APK에 패키징한
+   * 어두운 N 로고를 사용하므로 유효한 원격/기존 커버는 fallback으로 교체하지 않는다.
+   */
+  private fun resolveCoverForEmbed(
+    coverUrl: String,
+    cacheDir: File,
+    originalCover: (() -> File?)? = null,
+  ): ResolvedCover? {
+    val downloaded =
+      coverUrl.trim().takeIf { it.isNotEmpty() }?.let { downloadCover(it, cacheDir) }
+    val original =
+      if (downloaded != null && isDecodableImage(downloaded)) null
+      else originalCover?.invoke()
+    val source =
+      if (downloaded != null && isDecodableImage(downloaded)) {
+        original?.delete()
+        downloaded
+      } else if (original != null && isDecodableImage(original)) {
+        downloaded?.delete()
+        original
+      } else {
+        downloaded?.delete()
+        original?.delete()
+        copyDefaultAlbumArt(cacheDir) ?: return null
+      }
+    val embed = normalizeCoverForEmbed(source, cacheDir)
+    if (!isDecodableImage(embed)) {
+      embed.delete()
+      if (source != embed) source.delete()
+      return null
+    }
+    return ResolvedCover(sourceFile = source, embedFile = embed)
+  }
+
+  private fun isDecodableImage(file: File): Boolean {
+    if (!file.isFile || file.length() < 256L) return false
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, options)
+    return options.outWidth > 0 && options.outHeight > 0
+  }
+
+  private fun copyDefaultAlbumArt(cacheDir: File): File? {
+    val out = uniqueCacheFile(cacheDir, "nrm-default-album-art", ".png")
+    return try {
+      reactApplicationContext.assets.open(DEFAULT_ALBUM_ART_ASSET).use { input ->
+        FileOutputStream(out).use { output -> input.copyTo(output) }
+      }
+      if (isDecodableImage(out)) out else {
+        out.delete()
+        null
+      }
+    } catch (_: Exception) {
+      out.delete()
+      null
+    }
+  }
+
   private fun execFfmpeg(cmd: List<String>) {
     FfmpegExec.run(reactApplicationContext, cmd, tag = "ffmpeg-meta")
   }
@@ -624,15 +682,12 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
 
         // WAV·FLAC: attached_pic 지원 불안정 → 커버 스킵
         val skipCover = fmt in setOf("wav", "flac")
-        var coverFile: File? = null
-        var coverEmbedTemp: File? = null
-        if (!skipCover && tagBundle.coverUrl.isNotEmpty()) {
-          val rawCover = downloadCover(tagBundle.coverUrl, reactApplicationContext.cacheDir)
-          if (rawCover != null) {
-            coverEmbedTemp = rawCover
-            coverFile = normalizeCoverForEmbed(rawCover, reactApplicationContext.cacheDir)
+        val resolvedCover =
+          if (skipCover) null
+          else resolveCoverForEmbed(tagBundle.coverUrl, reactApplicationContext.cacheDir) {
+            extractEmbeddedCoverFile(paths, audioSrc)
           }
-        }
+        val coverFile = resolvedCover?.embedFile
 
         val basePath =
           audioSrc.absolutePath.let { p ->
@@ -667,8 +722,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
           throw Exception("TRANSCODE_META_OUTPUT_EMPTY")
         }
 
-        coverFile?.delete()
-        if (coverEmbedTemp != null && coverEmbedTemp != coverFile) coverEmbedTemp.delete()
+        resolvedCover?.deleteTemps()
         try {
           audioSrc.delete()
         } catch (_: Exception) {
@@ -1096,6 +1150,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
    * 느려지거나 멈출 수 있다.
    */
   private companion object {
+    const val DEFAULT_ALBUM_ART_ASSET = "nrm-default-album-art.png"
     const val NRM_LYRICS_MODE_META_KEY = "nrm_lyrics_mode"
     const val NRM_LYRICS_MODE_TXXX_DESC = "NRM_LYRICS_MODE"
   }

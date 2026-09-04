@@ -1,6 +1,7 @@
 import { applyNrmLoggedInIdentity } from '@/lib/nrmBrandIdentity';
 import {
   clearNrmOAuthPendingProfile,
+  getEffectiveNrmAuthSessionUserName,
   loadNrmAuthSession,
   loadNrmOAuthPendingProfile,
   saveNrmAuthSession,
@@ -15,7 +16,9 @@ type RegisterRpcRow = {
   id: number;
   serial_no: string;
   user_name: string;
+  user_custom_name: string | null;
   user_email: string;
+  oauth_user_id: string;
   app_kind: string;
   is_admin: string;
   version: string;
@@ -29,6 +32,7 @@ export async function registerNrmOAuthUserIfNeeded(): Promise<NrmAuthSession> {
         appKind: existing.appKind,
         userName: existing.userName,
         userEmail: existing.userEmail,
+        providerUserId: existing.providerUserId,
       }
     : null);
   if (!profile) {
@@ -44,6 +48,7 @@ export async function registerNrmOAuthUserIfNeeded(): Promise<NrmAuthSession> {
       p_app_kind: profile.appKind,
       p_user_name: profile.userName,
       p_user_email: profile.userEmail,
+      p_oauth_user_id: profile.providerUserId,
       p_version: getNrmAppVersion(),
     });
     if (!row) {
@@ -53,7 +58,11 @@ export async function registerNrmOAuthUserIfNeeded(): Promise<NrmAuthSession> {
     const session: NrmAuthSession = {
       serialNo: String(row.serial_no ?? '').trim(),
       userName: String(row.user_name ?? profile.userName).trim(),
+      userCustomName: String(row.user_custom_name ?? '').trim() || null,
       userEmail: String(row.user_email ?? profile.userEmail).trim(),
+      providerUserId: String(
+        row.oauth_user_id ?? profile.providerUserId,
+      ).trim(),
       appKind: row.app_kind === 'kakao' ? 'kakao' : 'google',
       isAdmin: String(row.is_admin ?? '').trim().toLowerCase() === 'y',
     };
@@ -64,7 +73,10 @@ export async function registerNrmOAuthUserIfNeeded(): Promise<NrmAuthSession> {
     await saveNrmAuthSession(session);
     await clearNrmOAuthPendingProfile();
     clearNrmAppSerialCache();
-    await applyNrmLoggedInIdentity(session.serialNo, session.userName);
+    await applyNrmLoggedInIdentity(
+      session.serialNo,
+      getEffectiveNrmAuthSessionUserName(session),
+    );
     logNrmDev('oauth.register.success', {
       provider: session.appKind,
       isAdmin: session.isAdmin,
@@ -76,7 +88,10 @@ export async function registerNrmOAuthUserIfNeeded(): Promise<NrmAuthSession> {
       hasExistingSession: !!existing,
     });
     if (existing?.serialNo) {
-      await applyNrmLoggedInIdentity(existing.serialNo, existing.userName);
+      await applyNrmLoggedInIdentity(
+        existing.serialNo,
+        getEffectiveNrmAuthSessionUserName(existing),
+      );
       return existing;
     }
     throw e;

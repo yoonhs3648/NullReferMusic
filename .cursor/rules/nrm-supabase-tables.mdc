@@ -14,9 +14,19 @@ Supabase Dashboard는 컬럼 주석을 UI에서 잘 보여주지 않는다.
    - LLM: `docs/supabase-tables/llm.md`
    - Chat: `docs/supabase-tables/chat.md`
    - 기존 NRM: `docs/supabase-tables/nrm-core.md`
+   - 시스템 스케줄: `docs/supabase-tables/system-schedule.md`
+   - MusicBrainz·Last.fm·벡터: `docs/supabase-tables/musicbrainz-lastfm-vector.md`
    - 목록: `docs/supabase-tables/README.md`
 2. 테이블 **추가·컬럼 변경·의미 변경** 시 **같은 작업 안에서** 해당 MD를 갱신한다.
 3. DDL과 MD가 다르면 **원격 DB 실스키마에 맞게 MD를 맞춘다.**
+
+## 음악 동기화 구현 필수
+
+- 음악 테이블·마이그레이션·Edge Function·Cron·RPC·태그 정규화·벡터 검색을 작업하기 전에 `musicbrainz-lastfm-vector.md`를 먼저 읽는다.
+- 외부 MBID를 내부 PK로 사용하지 않고 문서의 내부 UUID·alias·redirect·merge 규칙을 따른다.
+- 프로젝트 1을 권위 원장으로 유지하고 프로젝트 2는 outbox/inbox/source_seq/tombstone projection으로만 운영한다.
+- Last.fm에서 선별한 태그만 최대 20개 사용하며 hash/profile 계약 없이 벡터를 생성하지 않는다.
+- 문서와 다른 스키마·상태 전이·재시도 정책을 임의로 구현하지 않는다.
 
 ## 금지
 

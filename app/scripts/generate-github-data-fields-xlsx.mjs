@@ -64,8 +64,10 @@ const SCHEMAS = {
     fields: [
       { name: 'id', type: 'number', required: '필수', description: '등록 고유 ID' },
       { name: 'appKind', type: 'string', required: '필수', description: '로그인 플랫폼 google | kakao' },
-      { name: 'userName', type: 'string', required: '필수', description: 'OAuth에서 받은 표시 이름' },
+      { name: 'userName', type: 'string', required: '필수', description: 'OAuth에서 받은 원본 표시 이름' },
+      { name: 'userCustomName', type: 'string | null', required: '선택', description: '앱 설정에서 사용자가 지정한 계정별 표시 이름. null이면 userName 사용' },
       { name: 'userEmail', type: 'string', required: '필수', description: 'OAuth에서 받은 이메일' },
+      { name: 'oauthUserId', type: 'string', required: '필수', description: 'OAuth 공급자가 발급한 사용자 고유 ID. 이메일 미제공 계정 식별에도 사용' },
       { name: 'SerialNo', type: 'string', required: '필수', description: '로그인 시 발급하는 UUID' },
       { name: 'isAdmin', type: 'string', required: '필수', description: '관리자 여부 y/n. 기본 n' },
       { name: 'version', type: 'string', required: '필수', description: '등록 시점 앱 버전' },

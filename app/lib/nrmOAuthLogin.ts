@@ -114,6 +114,7 @@ async function loginWithGoogleNative(): Promise<NrmOAuthPendingProfile> {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const response = await GoogleSignin.signIn();
     if (response.type !== 'success') throw new Error('cancelled');
+    const providerUserId = String(response.data.user.id ?? '').trim();
     const email = String(response.data.user.email ?? '').trim();
     const name = String(
       response.data.user.name ?? response.data.user.givenName ?? '',
@@ -130,6 +131,7 @@ async function loginWithGoogleNative(): Promise<NrmOAuthPendingProfile> {
       appKind: 'google',
       userName: name || email.split('@')[0],
       userEmail: email.toLowerCase(),
+      providerUserId,
     };
   } catch (e) {
     if (
@@ -211,6 +213,7 @@ async function loginWithGoogleBrowser(): Promise<NrmOAuthPendingProfile> {
     throw new Error('Google 계정 정보를 받지 못했습니다.');
   }
   const payload = decodeJwtPayload(idToken);
+  const providerUserId = String(payload.sub ?? '').trim();
   const email = String(payload.email ?? '').trim();
   const name = String(payload.name ?? payload.given_name ?? '').trim();
   if (!email) {
@@ -220,7 +223,12 @@ async function loginWithGoogleBrowser(): Promise<NrmOAuthPendingProfile> {
     provider: 'google',
     stage: 'profile',
   });
-  return { appKind: 'google', userName: name || email.split('@')[0], userEmail: email.toLowerCase() };
+  return {
+    appKind: 'google',
+    userName: name || email.split('@')[0],
+    userEmail: email.toLowerCase(),
+    providerUserId,
+  };
 }
 
 async function loginWithKakaoNative(): Promise<NrmOAuthPendingProfile> {
@@ -264,6 +272,10 @@ async function loginWithKakaoNative(): Promise<NrmOAuthPendingProfile> {
   let user: Awaited<ReturnType<typeof kakaoUser.me>>;
   try {
     user = await kakaoUser.me();
+    if (user.emailNeedsAgreement || !String(user.email ?? '').trim()) {
+      await kakaoUser.scopes(['account_email']);
+      user = await kakaoUser.me();
+    }
   } catch (e) {
     logNrmRunError('oauth.kakao.profile', e, {
       provider: 'kakao',
@@ -271,12 +283,14 @@ async function loginWithKakaoNative(): Promise<NrmOAuthPendingProfile> {
     });
     throw new Error('카카오 계정 정보를 가져오지 못했습니다.');
   }
+  const providerUserId = String(user.id ?? '').trim();
   const email = String(user.email ?? '').trim();
   const name = String(user.nickname ?? user.name ?? '').trim();
+  if (!providerUserId) {
+    throw new Error('카카오 계정 식별 정보를 받지 못했습니다.');
+  }
   if (!email) {
-    throw new Error(
-      '카카오 계정 이메일을 받지 못했습니다. 카카오 로그인 동의 항목에서 이메일을 필수 또는 선택 동의로 활성화해 주세요.',
-    );
+    throw new Error('카카오 로그인에는 이메일 사용 동의가 필요합니다.');
   }
   logNrmDev('oauth.kakao.success', {
     provider: 'kakao',
@@ -287,6 +301,7 @@ async function loginWithKakaoNative(): Promise<NrmOAuthPendingProfile> {
     appKind: 'kakao',
     userName: name || email.split('@')[0],
     userEmail: email.toLowerCase(),
+    providerUserId,
   };
 }
 
@@ -353,21 +368,31 @@ async function loginWithKakaoBrowser(): Promise<NrmOAuthPendingProfile> {
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
   const me = (await meRes.json()) as {
+    id?: number | string;
     kakao_account?: {
       email?: string;
       profile?: { nickname?: string };
     };
   };
+  const providerUserId = String(me.id ?? '').trim();
   const email = String(me.kakao_account?.email ?? '').trim();
   const name = String(me.kakao_account?.profile?.nickname ?? '').trim();
+  if (!providerUserId) {
+    throw new Error('카카오 계정 식별 정보를 받지 못했습니다.');
+  }
   if (!email) {
-    throw new Error('카카오 계정 이메일 동의가 필요합니다.');
+    throw new Error('카카오 로그인에는 이메일 사용 동의가 필요합니다.');
   }
   logNrmDev('oauth.kakao.success', {
     provider: 'kakao',
     stage: 'profile',
   });
-  return { appKind: 'kakao', userName: name || email.split('@')[0], userEmail: email.toLowerCase() };
+  return {
+    appKind: 'kakao',
+    userName: name || email.split('@')[0],
+    userEmail: email.toLowerCase(),
+    providerUserId,
+  };
 }
 
 export async function loginWithNrmOAuth(kind: NrmAppKind): Promise<NrmOAuthPendingProfile> {

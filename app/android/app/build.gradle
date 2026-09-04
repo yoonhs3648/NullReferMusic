@@ -110,12 +110,20 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace 'com.nullrefer.music'
+    // 오디오 메타데이터 기본 앨범아트. 원본 자산을 빌드 산출물에만 복사해
+    // 중복 바이너리를 커밋하지 않으면서 debug/release APK 모두에 포함한다.
+    def generatedAlbumArtAssetsDir = layout.buildDirectory.dir("generated/nrmAlbumArtAssets")
+    sourceSets {
+        main {
+            assets.srcDir(generatedAlbumArtAssetsDir)
+        }
+    }
     defaultConfig {
         applicationId 'com.nullrefer.music'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 219
-        versionName "3.3.19"
+        versionCode 228
+        versionName "3.6.2"
         manifestPlaceholders.googleOAuthRedirectScheme = googleOAuthRedirectScheme
         manifestPlaceholders.kakaoOAuthRedirectScheme = kakaoOAuthRedirectScheme
 
@@ -175,6 +183,12 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    def packageDefaultAlbumArt = tasks.register("packageDefaultAlbumArt", Copy) {
+        from(file("../../assets/images/icon.png"))
+        into(generatedAlbumArtAssetsDir)
+        rename { "nrm-default-album-art.png" }
+    }
+    tasks.named("preBuild").configure { dependsOn(packageDefaultAlbumArt) }
     // whisper-cli OpenMP — NDK libomp.so → APK assets (기기에서 LD_LIBRARY_PATH)
     def copyWhisperNativeLibs = tasks.register("copyWhisperNativeLibs") {
         doLast {

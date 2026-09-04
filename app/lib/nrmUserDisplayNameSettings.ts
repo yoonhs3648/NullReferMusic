@@ -1,13 +1,22 @@
 /**
  * 메뉴 > 앱 설정 > 사용자 이름 변경.
- * bake userName을 기본/초기화값으로 쓰고, AI Lab 인사(`~~님 안녕하세요`)에만 반영한다.
+ * OAuth user_name을 기본값으로 쓰고 계정별 user_custom_name을 Supabase에 저장한다.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
-import { getResolvedNrmBrandUserName } from '@/lib/nrmBrandIdentity';
-
-const STORAGE_KEY = 'nrm_user_display_name_v1';
+import {
+  getEffectiveNrmAuthSessionUserName,
+  getNrmAuthSessionSnapshot,
+  loadNrmAuthSession,
+  setNrmAuthSessionUserCustomName,
+  subscribeNrmAuthSessionListener,
+} from '@/lib/nrmAuthSession';
+import {
+  applyNrmLoggedInIdentity,
+  getResolvedNrmBrandUserName,
+} from '@/lib/nrmBrandIdentity';
+import { clearNrmAppSerialCache } from '@/lib/nrmAppSerialNo';
+import { nrmSbRpc } from '@/lib/nrmSupabaseCrud';
 
 export const NRM_USER_DISPLAY_NAME_MAX_LENGTH = 30;
 
@@ -28,24 +37,28 @@ export function notifyUserDisplayNameChanged(effectiveName: string): void {
   }
 }
 
-/** APK bake userName — 설정 기본값·초기화 대상 */
+/** 현재 OAuth 계정의 원본 user_name — 설정 기본값·초기화 대상 */
 export function getNrmUserDisplayNameDefault(): string {
-  return getResolvedNrmBrandUserName() || '사용자';
+  return getNrmAuthSessionSnapshot()?.userName.trim() || '사용자';
+}
+
+export async function loadNrmUserDisplayNameDefault(): Promise<string> {
+  const session = await loadNrmAuthSession();
+  return session?.userName.trim() || '사용자';
 }
 
 export async function loadUserDisplayNameOverride(): Promise<string | null> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    const trimmed = raw?.trim() ?? '';
-    return trimmed.length > 0 ? trimmed : null;
-  } catch {
-    return null;
-  }
+  const session = await loadNrmAuthSession();
+  return session?.userCustomName?.trim() || null;
 }
 
 export async function loadEffectiveUserDisplayName(): Promise<string> {
-  const override = await loadUserDisplayNameOverride();
-  return override ?? getNrmUserDisplayNameDefault();
+  const session = await loadNrmAuthSession();
+  return (
+    getEffectiveNrmAuthSessionUserName(session) ||
+    getResolvedNrmBrandUserName() ||
+    '사용자'
+  );
 }
 
 export function validateUserDisplayNameInput(name: string): string | null {
@@ -64,19 +77,37 @@ export async function saveUserDisplayNameOverride(name: string | null): Promise<
   if (trimmed.length > NRM_USER_DISPLAY_NAME_MAX_LENGTH) {
     throw new Error('사용자 이름이 너무 길어요');
   }
-  const defaultName = getNrmUserDisplayNameDefault();
-  if (!trimmed || trimmed === defaultName) {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    notifyUserDisplayNameChanged(defaultName);
-    return;
+  const session = await loadNrmAuthSession();
+  if (!session?.serialNo.trim()) {
+    throw new Error('로그인 정보를 확인할 수 없습니다.');
   }
-  await AsyncStorage.setItem(STORAGE_KEY, trimmed);
-  notifyUserDisplayNameChanged(trimmed);
+  const customName = !trimmed || trimmed === session.userName.trim() ? null : trimmed;
+  const row = await nrmSbRpc<{
+    user_name: string;
+    user_custom_name: string | null;
+  }>('nrm_rpc_set_user_custom_name', {
+    p_serial_no: session.serialNo,
+    p_user_custom_name: customName,
+  });
+  const savedCustomName = String(row.user_custom_name ?? '').trim() || null;
+  const next = await setNrmAuthSessionUserCustomName(savedCustomName);
+  const effectiveName =
+    getEffectiveNrmAuthSessionUserName(next) ||
+    String(row.user_name ?? session.userName).trim() ||
+    '사용자';
+  await applyNrmLoggedInIdentity(session.serialNo, effectiveName);
+  clearNrmAppSerialCache();
+  notifyUserDisplayNameChanged(effectiveName);
 }
 
-/** AI Lab 인사 등 — 사용자 표시명만 */
+/** AI Lab 인사 등 모든 사용자 표시명 경로 */
 export function useNrmUserDisplayName(): string {
-  const [name, setName] = useState(() => getNrmUserDisplayNameDefault());
+  const [name, setName] = useState(
+    () =>
+      getEffectiveNrmAuthSessionUserName(getNrmAuthSessionSnapshot()) ||
+      getResolvedNrmBrandUserName() ||
+      '사용자',
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -84,9 +115,17 @@ export function useNrmUserDisplayName(): string {
       if (!cancelled) setName(effective);
     });
     const unsubscribe = subscribeUserDisplayNameListener(setName);
+    const unsubscribeSession = subscribeNrmAuthSessionListener((session) => {
+      setName(
+        getEffectiveNrmAuthSessionUserName(session) ||
+          getResolvedNrmBrandUserName() ||
+          '사용자',
+      );
+    });
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeSession();
     };
   }, []);
 

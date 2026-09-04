@@ -52,6 +52,8 @@ import { NrmAdminLlmTokenAllocationPanel } from '@/components/nrm/settings/NrmAd
 import { NrmAdminLlmSystemPromptPanel } from '@/components/nrm/settings/NrmAdminLlmSystemPromptPanel';
 import { NrmAdminDeviceResetPanel } from '@/components/nrm/settings/NrmAdminDeviceResetPanel';
 import { NrmAdminUserListPanel } from '@/components/nrm/settings/NrmAdminUserListPanel';
+import { NrmAdminMusicBrainzSyncPanel } from '@/components/nrm/settings/NrmAdminMusicBrainzSyncPanel';
+import { NrmAdminSupabaseCapacityPanel } from '@/components/nrm/settings/NrmAdminSupabaseCapacityPanel';
 import { NrmInquiryQaPanel } from '@/components/nrm/settings/NrmInquiryQaPanel';
 import { NrmActivityHistorySettingsPanel } from '@/components/nrm/settings/NrmActivityHistorySettingsPanel';
 import { NrmMainLogoDisplayNameSettingsPanel } from '@/components/nrm/settings/NrmMainLogoDisplayNameSettingsPanel';
@@ -202,6 +204,8 @@ type Panel =
   | 'adminLlmTokenAllocation'
   | 'adminLlmSystemPrompt'
   | 'adminDeviceReset'
+  | 'adminMusicBrainzSync'
+  | 'adminSupabaseCapacity'
   | ChartMenuPanel
   | 'periodCharts'
   | SearchMenuPanel;
@@ -1774,6 +1778,36 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminMusicBrainzSync')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    시스템 스케줄 관리
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => pushPanel('adminSupabaseCapacity')}
+                  style={({ pressed }) => [
+                    styles.row,
+                    pressed && { backgroundColor: rowHover },
+                  ]}>
+                  <Text style={[styles.rowLabel, { color: titleColor }]}>
+                    Supabase 용량
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={bodyColor}
+                  />
+                </Pressable>
               </NrmAppDrawerShell>
             ) : null}
 
@@ -1909,6 +1943,34 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminDeviceResetPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminMusicBrainzSync' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminMusicBrainzSyncPanel
+                  titleColor={titleColor}
+                  bodyColor={bodyColor}
+                  isDark={isDark}
+                  onBack={popPanel}
+                />
+              </NrmAppDrawerShell>
+            ) : null}
+
+            {panel === 'adminSupabaseCapacity' ? (
+              <NrmAppDrawerShell
+                titleColor={titleColor}
+                onDismiss={dismissDrawer}
+                compactFooter={Platform.OS !== 'web'}>
+                <NrmAdminSupabaseCapacityPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}

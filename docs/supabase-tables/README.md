@@ -17,6 +17,8 @@ Supabase Dashboard는 테이블/컬럼 `COMMENT`를 UI에서 잘 보여주지 �
 | LLM | [`llm.md`](./llm.md) | `LLMProvider`, `LLMModel`, `LLMSystemPrompt`, `LLMUserPermission`, `LLMUserQuota`, `LLMTokenHistory`, `LLMUserMonthlyAllocation`, `LLMCallAttemptLog`, `LLMAiLabSuggestionCategory`, `LLMAiLabSuggestionPrompt` | 원격 생성됨 (Suggestion 2026-07-23) |
 | Chat | [`chat.md`](./chat.md) | `ChatSession`, `ChatMessage` | 원격 생성됨 |
 | 기존 NRM | [`nrm-core.md`](./nrm-core.md) | `nrm_apk_version`, `nrm_alarm`, `nrm_user_ban_list`, `nrm_inquiry`, `nrm_user_list`, `nrm_music_list` | 운영 중 |
+| 시스템 스케줄 | [`system-schedule.md`](./system-schedule.md) | `nrm_system_schedule` (+ MusicBrainz/`ailab-chat-retention` seed, 삭제 금지) | 마이그레이션 `20260904150000_*` |
 | Track 이력 | [`track-history.md`](./track-history.md) | `TrackHistory` (+ Storage `album-covers`) | 원격 생성됨 |
+| 음악 동기화·벡터 | [`musicbrainz-lastfm-vector.md`](./musicbrainz-lastfm-vector.md) | MusicBrainz 원장, Last.fm Top 아티스트 4스케줄 Pool·발매예정 수집, allowlist·용량·purge, Last.fm 태그, outbox/inbox, `lastfm_recording_embedding` | 프로젝트 1 수집 DB·Last.fm artist pool worker·관리자 계약과 프로젝트 2 용량 RPC. `track.getTopTags`/vector projection worker는 미구현 |
 
 설정·적용 절차는 [`docs/SUPABASE-SETUP.md`](../SUPABASE-SETUP.md) 참고.

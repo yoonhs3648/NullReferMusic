@@ -180,6 +180,11 @@ ON public."ChatMessage" ("RegDate");
 - 앱은 세션 생성 시 persist 스냅샷을 캐시해, ChatMessage 저장 시 메모리 세션 조회 실패로 UiMeta가 빠지지 않게 한다.
 - `ChatSession.Title` 갱신(휴리스틱 임시 제목 → LLM 요약 제목)도 `nrm_rpc_chat_update_session_title`(service_role 전용)로만 가능하다. 상세: [`llm.md`](./llm.md#대화-제목-llm-요약-2026-07-29-복구).
 - 세션 삭제(소프트 삭제, `IsDeleted=true`)는 앱이 `nrm_rpc_chat_delete_session(p_serial_no, p_session_id)`을 직접 호출한다(anon/authenticated에 GRANT). 본인 `SerialNo` 소유 세션만 삭제 가능.
+- **보존 기간 하드 삭제**: 시스템 스케줄 `ailab-chat-retention`(`nrm_system_schedule`)이 활성일 때, cutoff(`now() - retention_days`, 기본 30)보다 오래된 아래 행을 물리 DELETE한다.
+  - `ChatSession` (`UpdateDate`)와 그 세션의 `ChatMessage`
+  - `LLMCallAttemptLog` (`RegDate`)
+  - `LLMTokenHistory` (`RegDate`)
+  Cron `nrm-system-schedule-tick` → `nrm_rpc_ailab_chat_retention_run`. 상세: [`system-schedule.md`](./system-schedule.md).
 
 ## 구현 시 참고
 

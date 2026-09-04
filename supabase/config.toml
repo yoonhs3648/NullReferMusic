@@ -15,3 +15,8 @@ major_version = 15
 [studio]
 enabled = true
 port = 54323
+
+[functions.musicbrainz-sync]
+# The function performs constant-time validation of MUSICBRAINZ_CRON_TOKEN.
+# pg_cron does not send a Supabase user JWT.
+verify_jwt = false

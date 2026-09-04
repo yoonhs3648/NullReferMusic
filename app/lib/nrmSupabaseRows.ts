@@ -107,7 +107,9 @@ export function mapInquiryRow(row: NrmSupabaseInquiryRow): NrmInquiryItem | null
 export function mapUserListRow(row: NrmSupabaseUserListRow): NrmUserListEntry | null {
   const id = row.id;
   if (typeof id !== 'number' || !Number.isFinite(id)) return null;
-  const userName = String(row.user_name ?? '').trim();
+  const oauthUserName = String(row.user_name ?? '').trim();
+  const userCustomName = String(row.user_custom_name ?? '').trim() || null;
+  const userName = userCustomName || oauthUserName;
   const SerialNo = String(row.serial_no ?? '').trim();
   if (!userName || !SerialNo) return null;
   const deviceIdRaw = row.device_id;
@@ -124,6 +126,7 @@ export function mapUserListRow(row: NrmSupabaseUserListRow): NrmUserListEntry | 
     id,
     appKind: String(row.app_kind ?? '').trim() || 'google',
     userName,
+    userCustomName,
     userEmail: String(row.user_email ?? '').trim(),
     SerialNo,
     version: String(row.version ?? '').trim(),

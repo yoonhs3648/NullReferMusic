@@ -10,8 +10,12 @@ export type NrmAppKind = 'google' | 'kakao';
 
 export type NrmAuthSession = {
   serialNo: string;
+  /** OAuth 공급자가 제공한 원본 이름 */
   userName: string;
+  /** 앱 설정에서 지정한 계정별 이름. 없으면 OAuth 원본 이름 사용 */
+  userCustomName: string | null;
   userEmail: string;
+  providerUserId: string;
   appKind: NrmAppKind;
   isAdmin: boolean;
 };
@@ -20,16 +24,42 @@ export type NrmOAuthPendingProfile = {
   appKind: NrmAppKind;
   userName: string;
   userEmail: string;
+  providerUserId: string;
 };
 
 let sessionCache: NrmAuthSession | null | undefined;
 let pendingCache: NrmOAuthPendingProfile | null | undefined;
 let sessionListener: ((session: NrmAuthSession | null) => void) | null = null;
+const additionalSessionListeners = new Set<
+  (session: NrmAuthSession | null) => void
+>();
 
 export function registerNrmAuthSessionListener(
   listener: ((session: NrmAuthSession | null) => void) | null,
 ): void {
   sessionListener = listener;
+}
+
+export function subscribeNrmAuthSessionListener(
+  listener: (session: NrmAuthSession | null) => void,
+): () => void {
+  additionalSessionListeners.add(listener);
+  return () => additionalSessionListeners.delete(listener);
+}
+
+function notifySessionChanged(session: NrmAuthSession | null): void {
+  sessionListener?.(session);
+  for (const listener of additionalSessionListeners) listener(session);
+}
+
+export function getEffectiveNrmAuthSessionUserName(
+  session: NrmAuthSession | null | undefined,
+): string {
+  return session?.userCustomName?.trim() || session?.userName.trim() || '';
+}
+
+export function getNrmAuthSessionSnapshot(): NrmAuthSession | null {
+  return sessionCache ?? null;
 }
 
 function parseSession(raw: string | null): NrmAuthSession | null {
@@ -38,12 +68,15 @@ function parseSession(raw: string | null): NrmAuthSession | null {
     const parsed = JSON.parse(raw) as Partial<NrmAuthSession>;
     const serialNo = String(parsed.serialNo ?? '').trim();
     const userEmail = String(parsed.userEmail ?? '').trim();
+    const providerUserId = String(parsed.providerUserId ?? '').trim();
     const appKind = parsed.appKind === 'kakao' ? 'kakao' : parsed.appKind === 'google' ? 'google' : '';
-    if (!serialNo || !userEmail || !appKind) return null;
+    if (!serialNo || (!userEmail && !providerUserId) || !appKind) return null;
     return {
       serialNo,
       userName: String(parsed.userName ?? '').trim(),
+      userCustomName: String(parsed.userCustomName ?? '').trim() || null,
       userEmail,
+      providerUserId,
       appKind,
       isAdmin: parsed.isAdmin === true,
     };
@@ -57,12 +90,14 @@ function parsePending(raw: string | null): NrmOAuthPendingProfile | null {
   try {
     const parsed = JSON.parse(raw) as Partial<NrmOAuthPendingProfile>;
     const userEmail = String(parsed.userEmail ?? '').trim();
+    const providerUserId = String(parsed.providerUserId ?? '').trim();
     const appKind = parsed.appKind === 'kakao' ? 'kakao' : parsed.appKind === 'google' ? 'google' : '';
-    if (!userEmail || !appKind) return null;
+    if ((!userEmail && !providerUserId) || !appKind) return null;
     return {
       appKind,
       userName: String(parsed.userName ?? '').trim(),
       userEmail,
+      providerUserId,
     };
   } catch {
     return null;
@@ -119,7 +154,20 @@ export async function saveNrmAuthSession(session: NrmAuthSession): Promise<void>
     provider: session.appKind,
     isAdmin: session.isAdmin,
   });
-  sessionListener?.(session);
+  notifySessionChanged(session);
+}
+
+export async function setNrmAuthSessionUserCustomName(
+  userCustomName: string | null,
+): Promise<NrmAuthSession | null> {
+  const session = await loadNrmAuthSession();
+  if (!session) return null;
+  const next: NrmAuthSession = {
+    ...session,
+    userCustomName: userCustomName?.trim() || null,
+  };
+  await saveNrmAuthSession(next);
+  return next;
 }
 
 export async function logoutNrmAuthSession(): Promise<void> {
@@ -146,7 +194,7 @@ export async function logoutNrmAuthSession(): Promise<void> {
     logNrmRunError('oauth.session.logout.admin', e, { provider });
   }
   logNrmDev('oauth.session.logout', { provider, result: 'success' });
-  sessionListener?.(null);
+  notifySessionChanged(null);
 }
 
 export async function getNrmAuthSessionSerialNo(): Promise<string> {
@@ -156,7 +204,7 @@ export async function getNrmAuthSessionSerialNo(): Promise<string> {
 
 export async function getNrmAuthSessionUserName(): Promise<string> {
   const session = await loadNrmAuthSession();
-  return session?.userName.trim() ?? '';
+  return getEffectiveNrmAuthSessionUserName(session);
 }
 
 export async function syncNrmAdminSessionFromAuth(): Promise<void> {

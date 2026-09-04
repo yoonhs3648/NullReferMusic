@@ -1,5 +1,7 @@
 /**
- * 런처 아이콘(ic_launcher*)만 생성. 소스: tempLogo.png
+ * 런처 아이콘(ic_launcher*)만 생성.
+ * 일반/원형 아이콘: 흰색 테마 app-icon-light.png
+ * 어댑티브 전경: 투명 배경 tempLogo.png
  * 인앱 logo-mark / notification-icon 등은 건드리지 않는다.
  */
 import sharp from 'sharp';
@@ -8,10 +10,11 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
-const src = path.join(root, 'assets', 'images', 'tempLogo.png');
+const iconSrc = path.join(root, 'assets', 'images', 'app-icon-light.png');
+const foregroundSrc = path.join(root, 'assets', 'images', 'tempLogo.png');
 
 async function makeIcon(destPath, size) {
-  await sharp(src).resize(size, size, { kernel: sharp.kernel.lanczos3 }).webp({ lossless: true }).toFile(destPath);
+  await sharp(iconSrc).resize(size, size, { kernel: sharp.kernel.lanczos3 }).webp({ lossless: true }).toFile(destPath);
   console.log('icon:', destPath);
 }
 
@@ -20,7 +23,7 @@ async function makeRoundIcon(destPath, size) {
   const circle = Buffer.from(
     `<svg><circle cx="${half}" cy="${half}" r="${half}"/></svg>`
   );
-  await sharp(src)
+  await sharp(iconSrc)
     .resize(size, size, { kernel: sharp.kernel.lanczos3 })
     .composite([{ input: circle, blend: 'dest-in' }])
     .webp({ lossless: true })
@@ -31,7 +34,7 @@ async function makeRoundIcon(destPath, size) {
 async function makeForeground(destPath, size) {
   // adaptive icon 안전 영역(~66%)에 맞춰 투명 캔버스 중앙에 배치
   const foregroundSize = Math.round(size * 0.68);
-  const foreground = await sharp(src)
+  const foreground = await sharp(foregroundSrc)
     .resize(foregroundSize, foregroundSize, { kernel: sharp.kernel.lanczos3 })
     .png()
     .toBuffer();
@@ -76,4 +79,4 @@ for (const [dir, size] of mipmapForeground) {
   await makeForeground(path.join(resBase, dir, 'ic_launcher_foreground.webp'), size);
 }
 
-console.log('All icons generated from tempLogo.png');
+console.log('All icons generated with the light theme');

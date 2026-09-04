@@ -222,6 +222,8 @@ RLS: anon/authenticated **SELECT만**. INSERT는 Edge(service_role).
 
 마이그레이션: `20260723130000_llm_call_attempt_log.sql`, 진단 확장 `20260728170000_llm_call_attempt_log_quota_diag.sql`, tool 인자 `20260730170000_llm_call_attempt_log_function_calls.sql`.
 
+**보존 삭제**: `ailab-chat-retention` 스케줄이 `RegDate < now() - retention_days`인 행을 `ChatSession`/`ChatMessage`와 같은 cutoff로 물리 DELETE한다. 상세: [`system-schedule.md`](./system-schedule.md).
+
 ---
 
 ## LLMUserQuota
@@ -325,6 +327,8 @@ LLM 호출 이력 (호출 단위).
 - **PK** `PK_LLMTokenHistory` (`HistoryID`, `SerialNo`)
 - `IX_LLMTokenHistory_SerialNo` (`SerialNo`) — `SerialNo` 단독 조회용 (복합 PK 2번째 컬럼이라 별도 인덱스 유지)
 - `IX_LLMTokenHistory_RegDate` (`RegDate`)
+
+**보존 삭제**: `ailab-chat-retention`이 `RegDate < now() - retention_days`인 행을 물리 DELETE한다(월별 누적 `LLMUserQuota`는 유지). 상세: [`system-schedule.md`](./system-schedule.md).
 
 ### DDL
 

@@ -101,6 +101,15 @@ DB에는 `CK_TrackHistory_Kind` CHECK 제약으로 위 10개 값만 허용한다
 
 **YouTube videoId (`YoutubeVideoId`)**: 네이티브 다운로드 오케스트레이터·실패 보고가 `scheduleNativeDownloadJob`/`reportNativeDownloadExtractFailure`의 `videoId`를 `logDownloadTrackHistory({ youtubeVideoId })`로 넘긴다. Melon 메타 검색 후 YouTube로 오디오를 받는 AI Lab 경로에서도 동일하다. `local:` 접두 URI는 저장하지 않는다.
 
+## 보존·자동 삭제
+
+시스템 스케줄 `track-history-retention`(`job_kind=track_history_retention`)이 활성일 때,
+매일 KST 08:00에 `DownloadDate`가 `retention_days`(기본 180)보다 오래된 `TrackHistory` 행을
+물리 DELETE한다. Cron은 기존 `nrm-system-schedule-tick` → `nrm_rpc_track_history_retention_run`.
+`album-covers` Storage는 전역 공유 경로이므로 이 retention에서 삭제하지 않는다.
+
+상세: [`system-schedule.md`](./system-schedule.md).
+
 ## History 탭 조회
 
 - `app/lib/nrmTrackHistoryClient.ts`의 `fetchTrackHistoryForDisplay(displayDays)` — `SerialNo` + `DownloadDate` 범위로 조회, `DownloadDate DESC` 정렬.

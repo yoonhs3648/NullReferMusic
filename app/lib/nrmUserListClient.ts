@@ -23,7 +23,9 @@ export function formatNrmUserListSubtitle(entry: NrmUserListEntry): string {
 export type NrmUserListEntry = {
   id: number;
   appKind: string;
+  /** trim(userCustomName) 우선, 없으면 OAuth user_name */
   userName: string;
+  userCustomName: string | null;
   userEmail: string;
   SerialNo: string;
   version: string;

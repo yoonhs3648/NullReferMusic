@@ -29,8 +29,10 @@ GitHub `data/*.json`에서 이전한 운영 테이블.
 |------|------|------|
 | `id` | bigint | PK |
 | `app_kind` | text | 로그인 플랫폼 `google` \| `kakao` |
-| `user_name` | text | Google/Kakao에서 받은 표시 이름 |
-| `user_email` | text | Google/Kakao에서 받은 이메일 |
+| `user_name` | text | Google/Kakao에서 받은 원본 표시 이름. 로그인할 때 공급자 최신 이름으로 갱신 |
+| `user_custom_name` | text null | 앱 설정에서 사용자가 지정한 계정별 표시 이름. 초기값·초기화값은 `NULL` |
+| `user_email` | text | Google/Kakao에서 받은 이메일. 공급자 동의 항목에 따라 빈 문자열 가능 |
+| `oauth_user_id` | text | OAuth 공급자가 발급한 사용자 고유 ID. 이메일 미제공 계정의 로그인 식별자 |
 | `serial_no` | text | 로그인 시 발급하는 UUID. 앱 내 사용자 식별자(문의·LLM·디바이스 바인딩) |
 | `version` | text | 등록 시점 앱 버전 |
 | `created_date` | date | 최초 등록일 |
@@ -39,8 +41,12 @@ GitHub `data/*.json`에서 이전한 운영 테이블.
 | `is_admin` | text | 관리자 여부 `y`/`n`. 기본 `n`. `y`이면 기존 관리자 기능 전부 사용 |
 | `inserted_at` / `updated_at` | timestamptz | 행 생성·수정 |
 
-유니크: `(app_kind, lower(user_email))` (`user_email <> ''`).  
+유니크: `(app_kind, oauth_user_id)` (`oauth_user_id <> ''`), 기존 호환용 `(app_kind, lower(user_email))` (`user_email <> ''`).
 앱 최초 실행: Google/Kakao 로그인 → 이용약관 → `nrm_rpc_register_oauth_user`로 upsert.
+
+앱의 유효 표시 이름은 `trim(user_custom_name)`이 비어 있지 않으면 그 값을 사용하고, 아니면
+`user_name`을 사용한다. `user_custom_name`은 `serial_no`로 식별한 현재 로그인 계정 행에만
+`nrm_rpc_set_user_custom_name`으로 저장한다. 초기화 시 빈 문자열을 저장하지 않고 반드시 `NULL`로 되돌린다.
 
 ### 레거시 `serial_no = admin` placeholder
 
@@ -52,7 +58,10 @@ GitHub `data/*.json`에서 이전한 운영 테이블.
 | `device_id`, `last_access_date` | `NULL` | 디바이스 바인딩·접속 추적 미사용 |
 
 시드: `supabase/migrations/20260722170000_nrm_user_list_admin_seed.sql` (중복 `admin` 행은 삽입하지 않음).  
-스키마 변경: `supabase/migrations/20260824120000_nrm_user_list_oauth.sql` (`app_name` 삭제, `app_kind`/`user_email`/`is_admin` 추가).
+스키마 변경:
+- `supabase/migrations/20260824120000_nrm_user_list_oauth.sql` (`app_name` 삭제, `app_kind`/`user_email`/`is_admin` 추가)
+- `supabase/migrations/20260904010000_nrm_user_list_oauth_user_id.sql` (`oauth_user_id` 추가, 이메일 없는 OAuth 계정 지원)
+- `supabase/migrations/20260904131000_nrm_user_custom_name.sql` (`user_custom_name` 추가, 계정별 표시 이름 변경 RPC)
 
 ### `nrm_user_ban_list` 컬럼
 
