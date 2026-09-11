@@ -35,7 +35,7 @@ const kakaoPlugins: NonNullable<ExpoConfig['plugins']> = kakaoNativeAppKey
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.6.2',
+  version: '3.7.8',
   orientation: 'portrait',
   /** 런처 아이콘은 밝은 배경, 스플래시는 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
   icon: './assets/images/app-icon-light.png',

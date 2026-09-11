@@ -8,11 +8,9 @@ import type {
   NrmSupabaseAlarmRow,
   NrmSupabaseApkVersionRow,
   NrmSupabaseInquiryRow,
-  NrmSupabaseMusicListRow,
   NrmSupabaseUserBanRow,
   NrmSupabaseUserListRow,
 } from '@/lib/nrmSupabaseDatabase.types';
-import type { NrmMusicListItem } from '@/lib/nrmMusicListTypes';
 
 export function throwSupabaseError(
   error: PostgrestError | { message: string } | null,
@@ -29,11 +27,6 @@ export function todayYmd(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-
-export function inquiryAlarmTitle(userName: string): string {
-  const name = userName.trim();
-  return name ? `${name} 님의 문의` : '문의';
 }
 
 export function formatNrmTimestamp(d: Date): string {
@@ -134,19 +127,6 @@ export function mapUserListRow(row: NrmSupabaseUserListRow): NrmUserListEntry | 
     deviceId,
     lastAccessDate,
     isAdmin: String(row.is_admin ?? 'n').trim().toLowerCase() === 'y' ? 'y' : 'n',
-  };
-}
-
-export function mapMusicListRow(row: NrmSupabaseMusicListRow): NrmMusicListItem {
-  return {
-    id: row.id,
-    rank: row.rank,
-    year: row.year,
-    artist: String(row.artist ?? '').trim(),
-    title: String(row.title ?? '').trim(),
-    album: String(row.album ?? '').trim(),
-    genre: String(row.genre ?? '').trim(),
-    updatedAt: row.updated_at ?? null,
   };
 }
 

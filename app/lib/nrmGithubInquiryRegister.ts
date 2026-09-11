@@ -1,4 +1,3 @@
-import { NRM_ALARM_ADMIN_SERIAL } from '@/lib/nrmAdminAlarmReceiver';
 import { getNrmAppSerialNo, getNrmAppUserName } from '@/lib/nrmAppSerialNo';
 import { getNrmAppVersion } from '@/lib/nrmAppInfo';
 import { invalidateAlarmCache } from '@/lib/nrmAlarmClient';
@@ -8,7 +7,7 @@ import {
   NRM_SUPABASE_INQUIRY_BUCKET,
 } from '@/lib/nrmSupabaseConfig';
 import { nrmSbRpc, nrmSbStorageUpload } from '@/lib/nrmSupabaseCrud';
-import { formatNrmTimestamp, inquiryAlarmTitle, todayYmd } from '@/lib/nrmSupabaseRows';
+import { formatNrmTimestamp } from '@/lib/nrmSupabaseRows';
 
 export type NrmInquiryRegisterInput = {
   content: string;
@@ -29,17 +28,6 @@ function base64ToUint8Array(b64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
-}
-
-async function registerInquiryAdminAlarm(createdDate: string, userName: string): Promise<void> {
-  await nrmSbRpc<number>('nrm_rpc_insert_alarm', {
-    p_is_noti: false,
-    p_title: inquiryAlarmTitle(userName),
-    p_content: createdDate,
-    p_serial_no: NRM_ALARM_ADMIN_SERIAL,
-    p_alarm_date: todayYmd(),
-  });
-  invalidateAlarmCache();
 }
 
 export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): Promise<void> {
@@ -79,7 +67,7 @@ export async function registerInquiryToGithub(input: NrmInquiryRegisterInput): P
       p_created_date: createdDate,
     });
 
-    await registerInquiryAdminAlarm(createdDate, userName);
+    invalidateAlarmCache();
     logNrmDev(tag, { event: 'register-ok', inquiryId, version, elapsedMs: Date.now() - t0 });
   } catch (e) {
     logNrmRunError(tag, e, { event: 'register-error', elapsedMs: Date.now() - t0 });

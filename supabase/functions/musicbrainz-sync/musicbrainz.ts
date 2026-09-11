@@ -49,7 +49,7 @@ export interface ParsedSearchPage {
 }
 
 export interface ReleaseEvent {
-  date: string;
+  date: string | null;
   country: string | null;
 }
 
@@ -74,6 +74,14 @@ export interface ParsedReleaseGroup {
   genres: GenreValue[];
 }
 
+export interface ParsedRecordingReleaseHint {
+  mbid: string;
+  title: string;
+  status: string | null;
+  date: string | null;
+  country: string | null;
+}
+
 export interface ParsedRecording {
   mbid: string;
   title: string;
@@ -85,6 +93,14 @@ export interface ParsedRecording {
   isrcs: string[];
   tags: TagValue[];
   genres: GenreValue[];
+  releases: ParsedRecordingReleaseHint[];
+}
+
+export interface ParsedRecordingSearchHit {
+  mbid: string;
+  title: string;
+  artistName: string;
+  score: number;
 }
 
 export interface ParsedTrack {
@@ -178,6 +194,27 @@ export function partialDate(value: unknown, label = "date", nullable = true): st
   return result;
 }
 
+export function coalescePartialDate(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return null;
+}
+
+export function earliestPartialDate(values: Array<string | null | undefined>): string | null {
+  const present = values.filter((value): value is string => typeof value === "string" && value !== "");
+  if (present.length === 0) return null;
+  return [...present].sort((a, b) => a.localeCompare(b))[0];
+}
+
+function hintPartialDate(value: unknown, label: string): string | null {
+  try {
+    return partialDate(value, label);
+  } catch {
+    return null;
+  }
+}
+
 function parseArtistCredit(value: unknown, label: string): ArtistCredit[] {
   return array(value, label).map((entry, index) => {
     const item = object(entry, `${label}[${index}]`);
@@ -230,6 +267,24 @@ function parseRecordingValue(value: unknown, label: string): ParsedRecording {
       }
       return result;
     });
+  const releases = item.releases == null
+    ? []
+    : array(item.releases, `${label}.releases`).slice(0, 50).flatMap((entry, index) => {
+      const release = object(entry, `${label}.releases[${index}]`);
+      let mbid: string;
+      try {
+        mbid = uuid(release.id, `${label}.releases[${index}].id`);
+      } catch {
+        return [];
+      }
+      return [{
+        mbid,
+        title: optionalText(release.title, `${label}.releases[${index}].title`) ?? "",
+        status: optionalText(release.status, `${label}.releases[${index}].status`),
+        date: hintPartialDate(release.date, `${label}.releases[${index}].date`),
+        country: optionalText(release.country, `${label}.releases[${index}].country`),
+      }];
+    });
   return {
     mbid: uuid(item.id, `${label}.id`),
     title: text(item.title, `${label}.title`)!,
@@ -241,6 +296,7 @@ function parseRecordingValue(value: unknown, label: string): ParsedRecording {
     isrcs: [...new Set(isrcs)],
     tags: parseTags(item.tags, `${label}.tags`),
     genres: parseGenres(item.genres, `${label}.genres`),
+    releases,
   };
 }
 
@@ -333,7 +389,7 @@ export function parseRelease(value: unknown): ParsedRelease {
       const item = object(entry, `release.release-events[${index}]`);
       const area = item.area == null ? null : object(item.area, `release.release-events[${index}].area`);
       return {
-        date: partialDate(item.date, `release.release-events[${index}].date`, false)!,
+        date: partialDate(item.date, `release.release-events[${index}].date`),
         country: area ? optionalText(area["iso-3166-1-codes"] instanceof Array
           ? area["iso-3166-1-codes"][0]
           : null, "release-event.country") : null,
@@ -342,7 +398,7 @@ export function parseRelease(value: unknown): ParsedRelease {
   const media = array(root.media, "release.media").map((entry, mediumIndex) => {
     const item = object(entry, `release.media[${mediumIndex}]`);
     const position = integer(item.position, `release.media[${mediumIndex}].position`, 1);
-    const tracks = array(item.tracks, `release.media[${mediumIndex}].tracks`).map((trackValue, trackIndex) => {
+    const tracks = (item.tracks == null ? [] : array(item.tracks, `release.media[${mediumIndex}].tracks`)).map((trackValue, trackIndex) => {
       const track = object(trackValue, `release.media[${mediumIndex}].tracks[${trackIndex}]`);
       return {
         mbid: uuid(track.id, `track[${trackIndex}].id`),
@@ -371,7 +427,8 @@ export function parseRelease(value: unknown): ParsedRelease {
     quality: optionalText(root.quality, "release.quality"),
     packaging: optionalText(root.packaging, "release.packaging"),
     country: optionalText(root.country, "release.country"),
-    date: partialDate(root.date, "release.date"),
+    date: partialDate(root.date, "release.date") ??
+      earliestPartialDate(events.map((event) => event.date)),
     barcode: optionalText(root.barcode, "release.barcode"),
     textLanguage: optionalText(textRepresentation.language, "release.text-representation.language"),
     textScript: optionalText(textRepresentation.script, "release.text-representation.script"),
@@ -388,8 +445,77 @@ export function parseRecording(value: unknown): ParsedRecording {
   return parseRecordingValue(value, "recording");
 }
 
-function quoteLucene(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+/** Lucene/Solr reserved chars that make MusicBrainz search return HTTP 400.
+ * `-` is not escaped: inside a quoted phrase it is literal, and arid UUIDs must keep hyphens. */
+const LUCENE_ESCAPE_CHARS = new Set([
+  "\\", "+", "!", "(", ")", "{", "}", "[", "]", "^", '"', "~", "*", "?", ":", "/", "<", ">", "|", "&",
+]);
+
+export function normalizeLuceneSearchText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\u00A0\u202F\u2007\u2009\u200B-\u200D\uFEFF]/g, " ")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function stripLuceneNoise(value: string): string {
+  return normalizeLuceneSearchText(value)
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Drop feat./remix parentheses so Last.fm chart titles can match MusicBrainz cores. */
+export function catalogCoreTitle(value: string): string {
+  const normalized = normalizeLuceneSearchText(value);
+  const stripped = normalized
+    .replace(/\s*[\(\[]\s*(feat\.?|featuring|ft\.?|with)\b[^\)\]]*[\)\]]/gi, " ")
+    .replace(/\s+(feat\.?|featuring|ft\.?)\s+.+$/i, " ")
+    .replace(
+      /\s*[\(\[][^\)\]]*(\bremix\b|\bremaster(?:ed)?\b|\blive\b|\bver(?:sion)?\.?|\binst(?:rumental)?\.?|\bmix\b|\bedit\b)[^\)\]]*[\)\]]/gi,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped || normalized;
+}
+
+export function catalogMatchKey(value: string): string {
+  return catalogCoreTitle(value)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function luceneText(value: string, mode: "quoted" | "stripped"): string {
+  return mode === "stripped" ? stripLuceneNoise(value) : normalizeLuceneSearchText(value);
+}
+
+function luceneRecordingClause(trackTitle: string, mode: "quoted" | "stripped"): string {
+  const title = luceneText(trackTitle, mode);
+  const core = luceneText(catalogCoreTitle(trackTitle), mode);
+  const terms = [quoteLucene(title)];
+  if (core && core.toLowerCase() !== title.toLowerCase()) terms.push(quoteLucene(core));
+  return terms.length === 1
+    ? `recording:${terms[0]}`
+    : `(${terms.map((term) => `recording:${term}`).join(" OR ")})`;
+}
+
+export function quoteLucene(value: string): string {
+  const normalized = normalizeLuceneSearchText(value);
+  let escaped = "";
+  for (const char of normalized) {
+    escaped += LUCENE_ESCAPE_CHARS.has(char) ? `\\${char}` : char;
+  }
+  return `"${escaped}"`;
 }
 
 function request(path: string, params: Record<string, string | number>): URL {
@@ -409,8 +535,12 @@ export interface ParsedArtistSearchHit {
   score: number;
 }
 
-export function buildArtistSearchRequest(artistName: string, limit = 5): URL {
-  const name = artistName.trim();
+export function buildArtistSearchRequest(
+  artistName: string,
+  limit = 5,
+  mode: "quoted" | "stripped" = "quoted",
+): URL {
+  const name = mode === "stripped" ? stripLuceneNoise(artistName) : normalizeLuceneSearchText(artistName);
   if (!name || name.length > 500) throw new ContractError("invalid artist search name");
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
     throw new ContractError("invalid artist search limit");
@@ -454,6 +584,9 @@ export function selectArtistSearchMatch(
   const needle = artistName.trim().toLowerCase();
   const exact = hits.find((hit) => hit.name.trim().toLowerCase() === needle);
   if (exact) return exact;
+  const key = catalogMatchKey(artistName);
+  const keyed = hits.find((hit) => catalogMatchKey(hit.name) === key);
+  if (keyed) return keyed;
   if (hits[0].score >= 90) return hits[0];
   return null;
 }
@@ -482,15 +615,120 @@ export function buildDiscoveryRequest(
 export function buildLookupRequest(
   entity: "artist" | "release-group" | "release" | "recording",
   mbid: string,
+  extraInc?: string,
 ): URL {
   const id = uuid(mbid);
   const includes: Record<typeof entity, string> = {
     artist: "aliases+artist-credits+tags+genres",
     "release-group": "artist-credits+tags+genres",
     release: "release-groups+recordings+artist-credits+labels+media+isrcs+tags+genres",
-    recording: "artist-credits+isrcs+tags+genres",
+    recording: extraInc ?? "artist-credits+isrcs+tags+genres+releases",
   };
   return request(`${entity}/${id}`, { inc: includes[entity] });
+}
+
+export function buildRecordingSearchRequest(
+  artistName: string,
+  trackTitle: string,
+  limit = 5,
+  mode: "quoted" | "stripped" = "quoted",
+  artistMbid?: string | null,
+): URL {
+  const artist = luceneText(artistName, mode);
+  const title = luceneText(trackTitle, mode);
+  const arid = artistMbid ? uuid(artistMbid, "artistMbid") : null;
+  if ((!arid && !artist) || !title || (!arid && artist.length > 500) || title.length > 500) {
+    throw new ContractError("invalid recording search names");
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+    throw new ContractError("invalid recording search limit");
+  }
+  const artistClause = arid
+    ? `arid:${quoteLucene(arid)}`
+    : `(artist:${quoteLucene(artist)} OR artistname:${quoteLucene(artist)} OR creditname:${quoteLucene(artist)})`;
+  return request("recording/", {
+    query: `${luceneRecordingClause(trackTitle, mode)} AND ${artistClause}`,
+    limit,
+  });
+}
+
+export function parseRecordingSearch(value: unknown): ParsedRecordingSearchHit[] {
+  const root = object(value, "recording search");
+  const raw = root.recordings;
+  const recordings = raw == null ? [] : array(raw, "recordings");
+  const hits: ParsedRecordingSearchHit[] = [];
+  for (const entry of recordings) {
+    const item = object(entry, "recording hit");
+    let mbid: string | null = null;
+    try {
+      mbid = uuid(item.id, "recording.id");
+    } catch {
+      mbid = null;
+    }
+    const title = optionalText(item.title, "recording.title");
+    if (!mbid || !title) continue;
+    let artistName = "";
+    try {
+      artistName = parseArtistCredit(item["artist-credit"], "recording.artist-credit")
+        .map((credit) => credit.credited_name + credit.join_phrase)
+        .join("")
+        .trim();
+    } catch {
+      artistName = optionalText(item["artist-credit-phrase"], "recording.artist-credit-phrase") ?? "";
+    }
+    const score = typeof item.score === "number"
+      ? item.score
+      : typeof item.score === "string" && Number.isFinite(Number(item.score))
+      ? Number(item.score)
+      : 0;
+    hits.push({ mbid, title, artistName, score });
+  }
+  return hits.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
+}
+
+export function selectRecordingSearchMatch(
+  hits: ParsedRecordingSearchHit[],
+  artistName: string,
+  trackTitle: string,
+): ParsedRecordingSearchHit | null {
+  if (hits.length === 0) return null;
+  const artistNeedle = artistName.trim().toLowerCase();
+  const titleNeedle = trackTitle.trim().toLowerCase();
+  const artistKey = catalogMatchKey(artistName);
+  const titleKey = catalogMatchKey(trackTitle);
+  const exact = hits.find((hit) =>
+    hit.title.trim().toLowerCase() === titleNeedle &&
+    hit.artistName.trim().toLowerCase() === artistNeedle
+  );
+  if (exact) return exact;
+  const keyed = hits.find((hit) =>
+    catalogMatchKey(hit.title) === titleKey && catalogMatchKey(hit.artistName) === artistKey
+  );
+  if (keyed) return keyed;
+  const titleExact = hits.find((hit) => hit.title.trim().toLowerCase() === titleNeedle);
+  if (titleExact && titleExact.score >= 80) return titleExact;
+  const titleKeyed = hits.find((hit) => catalogMatchKey(hit.title) === titleKey);
+  if (titleKeyed && (titleKeyed.score >= 80 || catalogMatchKey(titleKeyed.artistName) === artistKey)) {
+    return titleKeyed;
+  }
+  if (hits[0].score >= 90) return hits[0];
+  return null;
+}
+
+export function selectCatalogRelease(
+  releases: ParsedRecordingReleaseHint[],
+): ParsedRecordingReleaseHint | null {
+  if (releases.length === 0) return null;
+  return [...releases].sort((a, b) => {
+    const aOfficial = a.status?.toLowerCase() === "official" ? 0 : 1;
+    const bOfficial = b.status?.toLowerCase() === "official" ? 0 : 1;
+    if (aOfficial !== bOfficial) return aOfficial - bOfficial;
+    const aDate = a.date == null ? 1 : 0;
+    const bDate = b.date == null ? 1 : 0;
+    if (aDate !== bDate) return aDate - bDate;
+    const dateCompare = (a.date ?? "").localeCompare(b.date ?? "");
+    return dateCompare || a.mbid.localeCompare(b.mbid);
+  })[0];
 }
 
 export function buildReleaseBrowseRequest(releaseGroupMbid: string, offset: number, limit = 100): URL {
@@ -541,11 +779,15 @@ export function validateActualRelease(
     throw new ContractError("release artist credit does not contain allowlisted artist");
   }
   const countrySet = new Set(countries.map((country) => country.toUpperCase()));
-  const matchingEvent = release.events.some((event) =>
-    dateOverlaps(event.date, dateFrom, dateTo) &&
-    (countrySet.size === 0 || (event.country != null && countrySet.has(event.country.toUpperCase())))
-  );
-  if (!matchingEvent) throw new ContractError("no actual release-event matches date/country policy");
+  const eventMatches = (date: string | null, country: string | null): boolean =>
+    date != null &&
+    dateOverlaps(date, dateFrom, dateTo) &&
+    (countrySet.size === 0 || (country != null && countrySet.has(country.toUpperCase())));
+  const datedEvents = release.events.filter((event) => event.date != null);
+  const matchingEvent = datedEvents.some((event) => eventMatches(event.date, event.country));
+  if (matchingEvent) return;
+  if (datedEvents.length === 0 && eventMatches(release.date, release.country)) return;
+  throw new ContractError("no actual release-event matches date/country policy");
 }
 
 export function selectRepresentativeRelease(releases: ReleaseSummary[]): ReleaseSummary {
@@ -571,4 +813,117 @@ export function assertAllowedFinalUrl(url: string): void {
     !parsed.pathname.startsWith("/ws/2/")) {
     throw new ContractError("MusicBrainz redirect escaped allowed origin");
   }
+}
+
+const HANGUL_RE = /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3]/;
+const KANA_RE = /[\u3040-\u30FF]/;
+const KOREAN_TAG_RE =
+  /\bk[\s-]?pop\b|\bkpop\b|\bkorean\b|\bk[\s-]?rap\b|\bk[\s-]?hip[\s-]?hop\b|\bkorean hip[\s-]?hop\b|\bk[\s-]?r&b\b|\bk[\s-]?rnb\b|\btrot\b|\bk[\s-]?indie\b|\bk[\s-]?ballad\b|\bk[\s-]?rock\b|\bk[\s-]?soul\b/;
+const JAPANESE_TAG_RE = /\bj[\s-]?pop\b|\bjpop\b|\bj[\s-]?rap\b|\bj[\s-]?rock\b|\bj[\s-]?hip[\s-]?hop\b|\bjapanese\b/;
+
+export type CatalogRegionPolicy = "korean_only" | "exclude_korean" | "unfiltered";
+
+export function catalogRegionPolicy(scheduleKey: string | null | undefined): CatalogRegionPolicy {
+  switch (scheduleKey) {
+    case "musicbrainz-lastfm-korea-catalog":
+    case "musicbrainz-lastfm-korea-top":
+    case "musicbrainz-lastfm-korean-hiphop-catalog":
+    case "musicbrainz-lastfm-korean-hiphop-top":
+      return "korean_only";
+    case "musicbrainz-lastfm-global-catalog":
+    case "musicbrainz-lastfm-global-top":
+    case "musicbrainz-lastfm-hiphop-catalog":
+    case "musicbrainz-lastfm-hiphop-top":
+      return "exclude_korean";
+    default:
+      return "unfiltered";
+  }
+}
+
+export function scheduleRequiresKoreanWork(scheduleKey: string | null | undefined): boolean {
+  return catalogRegionPolicy(scheduleKey) === "korean_only";
+}
+
+export function containsHangul(value: string | null | undefined): boolean {
+  return typeof value === "string" && HANGUL_RE.test(value);
+}
+
+export function containsKana(value: string | null | undefined): boolean {
+  return typeof value === "string" && KANA_RE.test(value);
+}
+
+function normalizeTagName(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replaceAll("_", " ");
+}
+
+export function isSouthKoreaArtist(country: string | null, areaName: string | null): boolean {
+  if ((country ?? "").toUpperCase() === "KR") return true;
+  const area = (areaName ?? "").trim().toLowerCase();
+  return area === "south korea" || area === "korea, republic of" || area === "republic of korea";
+}
+
+export interface ParsedArtistGeo {
+  mbid: string;
+  country: string | null;
+  areaName: string | null;
+  names: string[];
+}
+
+export function parseArtistGeo(value: unknown): ParsedArtistGeo {
+  const root = object(value, "artist");
+  const area = root.area == null ? null : object(root.area, "artist.area");
+  const iso = area && Array.isArray(area["iso-3166-1-codes"])
+    ? optionalText(area["iso-3166-1-codes"][0], "artist.area.iso")
+    : null;
+  const aliases = root.aliases == null
+    ? []
+    : array(root.aliases, "artist.aliases").flatMap((entry, index) => {
+      const alias = object(entry, `artist.aliases[${index}]`);
+      const name = optionalText(alias.name, `artist.aliases[${index}].name`);
+      return name ? [name] : [];
+    });
+  const names = [
+    optionalText(root.name, "artist.name"),
+    optionalText(root["sort-name"], "artist.sort-name"),
+    ...aliases,
+  ].filter((name): name is string => Boolean(name));
+  return {
+    mbid: uuid(root.id, "artist.id"),
+    country: optionalText(root.country, "artist.country") ?? iso,
+    areaName: area ? optionalText(area.name, "artist.area.name") : null,
+    names,
+  };
+}
+
+export function artistLooksKorean(artist: ParsedArtistGeo): boolean {
+  return isSouthKoreaArtist(artist.country, artist.areaName) ||
+    artist.names.some((name) => containsHangul(name));
+}
+
+export type KoreanWorkVerdict = "accept" | "reject" | "check_artist";
+
+export function classifyKoreanWork(input: {
+  artistName?: string | null;
+  trackTitle?: string | null;
+  recordingTitle?: string | null;
+  creditedNames?: string[];
+  isrcs?: string[];
+  tags?: Array<{ name: string }>;
+  genres?: Array<{ name: string }>;
+}): KoreanWorkVerdict {
+  const texts = [
+    input.artistName,
+    input.trackTitle,
+    input.recordingTitle,
+    ...(input.creditedNames ?? []),
+  ];
+  if (texts.some((value) => containsHangul(value))) return "accept";
+  if (texts.some((value) => containsKana(value))) return "reject";
+  if ((input.isrcs ?? []).some((code) => code.toUpperCase().startsWith("KR"))) return "accept";
+  const tagNames = [...(input.tags ?? []), ...(input.genres ?? [])].map((tag) => normalizeTagName(tag.name));
+  if (tagNames.some((name) => KOREAN_TAG_RE.test(name))) return "accept";
+  const japaneseIsrc = (input.isrcs ?? []).some((code) => code.toUpperCase().startsWith("JP"));
+  const japaneseTag = tagNames.some((name) => JAPANESE_TAG_RE.test(name));
+  if (japaneseIsrc || japaneseTag) return "reject";
+  return "check_artist";
 }

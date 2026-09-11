@@ -26,7 +26,8 @@
 | `serial_no` | 등록 RPC가 발급하는 UUID |
 | `is_admin` | 기본 `n`. `y`이면 기존 관리자 메뉴·RPC 전부 사용 |
 | 문의 등록 | 세션의 `user_name` / `serial_no` |
-| 버전 정보 | 로그인 사용자 이름, `is_admin=y`이면 Admin Version |
+| 문의 알림 | `is_admin=y` 인 **모든** 계정 메인 화면 우측 상단 (`nrm_rpc_insert_inquiry`가 계정별 `nrm_alarm` 행 생성) |
+| 버전 정보 | `UserName :` 로그인 사용자 이름, `is_admin=y`이면 Admin Version |
 | **메뉴 > 앱 설정 > 사용자 이름 변경** | 기본값·초기화값 |
 | **AI Lab 인사** | 설정 오버라이드 반영 (`~~님 안녕하세요`) |
 

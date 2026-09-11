@@ -1117,12 +1117,7 @@ export default function HomeScreen() {
                 style={aiLabActive ? styles.storageKeepAliveVisible : styles.storageKeepAliveHidden}
                 pointerEvents={aiLabActive ? 'auto' : 'none'}
                 collapsable={false}>
-                <NrmHomeDiscoverScreen
-                  isDark={isDark}
-                  paddingHorizontal={pad}
-                  onNavigateYoutube={navigateToYoutubeFromMelon}
-                  isActive={aiLabActive}
-                />
+                <NrmHomeDiscoverScreen isDark={isDark} isActive={aiLabActive} />
               </View>
             ) : null}
             {storageActive || aiLabActive ? null : bodyContent}

@@ -3,17 +3,26 @@ import { nrmSbRpc } from '@/lib/nrmSupabaseCrud';
 import type {
   NrmSupabaseMusicArtistAllowlistRow,
   NrmSupabaseMusicAdminOverview,
+  NrmSupabaseMusicAdminQueueDueSchedule,
+  NrmSupabaseMusicAdminQueueOpenJob,
   NrmSupabaseMusicCollectionScheduleRow,
   NrmSupabaseMusicDeadLetterRow,
+  NrmSupabaseMusicScheduleRunErrors,
+  NrmSupabaseMusicScheduleRunFailureRow,
+  NrmSupabaseMusicScheduleRunInsertRow,
+  NrmSupabaseMusicScheduleRunJobCount,
   NrmSupabaseMusicScheduleRunRow,
 } from '@/lib/nrmSupabaseDatabase.types';
 
 export type NrmMusicSchedulePayload = {
   schedule_key: string;
   display_name: string;
-  schedule_kind: 'daily' | 'interval';
+  schedule_kind: 'daily' | 'weekly' | 'monthly' | 'once' | 'interval';
   daily_time_kst: string | null;
   interval_minutes: number | null;
+  weekly_weekday?: number | null;
+  monthly_day?: number | null;
+  once_on_date?: string | null;
   next_run_at: string;
   is_enabled: boolean;
   date_from_offset_days: number;
@@ -44,7 +53,12 @@ export type NrmMusicAdminOverview = {
   schedules: NrmSupabaseMusicCollectionScheduleRow[];
   allowlistCount: number;
   pendingJobs: number;
-  recentRuns: NrmSupabaseMusicScheduleRunRow[];
+  collectionBusy: boolean;
+  dueSchedules: NrmSupabaseMusicAdminQueueDueSchedule[];
+  openJobs: NrmSupabaseMusicAdminQueueOpenJob[];
+  runningRuns: NrmSupabaseMusicScheduleRunRow[];
+  completedRuns: NrmSupabaseMusicScheduleRunRow[];
+  failureRuns: NrmSupabaseMusicScheduleRunRow[];
   capacity: NrmSupabaseMusicAdminOverview['capacity'];
 };
 
@@ -59,6 +73,10 @@ async function callerSerial(): Promise<string> {
   return serial;
 }
 
+function asRunRows(value: unknown): NrmSupabaseMusicScheduleRunRow[] {
+  return Array.isArray(value) ? (value as NrmSupabaseMusicScheduleRunRow[]) : [];
+}
+
 export async function fetchMusicSyncAdminOverview(
   limit = 20,
   offset = 0,
@@ -71,12 +89,110 @@ export async function fetchMusicSyncAdminOverview(
       p_offset: Math.max(0, Math.trunc(offset)),
     },
   );
+  const legacyRuns = asRunRows(raw?.recent_runs);
+  const hasSplit =
+    raw != null &&
+    (raw.running_runs !== undefined ||
+      raw.completed_runs !== undefined ||
+      raw.failure_runs !== undefined);
   return {
     schedules: Array.isArray(raw?.schedules) ? raw.schedules : [],
     allowlistCount: Number(raw?.allowlist_count ?? 0),
     pendingJobs: Number(raw?.pending_jobs ?? 0),
-    recentRuns: Array.isArray(raw?.recent_runs) ? raw.recent_runs : [],
+    collectionBusy: Boolean(raw?.collection_busy),
+    dueSchedules: Array.isArray(raw?.queue?.due_schedules) ? raw.queue.due_schedules : [],
+    openJobs: Array.isArray(raw?.queue?.open_jobs) ? raw.queue.open_jobs : [],
+    runningRuns: hasSplit
+      ? asRunRows(raw?.running_runs)
+      : legacyRuns.filter((run) => run.run_status === 'running'),
+    completedRuns: hasSplit
+      ? asRunRows(raw?.completed_runs)
+      : legacyRuns.filter((run) => run.run_status === 'completed'),
+    failureRuns: hasSplit
+      ? asRunRows(raw?.failure_runs)
+      : legacyRuns.filter(
+          (run) =>
+            run.run_status === 'partial' ||
+            run.run_status === 'failed' ||
+            run.run_status === 'cancelled',
+        ),
     capacity: raw?.capacity ?? null,
+  };
+}
+
+export async function fetchMusicScheduleRunInserts(
+  scheduleRunId: string,
+  limit = 50,
+  offset = 0,
+): Promise<NrmMusicAdminPage<NrmSupabaseMusicScheduleRunInsertRow>> {
+  const raw = await nrmSbRpc<{
+    items?: NrmSupabaseMusicScheduleRunInsertRow[];
+    total?: number;
+  }>('music_rpc_admin_schedule_run_inserts', {
+    p_caller_serial: await callerSerial(),
+    p_schedule_run_id: scheduleRunId,
+    p_limit: Math.min(200, Math.max(1, Math.trunc(limit))),
+    p_offset: Math.max(0, Math.trunc(offset)),
+  });
+  return {
+    items: Array.isArray(raw?.items) ? raw.items : [],
+    total: Number(raw?.total ?? 0),
+  };
+}
+
+export async function fetchMusicScheduleRunFailures(
+  scheduleRunId: string,
+  limit = 50,
+  offset = 0,
+): Promise<NrmMusicAdminPage<NrmSupabaseMusicScheduleRunFailureRow>> {
+  const raw = await nrmSbRpc<{
+    items?: NrmSupabaseMusicScheduleRunFailureRow[];
+    total?: number;
+  }>('music_rpc_admin_schedule_run_failures', {
+    p_caller_serial: await callerSerial(),
+    p_schedule_run_id: scheduleRunId,
+    p_limit: Math.min(200, Math.max(1, Math.trunc(limit))),
+    p_offset: Math.max(0, Math.trunc(offset)),
+  });
+  return {
+    items: Array.isArray(raw?.items)
+      ? raw.items.map((item) => ({
+          ...item,
+          job_status: typeof item.job_status === 'string' ? item.job_status : '',
+        }))
+      : [],
+    total: Number(raw?.total ?? 0),
+  };
+}
+
+export async function fetchMusicScheduleRunJobs(
+  scheduleRunId: string,
+): Promise<NrmSupabaseMusicScheduleRunJobCount[]> {
+  const raw = await nrmSbRpc<{ items?: NrmSupabaseMusicScheduleRunJobCount[] }>(
+    'music_rpc_admin_schedule_run_jobs',
+    {
+      p_caller_serial: await callerSerial(),
+      p_schedule_run_id: scheduleRunId,
+    },
+  );
+  return Array.isArray(raw?.items) ? raw.items : [];
+}
+
+export async function fetchMusicScheduleRunErrors(
+  scheduleRunId: string,
+): Promise<NrmSupabaseMusicScheduleRunErrors> {
+  const raw = await nrmSbRpc<NrmSupabaseMusicScheduleRunErrors>(
+    'music_rpc_admin_schedule_run_errors',
+    {
+      p_caller_serial: await callerSerial(),
+      p_schedule_run_id: scheduleRunId,
+    },
+  );
+  return {
+    error_message: raw?.error_message ?? null,
+    failure_count: Number(raw?.failure_count ?? 0),
+    job_errors: Array.isArray(raw?.job_errors) ? raw.job_errors : [],
+    dead_letters: Array.isArray(raw?.dead_letters) ? raw.dead_letters : [],
   };
 }
 
@@ -212,8 +328,11 @@ export function musicScheduleToPayload(
     schedule_key: row.schedule_key,
     display_name: row.display_name,
     schedule_kind: row.schedule_kind,
-    daily_time_kst: row.schedule_kind === 'daily' ? row.daily_time_kst : null,
-    interval_minutes: row.schedule_kind === 'interval' ? row.interval_minutes : null,
+    daily_time_kst: row.schedule_kind === 'interval' ? null : row.daily_time_kst,
+    interval_minutes: row.schedule_kind === 'interval' ? (row.interval_minutes ?? 60) : null,
+    weekly_weekday: row.schedule_kind === 'weekly' ? (row.weekly_weekday ?? 0) : null,
+    monthly_day: row.schedule_kind === 'monthly' ? (row.monthly_day ?? 1) : null,
+    once_on_date: row.schedule_kind === 'once' ? (row.once_on_date ?? null) : null,
     next_run_at: row.next_run_at,
     is_enabled: row.is_enabled,
     date_from_offset_days: row.date_from_offset_days,

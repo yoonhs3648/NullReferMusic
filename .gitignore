@@ -34,6 +34,7 @@ supabase/seed_llm_provider_gemini.sql
 
 # Supabase CLI 로컬 캐시(project-ref/pooler-url 등, link 시 자동 생성 — 재현 가능)
 supabase/.temp/
+supabase-vector/supabase/.temp/
 
 # Excel 임시 잠금 파일 (Office)
 ~$*.xlsx

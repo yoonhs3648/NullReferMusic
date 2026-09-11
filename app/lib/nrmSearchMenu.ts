@@ -17,11 +17,11 @@ export type SearchPlatformRow = {
   iconKey: ChartPlatformIconKey;
 };
 
-/** 검색 메뉴 플랫폼 (표시 순서) */
+/** 검색 메뉴 플랫폼 (표시 순서). SoundCloud는 패널에서 비활성 행으로 맨 아래 */
 export const NRM_SEARCH_PLATFORM_ROWS: SearchPlatformRow[] = [
+  { id: 'melon', label: 'Melon', iconKey: 'melon' },
   { id: 'lastfm', label: 'Last.fm', iconKey: 'lastfm' },
   { id: 'spotify', label: 'Spotify (Premium)', iconKey: 'spotify' },
-  { id: 'melon', label: 'Melon', iconKey: 'melon' },
 ];
 
 export function getSearchPlatformLabel(id: SearchPlatformId): string {

@@ -828,7 +828,7 @@ AI Lab 좌측 메뉴의 「사용량 조회」는 모델(`LLMProvider`)별 월�
 
 ### 관리자페이지 UI (2026-07-22)
 
-앱 메뉴 → 관리자페이지 → **Discover 편집** 아래에 두 항목 추가:
+앱 메뉴 → 관리자페이지에 두 항목 추가:
 
 - **「AI토큰 조회」** (`app/components/nrm/settings/NrmAdminLlmTokenLookupPanel.tsx`) — 「전체」/「사용자별」 탭.
   - 전체: 제공자(모델) 선택 + 월 이동 → 그 달 **전체 사용자 합산** 사용량(`LLMUserQuota.TotalToken` 합계, `fetchProviderAggregateMonthUsage`)과 `LLMProvider.MonthlyLimit`(0=무제한)을 도넛으로 표시. "사용한 토큰량"은 사용자별이 아니라 **그 모델 자체**의 전체 사용량이라는 요구사항 그대로.

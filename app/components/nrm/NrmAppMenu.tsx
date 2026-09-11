@@ -35,6 +35,8 @@ import {
 } from '@/lib/nrmDownloadNavEvents';
 import { NrmGenreTagSettingsPanel } from '@/components/nrm/settings/NrmGenreTagSettingsPanel';
 import { NrmWeeklySnapshotSettingsPanel } from '@/components/nrm/settings/NrmWeeklySnapshotSettingsPanel';
+import { NRM_GENRE_TAG_SETTINGS_VISIBLE } from '@/lib/nrmGenreTagSettings';
+import { NRM_WEEKLY_SNAPSHOT_SETTINGS_VISIBLE } from '@/lib/nrmWeeklySnapshotSettings';
 import { NrmLastfmApiManagePanel } from '@/components/nrm/settings/NrmLastfmApiManagePanel';
 import { NrmSpotifyApiManagePanel } from '@/components/nrm/settings/NrmSpotifyApiManagePanel';
 import { NrmDeepLApiManagePanel } from '@/components/nrm/settings/NrmDeepLApiManagePanel';
@@ -46,7 +48,6 @@ import { NrmAdminAlarmRegisterPanel } from '@/components/nrm/settings/NrmAdminAl
 import { NrmAdminUserBanListPanel } from '@/components/nrm/settings/NrmAdminUserBanListPanel';
 import { NrmAdminUserBanRegisterPanel } from '@/components/nrm/settings/NrmAdminUserBanRegisterPanel';
 import { NrmAdminInquiryListPanel } from '@/components/nrm/settings/NrmAdminInquiryListPanel';
-import { NrmAdminDiscoverEditPanel } from '@/components/nrm/settings/NrmAdminDiscoverEditPanel';
 import { NrmAdminLlmTokenLookupPanel } from '@/components/nrm/settings/NrmAdminLlmTokenLookupPanel';
 import { NrmAdminLlmTokenAllocationPanel } from '@/components/nrm/settings/NrmAdminLlmTokenAllocationPanel';
 import { NrmAdminLlmSystemPromptPanel } from '@/components/nrm/settings/NrmAdminLlmSystemPromptPanel';
@@ -199,7 +200,6 @@ type Panel =
   | 'adminUserBanRegister'
   | 'adminInquiryList'
   | 'adminUserList'
-  | 'adminDiscoverEdit'
   | 'adminLlmTokenLookup'
   | 'adminLlmTokenAllocation'
   | 'adminLlmSystemPrompt'
@@ -844,21 +844,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={closeMenuAndNavigateGenreCharts}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    장르별 차트
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
                   onPress={() => pushPanel('search')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1040,36 +1025,40 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                     color={bodyColor}
                   />
                 </Pressable>
-                <Pressable
-                  onPress={() => pushPanel('weeklySnapshotSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    주간차트 스냅샷 요일 설정
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
-                  onPress={() => pushPanel('genreTagSettings')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    장르 태그 설정
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
+                {NRM_WEEKLY_SNAPSHOT_SETTINGS_VISIBLE ? (
+                  <Pressable
+                    onPress={() => pushPanel('weeklySnapshotSettings')}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed && { backgroundColor: rowHover },
+                    ]}>
+                    <Text style={[styles.rowLabel, { color: titleColor }]}>
+                      주간차트 스냅샷 요일 설정
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={bodyColor}
+                    />
+                  </Pressable>
+                ) : null}
+                {NRM_GENRE_TAG_SETTINGS_VISIBLE ? (
+                  <Pressable
+                    onPress={() => pushPanel('genreTagSettings')}
+                    style={({ pressed }) => [
+                      styles.row,
+                      pressed && { backgroundColor: rowHover },
+                    ]}>
+                    <Text style={[styles.rowLabel, { color: titleColor }]}>
+                      장르 태그 설정
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={bodyColor}
+                    />
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => pushPanel('historyManagementSettings')}
                   style={({ pressed }) => [
@@ -1704,21 +1693,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => pushPanel('adminDiscoverEdit')}
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && { backgroundColor: rowHover },
-                  ]}>
-                  <Text style={[styles.rowLabel, { color: titleColor }]}>
-                    Discover 편집
-                  </Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={bodyColor}
-                  />
-                </Pressable>
-                <Pressable
                   onPress={() => pushPanel('adminLlmTokenLookup')}
                   style={({ pressed }) => [
                     styles.row,
@@ -1873,20 +1847,6 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                 onDismiss={dismissDrawer}
                 compactFooter={Platform.OS !== 'web'}>
                 <NrmAdminUserListPanel
-                  titleColor={titleColor}
-                  bodyColor={bodyColor}
-                  isDark={isDark}
-                  onBack={popPanel}
-                />
-              </NrmAppDrawerShell>
-            ) : null}
-
-            {panel === 'adminDiscoverEdit' ? (
-              <NrmAppDrawerShell
-                titleColor={titleColor}
-                onDismiss={dismissDrawer}
-                compactFooter={Platform.OS !== 'web'}>
-                <NrmAdminDiscoverEditPanel
                   titleColor={titleColor}
                   bodyColor={bodyColor}
                   isDark={isDark}
@@ -2219,6 +2179,7 @@ export const NrmAppMenu = forwardRef<NrmAppMenuHandle, Props>(function NrmAppMen
                   bodyColor={bodyColor}
                   rowHover={rowHover}
                   onBackToRoot={goBackToRoot}
+                  onOpenMelon={closeMenuAndNavigateGenreCharts}
                   onOpenLastfm={() => void closeMenuAndNavigatePeriodLastfmCharts()}
                   onOpenSpotify={() => void closeMenuAndNavigatePeriodSpotifyCharts()}
                 />

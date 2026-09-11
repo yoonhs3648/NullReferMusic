@@ -31,10 +31,10 @@ export function getNrmBrandDisplayNameForUi(): string {
 export function getNrmBrandStorageFolderForPaths(): string {
   return getResolvedNrmBrandStorageFolderName();
 }
-/** 로그인한 사용자 이름이 있을 때 버전 정보 Custom 줄 */
+/** 로그인한 사용자 이름이 있을 때 버전 정보 UserName 줄 */
 export function getNrmVersionInfoCustomizingLine(): string | null {
   const userName = getResolvedNrmBrandUserName() || String(brandConfig.userName ?? '').trim();
-  return userName ? `Custom : ${userName}` : null;
+  return userName ? `UserName : ${userName}` : null;
 }
 
 /** 로그인한 사용자의 is_admin=y 일 때 */

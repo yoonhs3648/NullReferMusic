@@ -26,7 +26,7 @@ const SCHEMAS = {
       { name: 'isNoti', type: 'boolean', required: '필수', description: 'true면 메인 화면 상단 공지 딱지(notice)로 표시' },
       { name: 'title', type: 'string', required: '필수', description: '알림 제목 (알림 리스트·공지 딱지에 표시)' },
       { name: 'content', type: 'string', required: '필수', description: '알림 본문 (토글 펼침 시 표시)' },
-      { name: 'SerialNo', type: 'string', required: '선택', description: '비어 있으면 SerialNo가 설정된 모든 APK 사용자에게 표시. 값이 있으면 해당 SerialNo APK만 표시. APK SerialNo가 비어 있으면 알림 수집 안 함. "Admin"은 관리자 APK(SerialNo=Admin) 전용' },
+      { name: 'SerialNo', type: 'string', required: '선택', description: '비어 있으면 로그인한 모든 사용자에게 표시. 값이 있으면 해당 serial_no 계정만 표시. 로그인 serial이 없으면 알림을 수집하지 않음. 문의 등록 알림은 is_admin=y 계정마다 행을 하나씩 넣는다' },
       { name: 'date', type: 'string (YYYY-MM-DD)', required: '필수', description: '알림 게시일. NRM_ALARM_DISPLAY_DAYS(기본 7일) 이내만 앱에 노출' },
     ],
   },

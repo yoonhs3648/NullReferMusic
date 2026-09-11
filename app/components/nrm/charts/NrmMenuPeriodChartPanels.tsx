@@ -11,6 +11,7 @@ type Props = {
   bodyColor: string;
   rowHover: string;
   onBackToRoot: () => void;
+  onOpenMelon: () => void;
   onOpenLastfm: () => void;
   onOpenSpotify: () => void;
 };
@@ -34,7 +35,8 @@ export function NrmMenuPeriodChartPanels({
   bodyColor,
   rowHover,
   onBackToRoot,
-  onOpenLastfm,
+  onOpenMelon,
+  onOpenLastfm: _onOpenLastfm,
   onOpenSpotify,
 }: Props) {
   if (panel !== 'periodCharts') return null;
@@ -43,6 +45,15 @@ export function NrmMenuPeriodChartPanels({
     <>
       <MenuBackRow onPress={onBackToRoot} />
       <Text style={[styles.panelTitle, { color: titleColor }]}>기간별 차트</Text>
+      <Pressable
+        onPress={onOpenMelon}
+        style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>
+        <NrmChartPlatformIcon iconKey="melon" size={28} />
+        <View style={styles.rowTextBlock}>
+          <Text style={[styles.rowLabel, { color: titleColor }]}>Melon</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={bodyColor} />
+      </Pressable>
       <Pressable
         onPress={onOpenSpotify}
         style={({ pressed }) => [styles.row, pressed && { backgroundColor: rowHover }]}>

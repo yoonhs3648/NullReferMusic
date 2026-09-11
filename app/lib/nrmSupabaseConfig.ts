@@ -18,7 +18,6 @@ export const NRM_SUPABASE_TABLES = {
   userBanList: 'nrm_user_ban_list',
   inquiry: 'nrm_inquiry',
   userList: 'nrm_user_list',
-  musicList: 'nrm_music_list',
   llmModel: 'LLMModel',
   llmProvider: 'LLMProvider',
   llmUserPermission: 'LLMUserPermission',

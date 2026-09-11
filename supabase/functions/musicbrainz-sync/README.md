@@ -16,9 +16,10 @@ LASTFM_API_KEY=<Last.fm API Key>
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`는 Supabase 런타임 기본 secret을 사용한다.
 토큰·API Key·service-role key를 앱, APK, Git, 로그에 넣지 않는다.
 
-매분 Cron은 due된 스케줄에 대해 `lastfm_artist_pool`을 먼저 큐잉한다. worker가 Last.fm
-Top 100을 받아 MusicBrainz Artist에 매칭한 뒤 `music_rpc_apply_lastfm_artist_pool`로
-배타 아티스트 Pool을 갱신하고 discovery/hydrate를 이어간다.
+매분 Cron은 due된 스케줄에 대해 `lastfm_artist_pool`(발매예정) 또는
+`lastfm_track_pool`(이미 발매된 곡 catalog)을 먼저 큐잉한다. catalog는 Last.fm Top Tracks를
+모두 받은 뒤 Recording을 한 곡씩 MusicBrainz에 넣고, 그다음에 `track.getTopTags`를 저장한다.
+HTTP 5xx는 그 곡을 tick 안에서 3번 재시도한 뒤 실패하면 다음 곡으로 간다.
 
 ## Vault
 
@@ -42,12 +43,20 @@ select vault.create_secret(
 토큰이 남지 않도록 Dashboard의 Vault secret UI를 우선 사용한다.
 
 `20260904141000_musicbrainz_cron.sql`은 매분 dispatcher와 6시간 retention 호출을
-멱등 재생성한다. Vault 값이 없으면 Cron은 외부 요청을 보내지 않는다.
+멱등 재생성한다. `20260908100000_system_schedule_log_and_dispatch.sql`부터 dispatcher는
+`nrm_rpc_musicbrainz_dispatcher_cron`을 호출한다. Vault가 없으면 Cron이 조용히 건너뛰지 않고
+`nrm_system_schedule_log`에 `dispatcher_skipped`를 남긴다.
+
+관리 UI 로그 탭은 두지 않는다. 진단은 Edge `console.log` JSON(`fn=musicbrainz-sync`)과
+Postgres `RAISE LOG` 접두 `nrm-schedule`로만 남긴다. 토큰·API Key는 로그에 넣지 않는다.
 
 ## 검증
 
 ```powershell
 deno test supabase/functions/musicbrainz-sync/musicbrainz_test.ts
+deno test supabase/functions/musicbrainz-sync/lastfm_test.ts
 deno check supabase/functions/musicbrainz-sync/index.ts
 node supabase/tests/check-musicbrainz-worker.mjs
+node supabase/tests/check-historical-catalog.mjs
+node supabase/tests/check-admin-schedule-run-failures.mjs
 ```

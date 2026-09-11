@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'nrmWeeklySnapshotDay_v1';
 
+/** 앱 설정 메뉴 노출. false면 숨기고 목요일 고정. 패널·저장 코드는 유지 */
+export const NRM_WEEKLY_SNAPSHOT_SETTINGS_VISIBLE = false;
+
 /** 0=일 … 6=토 (UTC, Spotify 주간 스냅샷 요일) */
 export type WeeklySnapshotDay = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -30,6 +33,9 @@ export function clampWeeklySnapshotDay(raw: unknown): WeeklySnapshotDay {
 }
 
 export async function loadWeeklySnapshotDay(): Promise<WeeklySnapshotDay> {
+  if (!NRM_WEEKLY_SNAPSHOT_SETTINGS_VISIBLE) {
+    return DEFAULT_WEEKLY_SNAPSHOT_DAY;
+  }
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (raw == null) return DEFAULT_WEEKLY_SNAPSHOT_DAY;

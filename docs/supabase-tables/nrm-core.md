@@ -13,7 +13,6 @@ GitHub `data/*.json`에서 이전한 운영 테이블.
 | `nrm_user_ban_list` | `data/userBanList.json` | 기기(`device_id`) 단위 차단·해제 |
 | `nrm_inquiry` | `data/inquiry.json` | 문의하기 (+ Storage 첨부) |
 | `nrm_user_list` | `data/custom-apk/userList.json` | 디바이스 바인딩·사용자 목록 (관리자 placeholder 포함) |
-| `nrm_music_list` | (앱 음악 목록) | 마이그레이션 `20260629150000_*` 등 |
 
 ### LLM 연동 시 주의
 
@@ -62,6 +61,20 @@ GitHub `data/*.json`에서 이전한 운영 테이블.
 - `supabase/migrations/20260824120000_nrm_user_list_oauth.sql` (`app_name` 삭제, `app_kind`/`user_email`/`is_admin` 추가)
 - `supabase/migrations/20260904010000_nrm_user_list_oauth_user_id.sql` (`oauth_user_id` 추가, 이메일 없는 OAuth 계정 지원)
 - `supabase/migrations/20260904131000_nrm_user_custom_name.sql` (`user_custom_name` 추가, 계정별 표시 이름 변경 RPC)
+
+### `nrm_alarm`
+
+| 컬럼 | 타입 | 의미 |
+|------|------|------|
+| `id` | bigint | PK |
+| `is_noti` | boolean | true면 메인 상단 공지 딱지 |
+| `title` / `content` | text | 제목·본문 |
+| `serial_no` | text | 비어 있으면 로그인한 모든 사용자. 값이 있으면 **그 serial_no 계정만** |
+| `alarm_date` | date | 게시일. 앱은 최근 30일만 표시 |
+
+문의 등록 알림: `nrm_rpc_insert_inquiry`가 문의 INSERT와 같은 트랜잭션에서 `nrm_user_list.is_admin='y'`인 **모든 로그인 계정**(중복 `serial_no`는 1행, 레거시 `serial_no=admin` placeholder 제외)에 `is_noti=false` 알림을 넣는다. 제목은 `{표시이름} 님의 문의`(이름 없으면 `문의`). 예전처럼 `serial_no='admin'` 한 행만 넣는 방식은 쓰지 않는다. 관리자 APK/`Admin` 고정 SerialNo도 쓰지 않는다. 답변 알림은 문의 작성자 `serial_no` 1명에게만 `nrm_rpc_insert_alarm`으로 보낸다.
+
+스키마 변경: `supabase/migrations/20260908161000_inquiry_notify_all_admins.sql`.
 
 ### `nrm_user_ban_list` 컬럼
 

@@ -93,6 +93,8 @@ assert(rpc.includes("attempt_count = j.attempt_count + 1"),
   "claim RPC must qualify attempt_count against the job table");
 assert(parser.includes("release-events") && parser.includes("validateActualRelease"),
   "actual release-event validation is missing");
+assert(parser.includes("earliestPartialDate") && worker.includes("coalescePartialDate"),
+  "empty MusicBrainz dates must fall back without extra lookups");
 assert(parser.includes("Date.UTC") && parser.includes("dateOverlaps"), "partial date calendar validation is missing");
 assert(parser.includes("selectRepresentativeRelease"), "representative release selection is missing");
 assert(!rpc.match(/\b(raw_response|response_json|raw_json)\b/i), "raw response persistence found in migration");
@@ -105,8 +107,39 @@ assert(!rpc.match(/music_artist_allowlist[\s\S]{0,100}\bvalues\s*\(/i),
   "worker migration must not seed allowlist");
 
 assert(worker.includes("lastfm_artist_pool"), "Last.fm artist pool job handling is missing");
+assert(worker.includes("lastfm_tag_refresh"), "Last.fm tag refresh job handling is missing");
+assert(worker.includes("music_rpc_apply_lastfm_tag_refresh_page"), "tag refresh apply RPC is missing");
+assert(worker.includes("runJobWithTransientRetries"), "5xx must retry the current job inside the worker tick");
+assert(!worker.includes("http5xxRetryAt"), "5xx must not requeue other songs as retry jobs");
+assert(worker.includes("[3_000, 3_000, 3_000]"), "5xx retries must wait 3 seconds each");
+assert(worker.includes("HTTP_5XX_MAX_RETRIES = 3"), "HTTP 5xx retries must stop at 3");
+assert(!worker.includes("lastfmJob ? 16 : 8"), "16/8 unbounded 5xx retries must not remain");
+assert(worker.includes("lastfm_http_retry"), "Last.fm HTTP 5xx must retry inside the worker tick");
+assert(worker.includes("artistMethodToTrackMethod"), "artist pool must use the working Top Tracks endpoints");
+assert(worker.includes("NullReferMusic/lastfm-sync"), "Last.fm must not reuse the MusicBrainz User-Agent");
+assert(worker.includes("lastfm_http_error"), "Last.fm HTTP errors must log a sanitized body");
 assert(worker.includes("music_rpc_apply_lastfm_artist_pool"), "Last.fm pool apply RPC is missing");
+assert(worker.includes("music_rpc_apply_catalog_recording_bundle"), "catalog apply RPC is missing");
+assert(worker.includes("catalogRecordingOnlyBundle"), "catalog must persist recording without release");
+assert(!worker.includes("catalog recording has no release"), "empty releases must not quarantine catalog jobs");
+assert(worker.includes("classifyKoreanWork"), "korea-catalog must filter non-korean recordings");
+assert(worker.includes("catalogRegionPolicy"), "global/hiphop must exclude korean works");
+assert(worker.includes("music_rpc_skip_catalog_recording"), "korea-catalog skip RPC wiring missing");
+assert(parser.includes("classifyKoreanWork") && parser.includes("catalogRegionPolicy"),
+  "korean work classifier is missing");
 assert(index.includes("LASTFM_API_KEY"), "LASTFM_API_KEY wiring is missing");
 assert(parser.includes("buildArtistSearchRequest"), "MusicBrainz artist search builder is missing");
+assert(parser.includes("quoteLucene") && parser.includes("LUCENE_ESCAPE_CHARS"),
+  "MusicBrainz Lucene reserved-char escaping is missing");
+assert(worker.includes("jsonSearchOrStripped") && worker.includes('"stripped"'),
+  "HTTP 400 search must retry with stripped Lucene terms");
+assert(worker.includes("searchCatalogRecordingMatch") && worker.includes("buildArtistSearchRequest"),
+  "catalog name search must fall back to artist MBID then arid+title");
+assert(parser.includes("catalogCoreTitle") && parser.includes("catalogMatchKey") && parser.includes("artistname:"),
+  "catalog search must normalize feat titles and query artist aliases");
+assert(worker.includes("music_rpc_enqueue_mb_transient_retry"),
+  "MusicBrainz 503 dead jobs must be queued for the interval retry schedule");
+assert(worker.includes("nrm_rpc_system_schedule_log_append"), "worker must persist scheduler logs");
+assert(index.includes("http_authorized"), "edge must log authorized ticks");
 
 console.log("musicbrainz worker static checks passed");

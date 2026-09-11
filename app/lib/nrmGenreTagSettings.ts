@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 
+/** 앱 설정 메뉴 노출. false면 숨김. 패널·카탈로그 코드는 유지 */
+export const NRM_GENRE_TAG_SETTINGS_VISIBLE = false;
+
 const STORAGE_KEY = 'nrmGenreTagCatalog_v4';
 
 const LEGACY_STORAGE_KEYS = ['nrmGenreTagCatalog_v3', 'nrmGenreTagCatalog_v2'];

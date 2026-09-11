@@ -22,8 +22,20 @@
   Release 수집 4스케줄과 스케줄 간 아티스트/릴리스 중복 배제·스케줄당 신규 Recording 1000 상한은
   `supabase/migrations/20260904160000_lastfm_artist_pool_schedules.sql`과
   `supabase/functions/musicbrainz-sync/` worker의 `lastfm_artist_pool` job으로 구현한다.
-- §5.7 임베딩 원장·outbox, 프로젝트 2 벡터 적용 worker, Last.fm `track.getTopTags` Edge Function은
-  아직 구현하지 않았다.
+-   이미 발매된 곡 catalog 4스케줄(한국/글로벌/한국힙합/글로벌힙합 Top Tracks, Recording 배타,
+  연도 쿼터, Last.fm 리스트 단계 한국/글로벌 필터, 일일 순위 교체, Last.fm 태그 원장)은
+  `supabase/migrations/20260908113000_historical_catalog_schedules.sql`과
+  worker의 `lastfm_track_pool` / `mb_catalog_track_resolve` / `lastfm_tags`로 구현한다.
+  Last.fm 리스트 완료 후 MusicBrainz 한 곡씩·태그 순, 5xx는 그 곡만 tick 안 3회 재시도는
+  `20260909130000_catalog_serial_phases.sql`이다.
+- 매주 전곡 Last.fm 태그 갱신(`musicbrainz-lastfm-tag-refresh`, 일요일 12:00 KST)은
+  `supabase/migrations/20260908145000_*`~`20260908145500_*`와 worker `lastfm_tag_refresh`로 구현한다.
+- 발매예정은 원장에 바로 넣지 않고 `music_upcoming_release` 스테이징에 적재한다
+  (`20260907160000_*`, `20260907161000_*`). 일일 verify 후 확정 발매만 원장 promote.
+- §5.7 임베딩 원장·outbox, 프로젝트 2 벡터 적용 worker는 아직 구현하지 않았다.
+  Last.fm `track.getTopTags`는 catalog 수집 경로와 매주 전곡 갱신 스케줄에서 태그 원장만 저장한다.
+- 2026-09-11 운영 리셋: `20260911100000_disable_all_schedulers_and_wipe_collected_data.sql`이
+  시스템·수집 스케줄을 전부 off하고 원장·파이프라인·태그를 전량 삭제한다. 스케줄 정의는 유지.
 
 구현 목표:
 
@@ -111,7 +123,7 @@
 - MusicBrainz 요청은 의미 있는 User-Agent를 사용하고 전체 worker 기준 최소 1.1초 간격을 적용한다.
 - 프로젝트 1 DB가 **450MB**를 넘으면 MusicBrainz/Last.fm/벡터 **수집 스케줄러를 전부 off**한다.
   경고(350MB)·쓰기 중지(400MB)로 앱 일반 CRUD나 개별 INSERT를 막지 않는다.
-  AI Lab 채팅·Track History retention은 용량을 줄이는 작업이므로 450MB에서 자동 off하지 않는다.
+  AI Lab 채팅·Track History retention과 운영 데이터 정리는 용량을 줄이는 작업이므로 450MB에서 자동 off하지 않는다.
 - 프로젝트 2도 표시용 hard limit 500MB·수집 중지선 450MB를 사용하며 table 크기를 별도로 측정한다.
 
 ---
@@ -389,7 +401,7 @@ create extension if not exists pgcrypto with schema extensions;
 | `artist_credit_name` | `text` | N |  | 표시 아티스트 |
 | `status` / `quality` / `packaging` | `text` | Y |  | MusicBrainz 원문 |
 | `country_code` | `text` | Y |  | 국가 |
-| `release_date_text` | `text` | Y |  | 부분 발매일 |
+| `release_date_text` | `text` | Y |  | 부분 발매일. MB 루트 `date` 또는 날짜가 있는 `release-events` 중 가장 이른 값. catalog는 이어서 Recording `first-release-date` → Release Group `first-release-date`를 쓴다. 전부 없으면 NULL |
 | `barcode` | `text` | Y |  | UPC/EAN |
 | `text_language` / `text_script` | `text` | Y |  | 메타데이터 언어·문자 |
 | `track_count` | `integer` | N | `0` | 트랙 수 |
@@ -409,6 +421,7 @@ create extension if not exists pgcrypto with schema extensions;
 - 부분 UNIQUE `(album_id) WHERE is_representative`.
 - active 앨범당 대표판 정확히 하나는 deferred trigger로 보장한다.
 - representative이면 `retired_at IS NULL`, 아니면 `retired_at IS NOT NULL`.
+  catalog 추가 에디션도 비대표로 넣을 때 `retired_at`을 채운다. 기존 대표판은 유지한다.
 - 상태·self merge·cycle CHECK는 다른 권위 엔터티와 동일하다.
 - `album_id`, `canonical_mbid WHERE NOT NULL` 인덱스.
 - 대표판 순서: Official → track 정보 존재 → 날짜 존재 → 이른 날짜 → Release MBID 바이트 오름차순.
@@ -425,7 +438,7 @@ create extension if not exists pgcrypto with schema extensions;
 | `primary_artist_id` | `uuid` | Y |  | 대표 Artist |
 | `length_ms` | `integer` | Y |  | 길이 |
 | `is_video` | `boolean` | N | `false` | 영상 |
-| `first_release_date_text` | `text` | Y |  | 부분 날짜 |
+| `first_release_date_text` | `text` | Y |  | 부분 날짜. catalog는 Recording 값이 없으면 Release Group `first-release-date`를 쓴다 |
 | `entity_status` | `text` | N | `'active'` | active, merged, deleted, quarantined |
 | `merged_into_recording_id` | `uuid` | Y |  | 병합 대상 |
 | `lastfm_sync_enabled` | `boolean` | N | `true` | Last.fm 대상 |
@@ -669,7 +682,8 @@ MusicBrainz 연결:
 - recording CASCADE, tag RESTRICT.
 - `(fetch_id, recording_id) → lastfm_tag_fetch(fetch_id, recording_id) ON DELETE RESTRICT` 복합 FK로 다른 Recording의 fetch 참조를 막는다.
 - count>=0, weight 0~1, rank 1~20.
-- 이 테이블에는 필터를 통과해 실제 임베딩에 선택된 3~20개만 저장한다. 제외 태그는 fetch 원문 또는 기간 제한 감사 데이터에만 둔다.
+- 이 테이블에는 필터를 통과한 선별 태그만 저장한다(최대 20). 제외 태그는 fetch 원문 또는 기간 제한 감사 데이터에만 둔다.
+- `music_rpc_apply_lastfm_tags`는 기존 행을 지운 뒤 선별 결과로 다시 넣는다. 유효 태그가 3개 미만이면 빈 집합으로 교체하고 `embedding_enabled=false`.
 - 다른 candidate 응답의 count를 합산·평균하지 않는다.
 
 ## 5.7 임베딩 원장·outbox
@@ -727,10 +741,23 @@ MusicBrainz 연결:
 
 `job_id uuid PK`, job kind, entity type/ID, `idempotency_key UNIQUE`, 상태, priority, expected row version, attempt, available/lease/fence, HTTP/API 오류, 생성·완료 시각.
 
-- kind: mb_lookup, mb_redirect, lastfm_tags, embedding, reconcile.
+- kind: mb_lookup, mb_redirect, lastfm_artist_pool, lastfm_track_pool, lastfm_tag_refresh,
+  lastfm_tags, mb_catalog_track_resolve, mb_discovery, mb_release_hydrate, mb_recording_hydrate,
+  mb_upcoming_verify, embedding, reconcile.
 - 상태: pending, processing, retry, completed, blocked, quarantined, dead.
 - entity polymorphic FK는 claim/apply RPC가 검증한다.
 - `(priority, available_at, created_at) WHERE pending/retry`, lease partial index.
+- `lastfm_tags`는 `lastfm_tag_refresh`보다 먼저 claim한다. 한 페이지(50곡)를 큐잉한 뒤 Last.fm HTTP를 소진하고, 다음 tick에서 스캔을 이어 간다.
+
+### `music_lastfm_tag_refresh_state`
+
+전곡 태그 갱신 run의 커서. PK는 `schedule_run_id` → `music_schedule_run` RESTRICT.
+
+| 컬럼 | 의미 |
+|---|---|
+| `after_recording_id` | 다음 페이지 시작 직전 Recording. NULL이면 처음부터 |
+| `queued_count` | 지금까지 큐잉한 `lastfm_tags` 건수 |
+| `updated_at` | 커서 갱신 시각 |
 
 ### `music_sync_run`
 
@@ -762,12 +789,19 @@ dead letter ID, source kind/ID, reason, 비밀 제거 payload, 실패·해결 �
 ### `music_collection_schedule`
 
 관리자 설정 스케줄의 권위 원장이다. `schedule_id uuid PK`, 고유 `schedule_key`,
-표시 이름, `schedule_kind(daily|interval)`, KST 실행 시각 또는 interval 분,
+표시 이름, `schedule_kind(daily|weekly|monthly|once|interval)`, KST 실행 시각
+또는 분 간격(`interval_minutes` 1~10080),
+매주 요일(`weekly_weekday` 0=일요일) 또는 매월 일자(`monthly_day` 1~31) 또는
+단 1회 날짜(`once_on_date`),
 `next_run_at`, 활성/claim lease/fence, 날짜 시작·종료 offset, 국가·Release Group
 primary/secondary type·MusicBrainz status 필터, batch/request/new-recording 상한,
 우선순위와 timestamps를 저장한다.
 
-- daily는 `daily_time_kst`만, interval은 `interval_minutes`(1~1440)만 요구한다.
+- daily는 `daily_time_kst`만,
+  weekly는 `daily_time_kst`+`weekly_weekday`(0=일요일…6=토요일),
+  monthly는 `daily_time_kst`+`monthly_day`(1~31, 없는 날은 말일),
+  once는 `daily_time_kst`+`once_on_date`를 요구한다. 1회 실행 후 비활성.
+  interval은 `interval_minutes`(1~10080)만 요구한다. 예: 60이면 1시간마다.
 - 날짜 offset은 `-30..730`, 시작은 종료 이하여야 한다.
 - batch 1~100, 요청 1~500, 신규 Recording 1~5000으로 제한한다.
 - dispatcher는 `next_run_at` partial index와 `FOR UPDATE SKIP LOCKED`를 사용한다.
@@ -786,11 +820,11 @@ primary/secondary type·MusicBrainz status 필터, batch/request/new-recording �
 갱신한 뒤 MusicBrainz 발매예정 Release를 수집한다.
 
 ```text
-Last.fm
- ├─ 한국 Top 100   geo.getTopArtists(Korea, Republic of)
- ├─ 글로벌 Top 100 chart.getTopArtists
- ├─ Hip-Hop Top 100 tag.getTopArtists(hip-hop)
- └─ Korean Hip-Hop Top 100 tag.getTopArtists(korean hip hop)
+Last.fm (앱 차트와 같은 Top Tracks 엔드포인트. getTopArtists는 Edge에서 503만 나와 쓰지 않는다)
+ ├─ 한국 Top 100   geo.getTopTracks(Korea, Republic of) → 아티스트 중복 제거
+ ├─ 글로벌 Top 100 chart.getTopTracks → 아티스트 중복 제거
+ ├─ Hip-Hop Top 100 tag.getTopTracks(hip-hop) → 아티스트 중복 제거
+ └─ Korean Hip-Hop Top 100 tag.getTopTracks(korean hip hop) → 아티스트 중복 제거
           ↓
       아티스트 통합(스케줄 간 배타 소유)
           ↓
@@ -798,7 +832,13 @@ Last.fm
           ↓
       music_schedule_artist Pool
           ↓
-      MusicBrainz 발매예정 Release/Track/Recording 수집
+      MusicBrainz 발매예정 검색 → mb_release_hydrate
+          ↓
+      music_upcoming_release (스테이징, collection_mode=upcoming)
+          ↓
+      일일 mb_upcoming_verify (날짜≤오늘 KST → promote / 취소→삭제 / 미래→날짜갱신)
+          ↓
+      확정 시 music_* 원장 apply + Recording hydrate
 ```
 
 | schedule_key | Last.fm method | param | 시각(KST) | priority | max artists | max new recordings |
@@ -808,17 +848,174 @@ Last.fm
 | `musicbrainz-lastfm-hiphop-top` | `tag.getTopArtists` | `hip-hop` | 10:30 | 30 | 100 | 1000 |
 | `musicbrainz-lastfm-global-top` | `chart.getTopArtists` | (없음) | 11:00 | 40 | 100 | 1000 |
 
+`musicbrainz-lastfm-korea-top` / `korean-hiphop-top`은 **한국 아티스트만** pool에 넣는다.
+`global-top` / `hiphop-top`은 한글 이름·MusicBrainz 국가 KR 아티스트를 pool에서 뺀다.
+
 규칙:
 
 - 스케줄 due 시 `lastfm_artist_pool` job을 먼저 만들고, pool 적용 후에만 discovery scan을 큐잉한다.
 - `music_collection_schedule.lastfm_method` / `lastfm_param` / `lastfm_limit`(기본 100)이 소스 계약이다.
+- `collection_mode`: 발매예정 4스케줄은 `upcoming`(스테이징). 이미 발매된 곡 4스케줄은 `catalog`(원장 직행).
+  전곡 태그 재수집은 `tag_refresh`. MusicBrainz 일시 실패 재시도는 `mb_transient_retry`
+  (Last.fm method 없음, claim_due가 이 모드를 허용).
 - 활성 `music_schedule_artist`의 `artist_mbid`는 **전 스케줄 배타**다(부분 UNIQUE). 우선순위가
   낮은(숫자 작은) 스케줄이 소유권을 가진다: korean-hiphop(10) < korea(20) < hiphop(30) < global(40).
-- 동일 Release MBID가 이미 권위 원장에 있거나 다른 스케줄이 queued/applied면 후발 스케줄은
-  hydrate하지 않고 duplicate로 집계한다.
-- 스케줄 run당 **신규 Recording insert**는 `max_new_recording_count`(기본·운영값 1000)를 넘지 않는다.
-  이미 존재하는 Recording은 상한에 포함하지 않는다.
+- 동일 Release MBID가 이미 권위 원장·스테이징(watching/deferred/promote_queued/promoted)에 있거나
+  다른 스케줄이 queued/applied면 후발 스케줄은 hydrate하지 않고 duplicate로 집계한다.
+- 스케줄 run당 **신규 Recording insert**(원장 promote 경로)는 `max_new_recording_count`(기본·운영값 1000)를 넘지 않는다.
+  이미 존재하는 Recording은 상한에 포함하지 않는다. 스테이징만 할 때는 Recording hydrate를 만들지 않는다.
 - Last.fm API Key는 프로젝트 1 Edge Function Secret `LASTFM_API_KEY`에만 둔다.
+- `music_rpc_apply_lastfm_track_pool_page`는 `RETURNS TABLE(next_page)`와 테이블 컬럼
+  `next_page`가 겹치지 않게 테이블 alias로만 갱신한다. 아니면 PostgREST 400(42702)이 난다.
+- `music_rpc_apply_discovery_page`의 `next_offset` 갱신도 같은 이유로
+  `music_discovery_scan as s`로만 쓴다.
+- `music_rpc_apply_catalog_recording_bundle`은 OUT 컬럼명을 `applied_recording_id`로 두어
+  테이블 컬럼 `recording_id`와 42702가 나지 않게 한다.
+- catalog apply는 앨범에 대표 Release가 없으면 새 판을 대표로 넣고(`retired_at` null),
+  이미 대표가 있으면 추가 에디션을 비대표로 넣되 `retired_at=now()`를 같이 넣는다.
+  `is_representative=false`만 넣고 `retired_at`을 비우면 `ck_music_release_representative_retired`로
+  23514가 난다. 기존 대표판을 hydrate처럼 교체하지는 않는다.
+- Last.fm `@attr.rank`가 0이면 `chart_rank`를 1..5000으로 보정한다. 그대로 넣으면
+  `ck_music_catalog_track_candidate_rank` 때문에 PostgREST 400(23514)이 난다.
+- 수집 Last.fm 요청은 앱 차트와 같이 `encodeURIComponent`(%20)로 쿼리를 만들고
+  MusicBrainz User-Agent를 보내지 않는다. `lastfm_artist_pool`은 스케줄의
+  `geo/chart/tag.getTopArtists`를 각각 `getTopTracks`로 바꿔 호출한 뒤 아티스트를 뽑는다.
+
+### `music_upcoming_release` (발매예정 스테이징)
+
+확정 전 Release 스냅샷. 원장(`music_album`/`music_release`/…)과 분리한다.
+
+| 컬럼 | 의미 |
+|------|------|
+| `upcoming_id` | PK |
+| `release_mbid` | UNIQUE, MusicBrainz Release |
+| `release_group_mbid` / `title` / `artist_credit_name` / `artist_mbid` | 스냅샷 |
+| `release_date_text` | 부분 날짜 `YYYY`/`YYYY-MM`/`YYYY-MM-DD` |
+| `staging_status` | `watching` \| `deferred` \| `promote_queued` \| `promoted` \| `cancelled` |
+| `schedule_id` / `first_seen_schedule_run_id` / `last_schedule_run_id` | 출처 |
+| `last_verified_at` / `last_verify_note` | 검증 결과 |
+
+불변조건(verify job 완료 시점):
+
+- `watching` 행의 `music_partial_date_end(release_date_text)`는 **오늘(KST)보다 커야** 한다.
+- 날짜≤오늘이면 promote 큐 또는 취소 삭제. 취소/404는 행 삭제.
+- `promoted`는 감사 잔존(원장 승격 이력). 활성 감시 집합에서 제외.
+
+RPC:
+
+- `music_rpc_stage_upcoming_release` — hydrate가 `apply_target=staging`일 때
+- `music_rpc_enqueue_upcoming_verify_batch` — worker tick마다 due 행 verify job 생성
+- `music_rpc_apply_upcoming_verify_result` — MB lookup 결과 반영
+- candidate `validation_result=promote_from_upcoming` 적용 시 트리거가 `promoted`로 표시
+
+### 5.13 이미 발매된 곡 catalog (원장 직행)
+
+발매예정(`upcoming`)과 분리된 4스케줄. Last.fm **곡** Top Tracks를 페이지(50)로 받아
+MusicBrainz Recording을 매칭한 뒤 원장에 최소 bundle만 넣는다(차트에 오른 그 Recording +
+있으면 앨범/릴리스/트랙 1개). 앨범 전체 hydrate는 하지 않는다.
+Recording에 연결된 Release가 없거나 Release 파싱이 계약 오류면 **Recording만 저장**하고
+Last.fm 태그를 큐잉한다. 벡터화 키는 `recording_id`이며 album/release는 필수가 아니다.
+
+| schedule_key | Last.fm method | param | 시각(KST) | priority |
+|---|---|---|---|---|
+| `musicbrainz-lastfm-korea-catalog` | `tag.getTopTracks` | `k-pop` | 00:00 | 20 |
+| `musicbrainz-lastfm-global-catalog` | `chart.getTopTracks` | (없음) | 01:00 | 40 |
+| `musicbrainz-lastfm-korean-hiphop-catalog` | `tag.getTopTracks` | `korean hip hop` | 02:00 | 10 |
+| `musicbrainz-lastfm-hiphop-catalog` | `tag.getTopTracks` | `hip-hop` | 03:00 | 30 |
+
+`geo.getTopTracks(Korea)`는 **한국에서 많이 듣는 곡**이지 한국 작품이 아니다.
+한국 catalog는 Last.fm `tag.getTopTracks(k-pop)`을 쓰고, 페이지를 받은 즉시
+한글·Last.fm 아티스트 태그(`k-pop`/`korean` 등)로 **한국 노래만** 남긴 뒤 MusicBrainz에 보낸다.
+한국힙합은 `korean hip hop` 태그 차트에서 한국 노래만, 글로벌은 한국 노래를 제외,
+글로벌 힙합은 `hip-hop` 차트에서 한국 노래를 제외한다. 로마자 K-pop은 가수 `artist.getTopTags`로 판정한다.
+
+원장 입고 한도는 연도 쿼터다.
+
+- 2000년 미만: 스케줄당 100곡
+- 2000–2010년: 연도당 100곡
+- 2011–2020년: 연도당 300곡
+- 2021–현재(KST 연도, 해가 바뀌면 자동 연장): 연도당 500곡
+
+Last.fm에는 연도별 차트 API가 없어서 발매일은 MusicBrainz `first-release-date`로 버킷한다.
+해당 연도 쿼터가 찬 곡은 `YEAR_QUOTA_SKIP`이며 실패로 보지 않는다.
+Last.fm 리스트 상한은 연도 쿼터 합의 1.5배와 450MB 잔여(`bytes_per_track`, 4등분하지 않음) 중 작은 값이다.
+
+한국·한국힙합 catalog는 Recording lookup 뒤 Release lookup 전에 한국 작품만 남긴다(Last.fm 필터 안전망).
+글로벌·힙합 catalog는 같은 신호로 **한국 작품을 건너뛴다.**
+
+- 한글(가수·제목·크레딧), ISRC `KR*`, MusicBrainz 태그/장르 `k-pop`/`korean`/`k-rap`/`trot` 등이면 한국 작품.
+- 한국·한국힙합: 위 신호 또는 아티스트 국가 KR만 수집. 가나/`j-pop`은 `skipped_not_korean`.
+- 글로벌·힙합: 위 신호 또는 아티스트 국가 KR이면 `skipped_korean`. 애매한 로마자 외국곡은 수집.
+- skip은 실패 탭에 넣지 않는다. Last.fm 태그를 큐잉하지 않고 `inserted_count`를 올리지 않는다.
+
+규칙:
+
+- 수집 큐는 전역 직렬. 시각은 due 시점이며 동시 실행이 아니다.
+- 활성 `music_schedule_catalog_recording`의 `recording_id`는 **전 스케줄 배타**. 숫자 작은
+  priority가 소유한다: korean-hiphop(10) < korea(20) < hiphop(30) < global(40).
+- 곡 수는 고정 200이 아니다. `music_rpc_catalog_capacity_budget`는 연도 쿼터 합의 1.5배와
+  450MB 중지선 직전(8MB headroom) 잔여/`bytes_per_track` 중 작은 값을 `track_limit`로 쓴다.
+  4스케줄로 나누지 않는다. 잔여가 0이면 현재 멤버십만큼만 교체(성장 없음).
+  원장 입고는 `music_catalog_era_quota` 연도 버킷을 넘지 않는다.
+- 일일 스냅샷이 끝난 뒤에만 새 차트에 없는 멤버를 `retired`하고 tombstone+통제 purge한다.
+  다른 catalog가 소유하거나 allowlist/upcoming/merge 대상은 지우지 않는다.
+- `music_rpc_capacity_purge`는 활성 catalog 앨범을 지우지 않는다.
+- Last.fm `track.getTopTags`는 NFKC·noise 제거 후 최대 20개. 유효 태그 3개 미만이면
+  `music_recording.embedding_enabled=false`. `music_rpc_apply_lastfm_tags`는 선별 결과로
+  `lastfm_recording_tag`를 **교체(upsert)** 한다. 임베딩/프로젝트2 worker는 이 범위 밖이다.
+- catalog Recording 매칭: Last.fm이 `lastfm_mbid`를 주면 MusicBrainz recording lookup이
+  **성공한 경우 제목·가수 표기가 달라도 그 Recording을 쓴다.** 404·400이거나 lookup이 실패한
+  경우에만 artist+title Lucene 검색으로 넘어간다. Last.fm 한국 차트는 recording MBID가 자주
+  비어 이 경로가 기본이다. Lucene 질의는 `/ < > ? :` 등 예약 문자를 이스케이프하고, 검색이
+  HTTP 400이면 특수문자를 뺀 질의로 한 번 더 찾는다. 제목은 feat./remix 괄호를 뺀 핵심
+  제목도 OR로 넣고, 가수는 `artist`/`artistname`/`creditname`을 같이 본다. 그래도 계약
+  매칭이 안 되면 가수 검색으로 아티스트 MBID를 얻은 뒤 `arid`+제목으로 다시 찾는다.
+  표기 비교는 `&`/`and`, feat., 문장부호를 정규화한다.
+- catalog 단계: Last.fm Top Tracks 페이지를 **모두** 받은 뒤에야 `mb_catalog_track_resolve`를
+  큐잉한다. 그다음 Recording을 차트 순위 순으로 **한 곡씩** MusicBrainz에 요청한다.
+  그 곡이 HTTP 5xx/`429`/타임아웃이면 **같은 곡을 worker tick 안에서** 3초 간격으로 3번
+  재시도하고, 그래도 실패하면 `dead`로 닫은 뒤 다음 곡으로 간다. 실패 job을 `retry`로
+  큐에 쌓아 다른 곡과 섞지 않는다. MusicBrainz 일시 실패는 `music_mb_transient_retry`에
+  남기고 `musicbrainz-mb-503-retry`가 다시 요청한다. 날짜 형식 오류·고른 Release에 트랙
+  없음처럼 MusicBrainz 원문이 잘못된 계약 오류는 재시도하지 않고 즉시 `quarantined`다.
+- 같은 run의 `lastfm_tags`는 catalog MusicBrainz job이 모두 끝난 뒤에만 claim한다.
+- catalog apply의 album/release는 선택이다. Recording lookup 결과 `releases`가 비거나
+  Release lookup 404/트랙 불일치 등 계약 오류면 Recording만 넣고 `lastfm_tags`를 큐잉한다.
+- `musicbrainz-lastfm-korea-catalog` / `korean-hiphop-catalog`는 한국 작품이 아니면 원장에 넣지 않는다.
+  `global-catalog` / `hiphop-catalog`는 한글·KR ISRC·K-pop류 태그·KR 아티스트면 넣지 않는다.
+  외국곡은 `skipped_not_korean`, 한국곡(글로벌 쪽)은 `skipped_korean`으로 닫고 실패로 보지 않는다.
+- MusicBrainz `release-events[].date`가 비어 있어도 파싱 계약 오류가 아니다. 에디션 날짜는
+  루트 `release.date` → 날짜가 있는 이벤트 중 가장 이른 값으로 채우고, catalog
+  `music_release.release_date_text`는 이어서 Recording `first-release-date` →
+  Release Group `first-release-date`를 쓴다. 추가 MusicBrainz 요청은 하지 않는다.
+  셋 다 없으면 발매일을 모르는 것이고 컬럼은 NULL이다.
+
+### 5.13.1 MusicBrainz 503 재시도
+
+`musicbrainz-mb-503-retry` (`collection_mode=mb_transient_retry`, 기본 `interval` 60분, priority 5).
+
+MusicBrainz HTTP 503/`429`/5xx/타임아웃은 서버 컨디션이라 곡 고유 오류가 아니다. worker tick
+안 3회 재시도 후에도 실패하면 job은 `dead`이고, 같은 대상을 `music_mb_transient_retry`에
+올린다. Last.fm 일시 오류는 넣지 않는다.
+
+이 스케줄이 due되면 임시 행마다 원래 `job_kind`로 다시 큐잉한다. 수집이 성공하거나
+계약 오류(`quarantined`/`blocked`)면 임시 행을 **물리 삭제**한다. 다시 503이면 행을
+남겨 다음 주기에 재시도한다. 횟수 상한은 없다. 배포 전 `dead` job은
+`20260910162000_mb_transient_retry_backfill.sql`로 큐에 넣는다.
+
+`music_mb_transient_retry`는 원장이 아니다. hard-delete 금지 트리거를 달지 않는다.
+
+### 5.14 전곡 Last.fm 태그 갱신
+
+`musicbrainz-lastfm-tag-refresh` (`collection_mode=tag_refresh`, 매주 일요일 12:00 KST, priority 90).
+Last.fm method는 없다. claim_due는 `lastfm_method IS NOT NULL` 또는 `tag_refresh`/`mb_transient_retry`를 잡는다.
+
+- 시작 job `lastfm_tag_refresh`가 활성 Recording(`entity_status=active`, `lastfm_sync_enabled`)을
+  페이지(50)로 읽어 `lastfm_tags`를 큐잉한다. 커서는 `music_lastfm_tag_refresh_state`다.
+- worker는 기존 `lastfm_tags` 경로로 `track.getTopTags`를 호출하고 apply RPC가 태그를 upsert한다.
+- 전역 직렬 큐: 이 run이 끝날 때까지(태그 job 포함) 다른 수집은 claim되지 않는다.
+
+RPC: `music_rpc_apply_lastfm_tag_refresh_page`.
 
 ### `music_artist_allowlist`, `music_schedule_artist`
 
@@ -867,12 +1064,97 @@ timestamps를 저장한다. `music_schedule_artist(schedule_id, artist_mbid)`는
 
 ## 5.11 기존 작업·실행 테이블 확장
 
-- `music_sync_job`은 `mb_discovery`, `mb_release_hydrate`, `mb_recording_hydrate` 종류와
+- `music_sync_job`은 `mb_discovery`, `mb_release_hydrate`, `mb_recording_hydrate`,
+  `lastfm_artist_pool`, `mb_upcoming_verify` 종류와
   nullable `schedule_id`, `schedule_run_id`, `candidate_id`, `discovery_scan_id`를 가진다.
 - `music_sync_run`은 `schedule_id`, `schedule_run_id`, 발견/삽입/갱신/중복/실패,
   capacity 전후 집계를 가진다. schedule run은 `music_schedule_run`이 담당하며
   한 schedule의 dispatcher 실행을 멱등 request key로 식별한다.
 - worker 완료/재시도는 claim 때 발급한 fence token이 같은 processing 행만 바꾼다.
+
+### `music_schedule_run` 집계 카운트
+
+| 컬럼 | 관리 UI | 의미 |
+|------|---------|------|
+| `discovered_count` | 발견 | MusicBrainz 검색으로 잡은 **발매 후보** 수 |
+| `inserted_count` | 삽입 | upcoming 모드: 스테이징 신규 적재 수 / catalog·promote: 원장 신규 album/release/recording 합 |
+| `updated_count` | 갱신 | 이미 있던 엔티티를 **업데이트**한 건수 |
+| `duplicate_count` | 중복 | 이미 원장/다른 스케줄에 있어 hydrate하지 않고 **건너뛴** 후보 수 |
+| `new_recording_count` | (내부) | 이번 실행에서 새로 만든 Recording만 (상한 `max_new_recording_count`) |
+
+### 관리 UI 실행/실패 탭
+
+- **실행 탭**: 수집 `music_schedule_run`과 retention `nrm_system_schedule_run` 중
+  `run_status`가 `running`(스케줄러 큐 처리 중) 또는 `completed`(완전 성공)인 행.
+  스케줄러 큐의 진행중·작업 큐는 job 종류가 아니라 스케줄 표시 이름만 보여 준다.
+  **예외**: `musicbrainz-mb-503-retry`는 실패 job이 1건이라도 있으면 `completed`로 두지 않고
+  `failed`로 닫아 **실패 탭**에 넣는다.
+- **실패 탭**: `partial`(부분성공), `failed`, `cancelled`. 실행 탭에 `partial`을 넣지 않는다.
+- finalize(`music_rpc_finalize_mb_runs`)·`music_rpc_recover_stale_collection`은 일반 수집은
+  `failure_count=0`이면 `completed`, 있으면 `partial`. 503 재시도 스케줄은 실패 job이 있으면 `failed`.
+- Last.fm·MusicBrainz HTTP 5xx/`429`/타임아웃은 **지금 처리 중인 그 곡(또는 Last.fm 페이지)** 을
+  worker tick 안에서 3초 간격으로 3번 재시도한다. 3번 후에도 실패하면 `dead`로 닫고 다음
+  인덱스로 간다. 큐에 retry job을 쌓지 않는다. tick 예산 소진만 같은 job을 다음 tick으로 미룬다.
+- 자세히 보기: 관리자가 확인할 항목만 보여 준다. `music_rpc_admin_schedule_run_jobs` 중
+  대기·재시도·처리중·실패(dead/quarantined/blocked)만 표시한다. 완료 job·수집 기간·용량은 숨긴다.
+  이상이 없으면 "확인할 이상이 없습니다." 수집 건은 `music_rpc_admin_schedule_run_inserts`로
+  **성공** 접힘 목록(가수 — 제목)을 보고 펼치면 페이지로 이어서 본다(catalog applied, hydrate 신규,
+  upcoming first-seen, 완료된 `lastfm_tags`). 태그 갱신 run은 같은 RPC로 갱신한 곡을 보여 준다.
+  수집 실패 건은 `music_rpc_admin_schedule_run_failures`로 **실패** 접힘 목록에 가수 — 제목을 성공과
+  같이 쓰고, 그 아래 빨간 대표 실패 메시지 앞에 `(dead)`/`(quarantined)`/`(blocked)`를 붙인다.
+  job 집계에서 `dead`와 `quarantined`는 같은 **실패** 줄로 합친다. 대표 문구는 `music_sync_job.last_error_message`를
+  `music_admin_canonical_failure_message`로 정규화한 값이며 별도 실패 테이블은 두지 않는다.
+  대상은 `dead`/`quarantined`/`blocked` job뿐이다. 예: `catalog recording was not matched`,
+  `ck_music_release_representative_retired`. 예전 `catalog recording has no release`는
+  Recording만 저장하도록 바꾼 뒤로는 새 job에서 나오지 않는다.
+  `music_rpc_admin_schedule_run_errors`는 실행 단위 dump용으로 남기고 관리 UI 실패 목록에는 쓰지 않는다.
+  retention은 삭제 건수와 오류만 보여 주고, 완료 건은 시작·종료 시각을 숨긴다.
+  운영 데이터 정리(`ops_cleanup`)는 로그/Storage/스케줄 이력 삭제 건수·한도·단계 오류만 보여 준다.
+- 진단은 관리 UI에 넣지 않는다. Edge `console.log` JSON(`fn=musicbrainz-sync`)과
+  Postgres `RAISE LOG` 접두 `nrm-schedule`만 사용한다.
+
+### 전역 직렬 큐 (2026-09-07, 2026-09-08 보강)
+
+- `music_collection_is_busy()`: `music_schedule_run.run_status='running'` 또는 collection job
+  (`lastfm_artist_pool`/`lastfm_track_pool`/`lastfm_tag_refresh`/`lastfm_tags`/`mb_catalog_track_resolve`/`mb_discovery`/`mb_release_hydrate`/`mb_recording_hydrate`)이
+  `pending|processing|retry`이면 busy. **`mb_upcoming_verify`는 busy에 넣지 않는다.**
+  이미 실행 중인 스케줄이 하루를 넘겨 같은 키가 다시 due여도 busy면 claim하지 않으므로
+  대기 큐는 실행 중 run을 중단·끼어들지 못한다.
+- `music_rpc_claim_due_schedules`는 먼저 stale run을 마무리하고, busy면 0건, 아니면 **최대 1개**만 claim한다.
+  claim/즉시 실행은 `nrm_system_schedule.next_run_at`도 같이 갱신하므로 `nrm_music_rpc_owner`에 해당 테이블 GRANT·RLS가 필요하다.
+- `music_rpc_admin_schedule_run_now`는 idle이면 run+job을 바로 만들고, busy면 due만 남긴 뒤
+  `nrm_rpc_musicbrainz_dispatcher_cron`으로 worker를 즉시 호출한다. worker kick 실패는 수집 run을 롤백하지 않는다.
+- worker Edge는 claim batch_size=1을 사용한다.
+- catalog claim 순서: `lastfm_track_pool` → `mb_catalog_track_resolve`(차트 순위) → `lastfm_tags`.
+  Last.fm 리스트 job이 남아 있으면 MusicBrainz를 집지 않고, MusicBrainz가 남아 있으면 태그를 집지 않는다.
+  `mb_upcoming_verify`는 수집이 busy일 때 enqueue하지 않으며 claim 우선순위도 가장 낮다.
+- 진단 RPC: `music_rpc_scheduler_diagnostics` (관리 UI 비노출. Edge/Postgres 로그용).
+
+### RLS (원장 write)
+
+- `nrm_music_rpc_owner` SECURITY DEFINER RPC가 원장·credit·tag/genre·ISRC를 쓰려면
+  해당 테이블에 `pl_<table>_music_rpc_owner` FOR ALL 정책이 필요하다.
+- 20260907140000에서 artist_credit·genre·tag·ISRC 등 누락 정책을 보강했다.
+  (이전에는 hydrate가 `music_album_artist_credit` RLS 403으로 전부 quarantined 됨)
+
+## 5.12 테이블 유지 정책 (안전 DROP 없음)
+
+프로젝트 1 음악 관련 테이블은 대부분 **비어 있어도 계약상 필요**하다. 사이드이펙트 없이
+기능 100%를 유지하려면 현 시점에서 DROP할 테이블이 없다.
+
+| 계열 | 예시 | 비어 있어도 유지하는 이유 |
+|------|------|---------------------------|
+| 권위 원장 | `music_album`, `music_release`, `music_recording`, `music_track` | promote·catalog 적용 대상. 삭제 시 파이프라인·관리 UI·향후 검색 깨짐 |
+| MBID alias | `music_*_mbid` | redirect/merge 계약. 원장과 쌍 |
+| credit/genre/tag/ISRC | `music_*_artist_credit`, `music_*_genre`, `music_*_mb_tag`, `music_recording_isrc` | apply bundle이 항상 write. RLS·RPC owner 정책 전제 |
+| Last.fm | `music_lastfm_*` | 태그/벡터 미구현이어도 스키마·capacity·purge 계약에 포함 |
+| 수집 상태 | `music_collection_schedule`, `music_schedule_run`, `music_sync_job`, candidate/scan | 스케줄러 런타임 |
+| 스테이징 | `music_upcoming_release` | 발매예정 SSOT (2026-09-07 추가) |
+| 용량·purge | `music_capacity_*`, tombstone | 450MB 가드·통제 삭제 |
+| 임베딩 원장(미구현) | outbox/profile 등 §5.7 | 문서 계약·후속 구현 자리. 임의 DROP 금지 |
+
+정리한 것: Discover용 `nrm_music_list`만 제거(`20260907120000_*`). 그 외 “빈 테이블 =
+불필요”가 아니다.
 
 ---
 
@@ -1266,6 +1548,31 @@ music_rpc_admin_allowlist_set_enabled(
 music_rpc_admin_overview(
   p_caller_serial text, p_limit integer default 50, p_offset integer default 0
 ) returns jsonb;
+-- overview JSON: schedules, allowlist_count, pending_jobs,
+-- running_runs, completed_runs, failure_runs, capacity
+-- 실행/실패 탭 배열은 수집 music_schedule_run + retention nrm_system_schedule_run
+music_rpc_admin_schedule_run_inserts(
+  p_caller_serial text, p_schedule_run_id uuid,
+  p_limit integer default 50, p_offset integer default 0
+) returns jsonb;
+music_rpc_admin_schedule_run_failures(
+  p_caller_serial text, p_schedule_run_id uuid,
+  p_limit integer default 50, p_offset integer default 0
+) returns jsonb;
+-- failures JSON: { items: [{ job_id, artist, title, error_message, created_at }], total }
+-- error_message = music_admin_canonical_failure_message(last_error_message)
+music_rpc_admin_schedule_run_jobs(
+  p_caller_serial text, p_schedule_run_id uuid
+) returns jsonb;
+-- jobs JSON: { items: [{ job_kind, job_status, job_count }] }
+music_rpc_apply_lastfm_tags(p_job_id uuid, p_fence_token uuid, p_payload jsonb)
+  returns table(applied boolean, result_code text);
+music_rpc_apply_lastfm_tag_refresh_page(
+  p_job_id uuid, p_fence_token uuid, p_limit integer default 50
+) returns table(applied boolean, result_code text, has_more boolean, queued integer);
+music_rpc_admin_schedule_run_errors(
+  p_caller_serial text, p_schedule_run_id uuid
+) returns jsonb;
 music_rpc_admin_allowlist_page(
   p_caller_serial text, p_search text default null,
   p_limit integer default 50, p_offset integer default 0
@@ -1309,6 +1616,8 @@ upsert payload 확장은 worker 단계의 `music_rpc_apply_release_bundle_v2`와
 - Cron due time에 jitter를 넣는다.
 - 의미 있는 User-Agent와 연락처가 필수다.
 - 503이면 backoff와 전역 감속을 함께 적용한다.
+- Last.fm·MusicBrainz HTTP 5xx/`429`/타임아웃은 지금 처리 중인 항목을 tick 안에서
+  3번만 재시도한다(3초→3초→3초). 3번 후에도 실패하면 `dead`이고 다음 항목으로 간다.
 
 ## 8.2 MBID resolution
 
@@ -1535,7 +1844,9 @@ profile 전환 권위는 프로젝트 1이다. 각 상태 변경은 expected old
 - 프로젝트 2 테이블·inbox의 PUBLIC/anon/authenticated 권한을 철회한다.
 - 프로젝트 2 apply/search는 프로젝트 1 Edge Function만 서버 자격증명으로 호출한다.
 
-함수 owner는 `nrm_music_rpc_owner NOLOGIN` 전용 role로 하고 owner에게만 필요한 테이블 권한을 준다. 함수별로 다음을 migration에 명시한다.
+함수 owner는 `nrm_music_rpc_owner NOLOGIN` 전용 role로 하고 owner에게만 필요한 테이블 권한을 준다.
+수집 claim/즉시 실행이 `nrm_system_schedule.next_run_at`을 같이 갱신하므로 이 role에 해당 테이블 SELECT/UPDATE와 RLS 정책이 있어야 한다(`20260908114000_*`).
+함수별로 다음을 migration에 명시한다.
 
 ```sql
 revoke all on function public.<function_signature> from public, anon, authenticated;
@@ -1657,6 +1968,9 @@ MUSIC_VECTOR_SUPABASE_SECRET_KEY
 - [MusicBrainz Rate Limiting](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
 - [How To Merge Recordings](https://musicbrainz.org/doc/How_To_Merge_Recordings)
 - [Last.fm track.getTopTags](https://www.last.fm/api/show/track.getTopTags)
+- [Last.fm geo.getTopTracks](https://www.last.fm/api/show/geo.getTopTracks)
+- [Last.fm chart.getTopTracks](https://www.last.fm/api/show/chart.getTopTracks)
+- [Last.fm tag.getTopTracks](https://www.last.fm/api/show/tag.getTopTracks)
 - [Last.fm geo.getTopArtists](https://www.last.fm/api/show/geo.getTopArtists)
 - [Last.fm chart.getTopArtists](https://www.last.fm/api/show/chart.getTopArtists)
 - [Last.fm tag.getTopArtists](https://www.last.fm/api/show/tag.getTopArtists)

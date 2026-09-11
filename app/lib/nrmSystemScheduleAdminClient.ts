@@ -9,23 +9,27 @@ import type {
 export type NrmSystemScheduleJobKind =
   | 'musicbrainz_collection'
   | 'ailab_chat_retention'
-  | 'track_history_retention';
+  | 'track_history_retention'
+  | 'ops_cleanup';
 
-export type NrmSystemScheduleChatUpdatePayload = {
-  schedule_kind: 'daily' | 'interval';
+export type NrmSystemScheduleKind = 'daily' | 'weekly' | 'monthly' | 'once' | 'interval';
+
+export type NrmSystemScheduleTimingPayload = {
+  schedule_kind: NrmSystemScheduleKind;
   daily_time_kst: string | null;
-  interval_minutes: number | null;
+  interval_minutes?: number | null;
+  weekly_weekday?: number | null;
+  monthly_day?: number | null;
+  once_on_date?: string | null;
   is_enabled: boolean;
+};
+
+export type NrmSystemScheduleChatUpdatePayload = NrmSystemScheduleTimingPayload & {
   retention_days: number;
 };
 
 /** MusicBrainz 수집 스케줄은 실행 주기·on/off만 앱에서 편집한다. */
-export type NrmSystemScheduleMusicUpdatePayload = {
-  schedule_kind: 'daily' | 'interval';
-  daily_time_kst: string | null;
-  interval_minutes: number | null;
-  is_enabled: boolean;
-};
+export type NrmSystemScheduleMusicUpdatePayload = NrmSystemScheduleTimingPayload;
 
 async function callerSerial(): Promise<string> {
   const serial = (await getNrmAppSerialNo()).trim();
@@ -36,7 +40,44 @@ async function callerSerial(): Promise<string> {
 function mapJobKind(raw: unknown): NrmSystemScheduleJobKind {
   if (raw === 'ailab_chat_retention') return 'ailab_chat_retention';
   if (raw === 'track_history_retention') return 'track_history_retention';
+  if (raw === 'ops_cleanup') return 'ops_cleanup';
   return 'musicbrainz_collection';
+}
+
+function mapScheduleKind(raw: unknown): NrmSystemScheduleKind {
+  if (raw === 'weekly') return 'weekly';
+  if (raw === 'monthly') return 'monthly';
+  if (raw === 'once') return 'once';
+  if (raw === 'interval') return 'interval';
+  return 'daily';
+}
+
+function mapIntervalMinutes(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 10080) return null;
+  return value;
+}
+
+function mapWeeklyWeekday(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 6) return null;
+  return value;
+}
+
+function mapMonthlyDay(raw: unknown): number | null {
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 31) return null;
+  return value;
+}
+
+function mapOnceOnDate(raw: unknown): string | null {
+  if (raw == null || raw === '') return null;
+  const value = String(raw);
+  const ymd = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
 }
 
 function mapSystemScheduleRow(raw: Record<string, unknown>): NrmSupabaseSystemScheduleRow {
@@ -47,12 +88,32 @@ function mapSystemScheduleRow(raw: Record<string, unknown>): NrmSupabaseSystemSc
     display_name: String(raw.display_name ?? ''),
     job_kind: mapJobKind(raw.job_kind),
     is_enabled: Boolean(raw.is_enabled),
-    schedule_kind: raw.schedule_kind === 'interval' ? 'interval' : 'daily',
+    schedule_kind: mapScheduleKind(raw.schedule_kind),
     daily_time_kst: raw.daily_time_kst == null ? null : String(raw.daily_time_kst),
-    interval_minutes:
-      raw.interval_minutes == null || raw.interval_minutes === ''
-        ? null
-        : Number(raw.interval_minutes),
+    interval_minutes: mapIntervalMinutes(
+      raw.interval_minutes ??
+        (music && typeof music === 'object' && !Array.isArray(music)
+          ? (music as Record<string, unknown>).interval_minutes
+          : null),
+    ),
+    weekly_weekday: mapWeeklyWeekday(
+      raw.weekly_weekday ??
+        (music && typeof music === 'object' && !Array.isArray(music)
+          ? (music as Record<string, unknown>).weekly_weekday
+          : null),
+    ),
+    monthly_day: mapMonthlyDay(
+      raw.monthly_day ??
+        (music && typeof music === 'object' && !Array.isArray(music)
+          ? (music as Record<string, unknown>).monthly_day
+          : null),
+    ),
+    once_on_date: mapOnceOnDate(
+      raw.once_on_date ??
+        (music && typeof music === 'object' && !Array.isArray(music)
+          ? (music as Record<string, unknown>).once_on_date
+          : null),
+    ),
     next_run_at: String(raw.next_run_at ?? ''),
     config:
       raw.config && typeof raw.config === 'object' && !Array.isArray(raw.config)
@@ -131,6 +192,8 @@ export function jobKindLabel(kind: NrmSystemScheduleJobKind): string {
       return 'AI Lab 채팅 삭제';
     case 'track_history_retention':
       return 'Track History 삭제';
+    case 'ops_cleanup':
+      return '운영 데이터 정리';
     case 'musicbrainz_collection':
       return 'MusicBrainz 수집';
     default:

@@ -64,26 +64,17 @@ export type NrmSupabaseUserListRow = {
   updated_at: string;
 };
 
-export type NrmSupabaseMusicListRow = {
-  id: number;
-  rank: number;
-  year: number;
-  artist: string;
-  title: string;
-  album: string;
-  genre: string;
-  inserted_at: string;
-  updated_at?: string | null;
-};
-
 /** MusicBrainz 관리자 RPC가 반환하는 수집 스케줄 행. */
 export type NrmSupabaseMusicCollectionScheduleRow = {
   schedule_id: string;
   schedule_key: string;
   display_name: string;
-  schedule_kind: 'daily' | 'interval';
+  schedule_kind: 'daily' | 'weekly' | 'monthly' | 'once' | 'interval';
   daily_time_kst: string | null;
   interval_minutes: number | null;
+  weekly_weekday?: number | null;
+  monthly_day?: number | null;
+  once_on_date?: string | null;
   next_run_at: string;
   is_enabled: boolean;
   claimed_until: string | null;
@@ -99,6 +90,7 @@ export type NrmSupabaseMusicCollectionScheduleRow = {
   max_request_count: number;
   max_new_recording_count: number;
   priority: number;
+  collection_mode?: 'upcoming' | 'catalog' | 'tag_refresh' | 'mb_transient_retry';
   last_disabled_reason: string | null;
   created_at: string;
   updated_at: string;
@@ -109,11 +101,14 @@ export type NrmSupabaseSystemScheduleRow = {
   schedule_id: string;
   schedule_key: string;
   display_name: string;
-  job_kind: 'musicbrainz_collection' | 'ailab_chat_retention' | 'track_history_retention';
+  job_kind: 'musicbrainz_collection' | 'ailab_chat_retention' | 'track_history_retention' | 'ops_cleanup';
   is_enabled: boolean;
-  schedule_kind: 'daily' | 'interval';
+  schedule_kind: 'daily' | 'weekly' | 'monthly' | 'once' | 'interval';
   daily_time_kst: string | null;
   interval_minutes: number | null;
+  weekly_weekday?: number | null;
+  monthly_day?: number | null;
+  once_on_date?: string | null;
   next_run_at: string;
   config: Record<string, unknown>;
   created_at: string;
@@ -144,6 +139,10 @@ export type NrmSupabaseMusicScheduleRunRow = {
   started_at: string;
   finished_at: string | null;
   error_message: string | null;
+  job_kind?: 'musicbrainz_collection' | 'ailab_chat_retention' | 'track_history_retention' | 'ops_cleanup';
+  result?: Record<string, unknown> | null;
+  display_name?: string | null;
+  schedule_key?: string | null;
 };
 
 export type NrmSupabaseMusicCapacitySnapshotRow = {
@@ -156,12 +155,118 @@ export type NrmSupabaseMusicCapacitySnapshotRow = {
 };
 
 /** music_rpc_admin_overview(jsonb)의 실제 반환 계약. */
+export type NrmSupabaseMusicAdminQueueDueSchedule = {
+  schedule_id: string;
+  schedule_key: string;
+  display_name: string;
+  priority: number;
+  next_run_at: string;
+  is_enabled: boolean;
+  queue_state: 'waiting';
+};
+
+export type NrmSupabaseMusicAdminQueueOpenJob = {
+  schedule_id: string | null;
+  display_name: string;
+  job_count: number;
+};
+
+export type NrmSupabaseSystemScheduleLogRow = {
+  log_id: string;
+  created_at: string;
+  source: 'rpc' | 'cron' | 'edge' | 'pg_net' | 'trigger';
+  event: string;
+  level: 'debug' | 'info' | 'warn' | 'error';
+  schedule_id: string | null;
+  schedule_key: string | null;
+  schedule_run_id: string | null;
+  job_id: string | null;
+  detail: Record<string, unknown>;
+};
+
+export type NrmSupabaseSystemScheduleRunRow = {
+  system_run_id: string;
+  schedule_id: string;
+  schedule_key: string;
+  display_name: string;
+  job_kind: 'musicbrainz_collection' | 'ailab_chat_retention' | 'track_history_retention' | 'ops_cleanup';
+  run_status: 'running' | 'completed' | 'partial' | 'failed' | 'cancelled';
+  music_schedule_run_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  error_message: string | null;
+  result: Record<string, unknown>;
+  music_run: NrmSupabaseMusicScheduleRunRow | null;
+};
+
 export type NrmSupabaseMusicAdminOverview = {
   schedules: NrmSupabaseMusicCollectionScheduleRow[];
   allowlist_count: number;
   pending_jobs: number;
-  recent_runs: NrmSupabaseMusicScheduleRunRow[];
+  collection_busy?: boolean;
+  queue?: {
+    due_schedules: NrmSupabaseMusicAdminQueueDueSchedule[];
+    open_jobs: NrmSupabaseMusicAdminQueueOpenJob[];
+  };
+  /** @deprecated 마이그레이션 이후 running/completed/failure_runs 사용 */
+  recent_runs?: NrmSupabaseMusicScheduleRunRow[];
+  running_runs: NrmSupabaseMusicScheduleRunRow[];
+  completed_runs: NrmSupabaseMusicScheduleRunRow[];
+  failure_runs: NrmSupabaseMusicScheduleRunRow[];
   capacity: NrmSupabaseMusicCapacitySnapshotRow | null;
+};
+
+/** music_rpc_admin_schedule_run_inserts 항목. */
+export type NrmSupabaseMusicScheduleRunInsertRow = {
+  recording_id: string;
+  artist: string;
+  title: string;
+  release_title?: string;
+  created_at: string;
+};
+
+/** music_rpc_admin_schedule_run_failures 항목. */
+export type NrmSupabaseMusicScheduleRunFailureRow = {
+  job_id: string;
+  artist: string;
+  title: string;
+  error_message: string;
+  job_status?: string;
+  created_at: string;
+};
+
+export type NrmSupabaseMusicScheduleRunJobCount = {
+  job_kind: string;
+  job_status: string;
+  job_count: number;
+};
+
+/** music_rpc_admin_schedule_run_errors 계약. */
+export type NrmSupabaseMusicScheduleRunErrors = {
+  error_message: string | null;
+  failure_count: number;
+  job_errors: Array<{
+    job_id: string;
+    job_kind: string;
+    job_status: string;
+    entity_type: string;
+    http_status: number | null;
+    api_error_code: number | null;
+    last_error_message: string | null;
+    attempt_count: number;
+    created_at: string;
+    completed_at: string | null;
+  }>;
+  dead_letters: Array<{
+    dead_letter_id: string;
+    source_kind: string;
+    source_id: string;
+    reason: string;
+    failed_at: string;
+    resolved_at: string | null;
+    job_kind: string | null;
+    job_status: string | null;
+  }>;
 };
 
 export type NrmSupabaseMusicArtistAllowlistRow = {

@@ -1,4 +1,4 @@
-/** 메뉴 드로어 — 차트 루트·기간별·장르별 패널 */
+/** 메뉴 드로어 — 차트 루트·기간별(Melon 장르 차트 포함) 패널 */
 
 export type ChartRootMenuPanel = 'chartsHub' | 'charts' | 'periodCharts' | 'genreCharts';
 

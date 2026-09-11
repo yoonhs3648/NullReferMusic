@@ -20,11 +20,29 @@ function constantTimeEqual(left: string, right: string): boolean {
   return different === 0;
 }
 
+function edgeLog(event: string, detail: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({
+    fn: "musicbrainz-sync",
+    ts: new Date().toISOString(),
+    event,
+    ...detail,
+  }));
+}
+
 Deno.serve(async (request) => {
+  const started = Date.now();
+  edgeLog("http_received", {
+    method: request.method,
+    has_authorization: Boolean(request.headers.get("authorization")),
+  });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const cronToken = Deno.env.get("MUSICBRAINZ_CRON_TOKEN") ?? "";
   const authorization = request.headers.get("authorization") ?? "";
   if (!cronToken || !constantTimeEqual(authorization, `Bearer ${cronToken}`)) {
+    edgeLog("http_unauthorized", {
+      has_cron_token: Boolean(cronToken),
+      has_authorization: Boolean(authorization),
+    });
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -32,6 +50,7 @@ Deno.serve(async (request) => {
   try {
     payload = await request.json();
   } catch {
+    edgeLog("http_invalid_json", { level: "error" });
     return json({ error: "invalid_json" }, 400);
   }
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
@@ -52,22 +71,42 @@ Deno.serve(async (request) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const userAgent = Deno.env.get("MUSICBRAINZ_USER_AGENT");
   const lastfmApiKey = Deno.env.get("LASTFM_API_KEY") ?? undefined;
+  edgeLog("http_authorized", {
+    mode,
+    scheduled_at: body.scheduled_at,
+    has_supabase_url: Boolean(supabaseUrl),
+    has_service_role: Boolean(serviceRoleKey),
+    has_user_agent: Boolean(userAgent),
+    has_lastfm_key: Boolean(lastfmApiKey),
+  });
   if (!supabaseUrl || !serviceRoleKey || !userAgent) {
+    edgeLog("http_misconfigured", {
+      level: "error",
+      missing: [
+        supabaseUrl ? null : "SUPABASE_URL",
+        serviceRoleKey ? null : "SUPABASE_SERVICE_ROLE_KEY",
+        userAgent ? null : "MUSICBRAINZ_USER_AGENT",
+      ].filter(Boolean),
+    });
     return json({ error: "server_misconfigured" }, 500);
   }
   try {
-    return json(await runWorker({
+    const result = await runWorker({
       supabaseUrl,
       serviceRoleKey,
       userAgent,
       lastfmApiKey,
-    }, mode));
+      lastfmUserAgent: "NullReferMusic/lastfm-sync",
+    }, mode);
+    edgeLog("http_ok", { ...result, elapsed_ms: Date.now() - started });
+    return json(result);
   } catch (error) {
-    console.error(JSON.stringify({
-      fn: "musicbrainz-sync",
-      event: "worker_failed",
-      message: error instanceof Error ? error.message.slice(0, 900) : "unknown",
-    }));
-    return json({ error: "worker_failed" }, 500);
+    const message = error instanceof Error ? error.message.slice(0, 900) : "unknown";
+    edgeLog("worker_failed", {
+      level: "error",
+      message,
+      elapsed_ms: Date.now() - started,
+    });
+    return json({ error: "worker_failed", message }, 500);
   }
 });
