@@ -54,6 +54,10 @@ assert(
 );
 assert(edge.includes("nrm_is_admin_caller"), "Edge Function must verify the admin caller");
 assert(
+  edge.includes("startsWith('sb_')") && edge.includes("headers.set('apikey', apiKey)"),
+  "Edge Function must send sb_ keys on the apikey header only",
+);
+assert(
   edge.includes("music_rpc_capacity_status") &&
     edge.includes("vector_rpc_capacity_status"),
   "Edge Function must aggregate both capacity RPCs",

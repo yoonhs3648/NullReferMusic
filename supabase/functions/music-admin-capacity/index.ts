@@ -1,5 +1,3 @@
-import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
-
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -58,14 +56,81 @@ function isCapacityStatus(value: unknown): value is CapacityStatus {
   );
 }
 
+function sanitizeDetail(value: string): string {
+  return value
+    .replace(/sb_[A-Za-z0-9_-]+/g, '[redacted]')
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
+    .slice(0, 180);
+}
+
+/**
+ * `sb_secret_` / `sb_publishable_` keys are not JWTs. Some projects reject them
+ * on `Authorization: Bearer` and only accept `apikey`. Legacy JWT keys need both.
+ * Try the format that matches the key, then the other format on 401.
+ */
+function serviceHeaders(apiKey: string, forceBearer: boolean): Headers {
+  const headers = new Headers();
+  headers.set('apikey', apiKey);
+  headers.set('Content-Type', 'application/json');
+  headers.set('Accept', 'application/json');
+  const sendBearer = forceBearer || !apiKey.startsWith('sb_');
+  if (sendBearer) headers.set('Authorization', `Bearer ${apiKey}`);
+  return headers;
+}
+
+async function callRpcOnce(
+  url: string,
+  apiKey: string,
+  name: string,
+  body: Record<string, unknown>,
+  forceBearer: boolean,
+): Promise<{ data: unknown } | { status: number; detail: string }> {
+  const response = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: serviceHeaders(apiKey, forceBearer),
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown; code?: unknown };
+      detail = String(parsed.message ?? parsed.code ?? text);
+    } catch {
+      detail = text;
+    }
+    return { status: response.status, detail: sanitizeDetail(detail) };
+  }
+  try {
+    return { data: text ? JSON.parse(text) : null };
+  } catch {
+    return { status: response.status, detail: 'invalid_json' };
+  }
+}
+
+async function callRpc(
+  url: string,
+  apiKey: string,
+  name: string,
+  body: Record<string, unknown>,
+): Promise<{ data: unknown } | { status: number; detail: string }> {
+  const preferBearer = !apiKey.startsWith('sb_');
+  const first = await callRpcOnce(url, apiKey, name, body, preferBearer);
+  if (!('detail' in first) || first.status !== 401) return first;
+  return callRpcOnce(url, apiKey, name, body, !preferBearer);
+}
+
 async function loadCapacity(
-  client: SupabaseClient,
+  url: string,
+  apiKey: string,
   rpcName: 'music_rpc_capacity_status' | 'vector_rpc_capacity_status',
 ): Promise<CapacityStatus> {
-  const { data, error } = await client.rpc(rpcName);
-  if (error) throw new Error(`${rpcName}_failed`);
-  if (!isCapacityStatus(data)) throw new Error(`${rpcName}_invalid_response`);
-  return data;
+  const result = await callRpc(url, apiKey, rpcName, {});
+  if ('detail' in result) {
+    throw new Error(`${rpcName}_failed:${result.status}:${result.detail}`);
+  }
+  if (!isCapacityStatus(result.data)) throw new Error(`${rpcName}_invalid_response`);
+  return result.data;
 }
 
 Deno.serve(async (req) => {
@@ -104,39 +169,36 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'server_misconfigured' }, 500);
   }
 
-  const project1 = createClient(project1Url, project1ServiceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: isAdmin, error: adminError } = await project1.rpc('nrm_is_admin_caller', {
+  const adminResult = await callRpc(project1Url, project1ServiceKey, 'nrm_is_admin_caller', {
     p_serial: callerSerial,
   });
-  if (adminError) {
-    console.error(JSON.stringify({ fn: 'music-admin-capacity', event: 'admin_check_failed' }));
+  if ('detail' in adminResult) {
+    console.error(JSON.stringify({
+      fn: 'music-admin-capacity',
+      event: 'admin_check_failed',
+      status: adminResult.status,
+      detail: adminResult.detail,
+    }));
     return jsonResponse({ error: 'admin_check_failed' }, 500);
   }
-  if (isAdmin !== true) return jsonResponse({ error: 'forbidden' }, 403);
-
-  const project2 = createClient(project2Origin, project2SecretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  if (adminResult.data !== true) return jsonResponse({ error: 'forbidden' }, 403);
 
   try {
     const [project1Status, project2Status] = await Promise.all([
-      loadCapacity(project1, 'music_rpc_capacity_status'),
-      loadCapacity(project2, 'vector_rpc_capacity_status'),
+      loadCapacity(project1Url, project1ServiceKey, 'music_rpc_capacity_status'),
+      loadCapacity(project2Origin, project2SecretKey, 'vector_rpc_capacity_status'),
     ]);
     return jsonResponse({
       projects: [project1Status, project2Status],
       fetched_at: new Date().toISOString(),
     });
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        fn: 'music-admin-capacity',
-        event: 'capacity_load_failed',
-        code: error instanceof Error ? error.message : 'unknown',
-      }),
-    );
-    return jsonResponse({ error: 'capacity_load_failed' }, 502);
+    const detail = sanitizeDetail(error instanceof Error ? error.message : 'unknown');
+    console.error(JSON.stringify({
+      fn: 'music-admin-capacity',
+      event: 'capacity_load_failed',
+      detail,
+    }));
+    return jsonResponse({ error: 'capacity_load_failed', detail }, 502);
   }
 });

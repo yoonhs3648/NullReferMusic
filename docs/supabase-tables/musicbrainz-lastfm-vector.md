@@ -1867,6 +1867,8 @@ MUSIC_VECTOR_SUPABASE_SECRET_KEY
 
 비밀은 Git, 앱 config, APK, 로그, outbox, dead letter에 넣지 않는다.
 
+`MUSIC_VECTOR_SUPABASE_SECRET_KEY`가 `sb_secret_` 키이면 Edge Function은 그 값을 PostgREST `apikey` 헤더로만 보낸다. `Authorization: Bearer`에 넣으면 JWT가 아니라서 플랫폼이 거절하고 관리자 용량 조회가 실패한다.
+
 ## 10.3 용량 가드
 
 `pg_database_size(current_database())`를 claim RPC가 직접 확인한다.

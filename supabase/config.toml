@@ -20,3 +20,8 @@ port = 54323
 # The function performs constant-time validation of MUSICBRAINZ_CRON_TOKEN.
 # pg_cron does not send a Supabase user JWT.
 verify_jwt = false
+
+[functions.music-admin-capacity]
+# The app calls this with the publishable key, which is not a user JWT.
+# Admin access is checked inside the function via nrm_is_admin_caller.
+verify_jwt = false

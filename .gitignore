@@ -29,6 +29,8 @@ Thumbs.db
 
 # GitHub data PAT (APK 빌드용 — 절대 커밋 금지)
 .secrets/nrm-github-data.pat
+# Supabase access token (로컬 전용 — 절대 커밋 금지)
+.secrets/SUPABASE-ACCESS-TOKEN.md
 .tmp-gemini-models*.json
 supabase/seed_llm_provider_gemini.sql
 

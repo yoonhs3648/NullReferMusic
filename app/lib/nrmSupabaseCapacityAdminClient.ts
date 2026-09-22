@@ -56,6 +56,24 @@ function requiredNonNegativeNumber(value: unknown): number {
   return number;
 }
 
+async function readCapacityInvokeError(error: unknown): Promise<string> {
+  const context = (error as { context?: unknown }).context;
+  if (!context || typeof context !== 'object') return '';
+  try {
+    const body =
+      typeof (context as { json?: unknown }).json === 'function'
+        ? await (context as Response).json()
+        : context;
+    if (!body || typeof body !== 'object') return '';
+    const record = body as Record<string, unknown>;
+    const detail = typeof record.detail === 'string' ? record.detail.trim() : '';
+    const code = typeof record.error === 'string' ? record.error.trim() : '';
+    return [code, detail].filter(Boolean).join(': ').slice(0, 240);
+  } catch {
+    return '';
+  }
+}
+
 function parseState(value: unknown): NrmSupabaseCapacityState {
   if (value === 'normal' || value === 'discovery_disabled') {
     return value;
@@ -108,7 +126,10 @@ export async function fetchNrmSupabaseCapacityForAdmin(): Promise<NrmSupabaseCap
   const { data, error } = await getNrmSupabase().functions.invoke(CAPACITY_FUNCTION_NAME, {
     body: { callerSerial },
   });
-  if (error) throw new Error(`Supabase 용량 조회 실패: ${error.message}`);
+  if (error) {
+    const detail = await readCapacityInvokeError(error);
+    throw new Error(detail ? `Supabase 용량 조회 실패: ${detail}` : 'Supabase 용량 조회 실패');
+  }
 
   const payload = asRecord(data);
   if (!Array.isArray(payload.projects) || payload.projects.length !== 2) {

@@ -1,0 +1,20 @@
+---
+description: Supabase access token은 로컬 MD에서 읽고, 사용자에게 다시 요청하지 않는다.
+alwaysApply: true
+---
+
+# Supabase access token
+
+Supabase CLI·Management API·배포·원격 SQL에 access token이 필요하면 **사용자에게 묻지 않는다.**
+
+## 위치
+
+`.secrets/SUPABASE-ACCESS-TOKEN.md`
+
+코드 펜스의 `sbp_` 값을 `SUPABASE_ACCESS_TOKEN`으로만 사용한다. 발급일·만료일도 그 파일에 있다.
+
+## 금지
+
+- 토큰 값을 채팅, 로그, 커밋 메시지, 다른 소스 파일에 출력하거나 복사하지 않는다.
+- 이 파일을 Git에 넣지 않는다. `.gitignore`의 `.secrets/SUPABASE-ACCESS-TOKEN.md`를 유지한다.
+- 만료(2026-12-21) 후에만 사용자에게 새 토큰을 요청한다.
