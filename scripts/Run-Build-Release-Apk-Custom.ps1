@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$RepoRoot
+    [string]$RepoRoot,
+    [switch]$AssumeYes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,10 +60,14 @@ Write-Host "version : $versionName"
 Write-Host ''
 
 # ── 2. confirm Y/N ────────────────────────────────────────────────────────────
-if (-not (Read-BuildYn)) {
-    Write-Host 'Cancelled.'
-    Read-Host | Out-Null
-    exit 0
+# 배치가 echo Y | powershell 로 답을 넘기면 stdin 이 리다이렉트되어
+# Read-Host 가 NonInteractive 오류로 바로 죽고, 창이 닫힌다.
+if (-not $AssumeYes) {
+    if (-not (Read-BuildYn)) {
+        Write-Host 'Cancelled.'
+        Read-Host | Out-Null
+        exit 0
+    }
 }
 
 $adminDefaults = Get-NrmBrandAdminDefaults -RepoRoot $RepoRoot

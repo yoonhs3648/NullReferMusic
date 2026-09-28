@@ -45,6 +45,14 @@ Use NullReferMusic-Build-Release-Apk.bat or see docs/RELEASE-APK-IPA-RULE.md sec
 "@
 }
 
+$portableJava = Get-ChildItem -LiteralPath (Join-Path $RepoRoot '.jdk') -Recurse -Filter java.exe -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match '\\bin\\java\.exe$' } |
+    Select-Object -First 1
+if (-not $portableJava) {
+    Write-Error "Project JDK not found under $RepoRoot\.jdk . The release build needs JDK 21 there, without changing system JAVA_HOME."
+}
+$env:JAVA_HOME = Split-Path (Split-Path $portableJava.FullName -Parent) -Parent
+Write-Host "[nrm] JAVA_HOME=$env:JAVA_HOME (project local)"
 Write-Host "[nrm] GRADLE_USER_HOME=$gradleUserHome"
 Write-Host "[nrm] subst $substDrive -> $RepoRoot"
 if ($ApkVariant) {
