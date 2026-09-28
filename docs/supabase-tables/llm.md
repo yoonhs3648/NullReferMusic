@@ -750,7 +750,9 @@ Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠S
 - Intent `needDownloadTools`: 다운로드 FC — 도구 턴마다 클라이언트가 Edge를 다시 부르므로 그때만 추가 1회 (`previousInteractionId` 왕복)
 - 429: 대기 재시도 없이 즉시 `rate_limit` 반환
 - 대화 history: 최근 **15**턴 (향후 Summary 메모리 확장 포인트)
-- Intent 분류: Google `gemini-2.0-flash-lite` 별도 1회(Interactions 우선, 실패 시 Legacy → 휴리스틱)
+- Intent 분류: 인사·다운로드/검색·추천·FAQ는 키워드로 바로 라우팅한다. 그 외만 Google `gemini-3.5-flash-lite` 1회(Interactions, JSON은 프롬프트로 요청, 4초). 실패 시 Legacy `generateContent` 후 키워드 가드. 폐기된 `gemini-2.0-flash`와 `json_object` 형식은 쓰지 않는다.
+- 다운로드 FC·`[DOWNLOAD_RULES]`는 `needsDownloadTool` / `needsMusicSearch` / toolContinue 일 때만 붙인다. 인사·일반·추천·FAQ에는 역할·보안·현재 시각·플랫폼 제약·출력 형식 프롬프트는 유지하고 도구 스키마는 빼서 첫 토큰을 당긴다.
+- Interactions SSE는 응답 헤더가 온 뒤에도 본문 읽기까지 같은 벽시계(일반 22초, 도구 45초)로 끊는다. 끊기면 시도 로그와 system 안내를 남긴다. 앱은 55초 안에 스트림이 안 끝나면 안내를 보여주고, 세션이 이미 있으면 그 안내를 DB에 남긴다.
 
 **현재 활성 LLM 모델 (2026-07-31 기준)**: 피커는 `preference` 1→6 — `gemini-3.5-flash-lite`(`55`, 추천), `gemini-3.1-flash-lite`(`21`), `openai/gpt-oss-120b`(`1002`), `qwen/qwen3.6-27b`(`1001`), `gemini-3.6-flash`(`56`), `gemini-3.5-flash`(`28`). `llama-3.3-70b-versatile`(`1000`)은 `IsActive=false`. Groq 시드: `20260723190000_llm_provider_groq.sql`. Gemini 추가/활성: `20260723090000_llm_model_append_gemini36.sql`, `20260723093000_llm_model_activate_gemini35_flash_lite.sql`. 정렬·추천 컬럼: `20260731120000_llm_model_preference_recommend.sql`. `Type<>'LLM'`(Embedding/TTS/Image/Video)은 이 변경과 무관하게 그대로 둔다. `admin` SerialNo는 전체 `ProviderID`에 대해 `LLMUserPermission`(`IsApproved=true`, 무제한)을 갖는다(`scripts/seed-llm-admin-permissions-all.mjs`, Groq는 마이그레이션에서 `ProviderID=2` 권한도 INSERT). `LLMModel.IsActive=false`면 `llm-chat-send`가 `provider_unavailable`로 막는다.
 

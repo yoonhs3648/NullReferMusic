@@ -12,9 +12,9 @@ import { shouldUseGeminiInteractionsApi } from './ops/geminiApiMode.ts';
 import { classifyIntentViaInteractions } from './providers/geminiInteractions.ts';
 import type { AiLabIntentKind, IntentResult, IntentSource } from './types.ts';
 
-/** 분류 전용 — 메인 채팅 모델과 분리 */
-export const INTENT_CLASSIFIER_MODEL = 'models/gemini-2.0-flash';
-const INTENT_TIMEOUT_MS = 10_000;
+/** 분류 전용. 폐기된 gemini-2.0-flash 대신 채팅과 같은 계열을 쓴다. */
+export const INTENT_CLASSIFIER_MODEL = 'models/gemini-3.5-flash-lite';
+const INTENT_TIMEOUT_MS = 4_000;
 const INTENT_MAX_OUTPUT_TOKENS = 400;
 
 const VALID: readonly AiLabIntentKind[] = [
@@ -384,6 +384,7 @@ export async function classifyIntentWithLlm(
           temperature: 0,
           maxOutputTokens: INTENT_MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
       signal: AbortSignal.timeout(INTENT_TIMEOUT_MS),
@@ -450,6 +451,63 @@ export function intentWhenClassifierUnavailable(reason: string): IntentResult {
   };
 }
 
+const RE_GREETING_ONLY =
+  /^(?:안녕(?:하세요|하십니까)?|하이|헬로|hello|hi|hey|ㅎㅇ|ㅎㅎ|테스트)[\s!.?~]*$/iu;
+const RE_RECOMMEND = /추천/;
+const RE_FAQ =
+  /(?:이\s*앱|앱\s*(?:사용|이용|오류|기능|꿀팁)|로그인|회원가입|결제|유료|버그)/;
+
+function routeIntentWithoutClassifier(msg: string): IntentResult | null {
+  if (
+    messageLooksLikeDownload(msg) ||
+    messageLooksLikeMusicSearch(msg) ||
+    /\[AI_LAB_TRACK_SELECT\]|\[INTERNAL_CLIENT_STATE\]/.test(msg)
+  ) {
+    return {
+      ...intentWhenClassifierUnavailable('keyword_fast_path'),
+      source: 'keyword_guard',
+    };
+  }
+  if (RE_GREETING_ONLY.test(msg)) {
+    return {
+      ...intentWhenClassifierUnavailable('greeting_fast_path'),
+      confidence: 0.8,
+      source: 'keyword_guard',
+    };
+  }
+  if (RE_RECOMMEND.test(msg)) {
+    return normalizeFlags({
+      intent: 'recommendation',
+      confidence: 0.8,
+      needsWebSearch: false,
+      needsVectorSearch: true,
+      needsFaqSearch: false,
+      needsDownloadTool: false,
+      needsHistory: true,
+      needsUserProfile: true,
+      needsMusicSearch: false,
+      reasoning: 'keyword:recommendation',
+      source: 'keyword_guard',
+    });
+  }
+  if (RE_FAQ.test(msg)) {
+    return normalizeFlags({
+      intent: 'faq',
+      confidence: 0.75,
+      needsWebSearch: false,
+      needsVectorSearch: false,
+      needsFaqSearch: true,
+      needsDownloadTool: false,
+      needsHistory: false,
+      needsUserProfile: false,
+      needsMusicSearch: false,
+      reasoning: 'keyword:faq',
+      source: 'keyword_guard',
+    });
+  }
+  return null;
+}
+
 export async function analyzeUserIntent(params: {
   userMessage: string;
   isToolContinue: boolean;
@@ -458,9 +516,12 @@ export async function analyzeUserIntent(params: {
   if (params.isToolContinue) return toolContinueIntentResult();
 
   const msg = params.userMessage.trim();
+  const keywordRouted = routeIntentWithoutClassifier(msg);
   let base: IntentResult;
 
-  if (!params.googleApiKey?.trim()) {
+  if (keywordRouted) {
+    base = keywordRouted;
+  } else if (!params.googleApiKey?.trim()) {
     base = intentWhenClassifierUnavailable('no_google_api_key');
   } else {
     const classified = await classifyIntentWithLlm(params.googleApiKey, msg);

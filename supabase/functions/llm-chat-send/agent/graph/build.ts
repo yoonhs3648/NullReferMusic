@@ -14,7 +14,7 @@ export function buildExecutionGraph(params: {
   const { intent, tools, isToolContinue } = params;
   const downloadTools = tools.filter((t) => t.kind === 'download_fc').map((t) => t.id);
 
-  if (isToolContinue || intent.needsDownloadTool || downloadTools.length > 0) {
+  if (isToolContinue || intent.needsDownloadTool || intent.needsMusicSearch || downloadTools.length > 0) {
     return linearGraph([
       { type: 'tools', toolIds: downloadTools, parallel: false, retry: 0 },
       { type: 'llm', timeoutMs: 45_000, retry: 0, parallel: false },

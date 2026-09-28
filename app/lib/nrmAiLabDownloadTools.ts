@@ -399,6 +399,23 @@ export async function listReadyDownloadPlatforms(): Promise<{
   };
 }
 
+export const AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE =
+  '멜론에서 해당 곡을 찾지 못했어요. 가수와 곡의 정확한 이름을 알려 주세요.';
+
+/** 곡 검색이 오류 없이 0건인 경우. 선택 목록을 만들면 안 된다. */
+export function isAiLabMelonTrackSearchMiss(
+  name: string,
+  response: Record<string, unknown> | undefined,
+): boolean {
+  if (name !== 'search_music' && name !== 'search_track_on_platform') return false;
+  const result = response ?? {};
+  if (result.suggestMelon === true) return false;
+  if (result.error) return false;
+  const hits = Array.isArray(result.hits) ? result.hits : [];
+  const count = Number(result.count ?? hits.length);
+  return hits.length === 0 && (!Number.isFinite(count) || count <= 0);
+}
+
 function legacyToMusicPlatformId(platform: NrmAiLabDownloadPlatformId): MusicPlatformIdType {
   switch (platform) {
     case 'melon':
@@ -474,7 +491,9 @@ async function searchMusicTool(
           ? '검색 결과 1건. 다운로드면 먼저 「다운로드를 진행합니다.」를 말한 뒤 start_music_download(hit, lyricsOption=none). 가사 미요청이면 capability로 되묻기. 요청당 1곡.'
           : count > 1
             ? '여러 후보(한 페이지 최대 5개+「다른 목록 보기」). 텍스트는 선택 안내만. 「다운로드를 진행합니다」금지. start_music_download·재검색 금지. choices 대기.'
-            : out.error
+            : isAiLabMelonTrackSearchMiss('search_music', { hits: out.hits, error: out.error ?? null, count })
+              ? `검색 결과 0건. 선택 목록 없음. 「아래 목록에서 선택」 금지. ${AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE} 재검색·start_music_download 금지.`
+              : out.error
               ? null
               : '검색 결과 없음',
     },
@@ -944,12 +963,17 @@ export async function executeAiLabDownloadTool(
     }
     const out = await searchTrackOnPlatform('melon', query);
     if (out.hits.length > 0) cacheAiLabTrackHits(out.hits);
+    const count = out.hits.length;
     return {
       result: {
         hits: out.hits,
         error: out.error ?? null,
-        count: out.hits.length,
+        count,
         platformId: MusicPlatformId.MELON,
+        nextHint:
+          count === 0 && !out.error
+            ? `검색 결과 0건. 선택 목록 없음. 「아래 목록에서 선택」 금지. ${AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE} 재검색·start_music_download 금지.`
+            : undefined,
       },
       choices: out.choices,
     };

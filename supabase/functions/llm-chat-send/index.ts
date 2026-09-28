@@ -1727,6 +1727,31 @@ function parseTrackSelectHitPayload(raw: unknown): {
   };
 }
 
+/** 곡 검색 0건이면 선택 안내를 금지하고, 정확한 이름을 다시 묻게 한다. */
+function guideEmptyMelonTrackSearch<T extends { name: string; response: Record<string, unknown> }>(
+  rows: T[],
+): T[] {
+  return rows.map((row) => {
+    if (row.name !== 'search_music' && row.name !== 'search_track_on_platform') return row;
+    const response = row.response ?? {};
+    if (response.suggestMelon === true || response.error) return row;
+    const hits = Array.isArray(response.hits) ? response.hits : [];
+    const count = Number(response.count ?? hits.length);
+    if (hits.length > 0 || (Number.isFinite(count) && count > 0)) return row;
+    return {
+      ...row,
+      response: {
+        ...response,
+        ok: false,
+        count: 0,
+        hits: [],
+        nextHint:
+          '검색 결과 0건. 선택 목록 없음. 「아래 목록에서 선택」「선택해 주세요」 금지. 멜론에서 해당 곡을 찾지 못했어요. 가수와 곡의 정확한 이름을 알려 주세요. 재검색·start_music_download 금지.',
+      },
+    };
+  });
+}
+
 function buildUserTextForLlmFromClientHints(params: {
   displayMessage: string;
   trackSelectHit: ReturnType<typeof parseTrackSelectHitPayload>;
@@ -3320,14 +3345,15 @@ Deno.serve(async (req: Request) => {
           });
           const llmStartedAt = Date.now();
           let deltaCount = 0;
+          const guidedToolResults = isToolContinue ? guideEmptyMelonTrackSearch(toolResults) : toolResults;
           const toolContinuePayload = isToolContinue
             ? {
-                modelFunctionCalls: toolResults.map((t) => ({
+                modelFunctionCalls: guidedToolResults.map((t) => ({
                   callId: t.callId,
                   name: t.name,
                   args: t.args,
                 })),
-                functionResponses: toolResults.map((t) => ({
+                functionResponses: guidedToolResults.map((t) => ({
                   name: t.name,
                   response: t.response,
                 })),

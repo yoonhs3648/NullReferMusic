@@ -27,6 +27,8 @@ import { NrmHamburgerIcon } from '@/components/nrm/NrmHamburgerIcon';
 import { NrmLogo } from '@/components/nrm/NrmLogo';
 import { nrmTokens } from '@/constants/nrmTokens';
 import { getNrmAppSerialNo } from '@/lib/nrmAppSerialNo';
+import { getNrmAuthSessionSnapshot } from '@/lib/nrmAuthSession';
+import { getNrmBrandIdentitySnapshot } from '@/lib/nrmBrandIdentity';
 import {
   nrmAiLabEmptyGreeting,
   nrmAiLabRelativeTimeLabel,
@@ -66,6 +68,7 @@ import {
   persistAiLabYoutubeConfirmHost,
 } from '@/lib/nrmAiLabChatPersist';
 import { logNrmRunError } from '@/lib/nrmDevLog';
+import { fetchLlmModelsForAiLab, pickDefaultLlmModelId } from '@/lib/nrmLlmModelClient';
 import { resolveLlmSerialNo } from '@/lib/nrmLlmSerialNo';
 import {
   NrmLlmChatSendError,
@@ -74,6 +77,7 @@ import {
   type NrmLlmToolResultPayload,
 } from '@/lib/nrmLlmChatSend';
 import {
+  AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE,
   aiLabOneDownloadPerRequestResult,
   confirmAiLabYoutubeCandidateAndDownload,
   executeAiLabDownloadTool,
@@ -82,6 +86,7 @@ import {
   hitRefFromDownloadYesChoiceId,
   isAiLabDownloadChoiceId,
   isAiLabDownloadYesChoiceId,
+  isAiLabMelonTrackSearchMiss,
   isAiLabStartDownloadToolName,
   isAiLabTrackChoiceId,
   resolveMelonChartInfoChoices,
@@ -155,6 +160,13 @@ function aiLabSendErrorText(e: unknown): string {
 
 function nextTempId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 로그인 세션·브랜드 identity가 이미 메모리에 있으면 첫 프레임부터 전송 가능. */
+function readCachedAiLabSerialNo(): string | null {
+  const fromSession = getNrmAuthSessionSnapshot()?.serialNo ?? '';
+  const fromBrand = getNrmBrandIdentitySnapshot()?.serialNo ?? '';
+  return resolveLlmSerialNo(fromSession || fromBrand);
 }
 
 /** 새 대화 전송 직후 로컬 전용 세션 id (`c-…`). 서버 SessionID와 구분. */
@@ -439,7 +451,10 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const systemBubbleBg = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.045)';
   const systemTextColor = isDark ? nrmTokens.color.textMuted : nrmTokens.color.inkMuted80;
 
-  const [serialNo, setSerialNo] = useState<string | null>(null);
+  const [serialNo, setSerialNo] = useState<string | null>(readCachedAiLabSerialNo);
+  /** 시리얼·모델이 아직 없을 때 눌러 둔 전송. 준비되면 그 텍스트를 보낸다. */
+  const [sendArmed, setSendArmed] = useState(false);
+  const pendingSendTextRef = useRef<string | null>(null);
   const [conversations, setConversations] = useState<NrmAiLabConversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -646,18 +661,25 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     };
   }, [llmModelId, pinListToBottom, serialNo]);
 
-  // 사용자가 마지막으로 직접 고른 모델을 기기에서 복원 — 로드 전에는 피커가
-  // pickDefault로 AsyncStorage를 덮어쓰지 않도록 prefReady를 기다린다.
+  // 사이드 메뉴 Modal은 닫혀 있으면 자식을 마운트하지 않는다.
+  // 기본 모델 조회를 피커 안에만 두면, 앱을 켜고 바로 보낼 때 modelId가 없어 전송이 무시된다.
   useEffect(() => {
     let cancelled = false;
-    void loadAiLabSelectedModelId()
-      .then((id) => {
+    void (async () => {
+      const saved = await loadAiLabSelectedModelId();
+      if (cancelled) return;
+      if (saved != null) setLlmModelId(saved);
+      setLlmModelPrefReady(true);
+      if (saved != null) return;
+      try {
+        const models = await fetchLlmModelsForAiLab();
         if (cancelled) return;
-        if (id != null) setLlmModelId(id);
-      })
-      .finally(() => {
-        if (!cancelled) setLlmModelPrefReady(true);
-      });
+        const id = pickDefaultLlmModelId(models);
+        if (id != null) setLlmModelId((prev) => (prev == null ? id : prev));
+      } catch (e) {
+        logNrmRunError('ailab.models', e);
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -916,20 +938,54 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
   const activeSessionSending = Boolean(activeId && sendingSessionIds.has(activeId));
   const greeting = useMemo(() => nrmAiLabEmptyGreeting(greetingName), [greetingName]);
 
+  const keyboardOpenRef = useRef(false);
+  const restingWindowHeightRef = useRef(Dimensions.get('window').height);
+
+  useEffect(() => {
+    const onChange = ({ window }: { window: { height: number } }) => {
+      if (!keyboardOpenRef.current) {
+        restingWindowHeightRef.current = window.height;
+        return;
+      }
+      // adjustResize가 늦게 창을 줄이면 수동 여백과 겹치므로 여백을 뺀다.
+      if (window.height < restingWindowHeightRef.current - 48) setKeyboardInset(0);
+    };
+    const sub = Dimensions.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const frameEvt = Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidChangeFrame';
     const onShow = (e: { endCoordinates: { height: number; screenY: number } }) => {
-      const winH = Dimensions.get('window').height;
-      const overlap = Math.max(0, winH - e.endCoordinates.screenY);
-      const fallback = e.endCoordinates.height;
-      setKeyboardInset(overlap > 0 ? overlap : Platform.OS === 'ios' ? fallback : 0);
+      const nowH = Dimensions.get('window').height;
+      const kb = Math.max(0, Number(e.endCoordinates?.height) || 0);
+      const screenY = Number(e.endCoordinates?.screenY);
+      const overlap = Number.isFinite(screenY) ? Math.max(0, nowH - screenY) : 0;
+      const resized = nowH < restingWindowHeightRef.current - 48;
+      keyboardOpenRef.current = true;
+      if (resized) {
+        setKeyboardInset(0);
+        return;
+      }
+      // edge-to-edge 첫 키보드 이벤트는 screenY가 창 높이와 같아 overlap이 0이다.
+      // height로 올려야 전송 버튼이 키보드 뒤에 남지 않는다.
+      const lift = overlap > 0 ? overlap : kb;
+      if (lift <= 0) return;
+      setKeyboardInset(lift);
     };
-    const onHide = () => setKeyboardInset(0);
+    const onHide = () => {
+      keyboardOpenRef.current = false;
+      restingWindowHeightRef.current = Dimensions.get('window').height;
+      setKeyboardInset(0);
+    };
     const subShow = Keyboard.addListener(showEvt, onShow);
+    const subFrame = Keyboard.addListener(frameEvt, onShow);
     const subHide = Keyboard.addListener(hideEvt, onHide);
     return () => {
       subShow.remove();
+      subFrame.remove();
       subHide.remove();
     };
   }, []);
@@ -2174,6 +2230,40 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               });
             }
             if (roundChoices) lastToolChoices = roundChoices;
+            const onlyEmptyTrackSearch =
+              nextResults.length > 0 &&
+              !(roundChoices && roundChoices.length > 0) &&
+              nextResults.every((row) => isAiLabMelonTrackSearchMiss(row.name, row.response));
+            if (onlyEmptyTrackSearch) {
+              lastAssistantText = AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE;
+              lastToolChoices = undefined;
+              patchAssistant(activeAssistantId, {
+                content: AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE,
+                typing: false,
+                choices: undefined,
+                youtubeConfirm: undefined,
+              });
+              if (
+                serialNo &&
+                llmModelId != null &&
+                sessionIdForApi &&
+                /^\d+$/.test(sessionIdForApi)
+              ) {
+                void persistAiLabLocalMessages({
+                  serialNo,
+                  sessionId: sessionIdForApi,
+                  modelId: llmModelId,
+                  messages: [
+                    {
+                      id: activeAssistantId,
+                      role: 'assistant',
+                      content: AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE,
+                    },
+                  ],
+                });
+              }
+              break;
+            }
             toolResults = nextResults;
             toolContinue = true;
             if (nextResults.length === 0) {
@@ -2279,6 +2369,19 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 : c,
             ),
           );
+          if (
+            serialNo &&
+            llmModelId != null &&
+            sessionIdForApi &&
+            /^\d+$/.test(sessionIdForApi)
+          ) {
+            void persistAiLabLocalMessages({
+              serialNo,
+              sessionId: sessionIdForApi,
+              modelId: llmModelId,
+              messages: [sysMsg],
+            });
+          }
         } finally {
           clearSessionSending(flightSessionId);
           pinListToBottom({ animated: false });
@@ -2290,10 +2393,35 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
-    if (!text || activeSessionSending || !serialNo || llmModelId == null) return;
+    if (!text || activeSessionSending || sendArmed) return;
+    if (!serialNo || llmModelId == null) {
+      pendingSendTextRef.current = text;
+      setSendArmed(true);
+      return;
+    }
     setDraft('');
     sendUserText(text);
-  }, [activeSessionSending, draft, llmModelId, sendUserText, serialNo]);
+  }, [activeSessionSending, draft, llmModelId, sendArmed, sendUserText, serialNo]);
+
+  useEffect(() => {
+    if (!sendArmed) return;
+    if (!serialNo || llmModelId == null) return;
+    const text = pendingSendTextRef.current?.trim() ?? '';
+    pendingSendTextRef.current = null;
+    setSendArmed(false);
+    if (!text) return;
+    setDraft('');
+    sendUserText(text);
+  }, [llmModelId, sendArmed, sendUserText, serialNo]);
+
+  useEffect(() => {
+    if (!sendArmed) return;
+    const timer = setTimeout(() => {
+      pendingSendTextRef.current = null;
+      setSendArmed(false);
+    }, 20000);
+    return () => clearTimeout(timer);
+  }, [sendArmed]);
 
   const handleChoicePress = useCallback(
     (choice: NrmAiLabChoice, messageId?: string) => {
@@ -3247,9 +3375,14 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           {suggestionChips.map((chip) => (
             <Pressable
               key={`${chip.categoryId}-${chip.promptId}`}
-              disabled={activeSessionSending || !serialNo || llmModelId == null}
+              disabled={activeSessionSending || sendArmed}
               onPress={() => {
-                if (activeSessionSending || !serialNo || llmModelId == null) return;
+                if (activeSessionSending || sendArmed) return;
+                if (!serialNo || llmModelId == null) {
+                  pendingSendTextRef.current = chip.promptText;
+                  setSendArmed(true);
+                  return;
+                }
                 void sendUserText(chip.promptText);
               }}
               style={({ pressed }) => [
@@ -3332,7 +3465,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
-          disabled={activeSessionSending || !serialNo}
+          disabled={activeSessionSending || sendArmed}
         />
       </View>
       {keyboardInset > 0 ? <View style={{ height: keyboardInset }} /> : null}

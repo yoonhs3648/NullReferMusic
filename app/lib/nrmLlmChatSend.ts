@@ -25,6 +25,8 @@ import {
 import type { NrmSupabaseChatMessageRow } from '@/lib/nrmSupabaseDatabase.types';
 
 const LOG_TAG = 'ailab.llmSend';
+/** Edge 본문 제한(최대 45초)보다 길게 잡아, 서버 안내가 먼저 오게 한다. */
+const CLIENT_STREAM_TIMEOUT_MS = 55_000;
 
 export type NrmLlmChatSendErrorCode = 'fetch_error' | 'http_error' | 'stream_error' | 'no_final';
 
@@ -183,6 +185,10 @@ export async function sendLlmChatMessageStream(
         Authorization: `Bearer ${NRM_SUPABASE_PUBLISHABLE_KEY}`,
         apikey: NRM_SUPABASE_PUBLISHABLE_KEY,
       },
+      signal:
+        typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(CLIENT_STREAM_TIMEOUT_MS)
+          : undefined,
       body: JSON.stringify({
         serialNo,
         modelId,
@@ -376,8 +382,31 @@ export async function sendLlmChatMessageStream(
   };
 
   try {
+    const streamDeadlineAt = Date.now() + CLIENT_STREAM_TIMEOUT_MS;
+    const readChunk = () =>
+      new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+        const left = streamDeadlineAt - Date.now();
+        if (left <= 0) {
+          reject(new NrmLlmChatSendError('no_final', 'llm-chat-send: client_stream_timeout'));
+          return;
+        }
+        const timer = setTimeout(() => {
+          void reader.cancel().catch(() => {});
+          reject(new NrmLlmChatSendError('no_final', 'llm-chat-send: client_stream_timeout'));
+        }, left);
+        reader.read().then(
+          (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        );
+      });
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunk();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx: number;

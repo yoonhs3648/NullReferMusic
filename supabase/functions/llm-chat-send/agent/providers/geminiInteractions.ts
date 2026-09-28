@@ -36,7 +36,7 @@ const GEMINI_PLAIN_ATTEMPT_MS = 22_000;
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_LEGACY = 8192;
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_MODERN = 65536;
 const GEMINI_TITLE_TIMEOUT_MS = 8_000;
-const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 40;
+const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 128;
 const GEMINI_TITLE_MAX_LEN = 24;
 
 const TYPING_REPLAY_CHUNK_CHARS = 24;
@@ -133,6 +133,9 @@ export type StreamOptions = {
     /** Interactions stateful FC — Turn1 interaction.id */
     previousInteractionId?: string | null;
   };
+  /** 헤더+SSE 본문 전체 벽시계. 없으면 시도별 timeout만 사용 */
+  timeoutMs?: number;
+  signal?: AbortSignal;
 };
 
 function emptyAttemptHttpFields(): Pick<
@@ -462,6 +465,24 @@ function interactionsHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+/** 헤더 수신 이후 SSE 본문까지 같은 제한으로 끊는다. fetch 반환 시 타이머를 풀지 않는다. */
+function beginAttemptDeadline(
+  timeoutMs: number,
+  parent?: AbortSignal,
+): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onParent = () => controller.abort();
+  parent?.addEventListener('abort', onParent);
+  return {
+    signal: controller.signal,
+    done: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onParent);
+    },
+  };
+}
+
 async function fetchInteractionsWithTimeout(
   url: string,
   apiKey: string,
@@ -486,12 +507,20 @@ async function fetchInteractionsWithTimeout(
 async function readInteractionsSseEvents(
   res: Response,
   onEvent: (json: Record<string, unknown>) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!res.body) return;
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   const reader = res.body.getReader();
+  const onAbort = () => {
+    reader.cancel().catch(() => {});
+  };
+  signal?.addEventListener('abort', onAbort);
   const decoder = new TextDecoder();
   let buffer = '';
+  try {
   while (true) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -533,6 +562,9 @@ async function readInteractionsSseEvents(
         // ignore
       }
     }
+  }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -868,14 +900,18 @@ export async function streamGeminiInteractions(
     const attempt = attempts[i]!;
     const attemptStarted = Date.now();
     const requestBody = buildBody(attempt, true);
+    const wallMs = Math.max(attempt.timeoutMs, options?.timeoutMs ?? 0);
+    const deadline = beginAttemptDeadline(wallMs, options?.signal);
+    let keepDeadlineForBody = false;
     let res: Response;
     try {
-      res = await fetchInteractionsWithTimeout(
-        GEMINI_INTERACTIONS_STREAM_URL,
-        apiKey,
-        requestBody,
-        attempt.timeoutMs,
-      );
+      res = await fetch(GEMINI_INTERACTIONS_STREAM_URL, {
+        method: 'POST',
+        headers: interactionsHeaders(apiKey),
+        body: JSON.stringify(requestBody),
+        signal: deadline.signal,
+      });
+      keepDeadlineForBody = true;
     } catch (e) {
       const aborted =
         (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) ||
@@ -919,11 +955,14 @@ export async function streamGeminiInteractions(
       );
       if (i < attempts.length - 1) continue;
       return lastFail;
+    } finally {
+      if (!keepDeadlineForBody) deadline.done();
     }
 
     if (!res.ok) {
       const parsed = await parseInteractionsUnaryResponse(res, attempt.withSearch);
       if (!parsed.ok) {
+        deadline.done();
         const rateLimited = isGeminiRateLimitStatus(parsed.status);
         const kind = parsed.status === 401 || parsed.status === 403
           ? 'auth'
@@ -1094,8 +1133,13 @@ export async function streamGeminiInteractions(
           }
           return;
         }
-      });
+      }, deadline.signal);
     } catch (e) {
+      deadline.done();
+      const aborted =
+        (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) ||
+        (typeof e === 'object' && e != null && 'name' in e &&
+          (e as { name?: string }).name === 'AbortError');
       const errorMessage = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
       attemptDiags.push({
         ...emptyAttemptHttpFields(),
@@ -1105,7 +1149,7 @@ export async function streamGeminiInteractions(
         maxOutputTokens: attempt.maxOutputTokens,
         ok: false,
         httpStatus: res.status,
-        errorKind: 'network',
+        errorKind: aborted ? 'timeout' : 'network',
         errorMessage: errorMessage.slice(0, 800),
         finishReason: finishReason ?? null,
         blockReason: null,
@@ -1123,6 +1167,7 @@ export async function streamGeminiInteractions(
       if (i < attempts.length - 1) continue;
       return lastFail;
     }
+    deadline.done();
 
     // flush remaining FC accumulators
     for (const [index, acc] of fcByIndex) {
@@ -1419,7 +1464,18 @@ export async function generateTitleGeminiInteractions(
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(GEMINI_TITLE_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      console.warn(
+        JSON.stringify({
+          fn: 'llm-chat-send',
+          event: 'title_generate_http_error',
+          status: res.status,
+          bodyPreview: errBody.slice(0, 240),
+        }),
+      );
+      return null;
+    }
     // deno-lint-ignore no-explicit-any
     const json: any = await res.json().catch(() => null);
     if (!json) return null;
@@ -1439,7 +1495,8 @@ export async function generateTitleGeminiInteractions(
 }
 
 /**
- * Intent Classifier용 Interactions 단발 호출 (JSON response_format).
+ * Intent Classifier용 Interactions 단발 호출.
+ * JSON은 시스템 프롬프트로만 요구한다 (`response_format=json_object`는 이 API에서 거절됨).
  * 실패 시 null → 호출측이 Legacy/휴리스틱으로 폴백.
  */
 export async function classifyIntentViaInteractions(params: {
@@ -1460,7 +1517,6 @@ export async function classifyIntentViaInteractions(params: {
       max_output_tokens: params.maxOutputTokens,
       thinking_level: 'minimal',
     },
-    response_format: { type: 'json_object' },
   };
   try {
     const res = await fetch(GEMINI_INTERACTIONS_URL, {

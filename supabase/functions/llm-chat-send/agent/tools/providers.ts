@@ -2,17 +2,26 @@
  * 기본 Tool 등록 (schema/examples 포함).
  * 이번 버전: Melon 전용 검색·다운로드.
  *
- * download_fc는 Intent와 무관하게, Function Calling을 지원하는 모든 모델에 항상 노출한다.
- * (칩 클릭·후속 메시지에 「다운로드」 키워드가 없어도 도구를 쓸 수 있어야 함)
+ * download_fc는 다운로드·곡 검색·차트·toolContinue 일 때만 붙인다.
+ * 인사·일반 질문·추천·FAQ에는 도구 스키마를 넣지 않아 첫 토큰을 당긴다.
+ * 곡 선택·멜론 폴백·다운로드/검색 키워드는 Intent 가드가 needsMusicSearch/needsDownloadTool 을 켠다.
  */
 
+import type { ToolSupportContext } from './registry.ts';
 import { createTool, registerTool } from './registry.ts';
 
 const emptyObjectParams = { type: 'object', properties: {} };
 
-/** Melon 검색·다운로드·가사 FC — FC 지원 모델이면 항상 사용 가능 */
-const supportsDownloadFc = (ctx: { supportsFunctionCalling: boolean }) =>
-  ctx.supportsFunctionCalling === true;
+/** 다운로드·검색·차트·이어가기에만 Melon FC를 붙인다. */
+function supportsDownloadFc(ctx: ToolSupportContext): boolean {
+  if (ctx.supportsFunctionCalling !== true) return false;
+  if (ctx.isToolContinue) return true;
+  return (
+    ctx.intent.needsDownloadTool === true ||
+    ctx.intent.needsMusicSearch === true ||
+    ctx.intent.intent === 'download'
+  );
+}
 
 registerTool(
   createTool({
