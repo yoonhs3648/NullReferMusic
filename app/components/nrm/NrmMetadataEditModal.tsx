@@ -655,7 +655,7 @@ export function NrmMetadataEditModal({
         genre: resolvedGenre,
         releaseDate: releaseDate.trim(),
         coverUrl: coverUrl.trim(),
-        albumArtist: artist.trim() || undefined,
+        albumArtist: initialMetadataFields?.albumArtist?.trim() || undefined,
         trackNumber: trackNumber.trim() || undefined,
         discNumber: discNumber.trim() || undefined,
         composer: composer.trim() || undefined,
@@ -915,7 +915,8 @@ export function NrmMetadataEditModal({
     };
   }, [artist, excludeFileStem, item, preview, purpose, title, visible]);
 
-  const canUseMelonWebView = Platform.OS === 'android' && hasNrmMelonCookieNativeModule();
+  const canUseMelonWebView =
+    (Platform.OS === 'android' || Platform.OS === 'ios') && hasNrmMelonCookieNativeModule();
   const [melonHasAdultCookie, setMelonHasAdultCookie] = useState(false);
 
   useEffect(() => {

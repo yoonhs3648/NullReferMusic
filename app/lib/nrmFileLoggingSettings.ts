@@ -58,6 +58,10 @@ export async function loadNrmFileLoggingMode(): Promise<NrmFileLoggingMode> {
 
 /** 로그 폴더 내 일별·레거시 로그 파일 전부 삭제 (Android 네이티브) */
 export async function deleteAllNrmLogFiles(): Promise<number> {
+  if (Platform.OS === 'ios') {
+    const { deleteIosLogFiles } = await import('@/lib/nrmFileLog.ios');
+    return deleteIosLogFiles();
+  }
   if (Platform.OS !== 'android') return 0;
   const mod = NativeModules.NrmFileLogger as
     | { deleteAllLogFiles?: () => Promise<number> }

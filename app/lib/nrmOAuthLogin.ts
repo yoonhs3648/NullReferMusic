@@ -60,6 +60,7 @@ function redirectUri(): string {
 
 function googleRedirectUri(clientId: string): string {
   if (Platform.OS === 'web') return redirectUri();
+  if (Platform.OS === 'ios' && clientId === getGoogleWebClientId()) return redirectUri();
   const suffix = '.apps.googleusercontent.com';
   if (!clientId.endsWith(suffix)) {
     throw new Error('Google OAuth 클라이언트 ID 형식이 올바르지 않습니다.');
@@ -154,8 +155,9 @@ async function loginWithGoogleNative(): Promise<NrmOAuthPendingProfile> {
   }
 }
 
-async function loginWithGoogleBrowser(): Promise<NrmOAuthPendingProfile> {
-  const clientId = getGoogleClientId();
+async function loginWithGoogleBrowser(
+  clientId = getGoogleClientId(),
+): Promise<NrmOAuthPendingProfile> {
   if (!clientId) {
     throw new Error(
       Platform.OS === 'android'
@@ -398,9 +400,13 @@ async function loginWithKakaoBrowser(): Promise<NrmOAuthPendingProfile> {
 export async function loginWithNrmOAuth(kind: NrmAppKind): Promise<NrmOAuthPendingProfile> {
   try {
     if (kind === 'google') {
-      return Platform.OS === 'web'
-        ? await loginWithGoogleBrowser()
-        : await loginWithGoogleNative();
+      if (Platform.OS === 'web') return await loginWithGoogleBrowser();
+      if (Platform.OS === 'ios') {
+        const iosClientId =
+          extraString('oauthGoogleIosClientId') || configString('googleIosClientId');
+        if (!iosClientId) return await loginWithGoogleBrowser(getGoogleWebClientId());
+      }
+      return await loginWithGoogleNative();
     }
     return Platform.OS === 'web'
       ? await loginWithKakaoBrowser()

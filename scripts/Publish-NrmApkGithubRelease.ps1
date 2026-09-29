@@ -103,23 +103,31 @@ Invoke-NrmGithubPatchJsonUtf8 -Uri "https://api.github.com/repos/$Repo/releases/
 } | Out-Null
 Write-Host 'Updated release notes (UTF-8).'
 
-foreach ($asset in @($release.assets)) {
-    if ($asset.name -eq $ApkFileName) {
-        Write-Host "Deleting old asset: $($asset.name) (id=$($asset.id))"
-        Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/assets/$($asset.id)" -Headers $headers -Method Delete | Out-Null
+function Send-ReleaseAsset {
+    param(
+        [string]$FilePath,
+        [string]$AssetName,
+        [string]$ContentType
+    )
+    foreach ($asset in @($release.assets)) {
+        if (-not $asset) { continue }
+        if ($asset.name -eq $AssetName) {
+            Write-Host "Deleting old asset: $($asset.name) (id=$($asset.id))"
+            Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/assets/$($asset.id)" -Headers $headers -Method Delete | Out-Null
+        }
     }
+    $size = (Get-Item -LiteralPath $FilePath).Length
+    Write-Host "Uploading $AssetName ($size bytes) ..."
+    $uploadHeaders = @{
+        Authorization  = "Bearer $token"
+        Accept         = 'application/vnd.github+json'
+        'Content-Type' = $ContentType
+    }
+    $uploadUri = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$AssetName"
+    Invoke-RestMethod -Uri $uploadUri -Headers $uploadHeaders -Method Post -InFile $FilePath | Out-Null
+    Write-Host "OK: https://github.com/$Repo/releases/download/$Tag/$AssetName"
 }
 
-$fileSize = (Get-Item -LiteralPath $ApkPath).Length
-Write-Host "Uploading $ApkFileName ($fileSize bytes) ..."
-$uploadHeaders = @{
-    Authorization = "Bearer $token"
-    Accept        = 'application/vnd.github+json'
-    'Content-Type' = 'application/octet-stream'
-}
-$uploadUri = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$ApkFileName"
-Invoke-RestMethod -Uri $uploadUri -Headers $uploadHeaders -Method Post -InFile $ApkPath | Out-Null
+Send-ReleaseAsset -FilePath $ApkPath -AssetName $ApkFileName -ContentType 'application/octet-stream'
 
-$publicUrl = "https://github.com/$Repo/releases/download/$Tag/$ApkFileName"
-Write-Host "OK: $publicUrl"
 exit 0

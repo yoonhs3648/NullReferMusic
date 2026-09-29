@@ -1,6 +1,6 @@
 import '@/lib/nrmYoutubeInnertubeEvalSetup';
 import Innertube, { ClientType, FormatUtils, YTNodes } from 'youtubei.js';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { isStandaloneIos } from '@/lib/nrmStandalonePlatform';
 import type { NrmAudioFileMetadata } from '@/lib/nrmDownloadAudioMetadata';
@@ -62,7 +62,16 @@ function invalidateInnertubeClient(label: InnertubeClientLabel): void {
   innertubeByClient.delete(label);
 }
 
-function getOrCreateInnertubeClient(label: InnertubeClientLabel): Promise<Innertube> {
+function warmClientLabel(): InnertubeClientLabel {
+  if (Platform.OS === 'android') return 'android';
+  if (isStandaloneIos()) return 'ios';
+  return 'web';
+}
+
+function getOrCreateInnertubeClient(
+  label: InnertubeClientLabel,
+  retrievePlayer = true,
+): Promise<Innertube> {
   const existing = innertubeByClient.get(label);
   if (existing) return existing;
   const created = Innertube.create({
@@ -70,8 +79,9 @@ function getOrCreateInnertubeClient(label: InnertubeClientLabel): Promise<Innert
     location: 'KR',
     client_type: clientTypeForLabel(label),
     fetch: nrmYoutubeFetch,
+    retrieve_player: retrievePlayer,
   }).catch((err) => {
-    invalidateInnertubeClient(label);
+    if (innertubeByClient.get(label) === created) invalidateInnertubeClient(label);
     throw err;
   });
   innertubeByClient.set(label, created);
@@ -79,20 +89,15 @@ function getOrCreateInnertubeClient(label: InnertubeClientLabel): Promise<Innert
 }
 
 /**
- * android(또는 iOS) 세션만 미리 만든다. web은 폴백 시점에만 생성.
- * 호출 시점: 프로세스당 최초 YouTube 검색(콜드스타트 워밍 금지).
+ * 앱 시작 직후용. 플레이어 스크립트는 해석하지 않는다.
+ * 그 해석은 JS를 오래 잡아 스크롤이 끊기므로, 화면이 가려진 뒤에만 한다.
  */
 export async function warmInnertubeSessions(): Promise<void> {
-  const label: InnertubeClientLabel =
-    Platform.OS === 'android'
-      ? 'android'
-      : isStandaloneIos()
-        ? 'ios'
-        : 'web';
+  const label = warmClientLabel();
   const startedAt = Date.now();
   const already = innertubeByClient.has(label);
   try {
-    await getOrCreateInnertubeClient(label);
+    await getOrCreateInnertubeClient(label, false);
     logNrmDev('innertube.session', {
       event: 'warm_ok',
       client: label,
@@ -108,7 +113,7 @@ export async function warmInnertubeSessions(): Promise<void> {
   }
 }
 
-/** 프로세스당 최초 YouTube 검색에서만 InnerTube 세션 워밍 */
+/** 앱 시작 또는 최초 YouTube 검색에서 같은 세션 준비를 한 번만 돌린다. */
 let firstSearchInnertubeWarmPromise: Promise<void> | null = null;
 let firstSearchInnertubeWarmSettled = false;
 
@@ -124,6 +129,37 @@ export function ensureInnertubeWarmedOnFirstSearch(): Promise<void> {
     });
   }
   return firstSearchInnertubeWarmPromise;
+}
+
+let playerUpgradePromise: Promise<void> | null = null;
+let playerBgHooked = false;
+
+/** 서명 해석에 필요한 플레이어. 없으면 그때 한 번만 만든다. */
+export function ensureInnertubePlayerClient(): Promise<void> {
+  if (playerUpgradePromise) return playerUpgradePromise;
+  const label = warmClientLabel();
+  playerUpgradePromise = (async () => {
+    const current = innertubeByClient.get(label);
+    if (current) {
+      const yt = await current;
+      if (yt.session.player) return;
+    }
+    invalidateInnertubeClient(label);
+    await getOrCreateInnertubeClient(label, true);
+  })().finally(() => {
+    playerUpgradePromise = null;
+  });
+  return playerUpgradePromise;
+}
+
+/** 앱이 화면 뒤로 갔을 때만 플레이어를 올려, 사용 중 끊김을 피한다. */
+export function scheduleInnertubePlayerWarmInBackground(): void {
+  if (playerBgHooked || Platform.OS === 'web') return;
+  playerBgHooked = true;
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') return;
+    void ensureInnertubePlayerClient().catch(() => undefined);
+  });
 }
 
 /** Player.decipher 에 넘길 URL·cipher 정보가 있는 포맷만 남깁니다. */
@@ -150,7 +186,7 @@ function filterDecipherableStreamingData<
 }
 
 function shouldRetryInnertubeDownload(msg: string): boolean {
-  return /EXTRACT_TIMEOUT|No valid URL to decipher|Failed to decipher|No matching formats|Streaming data not available|STREAMING_DATA_MISSING|NO_DECIPHERABLE_FORMAT|status code 400|non 2xx|FETCH_FAILED|status code 403|read property 'as'|properties of null \(reading 'as'\)|Cannot cast SearchMobileHeader to one of SearchHeader/i.test(
+  return /EXTRACT_TIMEOUT|No valid URL to decipher|Failed to decipher|No matching formats|Streaming data not available|STREAMING_DATA_MISSING|NO_DECIPHERABLE_FORMAT|NO_PLAYER|NO_STREAM_URL|status code 400|non 2xx|FETCH_FAILED|status code 403|read property 'as'|properties of null \(reading 'as'\)|Cannot cast SearchMobileHeader to one of SearchHeader/i.test(
     msg,
   );
 }
@@ -242,6 +278,84 @@ function innertubeExtractClientSpecs(
   fetchFn: typeof fetch,
 ): InnertubeClientSpec[] {
   return buildExtractClientSpecs(fetchFn);
+}
+
+/** 미리듣기는 검색용 web 우선 순서를 쓰지 않는다. 워밍된 android 세션이 더 빠르다. */
+function innertubePreviewClientSpecs(): InnertubeClientSpec[] {
+  return buildExtractClientSpecs(nrmYoutubeFetch);
+}
+
+const PREVIEW_STREAM_TTL_MS = 15 * 60 * 1000;
+const previewStreamCache = new Map<string, { url: string; at: number }>();
+const previewStreamInflight = new Map<string, Promise<string>>();
+
+function readPreviewStreamCache(videoId: string): string | null {
+  const row = previewStreamCache.get(videoId);
+  if (!row) return null;
+  if (Date.now() - row.at > PREVIEW_STREAM_TTL_MS) {
+    previewStreamCache.delete(videoId);
+    return null;
+  }
+  return row.url;
+}
+
+function rememberPreviewStreamUrl(videoId: string, url: string): void {
+  const trimmed = url.trim();
+  if (!trimmed) return;
+  previewStreamCache.set(videoId, { url: trimmed, at: Date.now() });
+}
+
+type PreviewStreamingData = NonNullable<
+  Awaited<ReturnType<Innertube['getBasicInfo']>>['streaming_data']
+>;
+
+/** 미리듣기: m4a 128kbps 근처. 최고 음질은 버퍼만 늘린다. */
+function choosePreviewAudioFormat(streamingData: PreviewStreamingData) {
+  const audio = [
+    ...(streamingData.adaptive_formats ?? []),
+    ...(streamingData.formats ?? []),
+  ].filter((f) => f.has_audio && !f.has_video);
+  const m4a = audio.filter((f) => /mp4|m4a|aac/i.test(f.mime_type ?? ''));
+  const pool = m4a.length > 0 ? m4a : audio;
+  if (pool.length === 0) {
+    return FormatUtils.chooseFormat({ type: 'audio', quality: 'best' }, streamingData);
+  }
+  const target = 128_000;
+  return [...pool].sort((a, b) => {
+    const da = Math.abs((a.bitrate ?? target) - target);
+    const db = Math.abs((b.bitrate ?? target) - target);
+    return da - db;
+  })[0]!;
+}
+
+/** 서명 해석 전에 바로 재생을 시도할 수 있는 http 주소. */
+function previewDirectUrl(format: {
+  url?: string;
+  signature_cipher?: string;
+  cipher?: string;
+}): string | null {
+  const url = format.url?.trim() ?? '';
+  return url.startsWith('http') ? url : null;
+}
+
+const previewPlayerByLabel = new Map<InnertubeClientLabel, Promise<Innertube>>();
+
+/** 미리듣기 서명 해석용. 검색용 가벼운 세션은 지우지 않는다. */
+function getPreviewPlayerClient(label: InnertubeClientLabel): Promise<Innertube> {
+  const existing = previewPlayerByLabel.get(label);
+  if (existing) return existing;
+  const created = Innertube.create({
+    lang: 'ko',
+    location: 'KR',
+    client_type: clientTypeForLabel(label),
+    fetch: nrmYoutubeFetch,
+    retrieve_player: true,
+  }).catch((err) => {
+    if (previewPlayerByLabel.get(label) === created) previewPlayerByLabel.delete(label);
+    throw err;
+  });
+  previewPlayerByLabel.set(label, created);
+  return created;
 }
 
 function innertubeBrowseClientSpecs(): InnertubeClientSpec[] {
@@ -832,6 +946,7 @@ async function extractWithInnertube(
     throw new Error('이 기기에서 임시 저장 공간을 사용할 수 없습니다.');
   }
 
+  await ensureInnertubePlayerClient();
   const specs = innertubeExtractClientSpecs(nrmYoutubeFetch);
   let lastError: unknown;
   const { loadDownloadEncodeSettings } = await import('@/lib/nrmDownloadSettings');
@@ -1048,10 +1163,17 @@ export async function finalizeYoutubeAudioOnDevice(
   return tagThenPersist(fileUri, userSuggestedFileName, metadata);
 }
 
-export async function getAudioStreamUrlWithInnertube(
+async function resolvePreviewStreamUrlUncached(
   videoId: string,
+  preferDecipher = false,
 ): Promise<string> {
-  const specs = innertubeBrowseClientSpecs();
+  const cached = readPreviewStreamCache(videoId);
+  if (cached) {
+    logNrmDev('innertube.stream', { event: 'cache_hit', videoId });
+    return cached;
+  }
+
+  const specs = innertubePreviewClientSpecs();
   logNrmDev('innertube.stream', {
     event: 'start',
     videoId,
@@ -1075,18 +1197,29 @@ export async function getAudioStreamUrlWithInnertube(
       const filtered = filterDecipherableStreamingData(info.streaming_data);
       if (!filtered) throw new Error('NO_DECIPHERABLE_FORMAT');
       Object.assign(info, { streaming_data: filtered });
-      const format = FormatUtils.chooseFormat(
-        { type: 'audio', quality: 'best' },
-        filtered,
-      );
-      const formatUrl = await format.decipher(info.actions.session.player);
-      if (!formatUrl) throw new Error('NO_STREAM_URL');
+      const format = choosePreviewAudioFormat(filtered);
+      const direct = previewDirectUrl(format);
+      let formatUrl = '';
+      let via: 'decipher' | 'direct' = 'decipher';
+      if (direct && !preferDecipher) {
+        via = 'direct';
+        formatUrl = direct;
+      } else {
+        const playerYt = await getPreviewPlayerClient(spec.label);
+        const player = playerYt.session.player;
+        if (!player) throw new Error('NO_PLAYER');
+        formatUrl = (await format.decipher(player))?.trim() ?? '';
+        if (!formatUrl) throw new Error('NO_STREAM_URL');
+      }
+      if (via === 'decipher') rememberPreviewStreamUrl(videoId, formatUrl);
       logNrmDev('innertube.stream', {
         event: 'ok',
         videoId,
         client: spec.label,
         attempt: i + 1,
         fellBack: i > 0,
+        via,
+        bitrate: format.bitrate ?? null,
         elapsedMs: Date.now() - attemptStartedAt,
       });
       return formatUrl;
@@ -1116,6 +1249,28 @@ export async function getAudioStreamUrlWithInnertube(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export async function getAudioStreamUrlWithInnertube(
+  videoId: string,
+  options?: { preferDecipher?: boolean },
+): Promise<string> {
+  const preferDecipher = options?.preferDecipher === true;
+  if (!preferDecipher) {
+    const cached = readPreviewStreamCache(videoId);
+    if (cached) {
+      logNrmDev('innertube.stream', { event: 'cache_hit', videoId });
+      return cached;
+    }
+  }
+  const inflightKey = preferDecipher ? `${videoId}:decipher` : videoId;
+  const existing = previewStreamInflight.get(inflightKey);
+  if (existing) return existing;
+  const job = resolvePreviewStreamUrlUncached(videoId, preferDecipher).finally(() => {
+    previewStreamInflight.delete(inflightKey);
+  });
+  previewStreamInflight.set(inflightKey, job);
+  return job;
 }
 
 // ── 공개 진입점 ───────────────────────────────────────────────────────────────

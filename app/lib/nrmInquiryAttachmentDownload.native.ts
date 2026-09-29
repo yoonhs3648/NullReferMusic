@@ -15,6 +15,38 @@ export {
   openInquiryAttachmentOnWeb,
 } from '@/lib/nrmInquiryAttachmentDownload.shared';
 
+async function downloadInquiryAttachmentOnIos(name: string): Promise<void> {
+  const { NRM_BRAND_STORAGE_FOLDER_NAME } = await import('@/lib/nrmAppBrand');
+  await nrmNotifyAttachmentDownloadStarted(name);
+  const cacheRoot = FileSystem.cacheDirectory;
+  const docRoot = FileSystem.documentDirectory;
+  if (!cacheRoot || !docRoot) {
+    await nrmNotifyAttachmentDownloadFinished(name, false);
+    throw new Error('캐시 경로를 사용할 수 없습니다.');
+  }
+  const safeLocalName = name.replace(/[/\\?%*:|"<>]/g, '_');
+  const tempUri = `${cacheRoot}nrm-inquiry-attach-${Date.now()}-${safeLocalName}`;
+  const folder = `${docRoot}${NRM_BRAND_STORAGE_FOLDER_NAME}/downloads/`;
+  try {
+    const url = buildInquiryAttachmentRawUrl(name);
+    const dl = await FileSystem.downloadAsync(url, tempUri);
+    if (dl.status !== 200) {
+      throw new Error(`첨부 파일을 받지 못했습니다. (HTTP ${dl.status})`);
+    }
+    await FileSystem.makeDirectoryAsync(folder, { intermediates: true });
+    const dest = `${folder}${safeLocalName}`;
+    await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => undefined);
+    await FileSystem.copyAsync({ from: tempUri, to: dest });
+    logNrmDev('inquiry.attachDownload', { path: dest });
+    await nrmNotifyAttachmentDownloadFinished(name, true);
+  } catch (e) {
+    await nrmNotifyAttachmentDownloadFinished(name, false);
+    throw e;
+  } finally {
+    await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => undefined);
+  }
+}
+
 function guessMimeType(fileName: string): string {
   const lower = fileName.toLowerCase();
   if (lower.endsWith('.pdf')) return 'application/pdf';
@@ -32,6 +64,10 @@ export async function downloadInquiryAttachmentFile(fileName: string): Promise<v
   const name = fileName.trim();
   if (!name) {
     throw new Error('첨부 파일명이 없습니다.');
+  }
+  if (Platform.OS === 'ios') {
+    await downloadInquiryAttachmentOnIos(name);
+    return;
   }
   if (Platform.OS !== 'android') {
     throw new Error('첨부 파일 다운로드는 Android 앱에서만 지원합니다.');

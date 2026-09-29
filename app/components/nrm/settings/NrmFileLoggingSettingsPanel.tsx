@@ -105,9 +105,9 @@ export function NrmFileLoggingSettingsPanel({
       <Text style={[styles.pathLabel, { color: bodyColor }]}>
         로그위치 : {NRM_FILE_LOG_FOLDER_DISPLAY_PATH}
       </Text>
-      {Platform.OS !== 'android' ? (
+      {Platform.OS === 'web' ? (
         <Text style={[styles.note, { color: bodyColor }]}>
-          파일 로깅은 Android APK에서만 사용됩니다.
+          파일 로깅은 모바일 앱에서 사용됩니다.
         </Text>
       ) : null}
 
@@ -120,7 +120,7 @@ export function NrmFileLoggingSettingsPanel({
             <Switch
               value={enabled}
               onValueChange={(v) => void onToggleLogging(v)}
-              disabled={saving || Platform.OS !== 'android'}
+              disabled={saving || Platform.OS === 'web'}
               trackColor={{
                 false: 'rgba(128,128,128,0.35)',
                 true: nrmTokens.color.accentDim,
@@ -131,10 +131,10 @@ export function NrmFileLoggingSettingsPanel({
 
           <Pressable
             onPress={() => void onDeleteLogs()}
-            disabled={deleting || Platform.OS !== 'android'}
+            disabled={deleting || Platform.OS === 'web'}
             style={({ pressed }) => [
               styles.deleteBtn,
-              (deleting || Platform.OS !== 'android') && styles.deleteBtnDisabled,
+              (deleting || Platform.OS === 'web') && styles.deleteBtnDisabled,
               pressed && !deleting && styles.deleteBtnPressed,
             ]}
             accessibilityRole="button"

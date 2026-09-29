@@ -22,6 +22,11 @@ export function getAndroidMediaGranularPermissions():
 }
 
 export async function checkRequiredPermissions(): Promise<NrmRequiredPermissionState> {
+  if (Platform.OS === 'ios') {
+    if (isExpoGo()) return { notifications: true, media: true, saf: true };
+    const notifications = await checkNotificationPermission();
+    return { notifications, media: true, saf: true };
+  }
   if (Platform.OS !== 'android') {
     return { notifications: true, media: true, saf: true };
   }
@@ -64,6 +69,15 @@ async function checkMediaPermission(): Promise<boolean> {
  * 중간에 거부하면 즉시 false 반환(호출 측에서 앱 종료).
  */
 export async function requestAllRequiredPermissions(): Promise<NrmRequiredPermissionState> {
+  if (Platform.OS === 'ios') {
+    if (isExpoGo()) return { notifications: true, media: true, saf: true };
+    const notifRes = await requestNotificationPermissionsAsync();
+    return {
+      notifications: notifRes.status === 'granted',
+      media: true,
+      saf: true,
+    };
+  }
   if (Platform.OS !== 'android') {
     return { notifications: true, media: true, saf: true };
   }

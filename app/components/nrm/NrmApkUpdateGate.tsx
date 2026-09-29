@@ -79,7 +79,7 @@ async function waitForInstallPermission(maxMs = 180_000): Promise<boolean> {
   return canNrmInstallPackages();
 }
 
-/** After APK gate: prefetch ffmpeg only. Innertube warms on first YouTube search. */
+/** After APK gate: prefetch ffmpeg only. Innertube session starts before the app is shown. */
 function schedulePostGateWarm(): void {
   runAfterNrmApkUpdateGate(() => {
     if (Platform.OS !== 'android') return;
@@ -116,11 +116,27 @@ export function NrmApkUpdateGate({ onComplete }: Props) {
   }, []);
 
   const finishGateWithoutBlockingWarm = useCallback(() => {
-    onComplete();
-    setTimeout(() => {
-      markNrmApkUpdateGatePassed();
-      schedulePostGateWarm();
-    }, 0);
+    void (async () => {
+      if (Platform.OS !== 'web') {
+        await nrmDeferUiWork();
+        try {
+          const innertube = await import('@/lib/nrmInnertubeYoutube');
+          await innertube.preloadInnertubeRuntime();
+          await Promise.race([
+            innertube.ensureInnertubeWarmedOnFirstSearch(),
+            delay(2500),
+          ]);
+          innertube.scheduleInnertubePlayerWarmInBackground();
+        } catch (e) {
+          logNrmRunError('apk-update.innertube_session', e);
+        }
+      }
+      onComplete();
+      setTimeout(() => {
+        markNrmApkUpdateGatePassed();
+        schedulePostGateWarm();
+      }, 0);
+    })();
   }, [onComplete]);
 
   const runCheck = useCallback(() => {

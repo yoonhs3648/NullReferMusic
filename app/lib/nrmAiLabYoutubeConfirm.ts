@@ -210,12 +210,17 @@ export function currentCandidateVideoId(sessionId: string): string | null {
 }
 
 /** Innertube(android→web) → yt-dlp 순으로 미리듣기 스트림 URL */
-export async function resolveAiLabPreviewStreamUrl(videoId: string): Promise<string> {
+export async function resolveAiLabPreviewStreamUrl(
+  videoId: string,
+  opts?: { preferDecipher?: boolean },
+): Promise<string> {
   if (Platform.OS === 'web') {
     throw new Error('web_preview_unsupported');
   }
   try {
-    const url = await getAudioStreamUrlWithInnertube(videoId);
+    const url = await getAudioStreamUrlWithInnertube(videoId, {
+      preferDecipher: opts?.preferDecipher,
+    });
     if (url?.trim()) {
       logNrmDev(LOG, { event: 'stream_innertube_ok', videoId });
       return url.trim();
@@ -299,10 +304,17 @@ export function setAiLabYoutubeConfirmDuration(
   patchSession(sessionId, { durationMs });
 }
 
+function releaseYoutubeRejectLock(sessionId: string): void {
+  youtubeRejectLock.delete(sessionId);
+}
+
 /** 현재 후보 스트림을 백그라운드 준비. generation으로 이전 요청 무시 */
 export function prepareAiLabYoutubeConfirmStream(sessionId: string): void {
   const s = sessions.get(sessionId);
-  if (!s || s.exhausted || s.confirmed) return;
+  if (!s || s.exhausted || s.confirmed) {
+    releaseYoutubeRejectLock(sessionId);
+    return;
+  }
   const videoId = s.candidates[s.index]?.videoId;
   if (!videoId) {
     patchSession(sessionId, {
@@ -310,6 +322,7 @@ export function prepareAiLabYoutubeConfirmStream(sessionId: string): void {
       prepareError: 'no_candidate',
       streamUrl: null,
     });
+    releaseYoutubeRejectLock(sessionId);
     return;
   }
   const generation = s.prepareGeneration + 1;
@@ -331,6 +344,11 @@ export function prepareAiLabYoutubeConfirmStream(sessionId: string): void {
         uiStatus: 'READY',
         prepareError: null,
       });
+      releaseYoutubeRejectLock(sessionId);
+      const nextId = cur.candidates[cur.index + 1]?.videoId;
+      if (nextId) {
+        void resolveAiLabPreviewStreamUrl(nextId).catch(() => undefined);
+      }
     } catch (e) {
       const cur = sessions.get(sessionId);
       if (!cur || cur.prepareGeneration !== generation) return;
@@ -341,6 +359,7 @@ export function prepareAiLabYoutubeConfirmStream(sessionId: string): void {
         streamUrl: null,
         prepareError: msg,
       });
+      releaseYoutubeRejectLock(sessionId);
     }
   })();
 }
@@ -360,7 +379,7 @@ export async function refreshAiLabYoutubeConfirmStream(
     prepareError: null,
   });
   try {
-    const url = await resolveAiLabPreviewStreamUrl(videoId);
+    const url = await resolveAiLabPreviewStreamUrl(videoId, { preferDecipher: true });
     const cur = sessions.get(sessionId);
     if (!cur || cur.prepareGeneration !== generation) return null;
     patchSession(sessionId, { streamUrl: url, uiStatus: 'READY', prepareError: null });
@@ -382,10 +401,16 @@ export type RejectYoutubeConfirmResult =
   | { ok: true; exhausted: true; message: string }
   | { ok: false; error: string };
 
+const youtubeRejectLock = new Set<string>();
+
 export function rejectAiLabYoutubeCandidate(sessionId: string): RejectYoutubeConfirmResult {
+  if (youtubeRejectLock.has(sessionId)) {
+    return { ok: false, error: 'already_rejecting' };
+  }
   const s = sessions.get(sessionId);
   if (!s) return { ok: false, error: 'session_not_found' };
   if (s.confirmed) return { ok: false, error: 'already_confirmed' };
+  youtubeRejectLock.add(sessionId);
   const nextIndex = s.index + 1;
   if (nextIndex >= s.candidates.length || nextIndex >= AI_LAB_YOUTUBE_CONFIRM_MAX) {
     patchSession(sessionId, {
@@ -394,6 +419,7 @@ export function rejectAiLabYoutubeCandidate(sessionId: string): RejectYoutubeCon
       streamUrl: null,
       prepareGeneration: s.prepareGeneration + 1,
     });
+    releaseYoutubeRejectLock(sessionId);
     return {
       ok: true,
       exhausted: true,
@@ -409,7 +435,10 @@ export function rejectAiLabYoutubeCandidate(sessionId: string): RejectYoutubeCon
     prepareError: null,
     prepareGeneration: s.prepareGeneration + 1,
   });
-  if (!next) return { ok: false, error: 'session_not_found' };
+  if (!next) {
+    releaseYoutubeRejectLock(sessionId);
+    return { ok: false, error: 'session_not_found' };
+  }
   prepareAiLabYoutubeConfirmStream(sessionId);
   return { ok: true, exhausted: false, session: getAiLabYoutubeConfirmSession(sessionId)! };
 }

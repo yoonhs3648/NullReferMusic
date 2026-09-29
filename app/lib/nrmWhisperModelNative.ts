@@ -60,6 +60,7 @@ export async function fetchWhisperModelStatuses(): Promise<WhisperModelStatusRow
 }
 
 export async function hasAnyWhisperModelOnDevice(): Promise<boolean> {
+  if (Platform.OS === 'ios' && !usesWhisperBackendBridge()) return true;
   if (usesWhisperBackendBridge()) {
     const { hasAnyWhisperModelOnBackend } = await import('@/lib/nrmWhisperModelBackend');
     return hasAnyWhisperModelOnBackend();
@@ -71,6 +72,7 @@ export async function hasAnyWhisperModelOnDevice(): Promise<boolean> {
 }
 
 export async function isWhisperModelInstalled(modelId: NrmWhisperModelId): Promise<boolean> {
+  if (Platform.OS === 'ios' && !usesWhisperBackendBridge()) return true;
   if (usesWhisperBackendBridge()) {
     const { isWhisperModelInstalledOnBackend } = await import('@/lib/nrmWhisperModelBackend');
     return isWhisperModelInstalledOnBackend(modelId);

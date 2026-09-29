@@ -53,7 +53,7 @@ async function transcribeAudioToLrc(fileUri: string, fileName?: string): Promise
 }
 
 function canTranscribeOnPlatform(): boolean {
-  if (Platform.OS === 'android') return true;
+  if (Platform.OS === 'android' || Platform.OS === 'ios') return true;
   return usesPcBackendInDev();
 }
 

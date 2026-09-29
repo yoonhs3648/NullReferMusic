@@ -9,7 +9,7 @@ export const NRM_SPOTIFY_CHARTS_LOGIN_URL = `https://accounts.spotify.com/login?
 export const NRM_SPOTIFY_TOKEN_ENDPOINT =
   'https://open.spotify.com/get_access_token?reason=transport&productType=web_player';
 
-/** Charts Bearer 수집 WebView — Android 앱 전용 */
+/** Charts Bearer 수집 WebView — Android·iOS 앱 */
 export function isSpotifyChartsWebViewLoginVisible(): boolean {
-  return Platform.OS === 'android';
+  return Platform.OS === 'android' || Platform.OS === 'ios';
 }

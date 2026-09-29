@@ -1,6 +1,7 @@
 import AVFoundation
 import ExpoModulesCore
 import Foundation
+import UIKit
 
 public class NrmAudioMetadataModule: Module {
   public func definition() -> ModuleDefinition {
@@ -8,6 +9,63 @@ public class NrmAudioMetadataModule: Module {
 
     AsyncFunction("applyMetadata") { (inputPath: String, metadata: [String: Any]) -> [String: Any] in
       try await MetadataApplier.apply(inputPath: inputPath, metadata: metadata)
+    }
+
+    AsyncFunction("transcribeToLrc") { (inputPath: String) -> String in
+      try await NrmIosSpeechLyrics.transcribe(path: inputPath)
+    }
+
+    AsyncFunction("alignPlainToLrc") { (inputPath: String, plain: String, lang: String) -> String in
+      try await NrmIosSpeechLyrics.align(path: inputPath, plain: plain, lang: lang)
+    }
+
+    AsyncFunction("transcodeAudio") { (inputPath: String, format: String, bitrateKbps: Int) -> [String: Any] in
+      try await NrmIosAudioTranscode.transcode(
+        inputPath: inputPath,
+        format: format,
+        bitrateKbps: bitrateKbps,
+      )
+    }
+
+    AsyncFunction("beginBackgroundTask") { (token: String) in
+      NrmIosBackgroundWork.begin(token: token)
+    }
+
+    AsyncFunction("endBackgroundTask") { (token: String) in
+      NrmIosBackgroundWork.end(token: token)
+    }
+
+    AsyncFunction("pickDocument") { () -> [String: Any]? in
+      await NrmIosDocumentPicker.pick()
+    }
+
+    AsyncFunction("embedSyncedLyrics") {
+      (inputPath: String, lyrics: String, _: String, _: String?, _: String?) in
+      try await NrmIosLyricsEmbed.embed(inputPath: inputPath, lyrics: lyrics)
+    }
+
+    AsyncFunction("getDeviceIdSha256") { () -> String in
+      NrmIosDeviceIdentity.sha256Hex()
+    }
+
+    AsyncFunction("isConnectedViaWifi") { () -> Bool in
+      await NrmIosWifi.isWifiOrEthernet()
+    }
+
+    AsyncFunction("readSpDcCookie") { () -> String in
+      await NrmIosSpotifyCookies.readSpDc()
+    }
+
+    AsyncFunction("clearSpotifyCookies") {
+      await NrmIosSpotifyCookies.clearSpotify()
+    }
+
+    AsyncFunction("readMelonCookieHeader") { () -> String in
+      await NrmIosMelonCookies.header()
+    }
+
+    AsyncFunction("clearMelonCookies") {
+      await NrmIosMelonCookies.clear()
     }
   }
 }
@@ -26,15 +84,18 @@ private enum MetadataApplier {
     let genre = stringValue(metadata["genre"])
     let releaseDate = stringValue(metadata["releaseDate"])
     let coverUrl = stringValue(metadata["coverUrl"])
-    var albumArtist = stringValue(metadata["albumArtist"])
-    if albumArtist.isEmpty && !artist.isEmpty { albumArtist = artist }
+    let albumArtist = stringValue(metadata["albumArtist"])
     let trackNumber = stringValue(metadata["trackNumber"])
     let website = stringValue(metadata["website"])
 
+    let lyrics = stringValue(metadata["lyrics"])
     let hasText =
       !artist.isEmpty || !title.isEmpty || !album.isEmpty || !genre.isEmpty || !releaseDate.isEmpty
-      || !albumArtist.isEmpty || !trackNumber.isEmpty || !website.isEmpty
-    let coverData = coverUrl.isEmpty ? nil : await downloadCover(urlString: coverUrl)
+      || !albumArtist.isEmpty || !trackNumber.isEmpty || !website.isEmpty || !lyrics.isEmpty
+    var coverData = coverUrl.isEmpty ? nil : await downloadCover(urlString: coverUrl)
+    if coverData == nil {
+      coverData = Self.defaultAppIconData()
+    }
 
     if !hasText && coverData == nil {
       return ["path": path, "coverEmbedded": false]
@@ -46,11 +107,14 @@ private enum MetadataApplier {
       items.append(makeItem(.commonIdentifierAlbumArtist, value: albumArtist))
     }
     if !title.isEmpty { items.append(makeItem(.commonIdentifierTitle, value: title)) }
-    if !album.isEmpty { items.append(makeItem(.commonIdentifierAlbumName, value: album)) }
+    if !album.isEmpty && !isPlaceholderAlbumName(album) {
+      items.append(makeItem(.commonIdentifierAlbumName, value: album))
+    }
     if !genre.isEmpty { items.append(makeItem(.iTunesMetadataGenre, value: genre)) }
     if !releaseDate.isEmpty { items.append(makeItem(.commonIdentifierCreationDate, value: releaseDate)) }
     if !trackNumber.isEmpty { items.append(makeItem(.iTunesMetadataTrackNumber, value: trackNumber)) }
     if !website.isEmpty { items.append(makeItem(.commonIdentifierURL, value: website)) }
+    if !lyrics.isEmpty { items.append(makeItem(.commonIdentifierLyrics, value: lyrics)) }
     if let coverData {
       let art = AVMutableMetadataItem()
       art.identifier = .commonIdentifierArtwork
@@ -180,6 +244,23 @@ private enum MetadataApplier {
     return kCMMetadataBaseDataType_JPEG as String
   }
 
+  private static func defaultAppIconData() -> Data? {
+    if let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+      let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+      let files = primary["CFBundleIconFiles"] as? [String],
+      let name = files.last,
+      let image = UIImage(named: name),
+      let data = image.pngData(),
+      data.count >= 256
+    {
+      return data
+    }
+    if let image = UIImage(named: "AppIcon"), let data = image.pngData(), data.count >= 256 {
+      return data
+    }
+    return nil
+  }
+
   private static func downloadCover(urlString: String) async -> Data? {
     if urlString.isEmpty { return nil }
 
@@ -217,6 +298,21 @@ private enum MetadataApplier {
     } catch {
       return nil
     }
+  }
+
+  private static func isPlaceholderAlbumName(_ value: String) -> Bool {
+    let key = value.replacingOccurrences(
+      of: "\\s+",
+      with: "",
+      options: .regularExpression,
+    ).lowercased()
+    if key.isEmpty { return true }
+    let folder = NrmBrand.storageFolderName.replacingOccurrences(
+      of: "\\s+",
+      with: "",
+      options: .regularExpression,
+    ).lowercased()
+    return key == folder || key == "nullreferencemusic" || key == "nullreference"
   }
 
   private static func stringValue(_ value: Any?) -> String {

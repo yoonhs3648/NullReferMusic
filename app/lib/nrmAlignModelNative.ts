@@ -88,6 +88,7 @@ function packProgressFromRows(
 }
 
 export function isAlignModelNativeAvailable(): boolean {
+  if (Platform.OS === 'ios') return !usesPcBackendInDev();
   if (Platform.OS === 'android' && !!mod?.getAlignModelStatuses) return true;
   return usesPcBackendInDev();
 }
@@ -136,6 +137,7 @@ async function isPackInstalled(packId: NrmAlignModelPackId): Promise<boolean> {
 }
 
 export async function isAlignModelInstalled(modelId: NrmAlignModelId): Promise<boolean> {
+  if (Platform.OS === 'ios' && !usesAlignBackendBridge()) return true;
   if (usesAlignBackendBridge()) {
     const { isAlignModelInstalledOnBackend } = await import('@/lib/nrmAlignModelBackend');
     return isAlignModelInstalledOnBackend(modelId);
@@ -161,6 +163,7 @@ export async function isAlignModelInstalled(modelId: NrmAlignModelId): Promise<b
 }
 
 export async function isAnyAlignModelInstalled(): Promise<boolean> {
+  if (Platform.OS === 'ios' && !usesAlignBackendBridge()) return true;
   if (usesAlignBackendBridge()) {
     const { isAnyAlignModelInstalledOnBackend } = await import('@/lib/nrmAlignModelBackend');
     return isAnyAlignModelInstalledOnBackend();
@@ -295,6 +298,15 @@ export async function alignMelonLyricsToLrcNative(
   lyricsLang: MelonAlignLyricsLanguage = 'ko',
   options?: { syncSettings?: import('@/lib/nrmMelonSyncSettings').NrmMelonSyncSettings },
 ): Promise<MelonAlignNativeResult> {
+  if (Platform.OS === 'ios' && !usesAlignBackendBridge()) {
+    const { alignPlainLyricsOnIos } = await import('@/lib/nrmIosDeviceAudio');
+    const lrc = await alignPlainLyricsOnIos(audioPath, lyricsPlain, lyricsLang);
+    return {
+      lrc,
+      alignFailed: !lrc.trim(),
+      alignMemoryInsufficient: false,
+    };
+  }
   const pref = resolveAlignModelForMelonSync(
     isNrmAlignModelId(alignModelPreference)
       ? alignModelPreference

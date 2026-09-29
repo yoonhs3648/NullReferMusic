@@ -35,7 +35,7 @@ const kakaoPlugins: NonNullable<ExpoConfig['plugins']> = kakaoNativeAppKey
 const config: ExpoConfig = {
   name: (brandConfig.versionInfoProductName || brandConfig.displayName || 'NullReference Music').trim(),
   slug: 'nullrefer-music',
-  version: '3.8.3',
+  version: '3.8.8',
   orientation: 'portrait',
   /** 런처 아이콘은 밝은 배경, 스플래시는 tempLogo. 인앱 logo-mark / 알림 아이콘 등은 기존 유지 */
   icon: './assets/images/app-icon-light.png',
@@ -53,6 +53,8 @@ const config: ExpoConfig = {
     infoPlist: {
       UIFileSharingEnabled: true,
       LSSupportsOpeningDocumentsInPlace: true,
+      NSSpeechRecognitionUsageDescription:
+        '다운로드한 음악의 가사를 이 기기에서 만들기 위해 음성 인식을 사용합니다.',
     },
   },
   android: {

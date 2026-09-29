@@ -68,8 +68,19 @@ export async function getNrmAppUserName(): Promise<string> {
   return cachedUserName;
 }
 
-/** 기기의 ANDROID_ID를 SHA-256 해싱한 hex 문자열 (비식별화) */
+/** 기기의 ANDROID_ID를 SHA-256 해싱한 hex 문자열 (비식별화). iOS는 identifierForVendor. */
 export async function getNrmAndroidIdSha256(): Promise<string> {
+  if (Platform.OS === 'ios') {
+    const mod = NativeModules.NrmAudioMetadata as
+      | { getDeviceIdSha256?: () => Promise<string> }
+      | undefined;
+    if (!mod?.getDeviceIdSha256) return '';
+    try {
+      return String(await mod.getDeviceIdSha256()).trim();
+    } catch {
+      return '';
+    }
+  }
   if (Platform.OS !== 'android') return '';
   const mod = NativeModules.NrmAppBrand as NrmAppBrandNative | undefined;
   if (!mod?.getAndroidIdSha256) return '';

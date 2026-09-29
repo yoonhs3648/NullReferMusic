@@ -345,8 +345,8 @@ export function NrmDownloadSettingsPanel({
         <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
-              iOS IPA는 YouTube가 제공하는 오디오 포맷 중에서 선택한 확장자에 가장 가까운
-              스트림을 우선 사용합니다. (yt-dlp 변환 없음)
+              iOS는 시스템 인코더로 m4a·wav 변환을 합니다. MP3 재인코딩은 운영체제가
+              허용하지 않아, 원본이 MP3가 아니면 m4a로 저장합니다.
             </Text>
           ) : null}
           {!loaded ? (
@@ -508,8 +508,8 @@ export function NrmDownloadSettingsPanel({
         <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
-              비트레이트 설정은 Android APK(yt-dlp)에서만 적용됩니다. iOS는 YouTube 원본
-              비트레이트로 저장됩니다.
+              iOS의 m4a 변환은 선택한 비트레이트의 AAC로 저장합니다. MP3 비트레이트
+              재인코딩은 운영체제가 허용하지 않습니다.
             </Text>
           ) : null}
           {!isStandaloneIos() && !isYtDlpEncodeSettingsEffective() && Platform.OS === 'android' ? (
@@ -537,7 +537,8 @@ export function NrmDownloadSettingsPanel({
         <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
-              VBR 설정은 Android APK 변환에만 적용됩니다.
+              iOS AAC 변환은 선택한 비트레이트에 맞춥니다. VBR 세부 모드는 Android
+              변환기에서 적용됩니다.
             </Text>
           ) : null}
           <Text style={[styles.bitrateDesc, { color: bodyColor }]}>
@@ -563,7 +564,8 @@ export function NrmDownloadSettingsPanel({
         <View style={styles.sectionBody}>
           {isStandaloneIos() ? (
             <Text style={[styles.platformNote, { color: bodyColor }]}>
-              무손실 설정은 Android APK 변환에만 적용됩니다.
+              같은 확장자면 다시 인코딩하지 않습니다. 항상 재인코딩은 m4a·wav에
+              적용되고, MP3 재인코딩은 운영체제가 허용하지 않습니다.
             </Text>
           ) : null}
           <Text style={[styles.bitrateDesc, { color: bodyColor }]}>

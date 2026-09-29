@@ -34,7 +34,13 @@ export async function getInnertube() {
   return m.getInnertube();
 }
 
-/** 네이티브: 최초 YouTube 검색 시 android/ios 기본 세션을 생성·재사용 */
+/** youtubei 번들 해석만 끝낸다. 세션 요청은 시작하지 않는다. */
+export async function preloadInnertubeRuntime(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await import('./nrmInnertubeYoutube.native');
+}
+
+/** 네이티브: android/ios 세션을 플레이어 없이 생성·재사용 */
 export async function warmInnertubeSessions(): Promise<void> {
   if (Platform.OS === 'web') {
     const m = await import('./nrmInnertubeYoutube.web');
@@ -61,6 +67,13 @@ export async function ensureInnertubeWarmedOnFirstSearch(): Promise<void> {
   }
   const m = await import('./nrmInnertubeYoutube.native');
   return m.ensureInnertubeWarmedOnFirstSearch();
+}
+
+export function scheduleInnertubePlayerWarmInBackground(): void {
+  if (Platform.OS === 'web') return;
+  void import('./nrmInnertubeYoutube.native').then((m) =>
+    m.scheduleInnertubePlayerWarmInBackground(),
+  );
 }
 
 export async function downloadYoutubeAudioOnDevice(
@@ -100,13 +113,14 @@ export async function finalizeYoutubeAudioOnDevice(
 
 export async function getAudioStreamUrlWithInnertube(
   videoId: string,
+  options?: { preferDecipher?: boolean },
 ): Promise<string> {
   if (Platform.OS === 'web') {
     const m = await import('./nrmInnertubeYoutube.web');
     return m.getAudioStreamUrlWithInnertube(videoId);
   }
   const m = await import('./nrmInnertubeYoutube.native');
-  return m.getAudioStreamUrlWithInnertube(videoId);
+  return m.getAudioStreamUrlWithInnertube(videoId, options);
 }
 
 export { YtdlpExtractTimeoutError } from './nrmInnertubeYoutube.native';

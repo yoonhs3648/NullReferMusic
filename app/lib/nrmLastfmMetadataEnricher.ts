@@ -106,7 +106,6 @@ export async function enrichLastfmDownloadMetadata(
     genre: base.genre,
     releaseDate: base.releaseDate,
     coverUrl: base.coverUrl,
-    albumArtist: userArtist.trim() || undefined,
   };
 
   const trackR = await fetchLastfmTrackDetail(
@@ -126,7 +125,6 @@ export async function enrichLastfmDownloadMetadata(
     coverUrl: normalizeCoverArtUrl(info.imageUrl),
     website: info.url,
     trackNumber: info.albumTrackPosition,
-    albumArtist: info.artist,
   });
 
   const artistMbid = normalizeLastfmMbid(info.artistMbid);
@@ -145,7 +143,6 @@ export async function enrichLastfmDownloadMetadata(
           appendLastfmTagNames(collectedTagNames, detailA.data.tags);
           mergeRaw(raw, {
             website: detailA.data.info.url || raw.website,
-            albumArtist: detailA.data.info.name || raw.albumArtist,
           });
         }
       }

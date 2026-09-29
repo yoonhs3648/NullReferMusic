@@ -6,6 +6,25 @@ import { runAfterNrmApkUpdateGate } from '@/lib/nrmApkUpdateStartup';
 import { reconcileStaleArtifactsOnColdStart } from '@/lib/nrmStartupArtifactCleanup';
 
 void (async () => {
+  if (Platform.OS === 'ios') {
+    await initNrmFileLoggingRuntime();
+    if (isNrmFileLoggingActive()) {
+      const Constants = (await import('expo-constants')).default;
+      const logPath = await getNrmLogFilePath();
+      appendNrmFileLog(
+        'js-bootstrap',
+        'info',
+        JSON.stringify({
+          phase: 'js_bundle_loaded',
+          env: 'ios',
+          appVersion: Constants.expoConfig?.version ?? Constants.nativeAppVersion,
+          logPath,
+        }),
+      );
+    }
+    void reconcileStaleArtifactsOnColdStart();
+    return;
+  }
   if (Platform.OS !== 'android') return;
 
   await initNrmFileLoggingRuntime();

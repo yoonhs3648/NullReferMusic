@@ -9,6 +9,17 @@ type NrmSpotifyCookieModule = {
 };
 
 async function clearSpotifyWebCookies(): Promise<void> {
+  if (Platform.OS === 'ios') {
+    const ios = NativeModules.NrmAudioMetadata as
+      | { clearSpotifyCookies?: () => Promise<null> }
+      | undefined;
+    try {
+      await ios?.clearSpotifyCookies?.();
+    } catch {
+      /* optional */
+    }
+    return;
+  }
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmSpotifyCookie as NrmSpotifyCookieModule | undefined;
   if (!mod?.clearSpotifyLoginCookies) return;
@@ -22,7 +33,10 @@ async function clearSpotifyWebCookies(): Promise<void> {
 /** Charts WebView 로그인(쿠키) 또는 저장된 Bearer 세션이 있는지 */
 export async function hasSpotifyChartsWebLogin(): Promise<boolean> {
   if (await hasSpotifyChartsSessionAccess()) return true;
-  if (Platform.OS === 'android' && hasNrmSpotifyCookieNativeModule()) {
+  if (
+    (Platform.OS === 'android' && hasNrmSpotifyCookieNativeModule()) ||
+    Platform.OS === 'ios'
+  ) {
     const spDc = await readSpotifySpDcCookie({ maxAttempts: 1, delayMs: 0 });
     if (spDc) return true;
   }
@@ -33,7 +47,10 @@ export async function hasSpotifyChartsWebLogin(): Promise<boolean> {
 export async function logoutSpotifyChartsWebLogin(): Promise<void> {
   await clearAllSpotifyChartsSessionData();
   await clearSpotifyWebCookies();
-  if (Platform.OS === 'android' && hasNrmSpotifyCookieNativeModule()) {
+  if (
+    (Platform.OS === 'android' && hasNrmSpotifyCookieNativeModule()) ||
+    Platform.OS === 'ios'
+  ) {
     await new Promise((resolve) => setTimeout(resolve, 150));
     const remaining = await readSpotifySpDcCookie({ maxAttempts: 1, delayMs: 0 });
     if (remaining) {

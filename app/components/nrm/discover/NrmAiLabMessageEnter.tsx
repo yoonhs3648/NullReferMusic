@@ -6,13 +6,15 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   /** 답변이 사용자 메시지보다 한 박자 늦게 뜰 때 */
   delayMs?: number;
+  /** 예/아니요처럼 바로 눌러야 하는 말풍선은 등장 애니메이션을 건너뛴다. */
+  immediate?: boolean;
 };
 
 /** 채팅 말풍선 등장 — 아래에서 살짝 통통 튀며 올라옴. */
-export function NrmAiLabMessageEnter({ children, style, delayMs = 0 }: Props) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(14)).current;
-  const scale = useRef(new Animated.Value(0.94)).current;
+export function NrmAiLabMessageEnter({ children, style, delayMs = 0, immediate = false }: Props) {
+  const opacity = useRef(new Animated.Value(immediate ? 1 : 0)).current;
+  const translateY = useRef(new Animated.Value(immediate ? 0 : 14)).current;
+  const scale = useRef(new Animated.Value(immediate ? 1 : 0.94)).current;
 
   useEffect(() => {
     const snapVisible = () => {
@@ -20,6 +22,10 @@ export function NrmAiLabMessageEnter({ children, style, delayMs = 0 }: Props) {
       translateY.setValue(0);
       scale.setValue(1);
     };
+    if (immediate) {
+      snapVisible();
+      return;
+    }
     const anim = Animated.sequence([
       Animated.delay(delayMs),
       Animated.parallel([
@@ -50,7 +56,7 @@ export function NrmAiLabMessageEnter({ children, style, delayMs = 0 }: Props) {
       anim.stop();
       snapVisible();
     };
-  }, [delayMs, opacity, scale, translateY]);
+  }, [delayMs, immediate, opacity, scale, translateY]);
 
   return (
     <Animated.View

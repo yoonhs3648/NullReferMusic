@@ -90,7 +90,7 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
   );
 
   useEffect(() => {
-    if (Platform.OS !== 'android' || isExpoGo()) {
+    if (isExpoGo() || (Platform.OS !== 'android' && Platform.OS !== 'ios')) {
       onGranted();
       return;
     }
@@ -98,7 +98,7 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
   }, [onGranted, showPromptIfNeeded]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
+    if (Platform.OS !== 'android' && Platform.OS !== 'ios') return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') {
         if (requestingRef.current) {
@@ -112,7 +112,7 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
   }, [showPromptIfNeeded]);
 
   const onRequestPress = useCallback(() => {
-    if (Platform.OS !== 'android' || requestingRef.current) return;
+    if ((Platform.OS !== 'android' && Platform.OS !== 'ios') || requestingRef.current) return;
     requestingRef.current = true;
     setPhase('requesting');
     void (async () => {
@@ -153,7 +153,9 @@ export function NrmAppPermissionGate({ onGranted }: Props) {
         showsVerticalScrollIndicator={false}>
         <Text style={[styles.title, { color: ink }]}>앱 사용에 필요한 권한</Text>
         <Text style={[styles.lead, { color: muted }]}>
-          아래 권한을 모두 허용해야 앱을 사용할 수 있습니다.{'\n'}거부 시 앱이 종료됩니다.
+          {Platform.OS === 'ios'
+            ? '알림을 허용해야 앱을 사용할 수 있습니다. 거부했다면 설정에서 알림을 켜 주세요.'
+            : '아래 권한을 모두 허용해야 앱을 사용할 수 있습니다.\n거부 시 앱이 종료됩니다.'}
         </Text>
 
         <View style={styles.cardList}>

@@ -15,6 +15,10 @@ function toFsPath(fileUri: string): string {
 }
 
 export async function transcribeAudioToLrcNative(fileUri: string): Promise<string> {
+  if (Platform.OS === 'ios' && !usesPcBackendInDev()) {
+    const { transcribeAudioOnIos } = await import('@/lib/nrmIosDeviceAudio');
+    return transcribeAudioOnIos(fileUri);
+  }
   const mod = NativeModules.NrmWhisper as NrmWhisperNative | undefined;
   if (Platform.OS !== 'android' || !mod?.transcribeToLrc) {
     if (usesPcBackendInDev()) {

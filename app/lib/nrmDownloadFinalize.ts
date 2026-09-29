@@ -264,8 +264,8 @@ export async function finalizeNativeAudioStage(
       };
 
   const lyricsModeActive = !!(whisperMode ?? melonMode);
-  const safeName = applyDownloadExtension(fileName, encode.extension);
-  const extension = encode.extension;
+  let safeName = applyDownloadExtension(fileName, encode.extension);
+  let extension = encode.extension;
   const temps = new Set<string>([extractionUri]);
 
   logDownloadStage('pipeline', 'finalize_audio_start', {
@@ -333,6 +333,16 @@ export async function finalizeNativeAudioStage(
     processedUri = await applyFfmpegMetadataStage(transcodedUri, embedMetadata);
   }
   if (processedUri !== extractionUri) temps.add(processedUri);
+
+  if (Platform.OS === 'ios') {
+    const actualExt = extensionFromLocalPath(
+      processedUri.startsWith('file://') ? processedUri.slice(7) : processedUri,
+    );
+    if (actualExt) {
+      extension = `.${actualExt}` as typeof encode.extension;
+      safeName = applyDownloadExtension(fileName, extension);
+    }
+  }
 
   let whisperSourceUri = processedUri;
   const whisperCopyTask = lyricsModeActive

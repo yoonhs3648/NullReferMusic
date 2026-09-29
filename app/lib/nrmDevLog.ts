@@ -20,7 +20,7 @@ export function logNrmDev(
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.warn(`[NRM:dev][${tag}]`, payload);
   }
-  if (isNrmFileLoggingActive() && Platform.OS === 'android') {
+  if (isNrmFileLoggingActive() && (Platform.OS === 'android' || Platform.OS === 'ios')) {
     appendNrmFileLog(tag, 'info', toFilePayload(payload));
   }
 }
@@ -39,7 +39,7 @@ export function logNrmRunError(
         console.error(err.stack);
       }
     }
-    if (isNrmFileLoggingActive() && Platform.OS === 'android') {
+    if (isNrmFileLoggingActive() && (Platform.OS === 'android' || Platform.OS === 'ios')) {
       const ctx = extra ? ` ${toFilePayload(extra)}` : '';
       appendNrmFileLog(tag, 'error', `${err.message}${ctx}\n${err.stack ?? ''}`);
     }
@@ -48,7 +48,7 @@ export function logNrmRunError(
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.error(`[NRM:err][${tag}]`, err, extra ?? '');
   }
-  if (isNrmFileLoggingActive() && Platform.OS === 'android') {
+  if (isNrmFileLoggingActive() && (Platform.OS === 'android' || Platform.OS === 'ios')) {
     const ctx = extra ? ` ${toFilePayload(extra)}` : '';
     appendNrmFileLog(tag, 'error', `${String(err)}${ctx}`);
   }

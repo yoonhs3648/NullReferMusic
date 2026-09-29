@@ -74,6 +74,26 @@ export async function fetchChatSessions(serialNo: string): Promise<NrmAiLabConve
   return rows.map(mapSessionRow);
 }
 
+/** 세션 제목만. 백그라운드 제목 생성이 끝난 뒤 좌측 목록을 갈아끼울 때 쓴다. */
+export async function fetchChatSessionTitle(
+  serialNo: string,
+  sessionId: string,
+): Promise<string | null> {
+  if (!serialNo || !/^\d+$/.test(sessionId)) return null;
+  const rows = await nrmSbSelect<Pick<NrmSupabaseChatSessionRow, 'Title'>>(
+    NRM_SUPABASE_TABLES.chatSession,
+    (q) =>
+      q
+        .select('Title')
+        .eq('SerialNo', serialNo)
+        .eq('SessionID', Number(sessionId))
+        .eq('IsDeleted', false)
+        .limit(1),
+  );
+  const title = String(rows[0]?.Title ?? '').trim();
+  return title || null;
+}
+
 /** 특정 세션의 전체 메시지 — MessageID(=시간) 오름차순. IX_ChatMessage_SessionID 인덱스 활용. */
 export async function fetchChatMessages(sessionId: string): Promise<NrmAiLabMessage[]> {
   const rows = await nrmSbSelect<NrmSupabaseChatMessageRow>(

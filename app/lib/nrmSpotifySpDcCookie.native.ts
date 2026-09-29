@@ -30,10 +30,28 @@ type ReadSpDcOptions = {
   delayMs?: number;
 };
 
-/** Android CookieManager — dev build/APK 전용 (Expo Go 앱 바이너리에는 모듈 없음) */
+/** Android CookieManager — dev build/APK 전용 (Expo Go 앱 바이너리에는 모듈 없음). iOS는 WKWebView 쿠키. */
 export async function readSpotifySpDcCookie(
   options?: ReadSpDcOptions,
 ): Promise<string | null> {
+  if (Platform.OS === 'ios') {
+    const ios = NativeModules.NrmAudioMetadata as
+      | { readSpDcCookie?: () => Promise<string> }
+      | undefined;
+    if (!ios?.readSpDcCookie) return null;
+    const maxAttempts = options?.maxAttempts ?? 8;
+    const delayMs = options?.delayMs ?? 600;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const value = String(await ios.readSpDcCookie()).trim();
+        if (value) return value;
+      } catch {
+        /* retry */
+      }
+      if (attempt < maxAttempts - 1) await delay(delayMs);
+    }
+    return null;
+  }
   if (Platform.OS !== 'android') return null;
   if (!hasNrmSpotifyCookieNativeModule()) return null;
 
@@ -48,9 +66,9 @@ export async function readSpotifySpDcCookie(
   return null;
 }
 
-/** Charts 세션 WebView 로그인 UI — Android */
+/** Charts 세션 WebView 로그인 UI — Android·iOS */
 export function isSpotifyChartsWebViewLoginVisible(): boolean {
-  return Platform.OS === 'android';
+  return Platform.OS === 'android' || Platform.OS === 'ios';
 }
 
 export function canAutoReadSpotifySpDcCookie(): boolean {

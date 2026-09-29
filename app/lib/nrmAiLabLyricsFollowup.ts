@@ -107,6 +107,38 @@ export const TRANSLATE_YES_NO_CHOICES: NrmAiLabChoice[] = [
   { id: 'translate_no', label: '아니요' },
 ];
 
+/** 같은 채팅의 다운로드가 여러 개여도 질문 칩이 자기 곡만 가리키게 한다. */
+export function buildLyricsYesNoChoices(videoId?: string | null): NrmAiLabChoice[] {
+  const vid = (videoId ?? '').trim();
+  if (!vid) return LYRICS_YES_NO_CHOICES;
+  return [
+    { id: `lyrics_yes:${vid}`, label: '예, 가사 생성' },
+    { id: `lyrics_no:${vid}`, label: '아니요' },
+  ];
+}
+
+export function buildTranslateYesNoChoices(videoId?: string | null): NrmAiLabChoice[] {
+  const vid = (videoId ?? '').trim();
+  if (!vid) return TRANSLATE_YES_NO_CHOICES;
+  return [
+    { id: `translate_yes:${vid}`, label: '예, 번역해주세요' },
+    { id: `translate_no:${vid}`, label: '아니요' },
+  ];
+}
+
+export function isAiLabLyricsYesChoiceId(id: string): boolean {
+  const key = String(id ?? '').trim();
+  return key === 'lyrics_yes' || key.startsWith('lyrics_yes:');
+}
+
+export function videoIdFromAiLabChoiceId(id: string): string | undefined {
+  const key = String(id ?? '').trim();
+  const idx = key.indexOf(':');
+  if (idx < 0) return undefined;
+  const vid = key.slice(idx + 1).trim();
+  return vid || undefined;
+}
+
 export function setAiLabLyricsFollowupHooks(hooks: FollowupHooks): void {
   followupHooks = hooks;
 }
@@ -157,6 +189,19 @@ export async function getAiLabLyricsCapability(): Promise<AiLabLyricsCapability>
       message: '웹에서는 가사 생성을 지원하지 않습니다.',
       askPrompt: null,
       choices: [],
+    };
+  }
+  if (Platform.OS === 'ios') {
+    return {
+      ok: true,
+      wav2vec2BaseInstalled: true,
+      enKoTransliteratorInstalled: true,
+      canAskLyrics: true,
+      canGenerateLyrics: true,
+      missing: [],
+      message: '이 기기의 음성 인식으로 가사를 만듭니다.',
+      askPrompt: '가사도 생성을 할까요?',
+      choices: LYRICS_YES_NO_CHOICES,
     };
   }
   const [wav, tr] = await Promise.all([
@@ -298,7 +343,7 @@ function emitTranslationAsk(record: AiLabDownloadRecord): void {
   followupHooks.onAskTranslation?.({
     videoId: record.videoId,
     displayLabel: record.displayLabel,
-    choices: TRANSLATE_YES_NO_CHOICES,
+    choices: buildTranslateYesNoChoices(record.videoId),
     message:
       '가사가 영어로만 되어 있습니다. 한국어로 번역할까요? (Google Translator)',
   });
@@ -447,6 +492,10 @@ export async function acceptAiLabTranslation(params?: {
       message: '번역할 다운로드 곡을 찾을 수 없습니다.',
     };
   }
+  const decided = translationDecisionByVideoId.get(videoId);
+  if (decided === 'yes' || decided === 'no') {
+    return { ok: true, alreadyDecided: true, videoId };
+  }
   translationDecisionByVideoId.set(videoId, 'yes');
   return translateAiLabLyrics({ videoId });
 }
@@ -464,14 +513,24 @@ export function declineAiLabTranslation(params?: { videoId?: string }): {
   return { ok: true, videoId };
 }
 
+export function isAiLabTranslateYesChoiceId(id: string): boolean {
+  const key = String(id ?? '').trim();
+  return key === 'translate_yes' || key.startsWith('translate_yes:');
+}
+
 export function isAiLabTranslateChoiceId(id: string): boolean {
-  return id === 'translate_yes' || id === 'translate_no';
+  const key = String(id ?? '').trim();
+  return isAiLabTranslateYesChoiceId(key) || key === 'translate_no' || key.startsWith('translate_no:');
 }
 
 /** 다운로드 후 「예, 가사 생성」/「아니요」칩 — LLM 없이 앱 로컬 처리 */
 export function isAiLabLyricsChoiceId(id: string): boolean {
-  return id === 'lyrics_yes' || id === 'lyrics_no';
+  const key = String(id ?? '').trim();
+  return isAiLabLyricsYesChoiceId(key) || key === 'lyrics_no' || key.startsWith('lyrics_no:');
 }
+
+/** 같은 videoId 가사 생성은 한 번만. 버튼 연타는 여기서 버린다. */
+const lyricsGenerationLock = new Set<string>();
 
 export async function startAiLabLyrics(params: {
   videoId?: string;
@@ -479,15 +538,6 @@ export async function startAiLabLyrics(params: {
 }): Promise<Record<string, unknown>> {
   if (Platform.OS === 'web') {
     return { ok: false, error: 'web_not_supported' };
-  }
-  const cap = await getAiLabLyricsCapability();
-  if (!cap.canGenerateLyrics) {
-    return {
-      ok: false,
-      error: 'lyrics_models_missing',
-      message: cap.message,
-      missing: cap.missing,
-    };
   }
 
   let record =
@@ -512,12 +562,38 @@ export async function startAiLabLyrics(params: {
     };
   }
 
+  const videoId = record.videoId;
+  if (lyricsGenerationLock.has(videoId)) {
+    return {
+      ok: true,
+      queued: true,
+      alreadyRunning: true,
+      videoId,
+      label: record.displayLabel,
+      askTranslation: false,
+    };
+  }
+  lyricsGenerationLock.add(videoId);
+
+  try {
+  const cap = await getAiLabLyricsCapability();
+  if (!cap.canGenerateLyrics) {
+    lyricsGenerationLock.delete(videoId);
+    return {
+      ok: false,
+      error: 'lyrics_models_missing',
+      message: cap.message,
+      missing: cap.missing,
+    };
+  }
+
   const website =
     record.website?.trim() ||
     normalizeMelonTrackWebsite(record.hit.externalUrl) ||
     record.hit.externalUrl;
   const plain = (await resolveMelonPlainLyricsForEdit(website)).trim();
   if (!plain) {
+    lyricsGenerationLock.delete(videoId);
     return {
       ok: false,
       error: 'melon_lyrics_unavailable',
@@ -528,7 +604,6 @@ export async function startAiLabLyrics(params: {
   const englishOnly = isEnglishOnlyPlain(plain);
   recordsByVideoId.set(record.videoId, { ...record, plainLyrics: plain, website });
 
-  const videoId = record.videoId;
   const displayLabel = record.displayLabel;
   const jobId = `ailab-lyrics:${videoId}`;
 
@@ -623,6 +698,7 @@ export async function startAiLabLyrics(params: {
       void nrmNotifyLyricsFailed(displayLabel, videoId);
       nrmNotifyDownloadFinished(videoId, displayLabel, false, 'lyrics');
     } finally {
+      lyricsGenerationLock.delete(videoId);
       nrmBackgroundWorkRelease(nrmLyricsBackgroundWorkToken(videoId));
     }
   })();
@@ -638,6 +714,10 @@ export async function startAiLabLyrics(params: {
       ? '가사 생성 큐에 넣음(오디오가 아직 내려받는 중이면 끝난 뒤 자동 진행. 다시 요청하라고 안내하지 말 것). 앱이 번역 여부 choices(예/아니요)를 붙인다. 마크다운 목록으로 예/아니요를 쓰지 말 것. 사용자가 칩을 고를 때까지 translate_ai_lab_lyrics 호출 금지.'
       : '가사 생성 큐에 넣음(오디오가 아직 내려받는 중이면 끝난 뒤 자동 진행. 다시 요청하라고 안내하지 말 것). 번역은 요청하지 않는다(일반 Melon 정렬만).',
   };
+  } catch (e) {
+    lyricsGenerationLock.delete(videoId);
+    throw e;
+  }
 }
 
 export async function translateAiLabLyrics(params: {

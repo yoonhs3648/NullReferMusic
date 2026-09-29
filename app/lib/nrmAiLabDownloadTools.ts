@@ -16,11 +16,11 @@ import {
 import {
   AI_LAB_MELON_LYRICS_PRELOAD,
   getAiLabLyricsCapability,
-  LYRICS_YES_NO_CHOICES,
+  buildLyricsYesNoChoices,
+  buildTranslateYesNoChoices,
   maybeAskTranslationAfterAiLabLyrics,
   registerAiLabDownload,
   startAiLabLyrics,
-  TRANSLATE_YES_NO_CHOICES,
   translateAiLabLyrics,
   updateAiLabDownloadAudio,
 } from '@/lib/nrmAiLabLyricsFollowup';
@@ -31,6 +31,7 @@ import {
   getAiLabYoutubeConfirmSession,
   markAiLabYoutubeConfirmConfirmed,
   prepareAiLabYoutubeConfirmStream,
+  resolveAiLabPreviewStreamUrl,
 } from '@/lib/nrmAiLabYoutubeConfirm';
 import {
   nrmBackgroundWorkAcquire,
@@ -125,8 +126,22 @@ export function isAiLabTrackChoiceId(id: string): boolean {
   const key = String(id ?? '').trim();
   if (!key) return false;
   if (isAiLabDownloadChoiceId(key)) return false;
-  if (key === 'lyrics_yes' || key === 'lyrics_no') return false;
-  if (key === 'translate_yes' || key === 'translate_no') return false;
+  if (
+    key === 'lyrics_yes' ||
+    key.startsWith('lyrics_yes:') ||
+    key === 'lyrics_no' ||
+    key.startsWith('lyrics_no:')
+  ) {
+    return false;
+  }
+  if (
+    key === 'translate_yes' ||
+    key.startsWith('translate_yes:') ||
+    key === 'translate_no' ||
+    key.startsWith('translate_no:')
+  ) {
+    return false;
+  }
   if (key === 'melon_search_yes' || key === 'melon_search_no') return false;
   if (key === 'ailab_more_music_list') return false;
   if (key.startsWith('melon-artist:') || key.startsWith('melon-album:')) return false;
@@ -402,6 +417,9 @@ export async function listReadyDownloadPlatforms(): Promise<{
 export const AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE =
   '멜론에서 해당 곡을 찾지 못했어요. 가수와 곡의 정확한 이름을 알려 주세요.';
 
+/** 후보가 2곡 이상일 때 모델이 쓰던 선택 안내. 두 번째 LLM 호출 없이 앱이 그대로 보여 준다. */
+export const AI_LAB_TRACK_PICK_MESSAGE = '아래 목록에서 받을 곡을 선택해 주세요.';
+
 /** 곡 검색이 오류 없이 0건인 경우. 선택 목록을 만들면 안 된다. */
 export function isAiLabMelonTrackSearchMiss(
   name: string,
@@ -414,6 +432,30 @@ export function isAiLabMelonTrackSearchMiss(
   const hits = Array.isArray(result.hits) ? result.hits : [];
   const count = Number(result.count ?? hits.length);
   return hits.length === 0 && (!Number.isFinite(count) || count <= 0);
+}
+
+/**
+ * 이번 라운드가 곡/차트 검색뿐이고 결과마다 2건 이상인지.
+ * 이 경우 모델은 선택 안내만 쓰므로 Gemini를 다시 부르지 않는다.
+ */
+export function isAiLabMultiHitTrackSearchRound(
+  rows: { name: string; response: Record<string, unknown> | undefined }[],
+): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    if (
+      row.name !== 'search_music' &&
+      row.name !== 'search_track_on_platform' &&
+      row.name !== 'search_melon_chart'
+    ) {
+      return false;
+    }
+    const result = row.response ?? {};
+    if (result.suggestMelon === true || result.error) return false;
+    const hits = Array.isArray(result.hits) ? result.hits : [];
+    const count = Number(result.count ?? hits.length);
+    return hits.length >= 2 || (Number.isFinite(count) && count >= 2);
+  });
 }
 
 function legacyToMusicPlatformId(platform: NrmAiLabDownloadPlatformId): MusicPlatformIdType {
@@ -658,18 +700,35 @@ export async function startMusicDownload(params: {
     title,
   );
 
-  if (songId) {
-    try {
-      const detailOut = await fetchMelonTrackDetail(songId);
-      if (detailOut.ok) {
-        meta = {
-          ...buildMelonTrackAudioMetadata(detailOut.data, artist, title),
-          downloadPlatform: 'Melon',
-        };
-      }
-    } catch (e) {
-      logNrmRunError(LOG, e, { event: 'melon_detail_failed', songId });
-    }
+  const seedQuery = `${artist} ${title}`.trim();
+  const detailTask = songId
+    ? fetchMelonTrackDetail(songId).then(
+        (detailOut) => ({ ok: true as const, detailOut }),
+        (e: unknown) => ({ ok: false as const, e }),
+      )
+    : Promise.resolve(null);
+
+  logNrmDev(LOG, {
+    event: 'youtube_search_start',
+    query: seedQuery.slice(0, 80),
+    songId: songId ?? null,
+    lyricsMode,
+  });
+
+  const [detailSettled, encode, nameFormat, ytSeed] = await Promise.all([
+    detailTask,
+    loadDownloadEncodeSettings(),
+    loadDownloadFileNameFormat(),
+    searchYoutube(seedQuery),
+  ]);
+
+  if (detailSettled?.ok && detailSettled.detailOut.ok) {
+    meta = {
+      ...buildMelonTrackAudioMetadata(detailSettled.detailOut.data, artist, title),
+      downloadPlatform: 'Melon',
+    };
+  } else if (detailSettled && !detailSettled.ok) {
+    logNrmRunError(LOG, detailSettled.e, { event: 'melon_detail_failed', songId });
   }
 
   if (lyricsMode !== 'unset') {
@@ -678,23 +737,26 @@ export async function startMusicDownload(params: {
     delete meta.melonAlignLang;
   }
 
-  const encode = await loadDownloadEncodeSettings();
-  const format = await loadDownloadFileNameFormat();
   const fileName = applyDownloadExtension(
-    buildAudioFileName(meta.artist, meta.title, encode.extension, format),
+    buildAudioFileName(meta.artist, meta.title, encode.extension, nameFormat),
     encode.extension,
   );
   const conflict = await rejectIfDownloadFileNameConflicts(fileName);
   if (conflict) return conflict;
 
   const ytQuery = `${meta.artist} ${meta.title}`.trim();
-  logNrmDev(LOG, {
-    event: 'youtube_search_start',
-    query: ytQuery.slice(0, 80),
-    songId: songId ?? null,
-    lyricsMode,
-  });
-  const yt = await searchYoutube(ytQuery);
+  let yt = ytSeed;
+  if (ytQuery !== seedQuery) {
+    logNrmDev(LOG, {
+      event: 'youtube_search_refined',
+      query: ytQuery.slice(0, 80),
+    });
+    yt = await searchYoutube(ytQuery);
+  }
+  const leadVideoId = yt.ok ? yt.items?.[0]?.videoId : undefined;
+  if (leadVideoId) {
+    void resolveAiLabPreviewStreamUrl(leadVideoId).catch(() => undefined);
+  }
   if (!yt.ok || !yt.items?.length) {
     return { ok: false, error: yt.ok ? 'youtube_no_results' : yt.userMessage };
   }
@@ -733,6 +795,8 @@ export async function startMusicDownload(params: {
   };
 }
 
+const youtubeConfirmDecisionLock = new Set<string>();
+
 /** YouTube 후보 「맞다」— 기존 다운로드 파이프라인 시작 */
 export async function confirmAiLabYoutubeCandidateAndDownload(
   sessionId: string,
@@ -749,22 +813,34 @@ export async function confirmAiLabYoutubeCandidateAndDownload(
     }
   | { ok: false; error: string; message?: string }
 > {
+  if (youtubeConfirmDecisionLock.has(sessionId)) {
+    return { ok: false, error: 'youtube_confirm_already_done' };
+  }
   const session = getAiLabYoutubeConfirmSession(sessionId);
   if (!session) {
     return { ok: false, error: 'youtube_confirm_session_not_found' };
   }
+  if (session.confirmed) {
+    return { ok: false, error: 'youtube_confirm_already_done' };
+  }
   if (session.exhausted) {
     return { ok: false, error: 'youtube_confirm_exhausted' };
   }
+  youtubeConfirmDecisionLock.add(sessionId);
   const videoId = currentCandidateVideoId(sessionId);
   if (!videoId) {
+    youtubeConfirmDecisionLock.delete(sessionId);
     return { ok: false, error: 'youtube_confirm_no_candidate' };
   }
 
   const conflict = await rejectIfDownloadFileNameConflicts(session.fileName);
-  if (conflict) return conflict;
+  if (conflict) {
+    youtubeConfirmDecisionLock.delete(sessionId);
+    return conflict;
+  }
 
   if (!markAiLabYoutubeConfirmConfirmed(sessionId)) {
+    youtubeConfirmDecisionLock.delete(sessionId);
     return { ok: false, error: 'youtube_confirm_already_done' };
   }
 
@@ -871,7 +947,7 @@ export async function confirmAiLabYoutubeCandidateAndDownload(
       lyricsSkippedReason,
       ...(lyricsAskEligible
         ? {
-            lyricsChoices: LYRICS_YES_NO_CHOICES,
+            lyricsChoices: buildLyricsYesNoChoices(videoId),
             nextHint:
               '다운로드 시작됨. 사용자에게 「가사도 생성을 할까요?」를 묻고, 예이면 start_ai_lab_lyrics 호출.',
           }
@@ -999,7 +1075,11 @@ export async function executeAiLabDownloadTool(
     const askTranslation = (result as { askTranslation?: boolean }).askTranslation === true;
     return {
       result,
-      choices: askTranslation ? TRANSLATE_YES_NO_CHOICES : undefined,
+      choices: askTranslation
+        ? buildTranslateYesNoChoices(
+            (result as { videoId?: string }).videoId,
+          )
+        : undefined,
     };
   }
   if (name === 'translate_ai_lab_lyrics') {
@@ -1045,7 +1125,9 @@ export async function executeAiLabDownloadTool(
         lyricsOption: explicit ? 'auto' : 'none',
         lyricsMode: explicit && out.lyricsQueued ? 'melon' : 'unset',
       },
-      choices: out.lyricsAskEligible ? LYRICS_YES_NO_CHOICES : undefined,
+      choices: out.lyricsAskEligible
+        ? buildLyricsYesNoChoices((out as { videoId?: string }).videoId)
+        : undefined,
     };
   }
   return { result: { ok: false, error: `unknown_tool:${name}` } };

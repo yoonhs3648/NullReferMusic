@@ -81,6 +81,7 @@ import {
 } from './agent/mod.ts';
 import type { ProviderHttpDiag, QuotaClass } from './agent/mod.ts';
 import {
+  buildChatTitlePrompt,
   generateTitleGeminiInteractions,
   streamGeminiInteractions,
 } from './agent/providers/geminiInteractions.ts';
@@ -110,9 +111,7 @@ const GEMINI_PLAIN_ATTEMPT_MS = 22_000;
 // 필요하다 — getGeminiMaxOutputTokens()가 모델별로 이 둘을 구분해서 고른다.
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_LEGACY = 8192;
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_MODERN = 65536;
-// 제목 생성은 사용자 응답과 무관한 백그라운드 호출이라 짧게 끊어도 무방(실패 시
-// 임시 제목이 그대로 유지되므로 안전).
-const GEMINI_TITLE_TIMEOUT_MS = 8_000;
+// 제목은 채팅 응답을 기다리지 않게 하고, 호출이 느려도 시간으로 끊지 않는다.
 const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 40;
 const GEMINI_TITLE_MAX_LEN = 24;
 /** 최근 턴만 전달. 향후 Session Summary 메모리와 합칠 예정(지금은 요약 없음). */
@@ -714,6 +713,79 @@ function sanitizeGeneratedTitle(raw: string): string {
   t = t.replace(/^제목\s*[:：]\s*/, '').trim();
   if (!t) return '';
   return t.length > GEMINI_TITLE_MAX_LEN ? `${t.slice(0, GEMINI_TITLE_MAX_LEN)}…` : t;
+}
+
+const GENERIC_CHAT_TITLES = new Set([
+  '설치',
+  '다운로드',
+  '음악다운로드',
+  '노래다운로드',
+  '저장',
+  '음악',
+  '노래',
+  '요청',
+  '안내',
+  '질문',
+  '대화',
+  '다운로드요청',
+]);
+
+function compactTitle(text: string): string {
+  return text.replace(/\s+/g, '').toLowerCase();
+}
+
+/** 다운로드·받아줘 같은 동작만 뺀 주제. */
+function subjectTitleFromUserMessage(userMessage: string): string {
+  let t = userMessage.replace(/\s+/g, ' ').trim();
+  t = t.replace(/다운로드\s*(?:해\s*줘|해\s*주세요|해주세요|해라|해|하라)?/gi, ' ');
+  t = t.replace(/받아\s*줘|넣어\s*줘|저장해(?:\s*줘)?|알려\s*줘|download/gi, ' ');
+  t = t.replace(/\s+/g, ' ').replace(/^[\s,.\-]+|[\s,.\-]+$/g, '').trim();
+  if (!t) return '';
+  return t.length > GEMINI_TITLE_MAX_LEN ? `${t.slice(0, GEMINI_TITLE_MAX_LEN)}…` : t;
+}
+
+/** 곡·가수를 지키면서 다운로드 요청임이 제목에 보이게 한다. */
+function downloadTitleFromSubject(subject: string): string {
+  const base = subject.trim();
+  if (!base) return '다운로드';
+  const withAction = `${base} 다운로드`;
+  return withAction.length > GEMINI_TITLE_MAX_LEN
+    ? `${withAction.slice(0, GEMINI_TITLE_MAX_LEN)}…`
+    : withAction;
+}
+
+function titleStatesDownload(title: string): boolean {
+  return /다운로드|받기/.test(title) && !/설치/.test(title);
+}
+
+function isGenericChatTitle(title: string): boolean {
+  return GENERIC_CHAT_TITLES.has(compactTitle(title));
+}
+
+function titleKeepsSubject(title: string, subject: string): boolean {
+  const tokens = subject
+    .replace(/…$/u, '')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => [...w].length >= 2);
+  if (tokens.length === 0) return true;
+  const hay = compactTitle(title);
+  return tokens.some((word) => hay.includes(compactTitle(word)));
+}
+
+function refineGeneratedChatTitle(userMessage: string, generated: string): string {
+  const title = generated.replace(/\s+/g, ' ').trim();
+  const subject = subjectTitleFromUserMessage(userMessage);
+  const wantsDownload = /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(userMessage);
+  if (wantsDownload && subject) {
+    if (!title || isGenericChatTitle(title) || !titleKeepsSubject(title, subject) || !titleStatesDownload(title)) {
+      return downloadTitleFromSubject(subject);
+    }
+    return title;
+  }
+  if (!title) return subject;
+  if (isGenericChatTitle(title) && subject) return subject;
+  return title;
 }
 
 /**
@@ -1430,10 +1502,7 @@ const geminiLegacyGenerateContentAdapter: LlmAdapter = {
     const modelPath = modelName.startsWith('models/') ? modelName : `models/${modelName}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const thinkingConfig = getGeminiThinkingConfig(modelName);
-    const prompt =
-      '다음은 사용자가 채팅에서 처음 보낸 메시지다. 이 대화를 대표하는 아주 짧은 한국어 제목을 만들어라.\n' +
-      '규칙: 명사형으로 12자 이내. 설명·따옴표·마침표 없이 제목 한 줄만 출력. 메시지를 그대로 베끼지 말고 핵심 주제만 요약.\n\n' +
-      `사용자 메시지:\n${userMessage}`;
+    const prompt = buildChatTitlePrompt(userMessage);
 
     const maxOutputTokens =
       thinkingConfig && (thinkingConfig.thinkingBudget as number) > 0
@@ -1452,7 +1521,6 @@ const geminiLegacyGenerateContentAdapter: LlmAdapter = {
             ...(withThinking && thinkingConfig ? { thinkingConfig } : {}),
           },
         }),
-        signal: AbortSignal.timeout(GEMINI_TITLE_TIMEOUT_MS),
       });
 
     try {
@@ -1749,6 +1817,37 @@ function guideEmptyMelonTrackSearch<T extends { name: string; response: Record<s
           '검색 결과 0건. 선택 목록 없음. 「아래 목록에서 선택」「선택해 주세요」 금지. 멜론에서 해당 곡을 찾지 못했어요. 가수와 곡의 정확한 이름을 알려 주세요. 재검색·start_music_download 금지.',
       },
     };
+  });
+}
+
+const TRACK_LIST_PICK_MESSAGE = '아래 목록에서 받을 곡을 선택해 주세요.';
+
+function userAskedToDownload(
+  history: Array<{ role: string; content: string }>,
+  message: string,
+): boolean {
+  const recent = [...history].reverse().find((h) => h.role !== 'assistant' && h.role !== 'system');
+  return /다운로드|받아\s*줘|넣어\s*줘|저장해|download/i.test(`${message}\n${recent?.content ?? ''}`);
+}
+
+/** 다운로드 요청의 2건 이상 곡 검색은 선택 문장만 필요해서 Gemini를 다시 부르지 않는다. */
+function isMultiHitTrackSearchToolContinue(
+  rows: Array<{ name: string; response: Record<string, unknown> }>,
+): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    if (
+      row.name !== 'search_music' &&
+      row.name !== 'search_track_on_platform' &&
+      row.name !== 'search_melon_chart'
+    ) {
+      return false;
+    }
+    const response = row.response ?? {};
+    if (response.suggestMelon === true || response.error) return false;
+    const hits = Array.isArray(response.hits) ? response.hits : [];
+    const count = Number(response.count ?? hits.length);
+    return hits.length >= 2 || (Number.isFinite(count) && count >= 2);
   });
 }
 
@@ -2590,10 +2689,7 @@ const groqAdapter: LlmAdapter = {
   },
 
   async generateTitle(apiKey, modelName, userMessage) {
-    const prompt =
-      '다음은 사용자가 채팅에서 처음 보낸 메시지다. 이 대화를 대표하는 아주 짧은 한국어 제목을 만들어라.\n' +
-      '규칙: 명사형으로 12자 이내. 설명·따옴표·마침표 없이 제목 한 줄만 출력. 메시지를 그대로 베끼지 말고 핵심 주제만 요약.\n\n' +
-      `사용자 메시지:\n${userMessage}`;
+    const prompt = buildChatTitlePrompt(userMessage);
     try {
       const res = await fetch(GROQ_CHAT_URL, {
         method: 'POST',
@@ -2608,7 +2704,6 @@ const groqAdapter: LlmAdapter = {
           max_tokens: 40,
           stream: false,
         }),
-        signal: AbortSignal.timeout(GEMINI_TITLE_TIMEOUT_MS),
       });
       if (!res.ok) return null;
       // deno-lint-ignore no-explicit-any
@@ -2969,7 +3064,7 @@ Deno.serve(async (req: Request) => {
       else void task;
     };
 
-    /** 새 세션: 본문 LLM과 병렬로 짧은 요약 제목 생성. 성공 시 DB 갱신 + title_updated 이벤트. */
+    /** 새 세션: 본문 LLM과 병렬로 제목 생성. 채팅 응답은 이 호출을 기다리지 않는다. */
     const titleGenerationPromise: Promise<TitleResult | null> =
       isNewSession && model
         ? (() => {
@@ -2984,8 +3079,10 @@ Deno.serve(async (req: Request) => {
           })()
         : Promise.resolve(null);
 
-    const applyGeneratedTitle = async (
-      sendFn: (obj: Record<string, unknown>) => void,
+    let titleReleaseStarted = false;
+
+    const writeGeneratedTitle = async (
+      sendFn: ((obj: Record<string, unknown>) => void) | null,
     ): Promise<void> => {
       if (!isNewSession || !model) return;
       const titleResult = await titleGenerationPromise;
@@ -2996,10 +3093,18 @@ Deno.serve(async (req: Request) => {
         });
         return;
       }
+      const refinedTitle = refineGeneratedChatTitle(message, titleResult.title);
+      if (refinedTitle !== titleResult.title) {
+        logInfo(requestId, 'title_refined', {
+          sessionId: resolvedSessionId,
+          from: titleResult.title,
+          to: refinedTitle,
+        });
+      }
       const { error } = await supabase.rpc('nrm_rpc_chat_update_session_title', {
         p_session_id: resolvedSessionId,
         p_serial_no: serialNo,
-        p_title: titleResult.title,
+        p_title: refinedTitle,
       });
       if (error) {
         logErr(requestId, 'title_update_failed', error, { sessionId: resolvedSessionId });
@@ -3007,14 +3112,17 @@ Deno.serve(async (req: Request) => {
       }
       logInfo(requestId, 'title_update_ok', {
         sessionId: resolvedSessionId,
-        title: titleResult.title,
+        title: refinedTitle,
+        pushedToClient: sendFn != null,
       });
-      sendFn({
-        type: 'title_updated',
-        requestId,
-        sessionId: resolvedSessionId,
-        title: titleResult.title,
-      });
+      if (sendFn) {
+        sendFn({
+          type: 'title_updated',
+          requestId,
+          sessionId: resolvedSessionId,
+          title: refinedTitle,
+        });
+      }
       if (titleResult.totalTokens > 0) {
         const { error: quotaError } = await supabase.rpc('nrm_rpc_increment_llm_user_quota', {
           p_serial_no: serialNo,
@@ -3030,6 +3138,27 @@ Deno.serve(async (req: Request) => {
           });
         }
       }
+    };
+
+    /**
+     * 제목이 이미 끝났으면 스트림을 닫기 전에 title_updated를 보낸다.
+     * 아직이면 응답을 막지 않고 waitUntil로 DB만 갱신한다.
+     */
+    const settleTitleBeforeClose = async (
+      sendFn: (obj: Record<string, unknown>) => void,
+    ): Promise<void> => {
+      if (!isNewSession || !model || titleReleaseStarted) return;
+      titleReleaseStarted = true;
+      const peek = await Promise.race([
+        titleGenerationPromise.then((result) => ({ settled: true as const, result })),
+        Promise.resolve({ settled: false as const, result: null as TitleResult | null }),
+      ]);
+      if (peek.settled) {
+        await writeGeneratedTitle(sendFn);
+        return;
+      }
+      logInfo(requestId, 'title_generate_background', { sessionId: resolvedSessionId });
+      runBackground(writeGeneratedTitle(null));
     };
 
     const scheduleQuotaIncrement = (inputTokens: number, outputTokens: number, totalTokens: number) => {
@@ -3146,7 +3275,7 @@ Deno.serve(async (req: Request) => {
               isNewSession,
               ...(diag ? { diagSummary: { outcome, attemptCount: Array.isArray(diag.attempts) ? (diag.attempts as unknown[]).length : 0, lastError: diag.lastError ?? null } } : {}),
             });
-            await applyGeneratedTitle(send);
+            await settleTitleBeforeClose(send);
             closeStream();
           };
 
@@ -3189,6 +3318,75 @@ Deno.serve(async (req: Request) => {
               providerName: model.providerName,
             });
             await finishWithSystem(MSG_LLM_UNAVAILABLE, false, 'adapter_missing');
+            return;
+          }
+
+          if (
+            isToolContinue &&
+            userAskedToDownload(history, message) &&
+            isMultiHitTrackSearchToolContinue(toolResults)
+          ) {
+            logInfo(requestId, 'tool_continue_skip_llm', {
+              reason: 'track_search_choices',
+              sessionId: resolvedSessionId,
+              toolCount: toolResults.length,
+            });
+            const finalizeStartedAt = Date.now();
+            const { data: finalizeData, error: finalizeError } = await supabase.rpc(
+              'nrm_rpc_chat_finalize_turn',
+              {
+                p_session_id: resolvedSessionId,
+                p_role: 'assistant',
+                p_content: TRACK_LIST_PICK_MESSAGE,
+                p_input_token: 0,
+                p_output_token: 0,
+                p_total_token: 0,
+                p_serial_no: serialNo,
+                p_provider_id: model.providerId,
+                p_model_id: model.modelId,
+                p_record_history: false,
+                p_is_success: true,
+              },
+            );
+            const finalizeElapsedMs = Date.now() - finalizeStartedAt;
+            if (finalizeError) {
+              logErr(requestId, 'finalize_turn_failed', finalizeError, {
+                elapsedMs: finalizeElapsedMs,
+                sessionId: resolvedSessionId,
+                role: 'assistant',
+                outcome: 'canned_track_choices',
+              });
+              send({ type: 'error', requestId, message: finalizeError.message });
+              logInfo(requestId, 'request_done', {
+                outcome: 'finalize_failed',
+                totalElapsedMs: Date.now() - startedAt,
+                sessionId: resolvedSessionId,
+              });
+              closeStream();
+              return;
+            }
+            logInfo(requestId, 'finalize_turn_ok', {
+              elapsedMs: finalizeElapsedMs,
+              sessionId: resolvedSessionId,
+              role: 'assistant',
+              outcome: 'canned_track_choices',
+            });
+            send({
+              type: 'final',
+              requestId,
+              sessionId: resolvedSessionId,
+              isNewSession,
+              title,
+              message: finalizeData,
+              diag: { outcome: 'canned_track_choices', finishReason: 'SKIP_LLM' },
+            });
+            logInfo(requestId, 'request_done', {
+              outcome: 'canned_track_choices',
+              totalElapsedMs: Date.now() - startedAt,
+              sessionId: resolvedSessionId,
+            });
+            await settleTitleBeforeClose(send);
+            closeStream();
             return;
           }
 
@@ -3499,7 +3697,7 @@ Deno.serve(async (req: Request) => {
             });
             // 새 세션 첫 턴이 tool_turn으로 끝나도 요약 제목을 적용한다.
             // (미적용 시 toolContinue는 isNewSession=false라 제목이 휴리스틱에 영구 고정됨)
-            await applyGeneratedTitle(send);
+            await settleTitleBeforeClose(send);
             logInfo(requestId, 'request_done', {
               outcome: 'tool_turn',
               totalElapsedMs: Date.now() - startedAt,
@@ -3679,7 +3877,7 @@ Deno.serve(async (req: Request) => {
             sessionId: resolvedSessionId,
             isNewSession,
           });
-          await applyGeneratedTitle(send);
+          await settleTitleBeforeClose(send);
           closeStream();
           scheduleQuotaIncrement(result.inputTokens, result.outputTokens, result.totalTokens);
           return;

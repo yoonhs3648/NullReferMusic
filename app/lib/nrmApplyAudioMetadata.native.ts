@@ -37,6 +37,33 @@ type NativeAudioMetadata = {
   stripSyncedEmbeddedLyrics?: (audioUri: string, extension: string) => Promise<null>;
 };
 
+async function embedSyncedLyricsOnIos(
+  audioUri: string,
+  lrcContent: string,
+  lyricsMode?: string,
+): Promise<void> {
+  const { parseLyricsModeFromLrcText } = await import('@/lib/nrmLrcUiMode');
+  const modeFromHeader = parseLyricsModeFromLrcText(lrcContent);
+  const modeToken = (lyricsMode ?? modeFromHeader ?? '').trim();
+  const playerLrc = stripNrmLrcModeLine(lrcContent);
+  if (!playerLrc.trim() && !modeToken) return;
+  const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
+  const uri = audioUri.trim();
+  if (!uri) return;
+  try {
+    if (!mod?.embedSyncedLyrics) throw new Error('iOS 가사 내장을 사용할 수 없습니다.');
+    await mod.embedSyncedLyrics(uri, playerLrc, '', modeToken, null);
+  } catch (embedErr) {
+    const { siblingLrcUri } = await import('@/lib/nrmSiblingLrc');
+    const { preparePureSidecarLrcText } = await import('@/lib/nrmLrcUiMode');
+    const FileSystem = await import('expo-file-system/src/legacy/FileSystem');
+    const lrcUri = siblingLrcUri(uri.startsWith('file://') ? uri : `file://${uri}`);
+    const body = preparePureSidecarLrcText(playerLrc);
+    if (!lrcUri || !body.trim()) throw embedErr;
+    await FileSystem.writeAsStringAsync(lrcUri, body);
+  }
+}
+
 function toFsPath(fileUri: string): string {
   return fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
 }
@@ -124,6 +151,10 @@ export async function embedSyncedLyricsIntoAudio(
   lyricsMode?: string,
   _plainLyrics?: string | null,
 ): Promise<void> {
+  if (Platform.OS === 'ios') {
+    await embedSyncedLyricsOnIos(audioUri, lrcContent, lyricsMode);
+    return;
+  }
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
   if (!mod?.embedSyncedLyrics) {
@@ -162,6 +193,12 @@ export async function stripSyncedEmbeddedLyricsFromAudio(
   audioUri: string,
   extension: string,
 ): Promise<void> {
+  if (Platform.OS === 'ios') {
+    const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
+    if (!mod?.embedSyncedLyrics) return;
+    await mod.embedSyncedLyrics(audioUri.trim(), '', extension.replace(/^\./, ''));
+    return;
+  }
   if (Platform.OS !== 'android') return;
   const mod = NativeModules.NrmAudioMetadata as NativeAudioMetadata | undefined;
   if (!mod?.stripSyncedEmbeddedLyrics) {

@@ -48,7 +48,7 @@ export async function transcribeMelonLyricsLrc(
   preload?: MelonLyricsLrcPreload,
 ): Promise<WhisperLrcStageResult> {
   const canUseBackend = usesPcBackendInDev();
-  const canUseNative = Platform.OS === 'android';
+  const canUseNative = Platform.OS === 'android' || Platform.OS === 'ios';
   if (!canUseBackend && !canUseNative) {
     return { lyricsRequested: false, lyricsEmbedded: false };
   }
@@ -79,7 +79,12 @@ export async function transcribeMelonLyricsLrc(
     langDetectionMode === 'transliterator' && plainHasLatinWords(plain);
 
   if (needsTransliteratorPreprocess) {
-    if (!(await isEnKoTransliteratorInstalled())) {
+    if (Platform.OS === 'ios') {
+      logDownloadStage('whisperx-align', 'ios_speech_align_original', {
+        mode,
+        extension,
+      });
+    } else if (!(await isEnKoTransliteratorInstalled())) {
       logDownloadStage('whisperx-align', 'skip_transliterator_not_installed', {
         mode,
         extension,

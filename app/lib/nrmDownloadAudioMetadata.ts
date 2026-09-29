@@ -1,3 +1,4 @@
+import { NRM_BRAND_DISPLAY_NAME, NRM_BRAND_STORAGE_FOLDER_NAME } from '@/lib/nrmAppBrand';
 import type { ChartTrackItem } from '@/lib/nrmChartsTypes';
 import { normalizeCoverArtUrl } from '@/lib/nrmCoverArtUrl';
 import type { NrmAudioExtension } from '@/lib/nrmDownloadSettings';
@@ -69,6 +70,21 @@ function trimOpt(s: string | undefined): string {
   return (s ?? '').trim();
 }
 
+function collapsedAlbumKey(value: string): string {
+  return value.trim().replace(/\s+/g, '').toLowerCase();
+}
+
+/** 저장 폴더명·앱 이름은 앨범 정보가 아니다. */
+function isPlaceholderAlbumName(value: string): boolean {
+  const key = collapsedAlbumKey(value);
+  if (!key) return false;
+  return (
+    key === collapsedAlbumKey(NRM_BRAND_STORAGE_FOLDER_NAME) ||
+    key === collapsedAlbumKey(NRM_BRAND_DISPLAY_NAME) ||
+    key === 'nullreference'
+  );
+}
+
 /** 플랫폼별 필드 → 다운로드용 메타 (커버 URL 정규화 포함) */
 export function normalizeDownloadMetadata(
   meta: NrmAudioFileMetadata,
@@ -76,7 +92,7 @@ export function normalizeDownloadMetadata(
   const base = {
     artist: meta.artist.trim(),
     title: meta.title.trim(),
-    album: meta.album.trim(),
+    album: isPlaceholderAlbumName(meta.album) ? '' : meta.album.trim(),
     genre: meta.genre.trim(),
     releaseDate: meta.releaseDate.trim(),
     coverUrl: normalizeCoverArtUrl(meta.coverUrl),

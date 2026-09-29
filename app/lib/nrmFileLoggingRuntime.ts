@@ -25,6 +25,14 @@ function notifyListeners(enabled: boolean): void {
  * → 재설치 시 항상 false (기본 off).
  */
 async function readPersistedEnabled(): Promise<boolean> {
+  if (Platform.OS === 'ios') {
+    try {
+      const { getNativeFileLoggingEnabled } = await import('@/lib/nrmFileLog');
+      return getNativeFileLoggingEnabled();
+    } catch {
+      return false;
+    }
+  }
   if (Platform.OS !== 'android') return false;
   try {
     const { getNativeFileLoggingEnabled } = await import('@/lib/nrmFileLog');
@@ -36,6 +44,15 @@ async function readPersistedEnabled(): Promise<boolean> {
 
 /** noBackupFilesDir 에 저장 + 네이티브 in-memory 플래그 갱신 */
 async function writePersistedEnabled(enabled: boolean): Promise<void> {
+  if (Platform.OS === 'ios') {
+    try {
+      const { syncNativeFileLoggingEnabled } = await import('@/lib/nrmFileLog');
+      await syncNativeFileLoggingEnabled(enabled);
+    } catch {
+      /* optional */
+    }
+    return;
+  }
   if (Platform.OS !== 'android') return;
   try {
     const { syncNativeFileLoggingEnabled } = await import('@/lib/nrmFileLog');

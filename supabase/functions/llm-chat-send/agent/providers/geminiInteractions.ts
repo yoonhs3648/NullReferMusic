@@ -35,8 +35,8 @@ const GEMINI_SEARCH_ATTEMPT_MS = 18_000;
 const GEMINI_PLAIN_ATTEMPT_MS = 22_000;
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_LEGACY = 8192;
 const GEMINI_CHAT_MAX_OUTPUT_TOKENS_MODERN = 65536;
-const GEMINI_TITLE_TIMEOUT_MS = 8_000;
-const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 128;
+/** 제목은 12자 안팎이라 출력 상한만 작게 둔다. 느려도 시간으로 끊지 않는다. */
+const GEMINI_TITLE_MAX_OUTPUT_TOKENS = 64;
 const GEMINI_TITLE_MAX_LEN = 24;
 
 const TYPING_REPLAY_CHUNK_CHARS = 24;
@@ -1435,35 +1435,55 @@ export async function streamGeminiInteractions(
   );
 }
 
+function clipTitleSource(userMessage: string): string {
+  const t = userMessage.replace(/\s+/g, ' ').trim();
+  return t.length > 180 ? `${t.slice(0, 180)}…` : t;
+}
+
+/** 제목은 대상과 요청 내용이 같이 보이게 한다. 다운로드를 이름만으로 줄이거나 설치로 바꾸지 않는다. */
+export function buildChatTitlePrompt(userMessage: string): string {
+  return (
+    '대화 목록에 보일 한국어 제목 한 줄만 출력. 24자 이내. 따옴표·설명·마침표 금지.\n' +
+    '대상(곡명, 가수, 질문 주제)과 사용자가 시킨 일을 함께 담아라.\n' +
+    '다운로드·받아줘·넣어줘·저장해는 「다운로드」로 끝내라. 이름만 남기거나 「설치」로 바꾸지 마라.\n' +
+    '질문·정보 요청은 대상만으로 충분하면 동작 단어를 붙이지 마라.\n' +
+    '예) 달리반피카소 다운로드해 → 달리반피카소 다운로드\n' +
+    '예) 아이유 좋은 날 받아줘 → 아이유 좋은 날 다운로드\n' +
+    '예) 오늘 날씨 알려줘 → 오늘 날씨\n\n' +
+    `메시지:\n${clipTitleSource(userMessage)}`
+  );
+}
+
 export async function generateTitleGeminiInteractions(
   apiKey: string,
   modelName: string,
   userMessage: string,
 ): Promise<TitleResult | null> {
   const model = toInteractionsModelName(modelName);
-  const prompt =
-    '다음은 사용자가 채팅에서 처음 보낸 메시지다. 이 대화를 대표하는 아주 짧은 한국어 제목을 만들어라.\n' +
-    '규칙: 명사형으로 12자 이내. 설명·따옴표·마침표 없이 제목 한 줄만 출력. 메시지를 그대로 베끼지 말고 핵심 주제만 요약.\n\n' +
-    `사용자 메시지:\n${userMessage}`;
+  const prompt = buildChatTitlePrompt(userMessage);
 
-  const thinkingLevel = getInteractionsThinkingLevel(modelName);
-  const body: Record<string, unknown> = {
-    model,
-    input: prompt,
-    stream: false,
-    generation_config: {
-      max_output_tokens: GEMINI_TITLE_MAX_OUTPUT_TOKENS + (thinkingLevel === 'low' ? 64 : 0),
-      ...(thinkingLevel ? { thinking_level: thinkingLevel } : {}),
-    },
+  const post = (withThinkingLevel: boolean) => {
+    const generationConfig: Record<string, unknown> = {
+      max_output_tokens: GEMINI_TITLE_MAX_OUTPUT_TOKENS,
+    };
+    if (withThinkingLevel) generationConfig.thinking_level = 'minimal';
+    return fetch(GEMINI_INTERACTIONS_URL, {
+      method: 'POST',
+      headers: interactionsHeaders(apiKey),
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        stream: false,
+        generation_config: generationConfig,
+      }),
+    });
   };
 
   try {
-    const res = await fetch(GEMINI_INTERACTIONS_URL, {
-      method: 'POST',
-      headers: interactionsHeaders(apiKey),
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(GEMINI_TITLE_TIMEOUT_MS),
-    });
+    let res = await post(true);
+    if (!res.ok && res.status === 400) {
+      res = await post(false);
+    }
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       console.warn(
@@ -1489,7 +1509,14 @@ export async function generateTitleGeminiInteractions(
       outputTokens: usage.outputTokens,
       totalTokens: usage.totalTokens,
     };
-  } catch {
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        fn: 'llm-chat-send',
+        event: 'title_generate_exception',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    );
     return null;
   }
 }

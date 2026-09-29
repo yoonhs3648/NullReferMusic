@@ -110,7 +110,8 @@ export function NrmMelonAdultAuthPanel({
   const [saving, setSaving] = useState(false);
   const savedCookieRef = useRef('');
 
-  const canUseWebView = Platform.OS === 'android' && hasNrmMelonCookieNativeModule();
+  const canUseWebView =
+    (Platform.OS === 'android' || Platform.OS === 'ios') && hasNrmMelonCookieNativeModule();
 
   const refreshStatus = useCallback(async () => {
     const session = await getMelonAdultSession();

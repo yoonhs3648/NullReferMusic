@@ -27,7 +27,7 @@ function cacheEntryUri(root: string, name: string): string {
 
 /** JS 번들 cold start — cacheDirectory의 orphan `nrm-*` 임시 파일 제거 */
 export async function reconcileStaleArtifactsOnColdStart(): Promise<void> {
-  if (Platform.OS !== 'android') return;
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return;
 
   const root = FileSystem.cacheDirectory;
   if (!root) return;

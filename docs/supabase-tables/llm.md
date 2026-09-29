@@ -617,6 +617,8 @@ start_music_download(hit, lyricsOption)
 | `final` | 확정 | assistant 또는 system |
 | `error` | 복구 불가 | message |
 
+다운로드 요청의 toolContinue가 `search_music` / `search_track_on_platform` / `search_melon_chart`만이고 결과마다 2건 이상이면 Gemini를 다시 호출하지 않는다(2026-09-28). Edge가 「아래 목록에서 받을 곡을 선택해 주세요.」를 assistant로 저장하고 `final`만 보낸다. 앱은 이미 만든 곡 칩을 그 문장에 붙인다. 1건·검색 실패·정보 질문·다른 도구는 기존 LLM 경로다. 앱 빌드가 이 분기를 포함하면 두 번째 요청 자체를 보내지 않는다.
+
 도구 모드:
 - **download** → FC 지원 모델이면 **항상**. Melon function tools. Interactions는 `{type:"function",…}` + `previous_interaction_id`/`function_result`
 - **web_search** → **비활성**(2026-07-29). Gemini `google_search` / Groq `browser_search` 미첨부
@@ -734,13 +736,18 @@ start_music_download(hit, lyricsOption)
 - 수정 후 실제 테스트(자기소개 5문장/피보나치 함수/전통음식 3가지 소개 등 이전에 2~13 토큰에서 끊겼던 프롬프트들)에서 149~616 output tokens의 완전하고 자연스러운 답변이 생성됨을 확인.
 - 위 "알려진 이슈"(`gemini-flash-latest`)의 근본 원인도 이 문서 작성 시점 기준 사실상 동일한 SSE 조기 종료 계열 문제였을 가능성이 높다(다만 그쪽은 thinking 토큰이 커서 시간이 더 걸렸을 뿐) — 이번 수정으로 `stream()`을 쓰는 모든 모델이 함께 개선된다.
 
-### 대화 제목 (LLM 요약, 2026-07-29 복구)
+### 대화 제목 (LLM 요약, 2026-09-28)
 
-`nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 **임시 제목**(사용자 메시지 28자 절단)을 즉시 넣는다.  
-본문 LLM 스트리밍과 **병렬**로 Edge가 짧은 제목용 LLM 호출 1회를 하고, `final` **또는** 새 세션 첫 턴의 `tool_turn_end` 직후 `nrm_rpc_chat_update_session_title`로 덮어쓴 뒤 NDJSON `title_updated`를 보낸다. 앱 좌측 메뉴가 즉시 반영한다.  
-(`tool_turn_end`에서 미적용하면 이후 `toolContinue`는 `isNewSession=false`라 제목이 휴리스틱에 고정되는 버그가 있어 2026-07-30에 수정.)  
-Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠STOP) 논스트리밍 unary로 본문을 재확정한다(2026-07-30).  
-실패 시 임시 제목이 유지된다. (2026-07-23~29 사이에는 쿼터 절약으로 LLM 제목을 끄고 휴리스틱만 썼음)
+`nrm_rpc_chat_prepare_turn`이 새 세션 생성 시 **임시 제목**(사용자 메시지 28자 절단)을 즉시 넣는다.
+제목 LLM은 본문과 병렬로 시작하고, 채팅 응답(`final` / `tool_turn_end`)은 제목 호출을 기다리지 않는다.
+호출이 응답보다 먼저 끝나면 그 스트림으로 `title_updated`를 보낸다. 아직이면 `EdgeRuntime.waitUntil`로 끝까지 기다려 `nrm_rpc_chat_update_session_title`만 갱신한다. 느려도 시간 제한으로 끊지 않는다.
+HTTP 오류, 빈 글, 제목 함수가 없는 모델은 임시 제목이 남는다.
+제목 호출은 `thinking_level=minimal`, 출력 상한 64토큰, 메시지 180자다. `thinking_level`을 거절하면(400) 그 필드만 빼고 한 번 더 보낸다.
+제목은 대상과 시킨 일이 같이 보이게 한다. 다운로드 요청은 「달리반피카소 다운로드」처럼 이름과 다운로드를 함께 쓴다. 이름만 남기거나 「설치」·「다운로드」만 쓰면 「{대상} 다운로드」로 다시 저장한다. 날씨처럼 정보 질문은 대상만 둔다.
+앱은 새 세션에서 제목이 스트림보다 늦게 써지면 세션 제목을 백그라운드로 다시 읽어 좌측 목록을 갱신한다. 메뉴를 열 때의 목록 조회도 서버 제목을 우선한다.
+(`tool_turn_end`에서 제목 작업을 시작하지 않으면 이후 `toolContinue`는 `isNewSession=false`라 임시 제목에 고정된다. 2026-07-30에 적용을 넣었고, 2026-09-28에는 응답을 막지 않도록 바꿨다.)
+Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠STOP) 논스트리밍 unary로 본문을 재확정한다(2026-07-30).
+(2026-07-23~29 사이에는 쿼터 절약으로 LLM 제목을 끄고 휴리스틱만 썼음)
 
 ### Gemini 호출 횟수 최적화 (2026-07-23)
 
@@ -775,6 +782,7 @@ Interactions SSE가 `in_progress` 등으로 조기 종료되면(FinishReason≠S
 | `attempt_log_insert_ok` / `attempt_log_insert_failed` | `LLMCallAttemptLog` INSERT 결과 |
 | `finalize_turn_ok` / `finalize_turn_failed` | 2번 RPC 결과 |
 | `quota_increment_ok` / `quota_increment_failed` / `quota_increment_threw` | 백그라운드(`waitUntil`) 쿼터 누적 결과 — 응답 반환 **후** 로그이므로 클라이언트 응답 시점보다 늦게 찍힐 수 있음(정상) |
+| `title_generate_background` | 제목 LLM이 채팅 응답보다 늦음 — 스트림은 닫고 `waitUntil`로 DB 제목만 갱신 |
 | `title_generate_skipped` | 제목 LLM 실패·빈 결과 — 임시(휴리스틱) 제목 유지 |
 | `title_update_ok` | `nrm_rpc_chat_update_session_title` 성공 + `title_updated` 전송 |
 | `stream_cancelled_by_client` | 클라이언트가 스트림 읽기를 중단(앱 종료·화면 이탈 등) — `ReadableStream.cancel` |

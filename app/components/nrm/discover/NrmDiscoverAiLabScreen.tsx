@@ -61,7 +61,12 @@ import {
   pickAiLabSuggestionChips,
 } from '@/lib/nrmAiLabSuggestionPrompts';
 import type { NrmAiLabSuggestionChip } from '@/lib/nrmSupabaseDatabase.types';
-import { deleteChatSession, fetchChatMessages, fetchChatSessions } from '@/lib/nrmChatClient';
+import {
+  deleteChatSession,
+  fetchChatMessages,
+  fetchChatSessionTitle,
+  fetchChatSessions,
+} from '@/lib/nrmChatClient';
 import {
   persistAiLabAssistantUiMeta,
   persistAiLabLocalMessages,
@@ -78,6 +83,7 @@ import {
 } from '@/lib/nrmLlmChatSend';
 import {
   AI_LAB_MELON_TRACK_NOT_FOUND_MESSAGE,
+  AI_LAB_TRACK_PICK_MESSAGE,
   aiLabOneDownloadPerRequestResult,
   confirmAiLabYoutubeCandidateAndDownload,
   executeAiLabDownloadTool,
@@ -87,6 +93,7 @@ import {
   isAiLabDownloadChoiceId,
   isAiLabDownloadYesChoiceId,
   isAiLabMelonTrackSearchMiss,
+  isAiLabMultiHitTrackSearchRound,
   isAiLabStartDownloadToolName,
   isAiLabTrackChoiceId,
   resolveMelonChartInfoChoices,
@@ -99,13 +106,16 @@ import {
 } from '@/lib/nrmAiLabMusicChoicePager';
 import {
   acceptAiLabTranslation,
+  buildLyricsYesNoChoices,
+  buildTranslateYesNoChoices,
   declineAiLabTranslation,
   isAiLabLyricsChoiceId,
+  isAiLabLyricsYesChoiceId,
   isAiLabTranslateChoiceId,
-  LYRICS_YES_NO_CHOICES,
+  isAiLabTranslateYesChoiceId,
   setAiLabLyricsFollowupHooks,
   startAiLabLyrics,
-  TRANSLATE_YES_NO_CHOICES,
+  videoIdFromAiLabChoiceId,
 } from '@/lib/nrmAiLabLyricsFollowup';
 import {
   AI_LAB_YOUTUBE_EXHAUSTED_MESSAGE,
@@ -421,6 +431,10 @@ function applyPersistedLocalTurns(
   return dedupeConversationsById(withoutGhostTemps);
 }
 
+function choicePressLockKey(messageId: string | undefined, choiceId: string): string {
+  return messageId ? `m:${messageId}` : `c:${choiceId}`;
+}
+
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -473,8 +487,67 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     () => new Set(),
   );
   const sendingSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const sessionSendQueueRef = useRef<
+    Map<
+      string,
+      {
+        text: string;
+        userMsgId: string;
+        opts?: {
+          displayText?: string;
+          apiMessage?: string;
+          trackSelectHit?: NrmAiLabTrackHit;
+          forceMusicPlatformId?: MusicPlatformIdT;
+          attachedUserMessageId?: string;
+        };
+      }[]
+    >
+  >(new Map());
+  const sendUserTextRef = useRef<
+    (
+      text: string,
+      opts?: {
+        displayText?: string;
+        apiMessage?: string;
+        trackSelectHit?: NrmAiLabTrackHit;
+        forceMusicPlatformId?: MusicPlatformIdT;
+        attachedUserMessageId?: string;
+      },
+    ) => void
+  >(() => {});
+  const drainScheduledRef = useRef(new Set<string>());
+  /** 같은 말풍선 칩은 첫 탭만 받는다. 리렌더 전 연타도 막는다. */
+  const choiceLockRef = useRef(new Set<string>());
   /** 방금 로컬로만 만든 대화(서버 세션 확정 전) — 목록 refresh 시 병합용 */
   const pendingLocalConversationRef = useRef<NrmAiLabConversation | null>(null);
+  /** 새 세션 제목이 스트림보다 늦게 DB에 써지면 목록만 조용히 갱신 */
+  const titleWatchTokenRef = useRef(0);
+  const watchSessionTitleRef = useRef<(sessionId: string, baseline: string) => void>(() => {});
+  watchSessionTitleRef.current = (sessionId, baseline) => {
+    const owner = serialNo;
+    if (!owner || !/^\d+$/.test(sessionId)) return;
+    const token = ++titleWatchTokenRef.current;
+    const base = baseline.trim();
+    void (async () => {
+      const deadline = Date.now() + 180_000;
+      while (titleWatchTokenRef.current === token && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        if (titleWatchTokenRef.current !== token) return;
+        try {
+          const title = await fetchChatSessionTitle(owner, sessionId);
+          if (titleWatchTokenRef.current !== token) return;
+          if (!title || title === base) continue;
+          setConversations((prev) =>
+            prev.map((c) => (c.id === sessionId ? { ...c, title } : c)),
+          );
+          titleWatchTokenRef.current += 1;
+          return;
+        } catch {
+          // 다음 주기에 다시 읽는다.
+        }
+      }
+    })();
+  };
   /** temp `c-…` → 서버 SessionID. 목록 refresh 시 고스트 중복 제거용 */
   const localTempToServerIdRef = useRef<Map<string, string>>(new Map());
   /** isActive false→true 감지용 */
@@ -512,6 +585,39 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       sendingSessionIdsRef.current = next;
       return next;
     });
+    if (drainScheduledRef.current.has(sessionId)) return;
+    if (!sessionSendQueueRef.current.get(sessionId)?.length) return;
+    drainScheduledRef.current.add(sessionId);
+    setTimeout(() => {
+      drainScheduledRef.current.delete(sessionId);
+      if (sendingSessionIdsRef.current.has(sessionId)) {
+        const still = sessionSendQueueRef.current.get(sessionId);
+        if (still?.length) {
+          drainScheduledRef.current.add(sessionId);
+          setTimeout(() => {
+            drainScheduledRef.current.delete(sessionId);
+            if (sendingSessionIdsRef.current.has(sessionId)) return;
+            const q = sessionSendQueueRef.current.get(sessionId);
+            if (!q?.length) return;
+            const next = q.shift()!;
+            if (q.length === 0) sessionSendQueueRef.current.delete(sessionId);
+            sendUserTextRef.current(next.text, {
+              ...next.opts,
+              attachedUserMessageId: next.userMsgId,
+            });
+          }, 40);
+        }
+        return;
+      }
+      const q = sessionSendQueueRef.current.get(sessionId);
+      if (!q?.length) return;
+      const next = q.shift()!;
+      if (q.length === 0) sessionSendQueueRef.current.delete(sessionId);
+      sendUserTextRef.current(next.text, {
+        ...next.opts,
+        attachedUserMessageId: next.userMsgId,
+      });
+    }, 0);
   }, []);
 
   const transferSessionSending = useCallback((fromId: string, toId: string) => {
@@ -536,6 +642,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       if (!opts?.force && !stickToBottomRef.current) return;
       const animated = opts?.animated === true;
       const run = () => {
+        if (blockAutoScrollRef.current && !opts?.force) return;
         if (!opts?.force && !stickToBottomRef.current) return;
         listRef.current?.scrollToEnd({ animated });
       };
@@ -551,8 +658,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     [clearScrollPinTimers],
   );
 
+  /** 예/아니요·미리듣기가 보이면 자동 스크롤이 탭을 뺏지 않게 한다. */
+  const blockAutoScrollRef = useRef(false);
   /** 스트리밍 중 매 프레임 — sticky일 때만 즉시 하단 (settle 타이머 없음) */
   const pinListToBottomWhileStreaming = useCallback(() => {
+    if (blockAutoScrollRef.current) return;
     if (!stickToBottomRef.current) return;
     requestAnimationFrame(() => {
       if (!stickToBottomRef.current) return;
@@ -934,8 +1044,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     [activeId, conversations],
   );
   const messages = active?.messages ?? [];
-  /** 현재 보고 있는 세션만 전송 중 — composer/칩 잠금용 */
-  const activeSessionSending = Boolean(activeId && sendingSessionIds.has(activeId));
+  blockAutoScrollRef.current = messages.some(
+    (m) =>
+      (m.choices != null && m.choices.length > 0 && !m.typing) ||
+      m.youtubeConfirm?.sessionId != null,
+  );
   const greeting = useMemo(() => nrmAiLabEmptyGreeting(greetingName), [greetingName]);
 
   const keyboardOpenRef = useRef(false);
@@ -1115,13 +1228,47 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       trackSelectHit?: NrmAiLabTrackHit;
       /** Melon 폴백 수락 등 — 플랫폼 탐지 결과를 Melon으로 강제 */
       forceMusicPlatformId?: MusicPlatformIdT;
+      /** 대기열에 이미 올려 둔 사용자 말풍선 */
+      attachedUserMessageId?: string;
     }) => {
       if (!text || !serialNo || llmModelId == null) return;
       const targetId = activeId;
-      // 같은 세션만 추가 전송 차단 — 다른 세션·새 대화는 허용
-      if (targetId && isSessionSending(targetId)) return;
-
       const displayText = (opts?.displayText ?? text).trim() || text;
+      // 같은 세션이 응답 중이면 버리거나 막지 않고 이어서 보낸다.
+      if (targetId && isSessionSending(targetId)) {
+        if (opts?.attachedUserMessageId) {
+          const q = sessionSendQueueRef.current.get(targetId) ?? [];
+          q.unshift({ text, userMsgId: opts.attachedUserMessageId, opts });
+          sessionSendQueueRef.current.set(targetId, q);
+          return;
+        }
+        const userMsgId = nextTempId('u');
+        const q = sessionSendQueueRef.current.get(targetId) ?? [];
+        q.push({ text, userMsgId, opts });
+        sessionSendQueueRef.current.set(targetId, q);
+        const queuedMsg: NrmAiLabMessage = {
+          id: userMsgId,
+          role: 'user',
+          content: displayText,
+          pending: true,
+        };
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === targetId
+              ? {
+                  ...c,
+                  messages: [...c.messages, queuedMsg],
+                  updatedAtLabel: '지금',
+                  updatedAtIso: new Date().toISOString(),
+                }
+              : c,
+          ),
+        );
+        stickToBottomRef.current = true;
+        pinListToBottom({ force: true, animated: false });
+        return;
+      }
+
       const apiText = (opts?.apiMessage ?? displayText).trim() || displayText;
       const selectedHit = opts?.trackSelectHit ?? null;
       const forceMusicPlatformId = opts?.forceMusicPlatformId ?? null;
@@ -1129,7 +1276,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       stickToBottomRef.current = true;
       pinListToBottom({ force: true, animated: false });
 
-      const tempUserId = nextTempId('u');
+      const tempUserId = opts?.attachedUserMessageId ?? nextTempId('u');
       const tempAssistantId = nextTempId('a');
       const userMsg: NrmAiLabMessage = {
         id: tempUserId,
@@ -1150,6 +1297,12 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           pendingLocalConversationRef.current = null;
         }
         transferSessionSending(flightSessionId, id);
+        const queued = sessionSendQueueRef.current.get(flightSessionId);
+        if (queued?.length) {
+          const dest = sessionSendQueueRef.current.get(id) ?? [];
+          sessionSendQueueRef.current.set(id, dest.concat(queued));
+          sessionSendQueueRef.current.delete(flightSessionId);
+        }
         flightSessionId = id;
       };
 
@@ -1168,7 +1321,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         pendingLocalConversationRef.current = created;
         setConversations((prev) => [created, ...prev]);
         setActiveId(sourceConvId);
-      } else {
+      } else if (!opts?.attachedUserMessageId) {
         setConversations((prev) =>
           prev.map((c) =>
             c.id === sourceConvId ? { ...c, messages: [...c.messages, userMsg] } : c,
@@ -1827,6 +1980,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                     currentConvId = newConvId;
                     setActiveId(newConvId);
                   }
+                  if (meta.isNewSession && /^\d+$/.test(newConvId)) {
+                    watchSessionTitleRef.current(newConvId, meta.title || '');
+                  }
                 },
                 onDelta: (chunk) => {
                   gotFirstDelta = true;
@@ -2046,6 +2202,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                   }
                 },
                 onTitleUpdated: ({ sessionId, title: newTitle }) => {
+                  titleWatchTokenRef.current += 1;
                   setConversations((prev) =>
                     prev.map((c) =>
                       c.id === sessionId || c.id === currentConvId
@@ -2264,6 +2421,45 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               }
               break;
             }
+            const onlyMultiHitTrackSearch =
+              userLikelyWantsDownload &&
+              !!roundChoices?.some((ch) => isAiLabTrackChoiceId(ch.id)) &&
+              isAiLabMultiHitTrackSearchRound(nextResults);
+            if (onlyMultiHitTrackSearch && roundChoices) {
+              lastAssistantText = AI_LAB_TRACK_PICK_MESSAGE;
+              lastToolChoices = roundChoices;
+              patchAssistant(activeAssistantId, {
+                content: AI_LAB_TRACK_PICK_MESSAGE,
+                typing: false,
+                choices: roundChoices,
+                youtubeConfirm: undefined,
+              });
+              if (
+                serialNo &&
+                llmModelId != null &&
+                sessionIdForApi &&
+                /^\d+$/.test(sessionIdForApi)
+              ) {
+                const saved = await persistAiLabLocalMessages({
+                  serialNo,
+                  sessionId: sessionIdForApi,
+                  modelId: llmModelId,
+                  messages: [
+                    {
+                      id: activeAssistantId,
+                      role: 'assistant',
+                      content: AI_LAB_TRACK_PICK_MESSAGE,
+                      choices: roundChoices,
+                    },
+                  ],
+                });
+                const savedId = String(saved?.messages?.[0]?.id ?? '').trim();
+                if (/^\d+$/.test(savedId)) {
+                  patchAssistant(activeAssistantId, { persistId: savedId });
+                }
+              }
+              break;
+            }
             toolResults = nextResults;
             toolContinue = true;
             if (nextResults.length === 0) {
@@ -2390,10 +2586,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     },
     [activeId, clearSessionSending, isSessionSending, llmModelId, markSessionSending, musicPlatformId, pinListToBottom, pinListToBottomWhileStreaming, serialNo, transferSessionSending],
   );
+  sendUserTextRef.current = sendUserText;
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
-    if (!text || activeSessionSending || sendArmed) return;
+    if (!text || sendArmed) return;
     if (!serialNo || llmModelId == null) {
       pendingSendTextRef.current = text;
       setSendArmed(true);
@@ -2401,7 +2598,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
     }
     setDraft('');
     sendUserText(text);
-  }, [activeSessionSending, draft, llmModelId, sendArmed, sendUserText, serialNo]);
+  }, [draft, llmModelId, sendArmed, sendUserText, serialNo]);
 
   useEffect(() => {
     if (!sendArmed) return;
@@ -2425,7 +2622,10 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
 
   const handleChoicePress = useCallback(
     (choice: NrmAiLabChoice, messageId?: string) => {
-      if (activeSessionSending || !serialNo || llmModelId == null) return;
+      if (!serialNo || llmModelId == null) return;
+      const choiceKey = choicePressLockKey(messageId, choice.id);
+      if (choiceLockRef.current.has(choiceKey)) return;
+      choiceLockRef.current.add(choiceKey);
       if (isAiLabMoreMusicListChoiceId(choice.id)) {
         const convId = activeIdRef.current;
         if (!convId) return;
@@ -2434,6 +2634,22 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           role: 'user',
           content: choice.label,
         };
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id !== convId
+              ? c
+              : {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    (messageId
+                      ? m.id === messageId
+                      : m.choices?.some((ch) => isAiLabMoreMusicListChoiceId(ch.id)))
+                      ? { ...m, choices: undefined }
+                      : m,
+                  ),
+                },
+          ),
+        );
         void (async () => {
           const next = await advanceAiLabMusicListPage();
           const assistantMsg: NrmAiLabMessage = next.ok
@@ -2476,7 +2692,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           );
           stickToBottomRef.current = true;
           requestAnimationFrame(() => {
-            listRef.current?.scrollToEnd({ animated: true });
+            listRef.current?.scrollToEnd({ animated: false });
           });
           if (serialNo && llmModelId != null) {
             const persisted = await persistAiLabLocalMessages({
@@ -2507,176 +2723,226 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       if (isAiLabLyricsChoiceId(choice.id)) {
         const convId = activeIdRef.current;
         if (!convId) return;
+        const lyricsVideoId = videoIdFromAiLabChoiceId(choice.id);
+        const yes = isAiLabLyricsYesChoiceId(choice.id);
         const userMsg: NrmAiLabMessage = {
           id: nextTempId('u'),
           role: 'user',
           content: choice.label,
         };
+        const assistantMsg: NrmAiLabMessage = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content: yes
+            ? '가사 생성을 준비하고 있습니다…'
+            : '알겠습니다. 가사 생성은 진행하지 않습니다.',
+          typing: yes,
+        };
+        const hostMessages =
+          conversations.find((c) => c.id === convId)?.messages ?? [];
+        const clearIds = hostMessages
+          .filter((m) => (messageId ? m.id === messageId : m.choices?.some((ch) => ch.id === choice.id)))
+          .map((m) => dbMessageIdOf(m))
+          .filter((id): id is string => id != null);
+        const stripThis = (messages: NrmAiLabMessage[]) =>
+          messages.map((m) =>
+            (messageId ? m.id === messageId : m.choices?.some((ch) => ch.id === choice.id))
+              ? { ...m, choices: undefined }
+              : m,
+          );
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== convId) return c;
+            return {
+              ...c,
+              messages: [...stripThis(c.messages), userMsg, assistantMsg],
+              updatedAtLabel: '지금',
+              updatedAtIso: new Date().toISOString(),
+            };
+          }),
+        );
+        stickToBottomRef.current = true;
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+        });
+        const persistTurn = (finalAssistant: NrmAiLabMessage) => {
+          if (!serialNo || llmModelId == null) return;
+          void persistAiLabLocalMessages({
+            serialNo,
+            sessionId: /^\d+$/.test(convId) ? convId : null,
+            modelId: llmModelId,
+            messages: [userMsg, finalAssistant],
+            clearInteractiveMessageIds: clearIds,
+            clearInteractiveMode: 'choices',
+            clearInteractiveSourceMessages: hostMessages,
+          }).then((persisted) => {
+            if (!persisted) return;
+            setConversations((prev) =>
+              applyPersistedLocalTurns(prev, {
+                convId,
+                tempIds: [userMsg.id, finalAssistant.id],
+                clearInteractiveIds: clearIds,
+                clearInteractiveMode: 'choices',
+                persisted,
+              }),
+            );
+            if (persisted.sessionId !== convId) setActiveId(persisted.sessionId);
+          });
+        };
+        if (!yes) {
+          persistTurn(assistantMsg);
+          return;
+        }
         void (async () => {
-          let assistantContent: string;
+          const out = await startAiLabLyrics({ videoId: lyricsVideoId });
+          let content: string;
           let assistantChoices: NrmAiLabChoice[] | undefined;
-          if (choice.id === 'lyrics_yes') {
-            const out = await startAiLabLyrics({});
-            if (out.ok !== true) {
-              assistantContent = String(
-                out.message ?? '가사 생성을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
-              );
-            } else if (out.askTranslation === true) {
-              assistantContent =
-                '가사 생성을 시작했습니다. 영문 가사로 보여 번역도 할까요? 완료되면 알림으로 알려 드릴게요.';
-              assistantChoices = TRANSLATE_YES_NO_CHOICES;
-            } else {
-              assistantContent =
-                '가사 생성을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
-            }
+          if (out.ok !== true) {
+            content = String(
+              out.message ?? '가사 생성을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            );
+          } else if (out.alreadyRunning === true) {
+            content = '이 곡의 가사 생성은 이미 진행 중입니다.';
+          } else if (out.askTranslation === true) {
+            content =
+              '가사 생성을 시작했습니다. 영문 가사로 보여 번역도 할까요? 완료되면 알림으로 알려 드릴게요.';
+            assistantChoices = buildTranslateYesNoChoices(
+              String(out.videoId ?? lyricsVideoId ?? ''),
+            );
           } else {
-            assistantContent = '알겠습니다. 가사 생성은 진행하지 않습니다.';
+            content = '가사 생성을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
           }
-          const assistantMsg: NrmAiLabMessage = {
-            id: nextTempId('a'),
-            role: 'assistant',
-            content: assistantContent,
+          const finalAssistant: NrmAiLabMessage = {
+            ...assistantMsg,
+            content,
+            typing: false,
             choices: assistantChoices,
           };
-          const hostMessages =
-            conversations.find((c) => c.id === convId)?.messages ?? [];
-          const clearIds = hostMessages
-            .filter((m) => m.choices?.some((ch) => isAiLabLyricsChoiceId(ch.id)))
-            .map((m) => dbMessageIdOf(m))
-            .filter((id): id is string => id != null);
           setConversations((prev) =>
-            prev.map((c) => {
-              if (c.id !== convId) return c;
-              return {
-                ...c,
-                messages: [
-                  ...c.messages.map((m) =>
-                    m.choices?.some((ch) => isAiLabLyricsChoiceId(ch.id))
-                      ? { ...m, choices: undefined }
-                      : m,
-                  ),
-                  userMsg,
-                  assistantMsg,
-                ],
-                updatedAtLabel: '지금',
-                updatedAtIso: new Date().toISOString(),
-              };
-            }),
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === assistantMsg.id ? finalAssistant : m,
+                    ),
+                  }
+                : c,
+            ),
           );
-          stickToBottomRef.current = true;
-          requestAnimationFrame(() => {
-            listRef.current?.scrollToEnd({ animated: true });
-          });
-          if (serialNo && llmModelId != null) {
-            const persisted = await persistAiLabLocalMessages({
-              serialNo,
-              sessionId: /^\d+$/.test(convId) ? convId : null,
-              modelId: llmModelId,
-              messages: [userMsg, assistantMsg],
-              clearInteractiveMessageIds: clearIds,
-              clearInteractiveMode: 'choices',
-              clearInteractiveSourceMessages: hostMessages,
-            });
-            if (persisted) {
-              setConversations((prev) =>
-                applyPersistedLocalTurns(prev, {
-                  convId,
-                  tempIds: [userMsg.id, assistantMsg.id],
-                  clearInteractiveIds: clearIds,
-                  clearInteractiveMode: 'choices',
-                  persisted,
-                }),
-              );
-              if (persisted.sessionId !== convId) setActiveId(persisted.sessionId);
-            }
-          }
+          persistTurn(finalAssistant);
         })();
         return;
       }
       if (isAiLabTranslateChoiceId(choice.id)) {
         const convId = activeIdRef.current;
         if (!convId) return;
+        const translateVideoId = videoIdFromAiLabChoiceId(choice.id);
+        const yes = isAiLabTranslateYesChoiceId(choice.id);
         const userMsg: NrmAiLabMessage = {
           id: nextTempId('u'),
           role: 'user',
           content: choice.label,
         };
-        void (async () => {
-          let assistantContent: string;
-          if (choice.id === 'translate_yes') {
-            const out = await acceptAiLabTranslation();
-            if (out.ok !== true) {
-              assistantContent = String(
-                out.message ?? '번역을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
-              );
-            } else if (out.waitingForLyrics === true) {
-              assistantContent =
-                '알겠습니다. 가사 생성이 끝나는 대로 Google Translator로 한국어 번역을 진행합니다.';
-            } else {
-              assistantContent =
-                '한국어 번역을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
-            }
-          } else {
-            declineAiLabTranslation();
-            assistantContent = '알겠습니다. 번역 없이 영문 가사만 유지합니다.';
-          }
-          const assistantMsg: NrmAiLabMessage = {
-            id: nextTempId('a'),
-            role: 'assistant',
-            content: assistantContent,
-          };
-          const hostMessages =
-            conversations.find((c) => c.id === convId)?.messages ?? [];
-          const clearIds = hostMessages
-            .filter((m) => m.choices?.some((ch) => isAiLabTranslateChoiceId(ch.id)))
-            .map((m) => dbMessageIdOf(m))
-            .filter((id): id is string => id != null);
-          setConversations((prev) =>
-            prev.map((c) => {
-              if (c.id !== convId) return c;
-              return {
-                ...c,
-                messages: [
-                  ...c.messages.map((m) =>
-                    m.choices?.some((ch) => isAiLabTranslateChoiceId(ch.id))
-                      ? { ...m, choices: undefined }
-                      : m,
-                  ),
-                  userMsg,
-                  assistantMsg,
-                ],
-                updatedAtLabel: '지금',
-                updatedAtIso: new Date().toISOString(),
-              };
-            }),
-          );
-          stickToBottomRef.current = true;
-          requestAnimationFrame(() => {
-            listRef.current?.scrollToEnd({ animated: true });
+        const assistantMsg: NrmAiLabMessage = {
+          id: nextTempId('a'),
+          role: 'assistant',
+          content: yes
+            ? '번역을 준비하고 있습니다…'
+            : '알겠습니다. 번역 없이 영문 가사만 유지합니다.',
+          typing: yes,
+        };
+        const hostMessages =
+          conversations.find((c) => c.id === convId)?.messages ?? [];
+        const clearIds = hostMessages
+          .filter((m) => (messageId ? m.id === messageId : m.choices?.some((ch) => ch.id === choice.id)))
+          .map((m) => dbMessageIdOf(m))
+          .filter((id): id is string => id != null);
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== convId) return c;
+            return {
+              ...c,
+              messages: [
+                ...c.messages.map((m) =>
+                  (messageId ? m.id === messageId : m.choices?.some((ch) => ch.id === choice.id))
+                    ? { ...m, choices: undefined }
+                    : m,
+                ),
+                userMsg,
+                assistantMsg,
+              ],
+              updatedAtLabel: '지금',
+              updatedAtIso: new Date().toISOString(),
+            };
+          }),
+        );
+        stickToBottomRef.current = true;
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+        });
+        const persistTurn = (finalAssistant: NrmAiLabMessage) => {
+          if (!serialNo || llmModelId == null) return;
+          void persistAiLabLocalMessages({
+            serialNo,
+            sessionId: /^\d+$/.test(convId) ? convId : null,
+            modelId: llmModelId,
+            messages: [userMsg, finalAssistant],
+            clearInteractiveMessageIds: clearIds,
+            clearInteractiveMode: 'choices',
+            clearInteractiveSourceMessages: hostMessages,
+          }).then((persisted) => {
+            if (!persisted) return;
+            setConversations((prev) =>
+              applyPersistedLocalTurns(prev, {
+                convId,
+                tempIds: [userMsg.id, finalAssistant.id],
+                clearInteractiveIds: clearIds,
+                clearInteractiveMode: 'choices',
+                persisted,
+              }),
+            );
+            if (persisted.sessionId !== convId) setActiveId(persisted.sessionId);
           });
-          if (serialNo && llmModelId != null) {
-            const persisted = await persistAiLabLocalMessages({
-              serialNo,
-              sessionId: /^\d+$/.test(convId) ? convId : null,
-              modelId: llmModelId,
-              messages: [userMsg, assistantMsg],
-              clearInteractiveMessageIds: clearIds,
-              clearInteractiveMode: 'choices',
-              clearInteractiveSourceMessages: hostMessages,
-            });
-            if (persisted) {
-              setConversations((prev) =>
-                applyPersistedLocalTurns(prev, {
-                  convId,
-                  tempIds: [userMsg.id, assistantMsg.id],
-                  clearInteractiveIds: clearIds,
-                  clearInteractiveMode: 'choices',
-                  persisted,
-                }),
-              );
-              if (persisted.sessionId !== convId) setActiveId(persisted.sessionId);
-            }
+        };
+        if (!yes) {
+          declineAiLabTranslation({ videoId: translateVideoId });
+          persistTurn({ ...assistantMsg, typing: false });
+          return;
+        }
+        void (async () => {
+          const out = await acceptAiLabTranslation({ videoId: translateVideoId });
+          let content: string;
+          if (out.ok !== true) {
+            content = String(
+              out.message ?? '번역을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+            );
+          } else if (out.alreadyDecided === true) {
+            content = '이 곡의 번역 선택은 이미 반영되었습니다.';
+          } else if (out.waitingForLyrics === true) {
+            content =
+              '알겠습니다. 가사 생성이 끝나는 대로 Google Translator로 한국어 번역을 진행합니다.';
+          } else {
+            content = '한국어 번역을 시작했습니다. 완료되면 알림으로 알려 드릴게요.';
           }
+          const finalAssistant: NrmAiLabMessage = {
+            ...assistantMsg,
+            content,
+            typing: false,
+          };
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === assistantMsg.id ? finalAssistant : m,
+                    ),
+                  }
+                : c,
+            ),
+          );
+          persistTurn(finalAssistant);
         })();
         return;
       }
@@ -2727,7 +2993,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           );
           stickToBottomRef.current = true;
           requestAnimationFrame(() => {
-            listRef.current?.scrollToEnd({ animated: true });
+            listRef.current?.scrollToEnd({ animated: false });
           });
           if (serialNo && llmModelId != null) {
             void persistAiLabLocalMessages({
@@ -2796,8 +3062,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             return {
               ...c,
               messages: c.messages.map((m) =>
-                m.id === messageId ||
-                m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id))
+                (messageId
+                  ? m.id === messageId
+                  : m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)))
                   ? { ...m, choices: undefined }
                   : m,
               ),
@@ -2826,8 +3093,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                       ...c,
                       messages: [
                         ...c.messages.map((m) =>
-                          m.id === messageId ||
-                          m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id))
+                          (messageId
+                            ? m.id === messageId
+                            : m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)))
                             ? { ...m, choices: undefined }
                             : m,
                         ),
@@ -2850,7 +3118,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           const asstId = nextTempId('a');
           const hostMessages = conversations.find((c) => c.id === convId)?.messages ?? [];
           const clearIds = hostMessages
-            .filter((m) => m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)))
+            .filter((m) =>
+              messageId
+                ? m.id === messageId
+                : m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)),
+            )
             .map((m) => dbMessageIdOf(m))
             .filter((id): id is string => id != null);
           setConversations((prev) =>
@@ -2860,8 +3132,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                     ...c,
                     messages: [
                       ...c.messages.map((m) =>
-                        m.id === messageId ||
-                        m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id))
+                        (messageId
+                          ? m.id === messageId
+                          : m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)))
                           ? { ...m, choices: undefined }
                           : m,
                       ),
@@ -2881,7 +3154,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           );
           stickToBottomRef.current = true;
           requestAnimationFrame(() => {
-            listRef.current?.scrollToEnd({ animated: true });
+            listRef.current?.scrollToEnd({ animated: false });
           });
           void (async () => {
             const platform = await resolveAiLabMusicPlatformForMessage('', musicPlatformId);
@@ -2993,7 +3266,11 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         };
         const hostMessages = conversations.find((c) => c.id === convId)?.messages ?? [];
         const clearIds = hostMessages
-          .filter((m) => m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)))
+          .filter((m) =>
+            messageId
+              ? m.id === messageId
+              : m.choices?.some((ch) => isAiLabDownloadChoiceId(ch.id)),
+          )
           .map((m) => dbMessageIdOf(m))
           .filter((id): id is string => id != null);
         setConversations((prev) =>
@@ -3010,7 +3287,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         );
         stickToBottomRef.current = true;
         requestAnimationFrame(() => {
-          listRef.current?.scrollToEnd({ animated: true });
+          listRef.current?.scrollToEnd({ animated: false });
         });
         if (serialNo && llmModelId != null) {
           void persistAiLabLocalMessages({
@@ -3049,7 +3326,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       }
       sendUserText(choice.label);
     },
-    [activeSessionSending, conversations, llmModelId, musicPlatformId, sendUserText, serialNo],
+    [conversations, llmModelId, musicPlatformId, sendUserText, serialNo],
   );
 
   const handleYoutubeConfirmAccept = useCallback(
@@ -3059,6 +3336,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       if (!convId) return;
       void (async () => {
         const out = await confirmAiLabYoutubeCandidateAndDownload(sessionId);
+        if (!out.ok && out.error === 'youtube_confirm_already_done') return;
         const userMsg: NrmAiLabMessage = {
           id: nextTempId('u'),
           role: 'user',
@@ -3084,7 +3362,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
             id: nextTempId('a'),
             role: 'assistant',
             content: lines.join('\n'),
-            choices: out.lyricsAskEligible ? LYRICS_YES_NO_CHOICES : undefined,
+            choices: out.lyricsAskEligible ? buildLyricsYesNoChoices(out.videoId) : undefined,
           };
         }
         const clearFromPrev =
@@ -3115,7 +3393,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
         );
         stickToBottomRef.current = true;
         requestAnimationFrame(() => {
-          listRef.current?.scrollToEnd({ animated: true });
+          listRef.current?.scrollToEnd({ animated: false });
         });
         if (serialNo && llmModelId != null) {
           void persistAiLabLocalMessages({
@@ -3147,6 +3425,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       const convId = activeIdRef.current;
       if (!convId) return;
       const result = rejectAiLabYoutubeCandidate(sessionId);
+      if (!result.ok && result.error === 'already_rejecting') return;
       const userMsg: NrmAiLabMessage = {
         id: nextTempId('u'),
         role: 'user',
@@ -3202,7 +3481,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       );
       stickToBottomRef.current = true;
       requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: true });
+        listRef.current?.scrollToEnd({ animated: false });
       });
       if (serialNo && llmModelId != null) {
         void persistAiLabLocalMessages({
@@ -3243,7 +3522,12 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       return (
         <NrmAiLabMessageEnter
           style={[styles.msgRow, isUser ? styles.msgRowUser : styles.msgRowAssistant]}
-          delayMs={isUser ? 0 : 40}>
+          delayMs={isUser ? 0 : 40}
+          immediate={
+            !isUser &&
+            ((item.choices != null && item.choices.length > 0) ||
+              item.youtubeConfirm?.sessionId != null)
+          }>
           {!isUser ? (
             <View style={styles.avatar}>
               <NrmLogo markOnly markSize={28} />
@@ -3320,7 +3604,6 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
               <NrmAiLabYoutubeConfirmCard
                 sessionId={item.youtubeConfirm.sessionId}
                 isDark={isDark}
-                disabled={activeSessionSending}
                 onConfirm={handleYoutubeConfirmAccept}
                 onReject={handleYoutubeConfirmReject}
               />
@@ -3330,14 +3613,14 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 {item.choices.map((ch) => (
                   <Pressable
                     key={ch.id}
-                    disabled={activeSessionSending}
-                    onPress={() => handleChoicePress(ch, item.id)}
+                    onPressIn={() => handleChoicePress(ch, item.id)}
+                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
                     style={({ pressed }) => [
                       styles.choiceChip,
                       {
                         borderColor: hairline,
                         backgroundColor: userBubbleBg,
-                        opacity: activeSessionSending ? 0.5 : pressed ? 0.72 : 1,
+                        opacity: pressed ? 0.72 : 1,
                       },
                     ]}>
                     <Text style={[styles.choiceChipText, { color: titleColor }]} numberOfLines={2}>
@@ -3352,7 +3635,6 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
       );
     },
     [
-      activeSessionSending,
       hairline,
       handleChoicePress,
       handleYoutubeConfirmAccept,
@@ -3375,9 +3657,9 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           {suggestionChips.map((chip) => (
             <Pressable
               key={`${chip.categoryId}-${chip.promptId}`}
-              disabled={activeSessionSending || sendArmed}
+              disabled={sendArmed}
               onPress={() => {
-                if (activeSessionSending || sendArmed) return;
+                if (sendArmed) return;
                 if (!serialNo || llmModelId == null) {
                   pendingSendTextRef.current = chip.promptText;
                   setSendArmed(true);
@@ -3390,7 +3672,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
                 {
                   backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
                   borderColor: hairline,
-                  opacity: pressed ? 0.72 : activeSessionSending ? 0.55 : 1,
+                  opacity: pressed ? 0.72 : 1,
                 },
               ]}
               accessibilityRole="button"
@@ -3439,7 +3721,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           messages.length === 0 && styles.msgListContentEmpty,
         ]}
         ListEmptyComponent={messagesLoading ? null : emptyChat}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={Platform.OS === 'web'}
         onScroll={onChatListScroll}
@@ -3465,7 +3747,7 @@ export function NrmDiscoverAiLabScreen({ isDark, isActive = true }: Props) {
           value={draft}
           onChangeText={setDraft}
           onSend={handleSend}
-          disabled={activeSessionSending || sendArmed}
+          disabled={sendArmed}
         />
       </View>
       {keyboardInset > 0 ? <View style={{ height: keyboardInset }} /> : null}

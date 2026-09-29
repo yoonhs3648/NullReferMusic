@@ -60,6 +60,9 @@ export function NrmAiLabYoutubeConfirmCard({
   const [buffering, setBuffering] = useState(false);
   const [barWidth, setBarWidth] = useState(0);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const [soundReady, setSoundReady] = useState(false);
+  const decidingRef = useRef(false);
+  const [deciding, setDeciding] = useState(false);
   const loadedUrlRef = useRef<string | null>(null);
   const refreshTriedRef = useRef(false);
   const seekingRef = useRef(false);
@@ -91,6 +94,7 @@ export function NrmAiLabYoutubeConfirmCard({
     const sound = soundRef.current;
     soundRef.current = null;
     loadedUrlRef.current = null;
+    setSoundReady(false);
     if (sound) {
       try {
         await sound.stopAsync();
@@ -161,9 +165,11 @@ export function NrmAiLabYoutubeConfirmCard({
     const url = session?.streamUrl;
     const status = session?.uiStatus;
     if (!url || !status || status === 'PREPARING' || status === 'FAILED') {
+      setSoundReady(false);
       return;
     }
     if (loadedUrlRef.current === url && soundRef.current) return;
+    setSoundReady(false);
 
     let cancelled = false;
     void (async () => {
@@ -178,6 +184,7 @@ export function NrmAiLabYoutubeConfirmCard({
           { uri: url },
           { shouldPlay: false, progressUpdateIntervalMillis: 250 },
           onPlaybackStatus,
+          false,
         );
         if (cancelled) {
           await sound.unloadAsync();
@@ -186,6 +193,7 @@ export function NrmAiLabYoutubeConfirmCard({
         soundRef.current = sound;
         loadedUrlRef.current = url;
         refreshTriedRef.current = false;
+        setSoundReady(true);
         const st = await sound.getStatusAsync();
         if (st.isLoaded && st.durationMillis) {
           setDurationMs(st.durationMillis);
@@ -278,16 +286,27 @@ export function NrmAiLabYoutubeConfirmCard({
   );
 
   const handleConfirm = useCallback(async () => {
-    if (disabled) return;
+    if (disabled || decidingRef.current || !soundReady) return;
+    const status = session?.uiStatus;
+    if (status !== 'READY' && status !== 'PLAYING' && status !== 'PAUSED') return;
+    decidingRef.current = true;
+    setDeciding(true);
     await unloadSound();
     onConfirm(sessionId);
-  }, [disabled, onConfirm, sessionId, unloadSound]);
+  }, [disabled, onConfirm, session?.uiStatus, sessionId, soundReady, unloadSound]);
 
   const handleReject = useCallback(async () => {
-    if (disabled) return;
+    if (disabled || decidingRef.current) return;
+    const status = session?.uiStatus;
+    const canDecide =
+      status === 'FAILED' ||
+      (soundReady && (status === 'READY' || status === 'PLAYING' || status === 'PAUSED'));
+    if (!canDecide) return;
+    decidingRef.current = true;
+    setDeciding(true);
     await unloadSound();
     onReject(sessionId);
-  }, [disabled, onReject, sessionId, unloadSound]);
+  }, [disabled, onReject, session?.uiStatus, sessionId, soundReady, unloadSound]);
 
   if (session?.confirmed || session?.exhausted) return null;
 
@@ -307,8 +326,11 @@ export function NrmAiLabYoutubeConfirmCard({
   const uiStatus: AiLabYoutubeConfirmUiStatus = session.uiStatus;
   const progress =
     durationMs > 0 ? Math.max(0, Math.min(1, positionMs / durationMs)) : 0;
-  const canPlay = uiStatus === 'READY' || uiStatus === 'PLAYING' || uiStatus === 'PAUSED';
-  const showBuffering = uiStatus === 'PREPARING' || buffering;
+  const canPlay =
+    soundReady && (uiStatus === 'READY' || uiStatus === 'PLAYING' || uiStatus === 'PAUSED');
+  const showBuffering = !canPlay || buffering;
+  const confirmEnabled = canPlay && !disabled && !deciding;
+  const rejectEnabled = (canPlay || uiStatus === 'FAILED') && !disabled && !deciding;
 
   return (
     <View style={[styles.card, { backgroundColor: cardBg, borderColor: hairline }]}>
@@ -317,7 +339,7 @@ export function NrmAiLabYoutubeConfirmCard({
         {session.displayLabel}
       </Text>
 
-      {uiStatus === 'PREPARING' ? (
+      {!canPlay && uiStatus !== 'FAILED' ? (
         <View style={styles.preparingRow}>
           <ActivityIndicator size="small" color={primary} />
           <Text style={[styles.preparingText, { color: mutedColor }]}>
@@ -371,20 +393,20 @@ export function NrmAiLabYoutubeConfirmCard({
       <View style={styles.actions}>
         <Pressable
           onPress={() => void handleConfirm()}
-          disabled={!!disabled}
+          disabled={!confirmEnabled}
           style={({ pressed }) => [
             styles.actionBtn,
             styles.actionYes,
-            { borderColor: primary, opacity: pressed || disabled ? 0.7 : 1 },
+            { borderColor: primary, opacity: confirmEnabled ? (pressed ? 0.7 : 1) : 0.35 },
           ]}>
           <Text style={[styles.actionYesText, { color: primary }]}>맞다</Text>
         </Pressable>
         <Pressable
           onPress={() => void handleReject()}
-          disabled={!!disabled}
+          disabled={!rejectEnabled}
           style={({ pressed }) => [
             styles.actionBtn,
-            { borderColor: hairline, opacity: pressed || disabled ? 0.7 : 1 },
+            { borderColor: hairline, opacity: rejectEnabled ? (pressed ? 0.7 : 1) : 0.35 },
           ]}>
           <Text style={[styles.actionNoText, { color: titleColor }]}>아니다</Text>
         </Pressable>

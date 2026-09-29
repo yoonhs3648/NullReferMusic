@@ -23,6 +23,10 @@ export function nrmLyricsBackgroundWorkToken(jobId: string): string {
 
 /** 다운로드·Whisper 세션 시작 — Android Foreground Service + WakeLock 유지 */
 export function nrmBackgroundWorkAcquire(token: string): void {
+  if (Platform.OS === 'ios') {
+    void import('@/lib/nrmIosDeviceAudio').then((m) => m.beginIosBackgroundWork(token));
+    return;
+  }
   if (Platform.OS !== 'android') return;
   const t = token.trim();
   if (!t) return;
@@ -35,6 +39,10 @@ export function nrmBackgroundWorkAcquire(token: string): void {
 
 /** 세션 종료 — 참조 0이면 Foreground Service 중지 */
 export function nrmBackgroundWorkRelease(token: string): void {
+  if (Platform.OS === 'ios') {
+    void import('@/lib/nrmIosDeviceAudio').then((m) => m.endIosBackgroundWork(token));
+    return;
+  }
   if (Platform.OS !== 'android') return;
   const t = token.trim();
   if (!t) return;

@@ -29,6 +29,9 @@ export type PostProcessAudioResult = {
 
 /** Android: 확장자 변환만 (메타·Whisper 전에 호출해 실제 확장자 확정) */
 export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string> {
+  if (Platform.OS === 'ios') {
+    return applyIosTranscodeStage(fileUri);
+  }
   let uri = fileUri;
   if (Platform.OS !== 'android') return uri;
 
@@ -80,6 +83,36 @@ export async function applyFfmpegTranscodeStage(fileUri: string): Promise<string
     elapsedMs: Date.now() - t0,
   });
   return uri;
+}
+
+async function applyIosTranscodeStage(fileUri: string): Promise<string> {
+  const {
+    loadDownloadEncodeSettings,
+    extensionFromLocalPath,
+    audioQualityBitrateKbps,
+  } = await import('@/lib/nrmDownloadSettings');
+  const { shouldSkipExtensionTranscode } = await import('@/lib/nrmDownloadEncodePolicy');
+  const { transcodeAudioOnIos } = await import('@/lib/nrmIosDeviceAudio');
+  const encode = await loadDownloadEncodeSettings();
+  const path = fileUri.startsWith('file://') ? fileUri.slice(7) : fileUri;
+  const wantExt = encode.extension.slice(1).toLowerCase();
+  const haveExt = extensionFromLocalPath(path);
+  if (shouldSkipExtensionTranscode(encode.losslessMode, haveExt, wantExt)) {
+    return fileUri;
+  }
+  const out = await transcodeAudioOnIos(
+    fileUri,
+    wantExt,
+    audioQualityBitrateKbps(encode.audioQuality),
+  );
+  if (out.fallbackReason) {
+    logDownloadStage('ffmpeg', 'transcode_fallback', {
+      reason: out.fallbackReason,
+      requested: wantExt,
+      effective: out.format ?? '',
+    });
+  }
+  return out.path;
 }
 
 /** 2단계: 사용자 설정 확장자로 ffmpeg 변환 후 메타·커버 적용 */

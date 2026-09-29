@@ -306,11 +306,11 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     metadata.getString("albumArtist")?.trim()?.takeIf { it.isNotEmpty() }?.let {
       values.put(MediaStore.Audio.Media.ALBUM_ARTIST, it)
     }
-    val albumValue = metadata.getString("album")?.trim().orEmpty()
+    val albumValue = albumNameForLibrary(metadata.getString("album").orEmpty())
     if (albumValue.isNotEmpty()) {
       values.put(MediaStore.Audio.Media.ALBUM, albumValue)
     } else {
-      values.putNull(MediaStore.Audio.Media.ALBUM)
+      values.put(MediaStore.Audio.Media.ALBUM, "")
     }
     metadata.getString("genre")?.trim()?.takeIf { it.isNotEmpty() }?.let {
       values.put(MediaStore.Audio.Media.GENRE, it)
@@ -368,12 +368,11 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
   private fun readMetadataTags(metadata: ReadableMap): MetadataTagBundle {
     fun s(key: String) = metadata.getString(key)?.trim().orEmpty()
     val artist = s("artist")
-    var albumArtist = s("albumArtist")
-    if (albumArtist.isEmpty() && artist.isNotEmpty()) albumArtist = artist
+    val albumArtist = s("albumArtist")
     return MetadataTagBundle(
       artist = artist,
       title = s("title"),
-      album = s("album"),
+      album = albumNameForLibrary(s("album")),
       genre = s("genre"),
       releaseDate = s("releaseDate"),
       coverUrl = s("coverUrl"),
@@ -478,20 +477,6 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         }
       cmd.add("-metadata"); cmd.add("$ffmpegKey=$value")
     }
-    fun putTagAllowEmpty(logicalKey: String, value: String) {
-      val ffmpegKey =
-        if (mp4Family) {
-          when (logicalKey) {
-            "artist" -> "author"
-            "date" -> "year"
-            "disc" -> "disk"
-            else -> logicalKey
-          }
-        } else {
-          logicalKey
-        }
-      cmd.add("-metadata"); cmd.add("$ffmpegKey=$value")
-    }
     fun putArtistTag(value: String) {
       if (value.isEmpty()) return
       putTag("artist", value)
@@ -503,8 +488,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     putTag("title", tags.title)
     putArtistTag(tags.artist)
     putTag("album_artist", tags.albumArtist)
-    // 앨범 값이 비어 있으면 빈 태그를 명시해 플레이어 기본값 주입을 막는다.
-    putTagAllowEmpty("album", tags.album)
+    putTag("album", albumTagForFile(tags.album))
     putTag("genre", tags.genre)
     putTag("date", tags.releaseDate)
     putTag("track", tags.trackNumber)
@@ -811,17 +795,13 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
       cmd += listOf("-metadata", "${ffKey(key)}=$value")
     }
 
-    fun putTagAllowEmpty(key: String, value: String) {
-      cmd += listOf("-metadata", "${ffKey(key)}=$value")
-    }
-
     putTag("title", tags.title)
     if (tags.artist.isNotEmpty()) {
       cmd += listOf("-metadata", "${ffKey("artist")}=${tags.artist}")
       if (mp4Family) cmd += listOf("-metadata", "artist=${tags.artist}")
     }
     putTag("album_artist", tags.albumArtist)
-    putTagAllowEmpty("album", tags.album)
+    putTag("album", albumTagForFile(tags.album))
     putTag("genre", tags.genre)
     putTag("date", tags.releaseDate)
     putTag("track", tags.trackNumber)
@@ -885,6 +865,31 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
     AUDIO_STREAM,
     VIDEO_STREAM,
     OTHER,
+  }
+
+  /**
+   * 앨범명이 없으면 라이브러리에 이름을 넣지 않는다.
+   * 파일 태그에는 NBSP만 남겨, 빈 태그를 저장 폴더명으로 채우는 플레이어를 막는다.
+   */
+  private fun collapsedAlbumKey(value: String): String =
+    value.trim().replace(Regex("\\s+"), "").lowercase()
+
+  private fun isPlaceholderAlbumName(value: String): Boolean {
+    val key = collapsedAlbumKey(value)
+    if (key.isEmpty()) return true
+    val folder = collapsedAlbumKey(NrmBrand.STORAGE_FOLDER_NAME)
+    val display = collapsedAlbumKey(NrmBrand.DISPLAY_NAME)
+    return key == folder || key == display || key == "nullreference"
+  }
+
+  private fun albumNameForLibrary(value: String): String {
+    val trimmed = value.trim()
+    return if (isPlaceholderAlbumName(trimmed)) "" else trimmed
+  }
+
+  private fun albumTagForFile(album: String): String {
+    val name = albumNameForLibrary(album)
+    return if (name.isEmpty()) "\u00A0" else name
   }
 
   private fun isBogusEmbeddedTitle(value: String): Boolean {
@@ -959,6 +964,7 @@ class NrmAudioMetadataModule(reactContext: ReactApplicationContext) :
         val value = m.groupValues[2].trim()
         if (value.isEmpty() || out.hasKey(field)) continue
         if (field == "title" && isBogusEmbeddedTitle(value)) continue
+        if (field == "album" && albumNameForLibrary(value).isEmpty()) continue
         when (field) {
           "lyrics" -> {
             collectingLyrics = true
